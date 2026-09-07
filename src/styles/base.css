@@ -1,0 +1,29 @@
+@import "./tokens.css";
+@import "../components/ui/ui.css";
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  /* the webview paints its own ground behind us; set ours explicitly */
+  background: var(--c-black);
+  color: var(--c-text);
+  font: var(--f-size-ui) / 1 var(--f-ui);
+  overflow: hidden;
+}
+
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+
+/* Numeric columns line up. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+target/
+.DS_Store
+*.log
+
+# Tauri
+src-tauri/gen/
+
+# generated / local-only
+design/sketch/dist/
+design/reference/**/*@2x.png
+fixtures/build/
+test-results/
+playwright-report/
+e2e/**/__screenshots__/**/*-actual.png
+.perf-gate-stamp

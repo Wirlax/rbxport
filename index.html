@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rekordbox-lite</title>
+    <script>
+      // Set before first paint so per-OS font tokens apply without a flash.
+      document.documentElement.dataset.os =
+        navigator.userAgent.includes("Mac") ? "macos"
+        : navigator.userAgent.includes("Win") ? "windows" : "linux";
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

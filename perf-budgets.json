@@ -1,0 +1,9 @@
+{
+  "$comment": "Enforced by scripts/hooks/perf-gate.sh, scripts/check-bundle-size.ts and e2e/perf.spec.ts. Measured floors: React+ReactDOM 61.6 KB gz, +TanStack Virtual 66.0 KB gz (docs/PLAN.md appendix).",
+  "bundle": { "initialChunkKbGz": 180, "totalKbGz": 300 },
+  "startup": { "chromePaintedMsMac": 400, "chromePaintedMsWin": 700, "firstRowsMs": 1000 },
+  "interaction": { "sortRepaintMs": 50, "searchKeystrokeP95Ms": 50, "fetchRowsMs": 5 },
+  "scroll": { "maxFrameMs": 16.7, "maxIpcCallsPerFrame": 4, "maxLongTaskMs": 50 },
+  "idle": { "cpuPercent": 0.5, "rustRssMb": 120, "webviewRssMb": 150 },
+  "ipc": { "responseKb": 64, "waveformTileKb": 16, "eventKb": 1 }
+}
