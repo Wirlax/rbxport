@@ -83,7 +83,8 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     let mut strings: Vec<String> = vec![String::new(); TRACK_STRINGS];
     let set = |strings: &mut Vec<String>, slot: usize, value: &str| {
         if let Some(entry) = strings.get_mut(slot) {
-            *entry = value.to_owned();
+            entry.clear();
+            entry.push_str(value);
         }
     };
     set(&mut strings, slot::ISRC, &input.isrc);
@@ -122,11 +123,15 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     put_u2(&mut row, 0x50, input.year);
     put_u2(&mut row, 0x52, input.sample_depth);
     put_u2(&mut row, 0x54, input.duration_sec);
-    row.get_mut(0x58).map(|b| *b = input.color_id);
-    row.get_mut(0x59).map(|b| *b = input.rating);
+    if let Some(b) = row.get_mut(0x58) {
+        *b = input.color_id;
+    }
+    if let Some(b) = row.get_mut(0x59) {
+        *b = input.rating;
+    }
 
     // Append each string, recording where it landed.
-    let mut offsets = vec![0_u16; TRACK_STRINGS];
+    let mut offsets = [0_u16; TRACK_STRINGS];
     for (slot, text) in strings.iter().enumerate() {
         let at = u16::try_from(row.len()).unwrap_or(0);
         if let Some(entry) = offsets.get_mut(slot) {
