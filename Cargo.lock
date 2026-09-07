@@ -2943,6 +2943,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-pdb"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
