@@ -30,13 +30,11 @@ ${emit("f", tokens.font)}
 
 /* rekordbox export mode is a single dark design; we commit to it rather than
    deriving a light theme, but every color is set explicitly so the page never
-   borrows the host's ground. */
-:root[data-os="windows"] {
-  --f-ui: "Segoe UI", system-ui, sans-serif;
-}
-:root[data-os="macos"] {
-  --f-ui: "Lucida Grande", "Helvetica Neue", Helvetica, system-ui, sans-serif;
-}
+   borrows the host's ground.
+
+   No per-OS font override: the face was measured as Arial (see
+   design/measure/font-report.json) and Arial ships on both macOS and Windows,
+   so the same stack reproduces the app on both targets. */
 `;
 
 writeFileSync(root("src/styles/tokens.css"), css);

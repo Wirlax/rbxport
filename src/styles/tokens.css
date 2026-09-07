@@ -43,18 +43,16 @@
   --s-rail-w: 36px;
   --s-right-rail-w: 24px;
 
-  --f-ui: system-ui, sans-serif;
-  --f-size-ui: 16px;
-  --f-size-sm: 13px;
-  --f-size-xs: 11px;
+  --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
+  --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
+  --f-size-sm: 12px; /* status bar 'Analyzing: 8319 Tracks', 128pt wide, bold */
+  --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than
    deriving a light theme, but every color is set explicitly so the page never
-   borrows the host's ground. */
-:root[data-os="windows"] {
-  --f-ui: "Segoe UI", system-ui, sans-serif;
-}
-:root[data-os="macos"] {
-  --f-ui: "Lucida Grande", "Helvetica Neue", Helvetica, system-ui, sans-serif;
-}
+   borrows the host's ground.
+
+   No per-OS font override: the face was measured as Arial (see
+   design/measure/font-report.json) and Arial ships on both macOS and Windows,
+   so the same stack reproduces the app on both targets. */
