@@ -17,3 +17,7 @@ e2e/**/__screenshots__/**/*-actual.png
 .perf-gate-stamp
 test-results/
 playwright-report/
+
+# Diff recordings contain the user's library
+recordings/*.json
+recordings/*.json.gz

@@ -2915,6 +2915,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-difftool"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "rbl-db",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-index"
 version = "0.1.0"
 dependencies = [
