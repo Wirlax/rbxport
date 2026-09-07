@@ -1,0 +1,151 @@
+//! Writing ANLZ files.
+//!
+//! Sections carry their own framing, so re-emitting a parsed file reproduces it
+//! byte for byte. Tags we cannot author honestly — `PSSI` (phrases) and `PVDI`
+//! (vocals) — are copied through rather than invented or dropped.
+
+use rbl_core::FourCc;
+
+use crate::{Beat, Section, SECTION_FRAME};
+
+/// The `PMAI` header bytes rekordbox writes after the 12-byte frame.
+///
+/// Taken from real files; the meaning of the fields is not documented, so they
+/// are reproduced rather than derived.
+const DEFAULT_HEADER_EXTRA: [u8; 16] =
+    [0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+
+fn be16(v: u16) -> [u8; 2] {
+    v.to_be_bytes()
+}
+fn be32(v: u32) -> [u8; 4] {
+    v.to_be_bytes()
+}
+
+/// Renders a file from its header extras and sections.
+pub fn render(header_extra: &[u8], sections: &[Section]) -> Vec<u8> {
+    let len_header = SECTION_FRAME + header_extra.len();
+    let body_len: usize = sections
+        .iter()
+        .map(|s| SECTION_FRAME + s.header.len() + s.payload.len())
+        .sum();
+
+    let mut out = Vec::with_capacity(len_header + body_len);
+    out.extend_from_slice(b"PMAI");
+    out.extend_from_slice(&be32(u32::try_from(len_header).unwrap_or(0)));
+    out.extend_from_slice(&be32(u32::try_from(len_header + body_len).unwrap_or(0)));
+    out.extend_from_slice(header_extra);
+
+    for section in sections {
+        out.extend_from_slice(&section.tag.0);
+        out.extend_from_slice(&be32(section.len_header()));
+        out.extend_from_slice(&be32(section.len_tag()));
+        out.extend_from_slice(&section.header);
+        out.extend_from_slice(&section.payload);
+    }
+    out
+}
+
+/// Builds an ANLZ file section by section.
+#[derive(Debug)]
+pub struct AnlzBuilder {
+    header_extra: Vec<u8>,
+    sections: Vec<Section>,
+}
+
+impl Default for AnlzBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AnlzBuilder {
+    pub fn new() -> Self {
+        Self { header_extra: DEFAULT_HEADER_EXTRA.to_vec(), sections: Vec::new() }
+    }
+
+    /// Reproduces an existing file's header bytes, for re-emission.
+    pub fn header_extra(&mut self, bytes: &[u8]) -> &mut Self {
+        self.header_extra = bytes.to_vec();
+        self
+    }
+
+    /// `PPTH` — the path of the audio, UTF-16BE with a NUL terminator.
+    pub fn path(&mut self, path: &str) -> &mut Self {
+        let mut text: Vec<u8> = Vec::new();
+        for unit in path.encode_utf16() {
+            text.extend_from_slice(&unit.to_be_bytes());
+        }
+        text.extend_from_slice(&[0, 0]);
+        let header = be32(u32::try_from(text.len()).unwrap_or(0)).to_vec();
+        self.sections.push(Section::new(b"PPTH", header, text));
+        self
+    }
+
+    /// `PQTZ` — the beat grid.
+    pub fn beat_grid(&mut self, beats: &[Beat]) -> &mut Self {
+        let mut header = Vec::with_capacity(12);
+        header.extend_from_slice(&be32(0));
+        // Constant observed in every real file.
+        header.extend_from_slice(&be32(0x0008_0000));
+        header.extend_from_slice(&be32(u32::try_from(beats.len()).unwrap_or(0)));
+
+        let mut payload = Vec::with_capacity(beats.len() * 8);
+        for beat in beats {
+            payload.extend_from_slice(&be16(beat.beat_number));
+            payload.extend_from_slice(&be16(beat.tempo_x100));
+            payload.extend_from_slice(&be32(beat.time_ms));
+        }
+        self.sections.push(Section::new(b"PQTZ", header, payload));
+        self
+    }
+
+    /// `PWAV` / `PWV2` — one byte per column.
+    pub fn waveform_preview(&mut self, tag: &[u8; 4], data: &[u8]) -> &mut Self {
+        let mut header = Vec::with_capacity(8);
+        header.extend_from_slice(&be32(u32::try_from(data.len()).unwrap_or(0)));
+        header.extend_from_slice(&be32(0x0001_0000));
+        self.sections.push(Section::new(tag, header, data.to_vec()));
+        self
+    }
+
+    /// `PWV3`..`PWV7` — a stride per column.
+    pub fn waveform_scroll(&mut self, tag: &[u8; 4], stride: u32, data: &[u8]) -> &mut Self {
+        let entries = if stride == 0 { 0 } else { data.len() / stride as usize };
+        let mut header = Vec::with_capacity(12);
+        header.extend_from_slice(&be32(stride));
+        header.extend_from_slice(&be32(u32::try_from(entries).unwrap_or(0)));
+        header.extend_from_slice(&be32(0x0096_0000));
+        self.sections.push(Section::new(tag, header, data.to_vec()));
+        self
+    }
+
+    /// An empty cue list, which is what the share tree holds.
+    pub fn empty_cue_list(&mut self, extended: bool) -> &mut Self {
+        let mut header = Vec::with_capacity(12);
+        header.extend_from_slice(&be32(0)); // list type
+        header.extend_from_slice(&be16(0));
+        header.extend_from_slice(&be16(0)); // zero entries
+        header.extend_from_slice(&be32(0));
+        let tag: &[u8; 4] = if extended { b"PCO2" } else { b"PCOB" };
+        self.sections.push(Section::new(tag, header, Vec::new()));
+        self
+    }
+
+    /// Copies a section through unchanged. This is what preserves `PSSI` and
+    /// `PVDI` on re-emission: rekordbox authored them and we cannot.
+    pub fn copy_section(&mut self, section: &Section) -> &mut Self {
+        self.sections.push(section.clone());
+        self
+    }
+
+    /// Adds a section from raw parts.
+    pub fn raw(&mut self, tag: FourCc, header: Vec<u8>, payload: Vec<u8>) -> &mut Self {
+        self.sections.push(Section { tag, header, payload });
+        self
+    }
+
+    pub fn finish(&self) -> Vec<u8> {
+        render(&self.header_extra, &self.sections)
+    }
+}

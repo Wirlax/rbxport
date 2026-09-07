@@ -36,17 +36,18 @@ fn main() {
             Ok(anlz) => {
                 parsed += 1;
                 for section in &anlz.sections {
-                    *tags.entry(section.tag().to_string()).or_default() += 1;
-                    if let rbl_anlz::Section::Waveform { data, .. } = section {
-                        waveform_bytes += data.len();
+                    *tags.entry(section.tag.to_string()).or_default() += 1;
+                    if section.waveform().is_some() {
+                        waveform_bytes += section.payload.len();
                     }
                 }
                 if let Some(beats) = anlz.beat_grid() {
                     if !beats.is_empty() { beat_files += 1; total_beats += beats.len(); }
                 }
                 for section in &anlz.sections {
-                    if let rbl_anlz::Section::Cues { cues, .. } = section {
-                        if !cues.is_empty() { cue_files += 1; total_cues += cues.len(); }
+                    if section.is_cue_list() && !section.payload.is_empty() {
+                        cue_files += 1;
+                        total_cues += 1;
                     }
                 }
             }
