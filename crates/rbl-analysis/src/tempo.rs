@@ -152,12 +152,14 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
 /// A log-normal centred where dance music sits. It only breaks ties between
 /// octaves — it is far too broad to move an estimate that the signal supports.
 fn tempo_prior(bpm: f64) -> f64 {
+    /// Where dance music sits.
+    const CENTRE: f64 = 126.0;
+    /// About one octave of spread either side.
+    const WIDTH: f64 = 0.85;
+
     if bpm <= 0.0 {
         return 0.0;
     }
-    const CENTRE: f64 = 126.0;
-    // About one octave of spread either side.
-    const WIDTH: f64 = 0.85;
     let x = (bpm / CENTRE).ln() / WIDTH;
     (-0.5 * x * x).exp()
 }
