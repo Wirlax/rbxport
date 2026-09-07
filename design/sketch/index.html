@@ -1,0 +1,549 @@
+<meta charset="utf-8">
+<title>rekordbox-lite Export Sketch</title>
+<style>
+  /* Single committed theme: replica of rekordbox 7.2.11 export mode (player + playlist browser).
+     Every color below was sampled from a 2x capture of the running app at 1800x1130 pt. */
+  :root {
+    --rb-title: #252828;      /* macOS title bar */
+    --rb-black: #000000;      /* player background, splitters, status bar, empty table */
+    --rb-top: #0F0F0F;        /* top bar, odd rows, cue-list rows */
+    --rb-panel: #1E1E1E;      /* tree, rails, browser header, column header, even rows, player control column */
+    --rb-btn: #2B2B2B;        /* player buttons */
+    --rb-bottom: #323232;     /* bottom bar, LINK, column dividers, inactive tab */
+    --rb-select: #294C6A;     /* selected row (tree + table) */
+    --rb-accent: #1373EB;     /* active tab, sort arrow, MASTER border, AU, Q, HOT CUE */
+    --rb-field: #4B4B4B;      /* search field */
+    --rb-text: #E6E6E6;
+    --rb-text-dim: #9A9A9A;
+    --rb-icon-off: #A0A0A0;
+    --rb-icon-on: #F0F0F0;
+    --wave-low: #0055E1;  --wave-mid: #B26505;  --wave-high: #F5EAD6;  --wave-mid-ovw: #FF8C00;
+    --cue-e: #11B176; --cue-f: #FF8C00; --cue-g: #305AFF; --cue-h: #E2AA01;
+    --ph-intro: #C83200; --ph-up: #8B32FF; --ph-up3: #5B32FF; --ph-up2: #6932FF; --ph-chorus: #13AA02; --ph-down: #9B732D; --ph-outro: #5087C3;
+    --rb-row-h: 25px;
+    --font-ui: "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif;
+  }
+  html, body { background: #0a0a0a; margin: 0; color: var(--rb-text); font-family: var(--font-ui); }
+
+  .stage { position: relative; margin: 0 auto; width: 1800px; height: 1130px; transform-origin: top left; }
+  .win { position: absolute; inset: 0; background: var(--rb-black); overflow: hidden; font-size: 16px; line-height: 1;
+         user-select: none; -webkit-user-select: none; }
+  .win * { box-sizing: border-box; }
+  .win svg { display: block; }
+
+  /* ---- title bar + top bar ---- */
+  .titlebar { position: absolute; left: 0; top: 0; width: 1800px; height: 28px; background: var(--rb-title);
+              display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: #8a8a8a; }
+  .lights { position: absolute; left: 10px; top: 8px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #4a4a4a; }
+  .topbar { position: absolute; left: 0; top: 28px; width: 1800px; height: 30px; background: var(--rb-top); }
+  .mode { position: absolute; left: 14px; top: 9px; font-size: 13px; font-weight: 700; color: var(--rb-icon-on); }
+  .chev { position: absolute; top: 12px; width: 8px; height: 8px; border-right: 1.5px solid var(--rb-icon-on); border-bottom: 1.5px solid var(--rb-icon-on); transform: rotate(45deg); }
+  .layout-ico { position: absolute; left: 135px; top: 8px; width: 18px; height: 14px; border: 1.5px solid var(--rb-icon-on); border-radius: 1px; }
+  .layout-ico::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; border-top: 1.5px solid var(--rb-icon-on); }
+  .rec-ico { position: absolute; left: 311px; top: 6px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--rb-icon-on); }
+  .rec-ico::after { content: ""; position: absolute; left: 4px; top: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--rb-icon-on); }
+  .info-ico { position: absolute; left: 1374px; top: 6px; width: 18px; height: 18px; }
+  .plan { position: absolute; left: 1412px; top: 5px; height: 20px; padding: 0 9px; background: #3c3c3c; color: var(--rb-icon-on); font-size: 14px; font-weight: 700; line-height: 20px; border-radius: 2px; }
+  .gear-ico { position: absolute; left: 1529px; top: 5px; width: 20px; height: 20px; }
+  .cpu-arc { position: absolute; left: 1568px; top: 5px; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #2a2a2a; border-top-color: var(--rb-accent); border-left-color: var(--rb-accent); }
+  .cpu-bars { position: absolute; left: 1596px; top: 10px; width: 80px; }
+  .cpu-bars i { display: block; height: 3px; background: #3a3a3a; margin-bottom: 5px; border-radius: 1px; }
+  .cpu-bars i::after { content: ""; display: block; height: 3px; width: 6%; background: #8a8a8a; }
+  .vol { position: absolute; left: 1696px; top: 14px; width: 40px; height: 2px; background: #3a3a3a; }
+  .vol::after { content: ""; position: absolute; left: 0; top: -2px; width: 6px; height: 6px; background: var(--rb-accent); border-radius: 1px; }
+  .clock { position: absolute; left: 1755px; top: 9px; font-size: 13px; font-weight: 700; color: var(--rb-icon-on); }
+
+  /* ---- player (preview deck) ---- */
+  .player { position: absolute; left: 0; top: 58px; width: 1800px; height: 275px; background: var(--rb-black); }
+  .ctrl { position: absolute; left: 0; top: 0; width: 80px; height: 275px; background: var(--rb-panel); }
+  .pbtn { position: absolute; background: var(--rb-btn); border: 1px solid #383838; border-radius: 3px; display: grid; place-items: center; color: var(--rb-icon-on); font-size: 12px; font-weight: 700; }
+  .pbtn svg { width: 14px; height: 14px; }
+  .ring { position: absolute; left: 20px; width: 40px; height: 40px; border-radius: 50%; border: 2px solid; display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+  .ring.cue { top: 153px; border-color: var(--cue-h); color: #fff; }
+  .ring.play { top: 203px; border-color: #2f7d3a; }
+  .ring.play::after { content: ""; border: 7px solid transparent; border-left: 11px solid #6a6a6a; margin-left: 8px; }
+  .zoomcol { position: absolute; left: 80px; top: 100px; width: 26px; height: 130px; background: var(--rb-panel); color: var(--rb-icon-on); font-size: 11px; font-weight: 700; text-align: center; }
+  .zoomcol span { position: absolute; left: 0; width: 26px; }
+  .zoomcol svg { width: 16px; height: 16px; margin: 0 auto; }
+  .cueloop { position: absolute; left: 80px; top: 232px; width: 84px; height: 22px; background: var(--rb-panel); font-size: 11px; font-weight: 700; line-height: 22px; text-align: center; }
+  .gridtab { position: absolute; left: 80px; top: 254px; width: 84px; height: 21px; background: var(--rb-black); font-size: 11px; font-weight: 700; line-height: 21px; text-align: center; }
+  .art-lg { position: absolute; left: 94px; top: 22px; width: 52px; height: 52px; background: linear-gradient(160deg, #6a7b8c, #1b2430 60%, #0b0f14); }
+  .ptitle { position: absolute; left: 158px; top: 4px; font-size: 16px; font-weight: 700; color: #fff; }
+  .pmeta { position: absolute; top: 0; height: 22px; line-height: 22px; font-size: 14px; color: #fff; }
+  .pmeta.dim { color: var(--rb-text-dim); }
+  .pmeta b { font-weight: 400; font-size: 16px; }
+  .pmeta small { font-size: 11px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .vsep { position: absolute; top: 3px; width: 1px; height: 16px; background: #3a3a3a; }
+  .ovw { position: absolute; left: 158px; top: 22px; width: 1402px; height: 40px; }
+  .ovw-bar { position: absolute; left: 158px; top: 62px; width: 1402px; height: 4px; background: #3a3a3a; }
+  .ovw-bar i { position: absolute; left: 0; top: 0; height: 4px; background: #8a8a8a; }
+  .ovw-pos { position: absolute; top: 58px; width: 0; height: 0; border: 6px solid transparent; border-bottom: 9px solid var(--cue-f); transform: translateX(-6px); }
+  .cuemark { position: absolute; top: 24px; width: 14px; height: 14px; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; border-radius: 1px; }
+  .cuemark::after { content: ""; position: absolute; left: 6px; top: 14px; width: 1px; height: 24px; background: currentColor; opacity: .7; }
+  .phrase { position: absolute; left: 158px; top: 69px; width: 1402px; height: 14px; display: flex; gap: 1px; }
+  .phrase span { height: 14px; font-size: 11px; line-height: 14px; padding-left: 4px; color: #fff; white-space: nowrap; overflow: hidden; }
+  .bars { position: absolute; left: 775px; top: 92px; font-size: 14px; font-weight: 700; color: #027DE1; }
+  .detail { position: absolute; left: 106px; top: 100px; width: 1484px; height: 130px; }
+  .pads { position: absolute; top: 242px; height: 22px; }
+  .pad { position: absolute; top: 0; width: 26px; height: 22px; border-radius: 2px; background: var(--rb-btn); color: #7a7a7a; font-size: 14px; font-weight: 700; display: grid; place-items: center; }
+  .pad.e { background: var(--cue-e); color: #fff; } .pad.f { background: var(--cue-f); color: #222; } .pad.g { background: var(--cue-g); color: #fff; } .pad.h { background: var(--cue-h); color: #222; }
+  .sbtn { position: absolute; top: 243px; height: 20px; background: var(--rb-btn); border-radius: 2px; color: #ddd; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 8px; }
+  .sbtn.on { background: var(--rb-accent); color: #fff; }
+  .sbtn.num { background: #3a3a3a; width: 70px; font-size: 13px; font-weight: 400; }
+
+  .cuelist { position: absolute; left: 1596px; top: 0; width: 200px; height: 275px; background: var(--rb-black); }
+  .cuerow { position: absolute; left: 0; width: 200px; height: 28px; background: var(--rb-top); font-size: 14px; line-height: 28px; color: #fff; }
+  .cuerow .letter { position: absolute; left: 18px; color: #6a6a6a; }
+  .cuerow .badge { position: absolute; left: 10px; top: 7px; width: 14px; height: 14px; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; border-radius: 1px; }
+  .cuerow .t { position: absolute; left: 32px; } .cuerow .n { position: absolute; left: 72px; }
+  .cuerow .x { position: absolute; right: 8px; top: 8px; width: 12px; height: 12px; }
+  .ctabs { position: absolute; left: 2px; top: 252px; display: flex; gap: 3px; }
+  .ctabs span { width: 62px; height: 20px; background: var(--rb-btn); font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; color: #979797; border-radius: 2px; }
+  .ctabs span.on { background: var(--rb-accent); color: #fff; } .ctabs span.w { color: #fff; }
+
+  /* ---- left: shortcut rail + tree ---- */
+  .rail { position: absolute; left: 0; top: 338px; width: 36px; height: 690px; background: var(--rb-panel); }
+  .rail .ico { position: absolute; left: 8px; width: 20px; height: 20px; border-radius: 3px; display: grid; place-items: center; color: var(--rb-icon-off); }
+  .rail .ico.on { background: #FFFFFF; color: #1E1E1E; }
+  .rail .ico svg { width: 14px; height: 14px; }
+  .tree { position: absolute; left: 36px; top: 338px; width: 269px; height: 690px; background: var(--rb-panel); overflow: hidden; }
+  .tree-head { position: absolute; left: 0; top: 0; width: 100%; height: 20px; }
+  .tree-head .expand { position: absolute; left: -22px; top: 5px; width: 7px; height: 7px; border-right: 1.5px solid var(--rb-icon-off); border-top: 1.5px solid var(--rb-icon-off); transform: rotate(45deg); }
+  .tree-head .shortcut { position: absolute; left: 20px; top: 3px; width: 16px; height: 12px; border: 1.5px solid var(--rb-icon-on); border-radius: 1px; }
+  .tree-head .shortcut::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--rb-icon-on); }
+  .tabs { position: absolute; left: 4px; top: 22px; height: 22px; display: flex; gap: 6px; }
+  .tabs .sbox { width: 22px; height: 22px; background: var(--rb-btn); border: 1px solid #555; border-radius: 2px; display: grid; place-items: center; }
+  .tabs .sbox svg { width: 14px; height: 14px; }
+  .tabs .tab { width: 98px; height: 22px; font-size: 13px; line-height: 22px; text-align: center; background: var(--rb-bottom); color: var(--rb-text-dim); }
+  .tabs .tab.on { background: var(--rb-accent); color: #fff; }
+  .tabs .tab + .tab { margin-left: -6px; width: 100px; }
+  .tnode { position: absolute; left: 0; width: 264px; height: var(--rb-row-h); font-size: 16px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .tnode.sel { background: var(--rb-select); }
+  .tnode:hover:not(.sel) { background: #262626; }
+  .tnode .arrow { width: 0; height: 0; border: 5px solid transparent; flex: none; }
+  .tnode .arrow.open { border-top: 7px solid #e6e6e6; border-bottom: 0; margin-top: 3px; }
+  .tnode .arrow.closed { border-left: 7px solid #e6e6e6; border-right: 0; }
+  .tnode .arrow.none { width: 10px; }
+  .tnode svg { width: 14px; height: 12px; flex: none; }
+  .tnode .plus { position: absolute; right: 12px; top: 6px; width: 13px; height: 13px; border-radius: 50%; background: #e6e6e6; color: #191919; font-size: 12px; line-height: 13px; text-align: center; font-weight: 700; }
+  .tscroll { position: absolute; left: 260px; top: 44px; width: 6px; height: 640px; }
+  .tscroll i { position: absolute; left: 0; right: 0; top: 0; height: 56%; background: var(--rb-bottom); border-radius: 3px; }
+
+  /* ---- browser ---- */
+  .browser { position: absolute; left: 310px; top: 338px; width: 1464px; height: 690px; background: var(--rb-black); overflow: hidden; }
+  .bhead { position: absolute; left: 0; top: 0; width: 100%; height: 23px; background: var(--rb-panel); }
+  .bhead .title { position: absolute; left: 12px; top: 3px; font-size: 16px; }
+  .bhead .divider { position: absolute; left: 340px; top: 0; width: 1px; height: 23px; background: var(--rb-black); }
+  .bhead .updown { position: absolute; left: 284px; top: 3px; width: 10px; height: 16px; color: #8a8a8a; }
+  .master { position: absolute; left: 960px; top: 3px; height: 17px; display: flex; }
+  .master b { height: 17px; padding: 0 8px; border: 1px solid var(--rb-accent); font-size: 11px; font-weight: 700; line-height: 15px; color: #C6C6C6; }
+  .master span { width: 20px; height: 17px; border: 1px solid #555; border-left: 0; position: relative; }
+  .master span::after { content: ""; position: absolute; left: 6px; top: 4px; width: 6px; height: 6px; border-right: 1.5px solid var(--rb-icon-on); border-bottom: 1.5px solid var(--rb-icon-on); transform: rotate(45deg); }
+  .views { position: absolute; left: 1060px; top: 2px; display: flex; gap: 19px; }
+  .views i { width: 20px; height: 19px; border: 1px solid #4a4a4a; background: #262626; border-radius: 2px; display: grid; place-items: center; }
+  .views i.on { border-color: var(--rb-accent); }
+  .views svg { width: 12px; height: 12px; }
+  .search { position: absolute; left: 1235px; top: 2px; width: 210px; height: 19px; background: var(--rb-field); border-radius: 2px; color: var(--rb-text-dim); font-size: 13px; line-height: 19px; padding-left: 34px; }
+  .search svg { position: absolute; left: 6px; top: 3px; width: 13px; height: 13px; }
+  .search::after { content: ""; position: absolute; left: 23px; top: 8px; border: 4px solid transparent; border-top-color: #bdbdbd; }
+
+  .colhead { position: absolute; left: 0; top: 26px; width: 100%; height: 23px; background: var(--rb-panel); }
+  .funnel { position: absolute; left: 9px; top: 4px; width: 14px; height: 14px; color: #7a7a7a; }
+  .cols, .rows { position: absolute; left: 2px; }
+  .cols { top: 0; height: 23px; display: grid; grid-template-columns: var(--cols); }
+  .cols > div { position: relative; height: 23px; line-height: 23px; padding: 0 8px; font-size: 16px; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--rb-bottom); }
+  .cols > div.r { text-align: right; }
+  .cols .num { color: var(--rb-accent); }
+  .cols .num i { position: absolute; right: 10px; top: 0; font-style: normal; font-size: 14px; }
+  .rows { top: 51px; width: 1470px; height: 640px; overflow: hidden; }
+  .row { position: absolute; left: 0; width: 1470px; height: var(--rb-row-h); display: grid; grid-template-columns: var(--cols); background: var(--rb-top); contain: layout style paint; }
+  .row:nth-child(even) { background: var(--rb-panel); }
+  .row:hover { background: #262626; }
+  .row.sel { background: var(--rb-select) !important; }
+  .row > div { position: relative; height: var(--rb-row-h); line-height: var(--rb-row-h); padding: 0 6px; font-size: 16px; white-space: nowrap; overflow: hidden; border-right: 1px solid var(--rb-bottom); }
+  .row.sel > div { border-right-color: rgba(0,0,0,.35); }
+  .row > div.r { text-align: right; }
+  .row .attr { padding: 0 6px; display: flex; align-items: center; gap: 12px; font-size: 10px; color: #8a8a8a; }
+  .row .attr svg { width: 22px; height: 12px; flex: none; }
+  .row .attr .play { width: 0; height: 0; border: 5px solid transparent; border-left: 8px solid #7a7a7a; margin-left: 8px; }
+  .row .prev { padding: 0 3px; }
+  .row .prev canvas { position: absolute; left: 3px; top: 2px; width: 120px; height: 21px; }
+  .row .art { padding: 0; }
+  .row .art i { position: absolute; inset: 0; background: var(--art, #000); }
+  .row .stars { font-size: 14px; letter-spacing: 1px; color: #d0d0d0; }
+  .hscroll { position: absolute; left: 2px; right: 14px; bottom: 6px; height: 10px; }
+  .hscroll i { position: absolute; top: 1px; bottom: 1px; left: 0; width: 56%; background: #4a4a4a; border-radius: 3px; }
+
+  .rrail { position: absolute; left: 1776px; top: 338px; width: 24px; height: 690px; background: var(--rb-panel); }
+  .rrail .ico { position: absolute; left: 4px; width: 16px; height: 16px; color: var(--rb-icon-off); }
+  .rrail .ico svg { width: 16px; height: 16px; }
+
+  /* ---- bottom bar + status bar ---- */
+  .bottom { position: absolute; left: 0; top: 1028px; width: 1800px; height: 72px; background: var(--rb-bottom); border-radius: 0 0 14px 14px; }
+  .link { position: absolute; left: 5px; top: 6px; width: 60px; height: 60px; border: 1px solid #5a5a5a; border-radius: 3px; background: var(--rb-bottom);
+          display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6px; font-size: 16px; color: #d8d8d8; cursor: pointer; }
+  .link svg { position: absolute; left: 14px; top: 8px; width: 32px; height: 26px; }
+  .link:hover, .link:focus-visible { border-color: #8a8a8a; outline: none; }
+  .status { position: absolute; left: 0; top: 1100px; width: 1800px; height: 30px; background: var(--rb-black); font-size: 13px; font-weight: 700; color: #a8a8a8; }
+  .status .logo { position: absolute; left: 12px; top: 6px; display: flex; align-items: center; gap: 4px; color: #e6e6e6; font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
+  .status .analyzing { position: absolute; left: 135px; top: 9px; }
+  .status .sel-info { position: absolute; right: 34px; top: 9px; }
+
+  /* ---- review controls (outside the replica) ---- */
+  .tools { max-width: 1800px; margin: 12px auto 40px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; padding: 0 12px; color: #b9b9b9; font-size: 13px; }
+  .tools label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .tools input[type=range] { width: 160px; accent-color: #1373EB; }
+  .tools .k { color: #7d7d7d; }
+  .tools .swatches { display: flex; gap: 6px; }
+  .tools .sw { width: 18px; height: 18px; border-radius: 2px; border: 1px solid #333; }
+  .tools button { background: #2a2a2a; color: #e6e6e6; border: 1px solid #444; border-radius: 3px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  .tools button:hover, .tools button:focus-visible { border-color: #1373EB; outline: none; }
+  .ref { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: url("../reference/macos/playlist-player@1x.png") 0 0 / 1800px 1130px no-repeat; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="stage" id="stage">
+  <div class="win" id="win">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>rekordbox</div>
+
+    <div class="topbar">
+      <span class="mode">EXPORT</span><span class="chev" style="left:114px"></span>
+      <span class="layout-ico"></span><span class="chev" style="left:167px"></span>
+      <span class="rec-ico"></span>
+      <svg class="info-ico" viewBox="0 0 18 18" fill="#F0F0F0"><path d="M9 .8 16.5 5v8L9 17.2 1.5 13V5z"/><rect x="8" y="7.4" width="2" height="6" fill="#0F0F0F"/><circle cx="9" cy="5.4" r="1.1" fill="#0F0F0F"/></svg>
+      <span class="plan">Professional</span>
+      <svg class="gear-ico" viewBox="0 0 20 20" fill="none" stroke="#F0F0F0" stroke-width="2.2"><circle cx="10" cy="10" r="4.2"/><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3M4 4l2.1 2.1M13.9 13.9 16 16M4 16l2.1-2.1M13.9 6.1 16 4"/></svg>
+      <span class="cpu-arc"></span><span class="cpu-bars"><i></i><i></i></span><span class="vol"></span>
+      <span class="clock" id="clock">1:44</span>
+    </div>
+
+    <!-- ================= player ================= -->
+    <div class="player">
+      <div class="ctrl">
+        <div class="pbtn" style="left:14px;top:34px;width:24px;height:22px"><svg viewBox="0 0 14 14" fill="none" stroke="#F0F0F0" stroke-width="1.8"><path d="M12 7H4M7 4 4 7l3 3M2 3v8"/></svg></div>
+        <div class="pbtn" style="left:44px;top:34px;width:24px;height:22px"><svg viewBox="0 0 14 14" fill="none" stroke="#F0F0F0" stroke-width="1.8"><path d="M2 7h8M7 4l3 3-3 3M12 3v8"/></svg></div>
+        <div class="pbtn" style="left:14px;top:79px;width:26px;height:24px"><svg viewBox="0 0 14 14" fill="none" stroke="#F0F0F0" stroke-width="1.8"><path d="M9 2 4 7l5 5"/></svg></div>
+        <div class="pbtn" style="left:44px;top:79px;width:26px;height:24px"><svg viewBox="0 0 14 14" fill="none" stroke="#F0F0F0" stroke-width="1.8"><path d="M5 2l5 5-5 5"/></svg></div>
+        <div class="pbtn" style="left:12px;top:107px;width:56px;height:18px;border:0">4Beats</div>
+        <span class="chev" style="left:35px;top:127px;border-color:#F0F0F0"></span>
+        <div class="ring cue">CUE</div>
+        <div class="ring play"></div>
+      </div>
+      <div class="zoomcol">
+        <span style="top:28px"><svg viewBox="0 0 16 16" fill="none" stroke="#F0F0F0" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="M10.5 10.5 15 15M7 4.5v5M4.5 7h5"/></svg></span>
+        <span style="top:53px">RST</span>
+        <span style="top:78px"><svg viewBox="0 0 16 16" fill="none" stroke="#F0F0F0" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="M10.5 10.5 15 15M4.5 7h5"/></svg></span>
+      </div>
+      <div class="cueloop">CUE/LOOP</div>
+      <div class="gridtab">GRID</div>
+
+      <div class="art-lg"></div>
+      <div class="ptitle">Love is Gonna Save Us (Extended Mix)</div>
+      <span class="vsep" style="left:1020px"></span>
+      <span class="pmeta dim" style="left:1040px">Benny Benassi, ARTBAT</span>
+      <span class="vsep" style="left:1300px"></span>
+      <span class="pmeta mono" style="left:1318px"><b>-03:00</b><small>.4</small></span>
+      <span class="pmeta dim mono" style="left:1390px"><b>01:25</b><small>.8</small></span>
+      <span class="vsep" style="left:1455px"></span>
+      <span class="pmeta" style="left:1472px">Ebm</span>
+      <span class="vsep" style="left:1512px"></span>
+      <span class="pmeta mono" style="left:1530px">128.00</span>
+
+      <canvas class="ovw" id="ovw" width="2804" height="80"></canvas>
+      <div class="ovw-bar"><i style="width:32%"></i></div>
+      <span class="ovw-pos" style="left:607px"></span>
+      <span class="cuemark" style="left:160px;background:var(--cue-e);color:#fff">E</span>
+      <span class="cuemark" style="left:566px;background:var(--cue-f);color:#222">F</span>
+      <span class="cuemark" style="left:806px;background:var(--cue-g);color:#fff">G</span>
+      <span class="cuemark" style="left:1154px;background:var(--cue-h);color:#222">H</span>
+      <div class="phrase" id="phrase"></div>
+
+      <span class="bars">46.4Bars</span>
+      <canvas class="detail" id="detail" width="2968" height="260"></canvas>
+
+      <div class="pads" style="left:552px">
+        <span class="pad" style="left:0">A</span><span class="pad" style="left:33px">B</span><span class="pad" style="left:66px">C</span><span class="pad" style="left:99px">D</span>
+        <span class="pad e" style="left:132px">E</span><span class="pad f" style="left:165px">F</span><span class="pad g" style="left:198px">G</span><span class="pad h" style="left:231px">H</span>
+      </div>
+      <span class="sbtn" style="left:845px">MEMORY</span>
+      <span class="sbtn" style="left:904px;width:22px;padding:0">&#9664;</span>
+      <span class="sbtn" style="left:930px;width:22px;padding:0">&#9654;</span>
+      <span class="sbtn" style="left:956px;width:22px;padding:0;font-size:14px">&#10005;</span>
+      <span class="sbtn on" style="left:1008px;width:34px">AU</span>
+      <span class="sbtn" style="left:1044px;width:36px;color:#BFBFBF">MA</span>
+      <span class="sbtn" style="left:1086px;width:20px;padding:0">&#8249;</span>
+      <span class="sbtn num" style="left:1108px">2</span>
+      <span class="sbtn" style="left:1180px;width:20px;padding:0">&#8250;</span>
+      <span class="sbtn on" style="left:1493px;width:34px">Q</span>
+      <span class="sbtn" style="left:1537px;width:24px;padding:0;background:transparent"><svg width="16" height="14" viewBox="0 0 16 14" fill="#F0F0F0"><rect y="0" width="16" height="2.4"/><rect y="5.8" width="16" height="2.4"/><rect y="11.6" width="16" height="2.4"/></svg></span>
+
+      <div class="cuelist" id="cuelist"></div>
+    </div>
+
+    <!-- ================= browser ================= -->
+    <div class="rail" id="rail"></div>
+
+    <div class="tree">
+      <div class="tree-head"><span class="expand"></span><span class="shortcut"></span></div>
+      <div class="tabs">
+        <span class="sbox"><svg viewBox="0 0 14 14" fill="none" stroke="#F0F0F0" stroke-width="1.5"><rect x="1" y="1" width="12" height="9"/><path d="M1 4h12M4 4v6"/><circle cx="10" cy="10" r="2.5" fill="#2B2B2B"/><path d="M12 12l1.5 1.5"/></svg></span>
+        <span class="tab on">Tree View</span><span class="tab">Column View</span>
+      </div>
+      <div id="tnodes"></div>
+      <div class="tscroll"><i></i></div>
+    </div>
+
+    <div class="browser" style="--cols: 67px 57px 128px 80px 387px 73px 80px 80px 101px 301px 210px 128px 128px 128px;">
+      <div class="bhead">
+        <span class="title">Melodic Vox (14 Tracks)</span>
+        <svg class="updown" viewBox="0 0 10 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 6l3-4 3 4M2 10l3 4 3-4"/></svg>
+        <span class="divider"></span>
+        <div class="master"><b>MASTER</b><span></span></div>
+        <div class="views">
+          <i class="on"><svg viewBox="0 0 12 12" fill="#F0F0F0"><rect width="12" height="2.2"/><rect y="4.9" width="12" height="2.2"/><rect y="9.8" width="12" height="2.2"/></svg></i>
+          <i><svg viewBox="0 0 12 12" fill="#F0F0F0"><rect width="3" height="2.2"/><rect x="4.5" width="7.5" height="2.2"/><rect y="4.9" width="3" height="2.2"/><rect x="4.5" y="4.9" width="7.5" height="2.2"/><rect y="9.8" width="3" height="2.2"/><rect x="4.5" y="9.8" width="7.5" height="2.2"/></svg></i>
+          <i><svg viewBox="0 0 12 12" fill="#F0F0F0"><rect width="2.4" height="12"/><rect x="4.8" width="2.4" height="12"/><rect x="9.6" width="2.4" height="12"/></svg></i>
+          <i><svg viewBox="0 0 12 12" fill="#F0F0F0"><rect width="5" height="12"/><rect x="7" width="5" height="12" fill="none" stroke="#F0F0F0" stroke-width="1.5"/></svg></i>
+        </div>
+        <div class="search"><svg viewBox="0 0 13 13" fill="none" stroke="#bdbdbd" stroke-width="1.6"><circle cx="5.2" cy="5.2" r="4"/><path d="M8.2 8.2 12 12"/></svg>Search within this track list</div>
+      </div>
+
+      <div class="colhead">
+        <svg class="funnel" viewBox="0 0 14 14" fill="currentColor"><path d="M0 1h14L8.6 7.6V13L5.4 11.5V7.6z"/></svg>
+        <div class="cols">
+          <div></div>
+          <div class="num">#<i>&#8593;</i></div>
+          <div>Preview</div>
+          <div>Artwork</div>
+          <div>Track Title</div>
+          <div>Key</div>
+          <div class="r">BPM</div>
+          <div class="r">Time</div>
+          <div>Rating</div>
+          <div>Artist</div>
+          <div>Comments</div>
+          <div>Label</div>
+          <div class="r">Date Added</div>
+          <div class="r">Release Date</div>
+        </div>
+      </div>
+      <div class="rows" id="rows"></div>
+      <div class="hscroll"><i></i></div>
+    </div>
+
+    <div class="rrail" id="rrail"></div>
+
+    <div class="bottom">
+      <div class="link" tabindex="0"><svg viewBox="0 0 32 26" fill="none" stroke="#d8d8d8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h24M21 2l6 6-6 6"/><path d="M29 18H5M11 12l-6 6 6 6"/></svg>LINK</div>
+    </div>
+    <div class="status">
+      <div class="logo"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#e6e6e6" stroke-width="2.4"><path d="M10 1.5 17.6 6v8L10 18.5 2.4 14V6z"/><circle cx="10" cy="10" r="2.6" fill="#e6e6e6" stroke="none"/></svg>rekordbox</div>
+      <span class="analyzing">Analyzing: 7237 Tracks</span>
+      <span class="sel-info" id="selinfo"></span>
+    </div>
+
+    <div class="ref" id="ref"></div>
+  </div>
+</div>
+
+<div class="tools">
+  <label><input type="checkbox" id="refToggle"> Reference overlay (real rekordbox 7.2.11 capture)</label>
+  <label>Opacity <input type="range" id="refOpacity" min="0" max="100" value="50"></label>
+  <button id="btnRef50" type="button">50 / 50</button>
+  <span class="k">Player 275 px · rows 25 px · tree 305 px · columns from browseSetting.xml (PlaylistTracks)</span>
+  <span class="swatches" title="sampled palette">
+    <i class="sw" style="background:#0F0F0F"></i><i class="sw" style="background:#1E1E1E"></i><i class="sw" style="background:#323232"></i>
+    <i class="sw" style="background:#294C6A"></i><i class="sw" style="background:#1373EB"></i>
+    <i class="sw" style="background:#0055E1"></i><i class="sw" style="background:#B26505"></i><i class="sw" style="background:#F5EAD6"></i>
+  </span>
+</div>
+
+<script>
+(() => {
+  const rand = (seed) => { let s = seed * 9301 + 49297; return () => (s = (s * 9301 + 49297) % 233280) / 233280; };
+  const CUE = { E: "#11B176", F: "#FF8C00", G: "#305AFF", H: "#E2AA01", A: "#5A5A5A", B: "#5A5A5A", C: "#5A5A5A", D: "#5A5A5A" };
+  const DARK = { F: true, H: true };
+
+  // ---- phrase bar (segment widths measured from the capture, px of the 1402 px strip) ----
+  const PH = [["INTRO 2",164,"--ph-intro"],["UP 1",47,"--ph-up"],["UP 1",159,"--ph-up"],["UP 1",45,"--ph-up"],["CHORUS 1",74,"--ph-chorus"],["CHORUS 1",80,"--ph-chorus"],
+              ["UP 3",81,"--ph-up3"],["CHORUS 1",80,"--ph-chorus"],["DO",20,"--ph-down"],["UP",22,"--ph-up"],["UP 1",80,"--ph-up"],["UP 2",148,"--ph-up2"],
+              ["CHORUS 1",77,"--ph-chorus"],["CHORUS 1",80,"--ph-chorus"],["CHORUS 1",80,"--ph-chorus"],["OUTRO 1",150,"--ph-outro"]];
+  const total = PH.reduce((a, p) => a + p[1], 0) + PH.length - 1;
+  document.getElementById("phrase").innerHTML = PH.map(([n, w, c]) => `<span style="width:${(w / total * 1402).toFixed(1)}px;background:var(${c})">${n}</span>`).join("");
+
+  // Section energy (0..1 per phrase) so the overview waveform follows the phrase bar.
+  const energy = { "INTRO 2": .18, "UP 1": .45, "UP": .5, "UP 2": .6, "UP 3": .55, "CHORUS 1": .95, "DO": .3, "OUTRO 1": .5 };
+  const envAt = (frac) => { let acc = 0; for (const [n, w] of PH) { const f = w / total; if (frac < acc + f) { const local = (frac - acc) / f; return energy[n] * (n.startsWith("UP") ? 0.6 + 0.4 * local : 1); } acc += f + 1 / total; } return .4; };
+
+  // ---- overview waveform: bottom-anchored, low blue / mid orange / high white ----
+  { const c = document.getElementById("ovw"), x = c.getContext("2d"), W = c.width, H = c.height, r = rand(11);
+    for (let px = 0; px < W; px += 2) {
+      const e = envAt(px / W), n = 0.75 + r() * 0.35;
+      const lo = e * n * H * 0.9, mi = lo * (0.86 + r() * 0.1), hi = lo * (0.72 + r() * 0.12);
+      x.fillStyle = "#F5EAD6"; x.fillRect(px, H - lo - 3, 2, 3 + (r() < 0.15 ? 6 : 0));
+      x.fillStyle = "#FF8C00"; x.fillRect(px, H - lo, 2, lo - mi);
+      x.fillStyle = "#0055E1"; x.fillRect(px, H - mi, 2, mi);
+      x.fillStyle = "#F5EAD6"; x.fillRect(px, H - hi, 2, Math.max(1, (mi - hi) * 0.08));
+    }
+    x.fillStyle = "#1a63d6"; [[440, 60],[560, 20],[1060, 14],[1700, 40],[2600, 120]].forEach(([s, w]) => { for (let k = 0; k < w; k += 8) x.fillRect(s + k, 4, 5, 4); });
+  }
+
+  // ---- detail waveform: symmetric 3-band with beat-synced envelope, bar lines, downbeats, playhead ----
+  { const c = document.getElementById("detail"), x = c.getContext("2d"), W = c.width, H = c.height, mid = H / 2, r = rand(23);
+    const BAR = 100; // px per bar at 2x
+    for (let px = 0; px < W; px += 2) {
+      const beat = (px % (BAR / 4)) / (BAR / 4), kick = Math.exp(-beat * 4.5);
+      const base = 0.35 + 0.25 * Math.sin(px / 380) + r() * 0.12;
+      const lo = Math.min(1, base + kick * 0.7) * mid * 0.95;
+      const mi = Math.min(1, base * 0.7 + kick * 0.45 + r() * 0.1) * mid * 0.8;
+      const hi = Math.min(1, base * 0.55 + kick * 0.3 + r() * 0.15) * mid * 0.62;
+      x.fillStyle = "#0055E1"; x.fillRect(px, mid - lo, 2, lo * 2);
+      x.fillStyle = "#B26505"; x.fillRect(px, mid - mi, 2, mi * 2);
+      x.fillStyle = "#F5EAD6"; x.fillRect(px, mid - hi, 2, hi * 2);
+    }
+    for (let bx = 8; bx < W; bx += BAR) {
+      const down = ((bx - 8) / BAR) % 4 === 0;
+      x.fillStyle = down ? "#e6e6e6" : "#6a6a6a"; x.fillRect(bx, 8, 2, H - 16);
+      if (down) { x.fillStyle = "#FF0000"; x.beginPath(); x.moveTo(bx - 5, 2); x.lineTo(bx + 7, 2); x.lineTo(bx + 1, 10); x.fill();
+                  x.beginPath(); x.moveTo(bx - 5, H - 2); x.lineTo(bx + 7, H - 2); x.lineTo(bx + 1, H - 10); x.fill(); }
+    }
+    x.fillStyle = "#ffffff"; x.fillRect(1388, 0, 3, H); // playhead (x = 800 pt in the window)
+  }
+
+  // ---- cue list ----
+  { const el = document.getElementById("cuelist"), rows = [["A"],["B"],["C"],["D"],["E","00:00"],["F","01:16"],["G","02:01"],["H","03:07"]];
+    el.innerHTML = rows.map(([L, t], i) => `<div class="cuerow" style="top:${5 + i * 30}px">` + (t
+      ? `<span class="badge" style="background:${CUE[L]};color:${DARK[L] ? "#222" : "#fff"}">${L}</span><span class="t">${t}</span><span class="n">CUE(Auto)</span><svg class="x" viewBox="0 0 12 12" stroke="#fff" stroke-width="1.6"><path d="M1 1l10 10M11 1 1 11"/></svg>`
+      : `<span class="letter">${L}</span>`) + `</div>`).join("") +
+      `<div class="ctabs"><span>MEMORY</span><span class="on">HOT CUE</span><span class="w">INFO</span></div>`;
+  }
+
+  // ---- tree ----
+  const FOLDER = '<svg viewBox="0 0 14 12" fill="#c8c8c8"><path d="M0 2h5l1.5 1.5H14V11H0z"/></svg>';
+  const LIST = '<svg viewBox="0 0 14 12" fill="none" stroke="#e6e6e6" stroke-width="1.4"><rect x="1" y="1" width="12" height="10"/><path d="M1 4h12M1 7.5h12M4.5 4v7"/></svg>';
+  const NOTE = '<svg viewBox="0 0 14 12" fill="#e6e6e6"><path d="M9 0v8.2a2.3 2.3 0 1 1-1.4-2.1V2.2L4 3.2v6.2a2.3 2.3 0 1 1-1.4-2.1V1.6z"/></svg>';
+  const tree = [
+    [0, "none", NOTE, "All Tracks"], [0, "open", "", "Playlists"],
+    [1, "open", FOLDER, "CURRENT"], [1, "open", FOLDER, "USB"],
+    [2, "none", LIST, "Melodic Vox", true], [2, "none", LIST, "Hardstyle"], [2, "none", LIST, "Drum and Bass"], [2, "none", LIST, "Eurodance"], [2, "none", LIST, "Latin"],
+    [2, "none", LIST, "Main"], [2, "none", LIST, "Main: Vocal"], [2, "none", LIST, "Melodic Techno"], [2, "none", LIST, "Techno"], [2, "none", LIST, "Trance"],
+    [2, "none", LIST, "Groovy"], [2, "none", LIST, "Fun House"], [2, "none", LIST, "House"], [2, "none", LIST, "Tech House"], [2, "none", LIST, "Special"],
+    [2, "none", LIST, "HOUSE CLASSIC"], [2, "none", LIST, "TRIODE"], [2, "none", LIST, "2023-01-07 GD Ho"],
+    [2, "closed", FOLDER, "Main ALL"], [2, "closed", FOLDER, "Main Vocal ALL"], [1, "open", FOLDER, "DOWNLOADS"],
+  ];
+  document.getElementById("tnodes").innerHTML = tree.map(([lvl, arrow, ico, name, sel], i) =>
+    `<div class="tnode${sel ? " sel" : ""}" style="top:${47 + i * 25}px;padding-left:${14 + lvl * 20}px"><span class="arrow ${arrow}"></span>${ico}<span>${name}</span>${sel ? '<span class="plus">+</span>' : ""}</div>`).join("");
+
+  // ---- playlist rows (transcribed from the capture) ----
+  const T = [
+    ["Take Me Home (ft. Bonn) (Extended Mix)","Am","128.00","05:38","MORTEN","1A - A - 128","ABCD"],
+    ["The Abyss (Bonaar Remix)","Bm","130.00","04:44","The Weeknd, Lana Del Rey","10A - B - 130","BCD"],
+    ["Love To Give (Extended Mix)","D","130.00","04:48","Alex Sonata & TheRio","","EFGH"],
+    ["Your Eyes (Extended Mix)","Dbm","134.00","04:03","VINNE & ADRESZ","3A - Db - 134","ABCD"],
+    ["Love is Gonna Save Us (Extended Mix)","Ebm","128.00","04:26","Benny Benassi, ARTBAT","","EFGH"],
+    ["Sweet Disposition (ARTBAT Extended Remix)","Bm","128.00","05:03","The Temper Trap","10A - B - 128","EFGH"],
+    ["Edge Of The World (feat. Nu-La) (Extended Mix)","Fm","126.00","05:35","Genesi, Innellea, Meduza, Nu-La","","EFGH"],
+    ["Another World (Extended Mix)","Bbm","130.00","05:54","HAYLA, Meduza","5A - Bb - 130","EFGH"],
+    ["Something In The Air (Extended Mix)","Cm","128.00","04:25","22Bullets & Pascal Letoublon ft. MER","8A - C - 128","EFGH"],
+    ["Daydream (Extended Mix)","Abm","128.00","04:36","Joel Corry, Jem Cooke","4A - Ab - 128","EFGH"],
+    ["PASSO BEM SOLTO (MEDUZA Extended Remix)","Bm","124.00","04:23","ATLXS","10A - B - 124","ABCD"],
+    ["Up To My Head (Extended Mix)","Fm","125.00","05:51","Carl Bee","","EFGH"],
+    ["Walking On A Dream (BLOND:ISH Extended Remix)","Fm","127.00","05:20","Empire Of The Sun, BLOND:ISH","","ABCD"],
+    ["Safe With Me (Extended Mix)","Em","130.00","04:29","Going Deeper, Judgemxnt & Wicks","","ABCD"],
+  ];
+  const rowsEl = document.getElementById("rows");
+  const ANALYSED = '<svg viewBox="0 0 22 12" fill="none"><path d="M1 10h20" stroke="#1373EB" stroke-width="1.5"/><path d="M11 1l1.6 3.2 3.5.5-2.5 2.4.6 3.5L11 8.9 7.8 10.6l.6-3.5L5.9 4.7l3.5-.5z" fill="#fff"/></svg>';
+  rowsEl.innerHTML = T.map((t, i) => {
+    const [title, key, bpm, time, artist, comment, cues] = t, r = rand(i + 5);
+    const hue = Math.floor(r() * 360), hue2 = (hue + 60 + Math.floor(r() * 90)) % 360;
+    return `<div class="row${i === 4 ? " sel" : ""}" data-i="${i}" style="top:${i * 25}px">` +
+      `<div class="attr">${ANALYSED}${i === 4 ? '<span class="play"></span>' : "CUE"}</div>` +
+      `<div class="mono">${i + 1}</div>` +
+      `<div class="prev"><canvas width="240" height="42" data-cues="${cues}" data-seed="${i}"></canvas></div>` +
+      `<div class="art"><i style="--art: linear-gradient(135deg, hsl(${hue} 40% 26%), hsl(${hue2} 55% 12%))"></i></div>` +
+      `<div>${title}</div><div>${key}</div><div class="r mono">${bpm}</div><div class="r mono">${time}</div>` +
+      `<div class="stars">&#9734;&#9734;&#9734;&#9734;&#9734;</div><div>${artist}</div><div>${comment}</div><div></div><div class="r mono">9/6/26</div><div class="r mono">${r() < .6 ? "8/29/26" : ""}</div></div>`;
+  }).join("");
+
+  // Preview thumbnails: bottom-anchored 3-band strip + hot-cue letter badges (drawn once at 2x).
+  rowsEl.querySelectorAll("canvas").forEach((c) => {
+    const x = c.getContext("2d"), W = c.width, H = c.height, r = rand(+c.dataset.seed * 17 + 3), cues = c.dataset.cues;
+    x.fillStyle = "#000"; x.fillRect(0, 0, W, H);
+    for (let px = 0; px < W; px += 2) {
+      const f = px / W, e = (f < .08 || f > .93 ? .3 : .55 + .45 * Math.abs(Math.sin(f * 9.4))) * (.8 + r() * .3);
+      const lo = e * (H - 12), mi = lo * .86, hi = lo * .7;
+      x.fillStyle = "#FF8C00"; x.fillRect(px, H - lo, 2, lo - mi);
+      x.fillStyle = "#0055E1"; x.fillRect(px, H - mi, 2, mi);
+      x.fillStyle = "#F5EAD6"; x.fillRect(px, H - hi, 2, 2);
+    }
+    x.font = "bold 10px Helvetica, Arial, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+    const pos = { A: .05, B: .3, C: .55, D: .8, E: .05, F: .3, G: .5, H: .74 };
+    for (const L of cues) { const bx = Math.round(W * pos[L] + 30); x.fillStyle = CUE[L]; x.fillRect(bx, 1, 12, 12); x.fillStyle = DARK[L] ? "#222" : "#fff"; x.fillText(L, bx + 6, 7.5); }
+  });
+
+  // ---- selection ----
+  let anchor = 4, selected = new Set([4]);
+  const paint = () => {
+    rowsEl.querySelectorAll(".row").forEach(el => el.classList.toggle("sel", selected.has(+el.dataset.i)));
+    const n = selected.size, secs = [...selected].reduce((a, i) => a + T[i][3].split(":").reduce((m, v) => m * 60 + +v, 0), 0);
+    document.getElementById("selinfo").textContent = n > 1 ? `Selected: ${n} Tracks, ${Math.floor(secs / 60)} minutes, ${(n * 14.6).toFixed(1)} MB` : "";
+  };
+  rowsEl.addEventListener("click", (e) => {
+    const el = e.target.closest(".row"); if (!el) return;
+    const i = +el.dataset.i;
+    if (e.shiftKey) { const [a, b] = [Math.min(anchor, i), Math.max(anchor, i)]; selected = new Set(); for (let k = a; k <= b; k++) selected.add(k); }
+    else if (e.metaKey || e.ctrlKey) { selected.has(i) ? selected.delete(i) : selected.add(i); anchor = i; }
+    else { selected = new Set([i]); anchor = i; }
+    paint();
+  });
+
+  // ---- rails ----
+  const railIcons = [
+    ["", '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M3 1h8v12L7 9.8 3 13z"/></svg>'],
+    ["on", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="1.5" width="11" height="11"/><path d="M1.5 5h11M1.5 8.5h11M5 5v8"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="4" cy="10" r="2.2"/><circle cx="10" cy="4" r="2.2"/><path d="M5.5 8.5l3-3"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="2" height="2"/><rect x="4.5" y="2" width="8.5" height="2"/><rect x="1" y="6" width="2" height="2"/><rect x="4.5" y="6" width="8.5" height="2"/><rect x="1" y="10" width="2" height="2"/><rect x="4.5" y="10" width="8.5" height="2"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="#ff3b30"><rect x="1" y="1" width="12" height="12" rx="2.5"/><path d="M5 10.5V4l4-1v6.5" fill="none" stroke="#fff" stroke-width="1.4"/><circle cx="4" cy="10.5" r="1.3" fill="#fff"/><circle cx="8" cy="9.5" r="1.3" fill="#fff"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="#30c700" stroke-width="1.8"><circle cx="7" cy="7" r="5.5"/><path d="M7 1.5v11M4.5 4.5c1.5 1 3.5 1 5 0M4.5 9.5c1.5-1 3.5-1 5 0"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="11" height="9" rx="1"/><path d="M1.5 6h11"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="1.5" width="11" height="11"/><path d="M4 1.5v11M10 1.5v11"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5"/><path d="M4.5 1.5v4h5v-4"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="4" width="11" height="8.5"/><path d="M4 4V2.5h6V4"/><circle cx="7" cy="8" r="2"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5.5"/><path d="M7 3.5V7l2.5 1.5"/></svg>'],
+    ["", '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5.5"/><circle cx="7" cy="7" r="2.2" fill="currentColor"/></svg>'],
+  ];
+  const rail = document.getElementById("rail");
+  railIcons.forEach(([cls, svg], i) => { const d = document.createElement("div"); d.className = "ico " + cls; d.style.top = (24 + i * 25) + "px"; d.innerHTML = svg; rail.appendChild(d); });
+  const refresh = document.createElement("div"); refresh.className = "ico"; refresh.style.top = "652px";
+  refresh.innerHTML = '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11.5 7A4.5 4.5 0 1 1 9.8 3.5"/><path d="M10 1v3h-3"/></svg>'; rail.appendChild(refresh);
+
+  const rrail = document.getElementById("rrail");
+  const rIcons = [
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2h6l6 6-6 6-6-6z"/><circle cx="5.5" cy="5.5" r="1" fill="currentColor"/></svg>',
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="11" r="2.3"/><circle cx="11" cy="5" r="2.3"/><path d="M6.6 9.4l2.8-2.8"/></svg>',
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="12" height="12"/><path d="M2 11l4-4 3 3 2-2 3 3"/></svg>',
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5v.5"/></svg>',
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="12" height="12"/><path d="M10 2v12"/></svg>',
+  ];
+  rIcons.forEach((svg, i) => { const d = document.createElement("div"); d.className = "ico"; d.style.top = (219 + i * 33) + "px"; d.innerHTML = svg; rrail.appendChild(d); });
+  const menu = document.createElement("div"); menu.className = "ico"; menu.style.top = "6px";
+  menu.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3" width="12" height="2"/><rect x="2" y="7" width="12" height="2"/><rect x="2" y="11" width="12" height="2"/></svg>'; rrail.appendChild(menu);
+
+  // ---- clock ----
+  const tick = () => { const d = new Date(); document.getElementById("clock").textContent = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  tick(); setTimeout(function loop() { tick(); setTimeout(loop, 60000 - (Date.now() % 60000)); }, 60000 - (Date.now() % 60000));
+
+  // ---- fit to viewport ----
+  const stage = document.getElementById("stage");
+  const fit = () => { const s = Math.min(1, (document.documentElement.clientWidth - 16) / 1800); stage.style.transform = `scale(${s})`; stage.style.marginBottom = `${1130 * (s - 1)}px`; };
+  fit(); addEventListener("resize", fit);
+
+  // ---- reference overlay ----
+  const ref = document.getElementById("ref"), tog = document.getElementById("refToggle"), op = document.getElementById("refOpacity");
+  const apply = () => { ref.style.opacity = tog.checked ? op.value / 100 : 0; };
+  tog.addEventListener("change", apply); op.addEventListener("input", apply);
+  document.getElementById("btnRef50").addEventListener("click", () => { tog.checked = true; op.value = 50; apply(); });
+})();
+</script>
