@@ -72,7 +72,13 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
             .iter()
             .filter_map(|m| scores.get(lag * m).copied())
             .sum::<f64>();
-        let combined = score + 0.5 * harmonic;
+        // Autocorrelation cannot tell 64 from 128 from 256 BPM: every multiple
+        // of the true beat correlates. A listener resolves that by preference,
+        // so weight candidates by how tempo-like they are. Without this, a fifth
+        // of tracks locked onto a wrong multiple even though the period itself
+        // was right to a hundredth of a BPM.
+        let candidate_bpm = onsets.rate * 60.0 / lag as f64;
+        let combined = (score + 0.5 * harmonic) * tempo_prior(candidate_bpm);
         if let Some(slot) = scores.get_mut(lag) {
             *slot = score;
         }
@@ -139,6 +145,21 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
         .collect();
 
     TempoResult { bpm, confidence, first_beat_secs, beats }
+}
+
+/// How readily a tempo is heard *as* the tempo.
+///
+/// A log-normal centred where dance music sits. It only breaks ties between
+/// octaves — it is far too broad to move an estimate that the signal supports.
+fn tempo_prior(bpm: f64) -> f64 {
+    if bpm <= 0.0 {
+        return 0.0;
+    }
+    const CENTRE: f64 = 126.0;
+    // About one octave of spread either side.
+    const WIDTH: f64 = 0.85;
+    let x = (bpm / CENTRE).ln() / WIDTH;
+    (-0.5 * x * x).exp()
 }
 
 /// Finds the fractional lag that best explains the onset envelope.
