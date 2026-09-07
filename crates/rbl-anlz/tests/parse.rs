@@ -1,6 +1,6 @@
 //! Container and tag decoding, including the malformed inputs that must
 //! degrade rather than panic.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_anlz::{parse, Anlz, AnlzError, Section};
 use rbl_core::FourCc;
