@@ -1,0 +1,216 @@
+/**
+ * In-browser stand-in for the Rust backend.
+ *
+ * Deliberately mirrors the real contract's *shape*: it owns the ordering, hands
+ * out view handles, and only ever returns a window of rows. That way the UI is
+ * written against the real constraints from day one, and `pnpm dev:mock` runs
+ * the actual components with no Tauri, no database and no rekordbox.
+ *
+ * Its sort and search semantics are checked against the Rust view tests by a
+ * parity test once `rbl-index` lands.
+ */
+import type {
+  Backend, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec,
+} from "./types";
+
+const ARTISTS = [
+  "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
+  "Carl Bee", "Pretty Pink", "Dommo", "Eric Prydz", "Sarah de Warren", "Timmy Trumpet",
+  "Oliver Heldens", "The Temper Trap", "Wh0", "Benny Benassi", "Hayla", "Anyma",
+];
+const TITLES = [
+  "Take Me Home", "The Abyss", "Love To Give", "Your Eyes", "Love is Gonna Save Us",
+  "Sweet Disposition", "Edge Of The World", "Another World", "Something In The Air",
+  "Daydream", "Up To My Head", "Walking On A Dream", "Safe With Me", "Renegade Master",
+  "Gravity", "Airplane Mode", "Wasted Time", "Brighter Days", "Angels", "Goddess",
+];
+const MIXES = ["(Extended Mix)", "(Original Mix)", "(Extended Remix)", "(Radio Edit)", "(Club Mix)"];
+const KEYS = ["Am", "Bm", "Cm", "Dm", "Em", "Fm", "Gm", "Abm", "Bbm", "Dbm", "Ebm", "F#m", "D", "A", "E"];
+const GENRES = ["House", "Tech House", "Melodic House", "Techno", "Trance", "Progressive House", ""];
+const LABELS = ["Spinnin'", "Musical Freedom", "Defected", "Armada", "Toolroom", "Drumcode", ""];
+
+/** Deterministic PRNG so every run, test and screenshot sees identical data. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makeRows(count: number): RowDto[] {
+  const rnd = mulberry32(20260907);
+  const rows: RowDto[] = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const analysed = rnd() > 0.12 ? 1 : 0;
+    const artist = ARTISTS[Math.floor(rnd() * ARTISTS.length)] ?? "";
+    const key = analysed ? (KEYS[Math.floor(rnd() * KEYS.length)] ?? "") : "";
+    const bpmX100 = analysed ? (120 + Math.floor(rnd() * 20)) * 100 : 0;
+    const month = 1 + Math.floor(rnd() * 12);
+    const day = 1 + Math.floor(rnd() * 28);
+    rows[i] = {
+      id: String(100000 + i),
+      trackNo: i + 1,
+      title: `${TITLES[Math.floor(rnd() * TITLES.length)]} ${MIXES[Math.floor(rnd() * MIXES.length)]}`,
+      artist,
+      album: rnd() > 0.6 ? "Single" : "",
+      genre: GENRES[Math.floor(rnd() * GENRES.length)] ?? "",
+      label: LABELS[Math.floor(rnd() * LABELS.length)] ?? "",
+      comment: analysed && rnd() > 0.5 ? `${1 + Math.floor(rnd() * 12)}A - ${key.slice(0, 1)} - ${bpmX100 / 100}` : "",
+      bpmX100,
+      key,
+      durationSec: 180 + Math.floor(rnd() * 240),
+      rating: Math.floor(rnd() * 6),
+      analysed,
+      dateAdded: `2026-0${1 + Math.floor(rnd() * 9)}-${String(day).padStart(2, "0")}`,
+      releaseDate: rnd() > 0.3 ? `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "",
+      cues: analysed ? (rnd() > 0.5 ? "EFGH" : "ABCD") : "",
+      artworkHue: Math.floor(rnd() * 360),
+    };
+  }
+  return rows;
+}
+
+const FOLDERS = ["CURRENT", "USB", "DOWNLOADS"];
+const PLAYLISTS = [
+  "Melodic Vox", "Hardstyle", "Drum and Bass", "Eurodance", "Latin", "Main", "Main: Vocal",
+  "Melodic Techno", "Techno", "Trance", "Groovy", "Fun House", "House", "Tech House",
+  "Special", "HOUSE CLASSIC", "TRIODE",
+];
+
+function makeTree(): TreeNode[] {
+  const nodes: TreeNode[] = [
+    { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
+    { id: "playlists", name: "Playlists", kind: "collection", depth: 0, expanded: true },
+  ];
+  let n = 0;
+  for (const [fi, folder] of FOLDERS.entries()) {
+    nodes.push({ id: `folder-${fi}`, name: folder, kind: "folder", depth: 1, expanded: fi < 2 });
+    if (fi >= 2) continue;
+    const take = fi === 0 ? 3 : PLAYLISTS.length - 3;
+    for (let i = 0; i < take; i++) {
+      const name = PLAYLISTS[n++ % PLAYLISTS.length] ?? "";
+      nodes.push({ id: `pl-${fi}-${i}`, name, kind: "playlist", depth: 2 });
+    }
+  }
+  return nodes;
+}
+
+const collator = new Intl.Collator("en", { sensitivity: "base", numeric: true });
+
+function compare(a: RowDto, b: RowDto, col: SortColumn): number {
+  switch (col) {
+    case "trackNo": return a.trackNo - b.trackNo;
+    case "bpm": return a.bpmX100 - b.bpmX100;
+    case "duration": return a.durationSec - b.durationSec;
+    case "rating": return a.rating - b.rating;
+    case "title": return collator.compare(a.title, b.title);
+    case "artist": return collator.compare(a.artist, b.artist);
+    case "album": return collator.compare(a.album, b.album);
+    case "genre": return collator.compare(a.genre, b.genre);
+    case "label": return collator.compare(a.label, b.label);
+    case "key": return collator.compare(a.key, b.key);
+    case "dateAdded": return collator.compare(a.dateAdded, b.dateAdded);
+    case "releaseDate": return collator.compare(a.releaseDate, b.releaseDate);
+  }
+}
+
+/** Matches the folding the Rust index uses: lowercase, accents stripped. */
+export function fold(s: string): string {
+  return s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+export interface MockOptions {
+  trackCount?: number;
+  /** Simulated IPC latency in ms; 0 keeps tests fast. */
+  latencyMs?: number;
+}
+
+export function createMockBackend(options: MockOptions = {}): Backend {
+  const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
+  const latency = options.latencyMs ?? 0;
+  const all = makeRows(trackCount);
+  const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
+  const tree = makeTree();
+
+  const views = new Map<number, { order: Uint32Array; gen: number }>();
+  let nextViewId = 1;
+
+  const wait = <T>(value: T): Promise<T> =>
+    latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
+
+  return {
+    librarySummary: () =>
+      wait<LibrarySummary>({
+        trackCount,
+        playlistCount: tree.filter((n) => n.kind === "playlist").length,
+        readOnly: true,
+        dbVersion: null,
+      }),
+
+    playlistTree: () => wait(tree),
+
+    openView: (spec: ViewSpec) => {
+      // Playlists show a deterministic slice so the mock stays stable across runs.
+      let candidates: number[];
+      if (spec.source.kind === "playlist") {
+        const seed = [...spec.source.id].reduce((a, c) => a + c.charCodeAt(0), 0);
+        const size = 14 + (seed % 30);
+        candidates = Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
+      } else {
+        candidates = Array.from({ length: trackCount }, (_, i) => i);
+      }
+
+      const q = fold(spec.query.trim());
+      if (q) candidates = candidates.filter((i) => (folded[i] ?? "").includes(q));
+
+      const order = Uint32Array.from(candidates);
+      const rows = all;
+      const sorted = Array.from(order).sort((x, y) => {
+        const rx = rows[x];
+        const ry = rows[y];
+        if (!rx || !ry) return 0;
+        const c = compare(rx, ry, spec.sort);
+        return spec.descending ? -c : c;
+      });
+
+      const viewId = nextViewId++;
+      views.set(viewId, { order: Uint32Array.from(sorted), gen: 1 });
+      return wait<ViewHandle>({ viewId, len: sorted.length, gen: 1 });
+    },
+
+    fetchRows: (viewId, offset, len) => {
+      const view = views.get(viewId);
+      if (!view) return Promise.reject(new Error(`unknown view ${viewId}`));
+      const out: RowDto[] = [];
+      const end = Math.min(view.order.length, offset + len);
+      for (let i = Math.max(0, offset); i < end; i++) {
+        const row = all[view.order[i] ?? 0];
+        if (row) out.push(row);
+      }
+      return wait(out);
+    },
+
+    viewIdsInRange: (viewId, from, to) => {
+      const view = views.get(viewId);
+      if (!view) return Promise.reject(new Error(`unknown view ${viewId}`));
+      const [lo, hi] = from <= to ? [from, to] : [to, from];
+      const out: string[] = [];
+      for (let i = Math.max(0, lo); i <= Math.min(view.order.length - 1, hi); i++) {
+        const row = all[view.order[i] ?? 0];
+        if (row) out.push(row.id);
+      }
+      return wait(out);
+    },
+  };
+}
+
+/** `?tracks=40000` lets the perf spec load a full-size library into the mock. */
+function readCountFromUrl(): number | null {
+  if (typeof location === "undefined") return null;
+  const raw = new URLSearchParams(location.search).get("tracks");
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 && n <= 200000 ? n : null;
+}

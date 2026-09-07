@@ -5,40 +5,13 @@
   background: var(--c-black);
 }
 
-.topBar {
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  background: var(--c-top);
+.player {
+  background: var(--c-black);
+  border-bottom: 1px solid var(--c-panel);
 }
-
-.mode {
-  font-size: var(--f-size-sm);
-  font-weight: 700;
-  color: var(--c-icon-on);
-}
-
-.player { background: var(--c-black); }
 
 .body {
   display: grid;
   grid-template-columns: var(--s-tree-w) 1fr;
-  min-height: 0;               /* let the browser scroll instead of the page */
-}
-
-.tree { background: var(--c-panel); }
-
-.browser {
-  background: var(--c-black);
-  min-width: 0;
-}
-
-.statusBar {
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  background: var(--c-black);
-  font-size: var(--f-size-sm);
-  font-weight: 700;
-  color: var(--c-text-dim);
+  min-height: 0; /* let the browser scroll instead of the page */
 }

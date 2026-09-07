@@ -1,0 +1,150 @@
+/* Geometry and colour come from design/tokens; nothing here is a literal. */
+.browser {
+  display: grid;
+  grid-template-rows: var(--s-browser-head-h) var(--s-col-header-h) 1fr;
+  min-width: 0;
+  /* Without this a grid item floors at its content height, so .scroll would be
+     as tall as the whole list and the virtualizer would render every row. */
+  min-height: 0;
+  background: var(--c-black);
+}
+
+.browserHead {
+  display: flex;
+  align-items: center;
+  background: var(--c-panel);
+  padding: 0 12px;
+  gap: 12px;
+}
+
+.title { font-size: var(--f-size-ui); color: var(--c-text); }
+
+.search {
+  margin-left: auto;
+  position: relative;
+  width: 210px;
+  height: 19px;
+  line-height: 19px;
+  padding-left: 30px;
+  background: var(--c-field);
+  border: 1px solid var(--c-raised);
+  border-radius: 2px;
+  color: var(--c-field-placeholder);
+  font-size: var(--f-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 8px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--c-field-placeholder);
+  border-radius: 50%;
+}
+.searchIcon::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 5px;
+  height: 1.5px;
+  background: var(--c-field-placeholder);
+  transform: rotate(45deg);
+}
+
+.colHead {
+  display: grid;
+  grid-template-columns: var(--cols);
+  width: var(--table-w);
+  background: var(--c-panel);
+  height: var(--s-col-header-h);
+}
+
+.headCell {
+  position: relative;
+  height: var(--s-col-header-h);
+  line-height: var(--s-col-header-h);
+  padding: 0 8px;
+  font-size: var(--f-size-ui);
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 1px solid var(--c-raised);
+  cursor: default;
+}
+.headCell[data-sorted] { color: var(--c-accent); }
+.sortArrow { margin-left: 4px; color: var(--c-accent); }
+
+.scroll {
+  overflow: auto;
+  position: relative;
+  background: var(--c-black);
+  min-height: 0;
+}
+
+.inner { position: relative; width: var(--table-w); }
+
+.row {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--table-w);
+  height: var(--s-row-height);
+  display: grid;
+  grid-template-columns: var(--cols);
+  background: var(--c-top);
+  /* Isolates each row so a scroll tick repaints only what moved. */
+  contain: layout style paint;
+}
+.row[data-even] { background: var(--c-panel); }
+.row[data-selected] { background: var(--c-select); }
+.row:hover:not([data-selected]) { background: var(--c-button); }
+
+.cell,
+.attr,
+.artwork,
+.preview {
+  height: var(--s-row-height);
+  line-height: var(--s-row-height);
+  padding: 0 6px;
+  font-size: var(--f-size-ui);
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 1px solid var(--c-raised);
+}
+.row[data-selected] .cell,
+.row[data-selected] .attr,
+.row[data-selected] .artwork,
+.row[data-selected] .preview { border-right-color: var(--c-black); }
+
+.right { text-align: right; font-variant-numeric: tabular-nums; }
+
+.attr { display: flex; align-items: center; gap: 8px; }
+.analysed {
+  width: 10px;
+  height: 10px;
+  background: var(--c-icon-on);
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+.cue { font-size: var(--f-size-xs); color: var(--c-text-dim); }
+
+.artwork { padding: 0; position: relative; }
+.artwork > span { position: absolute; inset: 0; }
+
+.preview { padding: 0; position: relative; background: var(--c-black); }
+.preview[data-analysed]::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 3px;
+  height: 12px;
+  background: linear-gradient(to top, var(--c-wave-low) 55%, var(--c-wave-mid-ovw) 80%, var(--c-wave-high));
+  opacity: 0.85;
+}
+
+.stars { letter-spacing: 1px; color: var(--c-text); }

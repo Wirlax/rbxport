@@ -1,0 +1,30 @@
+import { defineConfig, devices } from "@playwright/test";
+
+/**
+ * Runs the real components against the mock backend in a plain browser.
+ * `webkit` approximates WKWebView (macOS shell), `chromium` approximates
+ * WebView2 (Windows shell).
+ */
+export default defineConfig({
+  testDir: "./e2e",
+  fullyParallel: true,
+  retries: 0,
+  reporter: process.env.CI ? "list" : [["list"]],
+  use: {
+    baseURL: "http://localhost:1420",
+    trace: "on-first-retry",
+    // Matches the reference captures so screenshots compare like for like.
+    viewport: { width: 1800, height: 1130 },
+    deviceScaleFactor: 2,
+  },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+  ],
+  webServer: {
+    command: "pnpm exec vite --port 1420 --strictPort",
+    url: "http://localhost:1420",
+    reuseExistingServer: true,
+    timeout: 60_000,
+  },
+});

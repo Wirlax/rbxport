@@ -1,0 +1,20 @@
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--s-status-bar-h);
+  padding: 0 12px;
+  background: var(--c-black);
+  font-size: var(--f-size-sm);
+  font-weight: 700;
+  color: var(--c-text-dim);
+}
+.logo { color: var(--c-text); }
+.readOnly {
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--c-raised);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-xs);
+}
+.selection { margin-left: auto; }
