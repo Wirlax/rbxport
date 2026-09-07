@@ -62,6 +62,11 @@ fn main() {
             Ok(a) => a,
             Err(_) => { failed += 1; continue; }
         };
+        // Very long files cost far more to analyse than they inform; the cap
+        // above bounds decoding, this bounds anything that slipped past it.
+        if audio.samples.len() > audio.sample_rate as usize * 120 {
+            continue;
+        }
         if audio.duration_secs() < 20.0 {
             continue;
         }
@@ -88,6 +93,11 @@ fn main() {
             }
         }
 
+        if analysed % 20 == 0 {
+            use std::io::Write as _;
+            println!("  … {analysed} analysed ({:.0}s)", started.elapsed().as_secs_f64());
+            let _ = std::io::stdout().flush();
+        }
         if analysed <= 10 {
             println!(
                 "  {:<44} rb {:>6.2} | ours {:>6.2} (folded {:>6.2})  key rb {:<4} ours {:<4}",
