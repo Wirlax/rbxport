@@ -24,4 +24,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rbl-core = { path = "../crates/rbl-core" }
+rbl-db = { path = "../crates/rbl-db" }
+rbl-index = { path = "../crates/rbl-index" }
+parking_lot = "0.12"

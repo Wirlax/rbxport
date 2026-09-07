@@ -60,7 +60,10 @@ pub type AppResult<T> = Result<T, AppError>;
 
 /// Runs a command body, converting a panic into an `AppError` instead of
 /// tearing down the app. Requires `panic = "unwind"` (see the root Cargo.toml).
-pub fn run_command<T>(name: &str, f: impl FnOnce() -> AppResult<T> + std::panic::UnwindSafe) -> AppResult<T> {
+pub fn run_command<T, F>(name: &str, f: F) -> AppResult<T>
+where
+    F: FnOnce() -> AppResult<T> + std::panic::UnwindSafe,
+{
     match std::panic::catch_unwind(f) {
         Ok(result) => result,
         Err(payload) => {
@@ -82,7 +85,7 @@ mod tests {
 
     #[test]
     fn a_panicking_command_becomes_an_error() {
-        let err = run_command::<()>("boom", || panic!("kaboom")).unwrap_err();
+        let err = run_command("boom", || -> AppResult<()> { panic!("kaboom") }).unwrap_err();
         assert_eq!(err.kind, ErrorKind::Internal);
         assert!(err.detail.unwrap().contains("kaboom"));
     }
