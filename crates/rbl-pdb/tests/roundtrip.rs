@@ -162,3 +162,172 @@ fn a_self_referential_page_chain_terminates() {
     let pdb = Pdb::parse(&file).unwrap();
     let _ = pdb.census(); // must return, not hang
 }
+
+// ---- writing every table type ----
+
+use rbl_pdb::rows::{
+    album_row, artist_row, color_row, key_row, playlist_entry_row, playlist_row,
+    simple_named_row, track_row, TrackInput,
+};
+
+#[test]
+fn a_written_track_reads_back_field_for_field() {
+    let input = TrackInput {
+        id: 42,
+        artist_id: 7,
+        album_id: 8,
+        genre_id: 9,
+        key_id: 10,
+        label_id: 11,
+        artwork_id: 12,
+        color_id: 3,
+        rating: 4,
+        tempo_x100: 12_800,
+        duration_sec: 257,
+        year: 2026,
+        bitrate: 320,
+        sample_rate: 44_100,
+        file_size: 10_485_760,
+        track_number: 5,
+        play_count: 6,
+        title: "All U Need".into(),
+        filename: "All U Need.mp3".into(),
+        file_path: "/Contents/TRIODE/Single/All U Need.mp3".into(),
+        analyze_path: "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT".into(),
+        comment: "8A - C - 128".into(),
+        date_added: "2026-09-06".into(),
+        release_date: "2026-08-29".into(),
+        ..TrackInput::default()
+    };
+
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(0, &[track_row(&input)]);
+    let bytes = file.finish();
+
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let rows = pdb.track_rows(pdb.table(PageType::Tracks).unwrap());
+    assert_eq!(rows.len(), 1);
+    let t = &rows[0];
+
+    assert_eq!(t.id, 42);
+    assert_eq!(t.artist_id, 7);
+    assert_eq!(t.album_id, 8);
+    assert_eq!(t.genre_id, 9);
+    assert_eq!(t.key_id, 10);
+    assert_eq!(t.label_id, 11);
+    assert_eq!(t.artwork_id, 12);
+    assert_eq!(t.color_id, 3);
+    assert_eq!(t.rating, 4);
+    assert_eq!(t.tempo_x100, 12_800);
+    assert_eq!(t.duration_sec, 257);
+    assert_eq!(t.year, 2026);
+    assert_eq!(t.bitrate, 320);
+    assert_eq!(t.sample_rate, 44_100);
+    assert_eq!(t.file_size, 10_485_760);
+    assert_eq!(t.track_number, 5);
+    assert_eq!(t.play_count, 6);
+    assert_eq!(t.title, "All U Need");
+    assert_eq!(t.filename, "All U Need.mp3");
+    assert_eq!(t.file_path, "/Contents/TRIODE/Single/All U Need.mp3");
+    assert_eq!(t.analyze_path, "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT");
+    assert_eq!(t.comment, "8A - C - 128");
+    assert_eq!(t.date_added, "2026-09-06");
+    assert_eq!(t.release_date, "2026-08-29");
+}
+
+#[test]
+fn every_name_table_round_trips() {
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(2, &[artist_row(1, "TRIODE"), artist_row(2, "ARTBAT")]);
+    file.add_table(3, &[album_row(1, 1, "Single")]);
+    file.add_table(1, &[simple_named_row(1, "House")]);
+    file.add_table(4, &[simple_named_row(1, "Defected")]);
+    file.add_table(5, &[key_row(1, "Am"), key_row(2, "Fm")]);
+    file.add_table(6, &[color_row(1, "Pink"), color_row(2, "Red")]);
+    let bytes = file.finish();
+    let pdb = Pdb::parse(&bytes).unwrap();
+
+    let names = |kind| -> Vec<(u32, String)> {
+        pdb.named_rows(pdb.table(kind).unwrap()).into_iter().map(|r| (r.id, r.name)).collect()
+    };
+    assert_eq!(names(PageType::Artists), vec![(1, "TRIODE".into()), (2, "ARTBAT".into())]);
+    assert_eq!(names(PageType::Albums), vec![(1, "Single".into())]);
+    assert_eq!(names(PageType::Genres), vec![(1, "House".into())]);
+    assert_eq!(names(PageType::Labels), vec![(1, "Defected".into())]);
+    assert_eq!(names(PageType::Keys), vec![(1, "Am".into()), (2, "Fm".into())]);
+    assert_eq!(names(PageType::Colors), vec![(1, "Pink".into()), (2, "Red".into())]);
+}
+
+#[test]
+fn playlists_and_their_entries_round_trip() {
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(
+        7,
+        &[
+            playlist_row(1, 0, 1, true, "USB"),
+            playlist_row(2, 1, 1, false, "Melodic Vox"),
+        ],
+    );
+    file.add_table(
+        8,
+        &[playlist_entry_row(1, 100, 2), playlist_entry_row(2, 101, 2)],
+    );
+    let bytes = file.finish();
+    let pdb = Pdb::parse(&bytes).unwrap();
+
+    let nodes = pdb.playlist_nodes(pdb.table(PageType::PlaylistTree).unwrap());
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes[0].name, "USB");
+    assert!(nodes[0].is_folder);
+    assert_eq!(nodes[1].name, "Melodic Vox");
+    assert!(!nodes[1].is_folder);
+    assert_eq!(nodes[1].parent_id, 1);
+
+    let entries = pdb.playlist_entries(pdb.table(PageType::PlaylistEntries).unwrap());
+    assert_eq!(entries.len(), 2);
+    assert_eq!((entries[0].entry_index, entries[0].track_id, entries[0].playlist_id), (1, 100, 2));
+    assert_eq!(entries[1].track_id, 101);
+}
+
+#[test]
+fn a_track_with_unicode_metadata_round_trips() {
+    let input = TrackInput {
+        id: 1,
+        title: "Ébano — Tiësto Remix".into(),
+        file_path: "/Contents/Tiësto/Álbum/Ébano.mp3".into(),
+        ..TrackInput::default()
+    };
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(0, &[track_row(&input)]);
+    let pdb_bytes = file.finish();
+    let pdb = Pdb::parse(&pdb_bytes).unwrap();
+    let rows = pdb.track_rows(pdb.table(PageType::Tracks).unwrap());
+    assert_eq!(rows[0].title, "Ébano — Tiësto Remix");
+    assert_eq!(rows[0].file_path, "/Contents/Tiësto/Álbum/Ébano.mp3");
+}
+
+#[test]
+fn many_tracks_span_pages_and_all_survive() {
+    let inputs: Vec<Vec<u8>> = (1..=250_u32)
+        .map(|i| {
+            track_row(&TrackInput {
+                id: i,
+                title: format!("Track number {i:03}"),
+                file_path: format!("/Contents/A/B/track-{i:03}.mp3"),
+                tempo_x100: 12_000 + i,
+                ..TrackInput::default()
+            })
+        })
+        .collect();
+
+    let mut file = FileBuilder::new(PAGE);
+    file.add_table(0, &inputs);
+    let bytes = file.finish();
+
+    let pdb = Pdb::parse(&bytes).unwrap();
+    let rows = pdb.track_rows(pdb.table(PageType::Tracks).unwrap());
+    assert_eq!(rows.len(), 250, "every track must survive paging");
+    assert_eq!(rows[0].title, "Track number 001");
+    assert_eq!(rows[249].title, "Track number 250");
+    assert_eq!(rows[249].tempo_x100, 12_250);
+}
