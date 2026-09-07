@@ -20,3 +20,5 @@ tempfile = "3"
 rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }
 rbl-index = { path = "../rbl-index" }
+rbl-audio = { path = "../rbl-audio" }
+rbl-analysis = { path = "../rbl-analysis" }
