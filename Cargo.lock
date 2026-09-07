@@ -3168,7 +3168,9 @@ name = "rekordbox-lite"
 version = "0.1.0"
 dependencies = [
  "parking_lot",
+ "rbl-analysis",
  "rbl-anlz",
+ "rbl-audio",
  "rbl-core",
  "rbl-db",
  "rbl-index",

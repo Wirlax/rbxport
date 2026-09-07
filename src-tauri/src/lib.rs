@@ -82,6 +82,7 @@ pub fn run() {
             commands::fetch_rows,
             commands::view_ids_in_range,
             commands::track_waveform,
+            commands::analyse_track,
         ])
         .run(tauri::generate_context!());
 

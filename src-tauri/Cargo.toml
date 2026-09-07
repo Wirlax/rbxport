@@ -29,4 +29,6 @@ rbl-core = { path = "../crates/rbl-core" }
 rbl-db = { path = "../crates/rbl-db" }
 rbl-index = { path = "../crates/rbl-index" }
 rbl-anlz = { path = "../crates/rbl-anlz" }
+rbl-analysis = { path = "../crates/rbl-analysis" }
+rbl-audio = { path = "../crates/rbl-audio" }
 parking_lot = "0.12"

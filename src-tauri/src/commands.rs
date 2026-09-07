@@ -230,3 +230,73 @@ pub async fn track_waveform(
     })
     .await
 }
+
+/// What analysing one track produced.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisResultDto {
+    pub track_id: String,
+    /// BPM x100, as rekordbox stores it.
+    pub bpm_x100: u32,
+    pub key: String,
+    pub beats: u32,
+    /// Peak sample magnitude, 0..=1.
+    pub peak: f32,
+    pub duration_sec: u32,
+    pub elapsed_ms: u64,
+}
+
+/// Analyses one track and returns the result **without writing anything**.
+///
+/// Persisting analysis means writing to the user's library and authoring files
+/// in its share tree. Neither happens until the differential recordings in
+/// `docs`/`recordings` explain what rekordbox itself writes, so this reports
+/// what it found and stops there.
+#[tauri::command]
+pub async fn analyse_track(
+    state: State<'_, Arc<AppState>>,
+    track_id: String,
+) -> AppResult<AnalysisResultDto> {
+    let library = state.library()?;
+    let Ok(numeric) = track_id.parse::<u64>() else {
+        return Err(AppError::new(ErrorKind::Malformed, "That track id is not valid.")
+            .with_detail(format!("track_id {track_id:?}")));
+    };
+
+    blocking("analyse_track", move || {
+        let Some(row) = library.ids.iter().position(|&id| id == numeric) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
+        };
+        let path = library.folder_path.get(row);
+        if path.is_empty() {
+            return Err(AppError::new(ErrorKind::NotFound, "That track has no file path."));
+        }
+
+        let started = std::time::Instant::now();
+        // Bounded: tempo and key are global properties, and an unbounded decode
+        // of a long mix is how a single track becomes a memory problem.
+        let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(180.0)).map_err(|e| {
+            AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
+                .with_detail(e.to_string())
+        })?;
+
+        let analysis = rbl_analysis::analyse(&audio.samples, audio.sample_rate);
+        // Clamp before narrowing so the conversion cannot truncate. The cast is
+        // safe because the value is already inside u32's range.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped into 0..=u32::MAX on the line above")]
+        let to_u32 = |v: f64| {
+            let clamped = v.round().clamp(0.0, f64::from(u32::MAX));
+            clamped as u32
+        };
+        Ok(AnalysisResultDto {
+            track_id: numeric.to_string(),
+            bpm_x100: to_u32(analysis.tempo.bpm * 100.0),
+            key: analysis.key.map(|k| k.name).unwrap_or_default(),
+            beats: u32::try_from(analysis.tempo.beats.len()).unwrap_or(u32::MAX),
+            peak: analysis.peak,
+            duration_sec: to_u32(audio.duration_secs()),
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        })
+    })
+    .await
+}
