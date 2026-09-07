@@ -22,6 +22,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
                 let db_version = db.schema().db_version;
+                let share_root = db.location().share_root.clone();
                 match rbl_index::load(&db) {
                     Ok((library, stats)) => {
                         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -35,7 +36,8 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         // Writes are gated on rekordbox not running, which we
                         // re-check per transaction; the banner reflects it now.
                         let read_only = rbl_db::is_rekordbox_running();
-                        app.state::<Arc<AppState>>().set_library(library, read_only, db_version, load_ms);
+                        app.state::<Arc<AppState>>()
+                            .set_library(library, read_only, db_version, load_ms, share_root);
                         let _ = tauri::Emitter::emit(&app, "library:ready", ());
                     }
                     Err(e) => {
@@ -79,6 +81,7 @@ pub fn run() {
             commands::open_view,
             commands::fetch_rows,
             commands::view_ids_in_range,
+            commands::track_waveform,
         ])
         .run(tauri::generate_context!());
 

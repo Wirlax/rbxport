@@ -75,3 +75,25 @@ test("scrolling loads further rows without leaving gaps", async ({ page }) => {
     )
     .not.toBe("");
 });
+
+test("analysed tracks draw a waveform, unanalysed ones stay blank", async ({ page }) => {
+  const canvases = page.locator('[role="row"] canvas');
+  await expect.poll(async () => canvases.count()).toBeGreaterThan(5);
+
+  // Every canvas that was drawn must have actual pixels; a blank one means the
+  // fetch-and-render path silently failed, which is how this first shipped.
+  const painted = await page.evaluate(() => {
+    let drawn = 0;
+    let blank = 0;
+    for (const canvas of document.querySelectorAll<HTMLCanvasElement>('[role="row"] canvas')) {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      if (data.some((v) => v !== 0)) drawn++;
+      else blank++;
+    }
+    return { drawn, blank };
+  });
+  expect(painted.drawn).toBeGreaterThan(5);
+  expect(painted.blank).toBe(0);
+});

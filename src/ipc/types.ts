@@ -82,6 +82,9 @@ export interface AppErrorDto {
   detail?: string;
 }
 
+/** Which waveform to fetch for a track. */
+export type WaveformKind = "preview" | "detail" | "colour";
+
 export interface Backend {
   librarySummary(): Promise<LibrarySummary>;
   playlistTree(): Promise<TreeNode[]>;
@@ -89,4 +92,10 @@ export interface Backend {
   fetchRows(viewId: number, offset: number, len: number): Promise<RowDto[]>;
   /** Ids between two row indices inclusive; used for shift-click across unfetched rows. */
   viewIdsInRange(viewId: number, from: number, to: number): Promise<string[]>;
+  /**
+   * Raw waveform bytes for a track, or an empty array when it has no analysis.
+   * Sent as bytes rather than JSON: a colour waveform is several kilobytes of
+   * numbers and JSON would multiply that and cost a parse on the UI thread.
+   */
+  trackWaveform(trackId: string, kind: WaveformKind): Promise<Uint8Array>;
 }

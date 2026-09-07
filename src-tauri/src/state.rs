@@ -24,6 +24,8 @@ pub struct AppState {
 #[derive(Default)]
 struct Inner {
     library: Option<Arc<Library>>,
+    /// Root of rekordbox's share tree, where analysis files live.
+    share_root: std::path::PathBuf,
     read_only: bool,
     db_version: Option<i64>,
     load_ms: u64,
@@ -46,9 +48,17 @@ impl AppState {
         Self { inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }) }
     }
 
-    pub fn set_library(&self, library: Library, read_only: bool, db_version: Option<i64>, load_ms: u64) {
+    pub fn set_library(
+        &self,
+        library: Library,
+        read_only: bool,
+        db_version: Option<i64>,
+        load_ms: u64,
+        share_root: std::path::PathBuf,
+    ) {
         let mut inner = self.inner.write();
         inner.library = Some(Arc::new(library));
+        inner.share_root = share_root;
         inner.read_only = read_only;
         inner.db_version = db_version;
         inner.load_ms = load_ms;
@@ -63,6 +73,11 @@ impl AppState {
             .library
             .clone()
             .ok_or_else(|| AppError::new(ErrorKind::NotFound, "The library has not finished loading yet."))
+    }
+
+    /// Where analysis files live for the loaded library.
+    pub fn share_root(&self) -> std::path::PathBuf {
+        self.inner.read().share_root.clone()
     }
 
     pub fn summary(&self) -> (bool, Option<i64>, u64, u32) {

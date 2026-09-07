@@ -10,7 +10,7 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  Backend, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec,
+  Backend, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 
 const ARTISTS = [
@@ -189,6 +189,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       for (let i = Math.max(0, offset); i < end; i++) {
         const row = all[view.order[i] ?? 0];
         if (row) out.push(row);
+      }
+      return wait(out);
+    },
+
+    trackWaveform: (trackId: string, _kind: WaveformKind) => {
+      // Synthesised so the mock exercises the same drawing path as real data:
+      // one byte per column, low five bits height, top three whiteness.
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row || row.analysed === 0) return wait(new Uint8Array());
+      const rnd = mulberry32(index + 1);
+      const columns = 400;
+      const out = new Uint8Array(columns);
+      for (let i = 0; i < columns; i++) {
+        const shape = 0.35 + 0.65 * Math.abs(Math.sin((i / columns) * Math.PI * 3));
+        const height = Math.round(shape * (0.6 + rnd() * 0.4) * 31);
+        const whiteness = Math.round(rnd() * 7);
+        out[i] = (whiteness << 5) | (height & 0x1f);
       }
       return wait(out);
     },

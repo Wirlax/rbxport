@@ -28,4 +28,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rbl-core = { path = "../crates/rbl-core" }
 rbl-db = { path = "../crates/rbl-db" }
 rbl-index = { path = "../crates/rbl-index" }
+rbl-anlz = { path = "../crates/rbl-anlz" }
 parking_lot = "0.12"

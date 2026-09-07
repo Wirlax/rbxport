@@ -182,3 +182,51 @@ pub async fn view_ids_in_range(
     })
     .await
 }
+
+/// Waveform bytes for a track, as raw bytes rather than JSON.
+///
+/// A colour waveform is a few kilobytes of numbers; sending it as a JSON array
+/// would be several times larger and cost a parse on the UI thread. `tauri`
+/// hands `Vec<u8>` to the webview as a binary response.
+///
+/// Returns an empty vector when the track has no analysis, which the UI draws
+/// as a blank preview rather than an error.
+#[tauri::command]
+pub async fn track_waveform(
+    state: State<'_, Arc<AppState>>,
+    track_id: String,
+    kind: String,
+) -> AppResult<Vec<u8>> {
+    let library = state.library()?;
+    let share = state.share_root();
+    let Ok(numeric) = track_id.parse::<u64>() else {
+        return Err(AppError::new(ErrorKind::Malformed, "That track id is not valid.")
+            .with_detail(format!("track_id {track_id:?}")));
+    };
+
+    blocking("track_waveform", move || {
+        let Some(row) = library.ids.iter().position(|&id| id == numeric) else {
+            return Ok(Vec::new());
+        };
+        let analysis_path = library.analysis_path.get(row);
+        if analysis_path.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // The stored path names the .DAT; the colour waveforms live in the
+        // .EXT sibling and the three-band ones in .2EX.
+        let dat = rbl_anlz::resolve(&share, analysis_path);
+        let (file, tag): (std::path::PathBuf, [u8; 4]) = match kind.as_str() {
+            "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5"),
+            "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4"),
+            // The overview strip above the browser.
+            _ => (dat, *b"PWAV"),
+        };
+
+        let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
+            return Ok(Vec::new()); // analysis missing on disk: draw nothing
+        };
+        Ok(anlz.waveform(&tag).map(|(_, data)| data.to_vec()).unwrap_or_default())
+    })
+    .await
+}

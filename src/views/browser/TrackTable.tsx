@@ -13,6 +13,7 @@ import { useTrackView } from "@/store/useTrackView";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
 import { visibleWindow } from "@/lib/virtual";
+import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 
 const ROW_H = 25; // --s-row-height
@@ -114,7 +115,11 @@ const TrackRow = memo(function TrackRow({
           );
         }
         if (col.key === "preview") {
-          return <div key={col.key} className={styles.preview} role="gridcell" data-analysed={row.analysed ? "" : undefined} />;
+          return (
+            <div key={col.key} className={styles.preview} role="gridcell">
+              {row.analysed ? <WaveformPreview trackId={row.id} width={col.width - 6} height={19} /> : null}
+            </div>
+          );
         }
         if (col.key === "rating") {
           return (

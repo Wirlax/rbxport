@@ -135,16 +135,12 @@
 .artwork { padding: 0; position: relative; }
 .artwork > span { position: absolute; inset: 0; }
 
-.preview { padding: 0; position: relative; background: var(--c-black); }
-.preview[data-analysed]::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  right: 3px;
-  bottom: 3px;
-  height: 12px;
-  background: linear-gradient(to top, var(--c-wave-low) 55%, var(--c-wave-mid-ovw) 80%, var(--c-wave-high));
-  opacity: 0.85;
+.preview {
+  padding: 0 3px;
+  position: relative;
+  background: var(--c-black);
+  display: flex;
+  align-items: center;
 }
 
 .stars { letter-spacing: 1px; color: var(--c-text); }
