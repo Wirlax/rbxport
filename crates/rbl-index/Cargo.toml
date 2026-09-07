@@ -1,0 +1,22 @@
+[package]
+name = "rbl-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "In-memory columnar index over the rekordbox library."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-core = { path = "../rbl-core" }
+rbl-db = { path = "../rbl-db" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+memchr = "2"
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+[dev-dependencies]
+tempfile = "3"

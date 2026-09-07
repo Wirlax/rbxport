@@ -1,0 +1,272 @@
+//! Read access to rekordbox's `master.db`.
+//!
+//! # Safety around the user's library
+//!
+//! This crate opens the real database. Two rules are enforced here rather than
+//! left to callers:
+//!
+//! - Opening is **read-only** unless [`OpenMode::ReadWrite`] is asked for
+//!   explicitly, and read-write is refused while rekordbox is running.
+//! - With `RB_LITE_TEST=1` set, read-write against the *detected* (i.e. real)
+//!   database path is refused outright, so a test can never write to the
+//!   user's library even by mistake.
+
+pub mod key;
+mod schema;
+
+use std::path::{Path, PathBuf};
+
+use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
+
+pub use schema::{SchemaProbe, SchemaSupport};
+
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error("rekordbox does not appear to be installed: {0}")]
+    NotInstalled(String),
+    #[error("could not derive the database key: {0}")]
+    KeyDerivation(String),
+    #[error("could not open the database: {0}")]
+    Open(String),
+    #[error("refusing to open the library for writing: {0}")]
+    WriteRefused(String),
+    #[error("unexpected database schema: {0}")]
+    Schema(String),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+pub type Result<T> = std::result::Result<T, DbError>;
+
+/// Where rekordbox keeps its database and how to unlock it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryLocation {
+    pub master_db: PathBuf,
+    /// Root of the `share/` tree holding ANLZ files and artwork.
+    pub share_root: PathBuf,
+    /// Decrypted `SQLCipher` passphrase.
+    #[serde(skip)]
+    pub passphrase: String,
+    /// True when this points at the user's real install rather than a fixture.
+    pub is_real_install: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// The agent's options file, which holds the db path and the wrapped passphrase.
+fn options_path() -> Result<PathBuf> {
+    let base = if cfg!(target_os = "windows") {
+        dirs::config_dir().map(|p| p.join("Pioneer"))
+    } else {
+        dirs::home_dir().map(|p| p.join("Library/Application Support/Pioneer"))
+    }
+    .ok_or_else(|| DbError::NotInstalled("no home directory".into()))?;
+
+    let path = base.join("rekordboxAgent/storage/options.json");
+    if path.exists() {
+        Ok(path)
+    } else {
+        Err(DbError::NotInstalled(format!("{} not found", path.display())))
+    }
+}
+
+/// Finds the installed library and unwraps its passphrase.
+pub fn detect() -> Result<LibraryLocation> {
+    detect_from(&options_path()?)
+}
+
+pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
+    let text = std::fs::read_to_string(options_json)?;
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| DbError::NotInstalled(format!("options.json is not valid JSON: {e}")))?;
+
+    // `options` is an array of [key, value] pairs.
+    let entries = parsed
+        .get("options")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| DbError::NotInstalled("options.json has no `options` array".into()))?;
+
+    let mut db_path: Option<String> = None;
+    let mut dp: Option<String> = None;
+    for entry in entries {
+        let Some(pair) = entry.as_array() else { continue };
+        let (Some(k), Some(v)) = (pair.first().and_then(|k| k.as_str()), pair.get(1)) else {
+            continue;
+        };
+        match k {
+            "db-path" => db_path = v.as_str().map(str::to_owned),
+            "dp" => dp = v.as_str().map(str::to_owned),
+            _ => {}
+        }
+    }
+
+    let master_db = PathBuf::from(
+        db_path.ok_or_else(|| DbError::NotInstalled("options.json has no db-path".into()))?,
+    );
+    let passphrase = key::derive_password(
+        &dp.ok_or_else(|| DbError::NotInstalled("options.json has no dp".into()))?,
+    )?;
+
+    let share_root = master_db
+        .parent()
+        .map_or_else(|| PathBuf::from("share"), |p| p.join("share"));
+
+    Ok(LibraryLocation { master_db, share_root, passphrase, is_real_install: true })
+}
+
+/// True when rekordbox (or its agent) is running, in which case we must not write.
+pub fn is_rekordbox_running() -> bool {
+    use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+    let sys = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+    );
+    sys.processes().values().any(|p| {
+        let name = p.name().to_string_lossy().to_ascii_lowercase();
+        // Match the app and its agent, not Electron helpers.
+        name == "rekordbox" || name == "rekordbox.exe"
+            || name == "rekordboxagent" || name == "rekordboxagent.exe"
+    })
+}
+
+/// Why a read-write open must be refused, if it must.
+///
+/// Separated from [`Library::open`] so the rule can be tested without mutating
+/// process-global state.
+#[must_use]
+pub fn write_refusal_reason(
+    is_real_install: bool,
+    test_mode: bool,
+    rekordbox_running: bool,
+) -> Option<&'static str> {
+    if is_real_install && test_mode {
+        return Some("RB_LITE_TEST is set and this is the real library; tests must copy a fixture first");
+    }
+    if rekordbox_running {
+        return Some("rekordbox is running. Quit it before making changes.");
+    }
+    None
+}
+
+/// An open handle to the library.
+#[derive(Debug)]
+pub struct Library {
+    conn: Connection,
+    mode: OpenMode,
+    location: LibraryLocation,
+    schema: SchemaProbe,
+}
+
+impl Library {
+    /// Opens the library. See the module docs for the write rules.
+    pub fn open(location: LibraryLocation, mode: OpenMode) -> Result<Self> {
+        if mode == OpenMode::ReadWrite {
+            if let Some(reason) = write_refusal_reason(
+                location.is_real_install,
+                std::env::var_os("RB_LITE_TEST").is_some(),
+                is_rekordbox_running(),
+            ) {
+                return Err(DbError::WriteRefused(reason.into()));
+            }
+        }
+
+        let flags = match mode {
+            OpenMode::ReadOnly => OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            OpenMode::ReadWrite => OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        };
+
+        let conn = Connection::open_with_flags(&location.master_db, flags)
+            .map_err(|e| DbError::Open(format!("{}: {e}", location.master_db.display())))?;
+
+        // Order matters: cipher settings must precede the key.
+        conn.pragma_update(None, "cipher", "sqlcipher")?;
+        conn.pragma_update(None, "legacy", 4)?;
+        conn.pragma_update(None, "key", &location.passphrase)?;
+        // Lets us read while rekordbox holds the WAL.
+        conn.pragma_update(None, "read_uncommitted", true)?;
+
+        // The first read is what actually proves the key: a wrong passphrase
+        // fails here rather than at open time.
+        let schema = SchemaProbe::probe(&conn)?;
+
+        Ok(Self { conn, mode, location, schema })
+    }
+
+    /// Convenience: detect and open the installed library read-only.
+    pub fn open_installed_read_only() -> Result<Self> {
+        Self::open(detect()?, OpenMode::ReadOnly)
+    }
+
+    pub fn schema(&self) -> &SchemaProbe {
+        &self.schema
+    }
+
+    pub fn location(&self) -> &LibraryLocation {
+        &self.location
+    }
+
+    pub fn mode(&self) -> OpenMode {
+        self.mode
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// Live (not soft-deleted) track count.
+    pub fn live_track_count(&self) -> Result<u32> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+
+    /// Live playlist count.
+    pub fn live_playlist_count(&self) -> Result<u32> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM djmdPlaylist WHERE rb_local_deleted = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_from_reports_a_missing_options_file_clearly() {
+        let err = detect_from(Path::new("/nonexistent/options.json")).unwrap_err();
+        assert!(matches!(err, DbError::Io(_)));
+    }
+
+    #[test]
+    fn detect_from_rejects_options_without_a_db_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("options.json");
+        std::fs::write(&path, r#"{"options":[["something","else"]]}"#).unwrap();
+        assert!(matches!(detect_from(&path), Err(DbError::NotInstalled(_))));
+    }
+
+    #[test]
+    fn read_write_against_the_real_library_is_refused_in_test_mode() {
+        // Guards the rule that a test can never write to the user's library.
+        // Expressed against the pure predicate so the test needs no global env
+        // mutation (which is `unsafe` in edition 2024 and racy across threads).
+        assert!(write_refusal_reason(true, true, false).is_some());
+        assert!(write_refusal_reason(true, false, true).is_some());
+        assert!(write_refusal_reason(false, true, false).is_none());
+        assert!(write_refusal_reason(true, false, false).is_none());
+    }
+}

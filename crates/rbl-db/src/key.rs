@@ -1,0 +1,85 @@
+//! `SQLCipher` key derivation.
+//!
+//! rekordbox stores the database passphrase encrypted in its agent's
+//! `options.json` under `dp`. The value is base64, and decrypts with Blowfish
+//! in ECB mode under a fixed key.
+//!
+//! Verified against this machine's rekordbox 7.2.11 install.
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use blowfish::Blowfish;
+use cipher::{BlockDecrypt, KeyInit};
+
+use crate::{DbError, Result};
+
+/// The fixed Blowfish key rekordbox uses to protect the passphrase.
+const MAGIC: &[u8] = b"ZOwUlUZYqe9Rdm6j";
+
+const BLOCK: usize = 8;
+
+/// Decrypts the `dp` field from `options.json` into the `SQLCipher` passphrase.
+///
+/// Note there is **no PKCS padding** on rekordbox 6/7 databases: the plaintext
+/// is trailing-trimmed rather than unpadded. Assuming PKCS5 (as some published
+/// recipes do) corrupts the last block.
+pub fn derive_password(dp_base64: &str) -> Result<String> {
+    let ciphertext = STANDARD
+        .decode(dp_base64.trim())
+        .map_err(|e| DbError::KeyDerivation(format!("dp is not valid base64: {e}")))?;
+
+    if ciphertext.is_empty() || ciphertext.len() % BLOCK != 0 {
+        return Err(DbError::KeyDerivation(format!(
+            "dp decodes to {} bytes, which is not a whole number of Blowfish blocks",
+            ciphertext.len()
+        )));
+    }
+
+    let cipher = Blowfish::<byteorder::BigEndian>::new_from_slice(MAGIC)
+        .map_err(|e| DbError::KeyDerivation(format!("bad Blowfish key: {e}")))?;
+
+    let mut plaintext = ciphertext.clone();
+    for block in plaintext.chunks_exact_mut(BLOCK) {
+        cipher.decrypt_block(block.into());
+    }
+
+    // Trailing bytes are whitespace/NUL, not PKCS padding.
+    let end = plaintext
+        .iter()
+        .rposition(|b| !b.is_ascii_whitespace() && *b != 0)
+        .map_or(0, |i| i + 1);
+    plaintext.truncate(end);
+
+    String::from_utf8(plaintext)
+        .map_err(|e| DbError::KeyDerivation(format!("passphrase is not UTF-8: {e}")))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use blowfish::cipher::BlockEncrypt;
+
+    /// Round-trips through our own encryptor so the test needs no real secret.
+    #[test]
+    fn decrypts_what_the_same_cipher_encrypted() {
+        let cipher = Blowfish::<byteorder::BigEndian>::new_from_slice(MAGIC).unwrap();
+        let secret = b"correct horse battery staple!!!!"; // 32 bytes, block aligned
+        let mut buf = secret.to_vec();
+        for block in buf.chunks_exact_mut(BLOCK) {
+            cipher.encrypt_block(block.into());
+        }
+        let dp = STANDARD.encode(&buf);
+        assert_eq!(derive_password(&dp).unwrap(), "correct horse battery staple!!!!");
+    }
+
+    #[test]
+    fn rejects_input_that_is_not_block_aligned() {
+        let dp = STANDARD.encode([1, 2, 3]);
+        assert!(matches!(derive_password(&dp), Err(DbError::KeyDerivation(_))));
+    }
+
+    #[test]
+    fn rejects_non_base64() {
+        assert!(matches!(derive_password("not base64!!"), Err(DbError::KeyDerivation(_))));
+    }
+}
