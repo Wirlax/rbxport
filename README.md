@@ -26,13 +26,17 @@ Measured against a real 38,681-track library, read-only, with Rekordbox running.
 | Packaged app at idle | **77.5 MB, 0.0% CPU** |
 | Analysis files parsed | **97,954 / 97,954** |
 | Analysis files re-emitted byte-identically | **99,032 / 99,032** |
-| BPM vs Rekordbox's own stamps | median error **0.030 BPM** |
+| BPM vs Rekordbox's own stamps | median error **0.025 BPM**, 78% within 0.05 |
 | Real USB export written and verified | 25 tracks, 319 MB |
 
 Working: browsing the real library with waveforms, sorting, search, playlists,
 track analysis, USB export, and reading Rekordbox's own `export.pdb`.
 
 Not yet: writing to the library (see below), Pro DJ Link, the preview player.
+
+Known weak: key detection agrees with Rekordbox on 40% of tracks. Tempo is
+accurate where it locks onto the right beat family; about 8% of tracks land on a
+wrong multiple. Both numbers are measured, not estimated.
 
 ## Safety around your library
 
