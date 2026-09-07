@@ -1,0 +1,22 @@
+[package]
+name = "rbl-export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Writes rekordbox-compatible USB exports."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-pdb = { path = "../rbl-pdb" }
+rbl-anlz = { path = "../rbl-anlz" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+rbl-anlz = { path = "../rbl-anlz" }
+rbl-db = { path = "../rbl-db" }
+rbl-index = { path = "../rbl-index" }

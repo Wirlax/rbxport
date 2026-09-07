@@ -3040,6 +3040,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-export"
+version = "0.1.0"
+dependencies = [
+ "rbl-anlz",
+ "rbl-db",
+ "rbl-index",
+ "rbl-pdb",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-index"
 version = "0.1.0"
 dependencies = [
