@@ -156,6 +156,13 @@ export interface Backend {
    * transmitted, because announcing as a source needs the database server's
    * menus, which are not built.
    */
+  /**
+   * Asks for a destination and writes a playlist to it.
+   *
+   * Resolves to what was written, or `null` if the picker was cancelled.
+   */
+  exportPlaylist(playlistId: string): Promise<ExportReport | null>;
+
   startLinkListening(): Promise<LinkStatus>;
   stopLinkListening(): Promise<void>;
   /** Called as the set of devices on the network changes. */
@@ -184,6 +191,18 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** What an export wrote. */
+export interface ExportReport {
+  tracks: number;
+  playlists: number;
+  bytesCopied: number;
+  analysisFiles: number;
+  /** Tracks left out because their audio was missing or unreadable. */
+  skipped: string[];
+  /** Whether the export read back correctly with the independent parser. */
+  verified: boolean;
 }
 
 /** One beat of the grid. */

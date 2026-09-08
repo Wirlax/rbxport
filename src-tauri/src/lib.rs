@@ -96,6 +96,7 @@ pub fn run() {
             // running, re-checked immediately before the transaction.
             commands::start_link_listening,
             commands::stop_link_listening,
+            commands::export_playlist,
             commands::track_beats,
             commands::track_cues,
             commands::missing_tracks,

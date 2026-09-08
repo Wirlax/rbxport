@@ -32,6 +32,7 @@ rbl-anlz = { path = "../crates/rbl-anlz" }
 rbl-analysis = { path = "../crates/rbl-analysis" }
 rbl-audio = { path = "../crates/rbl-audio" }
 rbl-prolink = { path = "../crates/rbl-prolink" }
+rbl-export = { path = "../crates/rbl-export" }
 parking_lot = "0.12"
 dirs = "5"
 

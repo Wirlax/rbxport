@@ -14,13 +14,14 @@ import {
 import { SourceRail } from "./SourceRail";
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onExport,
 }: {
   node: TreeNode;
   selected: boolean;
   /** Whether a track drag could land here. */
   droppable: boolean;
   onDropTracks: ((playlistId: string) => void) | undefined;
+  onExport: ((node: TreeNode) => void) | undefined;
   /** Whether anything sits under this node, so it can be opened at all. */
   branch: boolean;
   open: boolean;
@@ -45,6 +46,13 @@ const Row = memo(function Row({
         if (!droppable) return;
         e.preventDefault();
         onDropTracks?.(node.id);
+      }}
+      onContextMenu={(e) => {
+        // Only a playlist can be exported; a folder would have to invent which
+        // of its playlists was meant.
+        if (node.kind !== "playlist" || !onExport) return;
+        e.preventDefault();
+        onExport(node);
       }}
       data-droppable={droppable || undefined}
       role="treeitem"
@@ -77,13 +85,17 @@ export interface TreeViewProps {
   nodes: readonly TreeNode[];
   selectedId: string | null;
   onSelect: (node: TreeNode) => void;
+  /** Write a playlist to a stick. */
+  onExport?: (node: TreeNode) => void;
   /** True while tracks are being dragged, so playlists can offer themselves. */
   dragging?: boolean;
   /** Drop the dragged tracks onto a playlist. */
   onDropTracks?: (playlistId: string) => void;
 }
 
-export function TreeView({ nodes, selectedId, onSelect, dragging, onDropTracks }: TreeViewProps) {
+export function TreeView({
+  nodes, selectedId, onSelect, dragging, onDropTracks, onExport,
+}: TreeViewProps) {
   // Which nodes the user has closed. Absent means open, so a freshly-loaded
   // tree renders exactly as the backend sent it.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -124,6 +136,7 @@ export function TreeView({ nodes, selectedId, onSelect, dragging, onDropTracks }
             onToggle={onToggle}
             droppable={Boolean(dragging) && node.kind === "playlist"}
             onDropTracks={onDropTracks}
+            onExport={onExport}
           />
         ))}
         {visible.length === 0 ? (

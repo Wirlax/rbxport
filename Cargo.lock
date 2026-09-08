@@ -3276,6 +3276,7 @@ dependencies = [
  "rbl-audio",
  "rbl-core",
  "rbl-db",
+ "rbl-export",
  "rbl-index",
  "rbl-prolink",
  "serde",

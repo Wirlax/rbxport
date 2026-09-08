@@ -691,3 +691,19 @@ test("the detail waveform draws a beat grid with heavier downbeats", async ({ pa
   );
   expect(weights.length).toBeGreaterThan(1);
 });
+
+test("a playlist offers export, and a folder does not", async ({ page }) => {
+  // A folder holds playlists, so exporting one would have to invent which.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // The mock has no filesystem, so the picker resolves to nothing and the
+  // status bar goes quiet again rather than claiming an export happened.
+  const playlist = page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first();
+  await playlist.click({ button: "right" });
+  await expect(page.getByRole("contentinfo")).not.toContainText("Exported");
+
+  const folder = page.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
+  await folder.click({ button: "right" });
+  await expect(page.getByRole("contentinfo")).not.toContainText("Exporting");
+});

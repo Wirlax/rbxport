@@ -297,6 +297,27 @@ export function App() {
     analysis.add(selectedTracks);
   }, [analysis, selectedTracks]);
 
+  const exportPlaylist = useCallback((node: TreeNode) => {
+    void (async () => {
+      const backend = await getBackend();
+      setDropNote(`Exporting ${node.name}…`);
+      try {
+        const report = await backend.exportPlaylist(node.id);
+        if (report === null) {
+          setDropNote(null);
+          return;
+        }
+        setDropNote(
+          report.verified
+            ? `Exported ${report.tracks} tracks to the stick, and read them back.`
+            : `Exported ${report.tracks} tracks, but the result did not read back.`,
+        );
+      } catch (e) {
+        setDropNote(e instanceof Error ? e.message : "That export could not be written.");
+      }
+    })();
+  }, []);
+
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
@@ -315,6 +336,7 @@ export function App() {
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
+          onExport={exportPlaylist}
         />
         <div
           className={styles.splitter}

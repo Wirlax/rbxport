@@ -135,3 +135,17 @@ pub struct BeatDto {
     /// The first beat of a bar, drawn heavier than the rest.
     pub downbeat: bool,
 }
+
+/// What an export wrote.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportReportDto {
+    pub tracks: u32,
+    pub playlists: u32,
+    pub bytes_copied: u64,
+    pub analysis_files: u32,
+    /// Tracks left out because their audio was missing or unreadable.
+    pub skipped: Vec<String>,
+    /// Whether the export read back correctly with the independent parser.
+    pub verified: bool,
+}

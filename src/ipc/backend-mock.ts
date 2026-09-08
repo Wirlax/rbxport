@@ -355,6 +355,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ]);
     },
 
+    // No picker and no filesystem in a browser, so nothing can be written.
+    exportPlaylist: () => wait(null),
+
     // No network in a browser, so there is nothing to listen to. Saying why
     // is better than a panel that silently shows nothing.
     startLinkListening: () =>
