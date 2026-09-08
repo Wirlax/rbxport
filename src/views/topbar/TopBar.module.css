@@ -14,7 +14,7 @@
 }
 .clock { font-size: var(--f-size-sm); font-weight: 700; color: var(--c-icon-on); font-variant-numeric: tabular-nums; }
 
-/* The settings gear replaces rekordbox's EXPORT dropdown in this corner. */
+/* The settings gear sits at the right-hand end of the bar, after the clock. */
 .settings {
   display: flex;
   align-items: center;

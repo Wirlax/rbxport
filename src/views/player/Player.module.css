@@ -18,6 +18,11 @@
   border-right: 1px solid var(--c-panel);
 }
 
+/* CUE and PLAY sit at the foot of the column, not under the skip buttons.
+   Measured off design/reference/macos/playlist-player@2x.png: the skips are at
+   the top, then a gap, then the two large circles near the bottom. */
+.cue { margin-top: auto; }
+
 .skips { display: flex; gap: 6px; }
 
 .skip,

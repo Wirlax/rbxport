@@ -225,11 +225,32 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
   await expect(title).toHaveText(before);
 });
 
-test("the top bar offers settings, and not rekordbox's export controls", async ({ page }) => {
+test("the top bar offers settings on the right, and not rekordbox's export controls", async ({ page }) => {
   // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+  const settings = page.getByRole("button", { name: "Settings" });
+  await expect(settings).toBeVisible();
   await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
+
+  // At the right-hand end, past the clock.
+  const bar = await page.getByRole("banner").boundingBox();
+  const gear = await settings.boundingBox();
+  expect((gear?.x ?? 0) - (bar?.x ?? 0)).toBeGreaterThan((bar?.width ?? 0) / 2);
+});
+
+test("the player's cue and play sit at the foot of the transport", async ({ page }) => {
+  // Measured off design/reference/macos/playlist-player@2x.png: the skip
+  // buttons are at the top of the column, then a gap, then the two circles.
+  await page.goto("/");
+  const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
+  const cue = await page.getByRole("button", { name: "Cue" }).boundingBox();
+  const play = await page
+    .getByRole("region", { name: "Preview player" })
+    .getByRole("button", { name: "Play", exact: true })
+    .boundingBox();
+
+  expect((cue?.y ?? 0) - (player?.y ?? 0)).toBeGreaterThan((player?.height ?? 0) / 2);
+  expect(play?.y ?? 0).toBeGreaterThan(cue?.y ?? 0);
 });
 
 test("the tree can be resized by dragging the splitter", async ({ page }) => {
