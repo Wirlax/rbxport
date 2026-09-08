@@ -12,6 +12,23 @@
 
 .body {
   display: grid;
-  grid-template-columns: var(--s-tree-w) 1fr;
+  /* --tree-w is set by the splitter drag; the token is the starting width. */
+  grid-template-columns: var(--tree-w, var(--s-tree-w)) 4px 1fr;
   min-height: 0; /* let the browser scroll instead of the page */
 }
+
+/* The drag handle between the tree and the browser. Four pixels wide with a
+   wider hit area, which is how a splitter stays grabbable without drawing
+   attention to itself. */
+.splitter {
+  position: relative;
+  background: var(--c-panel);
+  cursor: col-resize;
+  touch-action: none;
+}
+.splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+.splitter:hover { background: var(--c-raised); }

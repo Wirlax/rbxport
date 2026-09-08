@@ -14,6 +14,7 @@ import { TopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
+import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -45,6 +46,11 @@ export function App() {
   });
   const [selectedCount, setSelectedCount] = useState(0);
   const [query, setQuery] = useState("");
+  // The tree's width, dragged by the splitter. Held here because the grid that
+  // sizes both panes lives here.
+  const [treeWidth, setTreeWidth] = useState(305);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const dragFrom = useRef<{ x: number; width: number } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
   // Read once: the platform cannot change while the window is open, and
@@ -117,6 +123,49 @@ export function App() {
     };
   }, [platform, query]);
 
+  const bounds = useCallback(
+    () => ({ ...TREE_BOUNDS, available: bodyRef.current?.clientWidth ?? 0 }),
+    [],
+  );
+
+  // Re-clamp when the window changes: a width that fitted a wide window can
+  // leave the track list with nothing in a narrow one.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      setTreeWidth((w) => clampWidth(w, bounds()));
+    });
+    observer.observe(body);
+    return () => {
+      observer.disconnect();
+    };
+  }, [bounds]);
+
+  const onSplitterDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      dragFrom.current = { x: event.clientX, width: treeWidth };
+      // Capture, so the drag survives the pointer leaving the 4px handle.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    },
+    [treeWidth],
+  );
+
+  const onSplitterMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const from = dragFrom.current;
+      if (!from) return;
+      setTreeWidth(clampWidth(from.width + (event.clientX - from.x), bounds()));
+    },
+    [bounds],
+  );
+
+  const onSplitterUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    dragFrom.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
@@ -124,8 +173,22 @@ export function App() {
     <div className={styles.window}>
       <TopBar clock={clock} />
       <section className={styles.player} aria-label="Preview player" />
-      <div className={styles.body}>
+      <div
+        className={styles.body}
+        ref={bodyRef}
+        style={{ ["--tree-w" as string]: `${treeWidth}px` }}
+      >
         <TreeView nodes={tree} selectedId={selectedNode?.id ?? null} onSelect={setSelectedNode} />
+        <div
+          className={styles.splitter}
+          onPointerDown={onSplitterDown}
+          onPointerMove={onSplitterMove}
+          onPointerUp={onSplitterUp}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the library tree"
+          aria-valuenow={treeWidth}
+        />
         <TrackTable
           spec={spec}
           onSortChange={handleSort}

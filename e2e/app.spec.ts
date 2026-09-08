@@ -229,3 +229,38 @@ test("the top bar offers settings, and not rekordbox's export controls", async (
   await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
   await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
 });
+
+test("the tree can be resized by dragging the splitter", async ({ page }) => {
+  await page.goto("/");
+  const tree = page.getByRole("navigation", { name: "Library" });
+  const splitter = page.getByRole("separator", { name: /resize the library tree/i });
+  await expect(splitter).toBeVisible();
+
+  const before = (await tree.boundingBox())?.width ?? 0;
+  const handle = await splitter.boundingBox();
+  await page.mouse.move((handle?.x ?? 0) + 2, (handle?.y ?? 0) + 100);
+  await page.mouse.down();
+  await page.mouse.move((handle?.x ?? 0) + 122, (handle?.y ?? 0) + 100, { steps: 8 });
+  await page.mouse.up();
+
+  await expect.poll(async () => (await tree.boundingBox())?.width ?? 0).toBeGreaterThan(before + 80);
+});
+
+test("the tree cannot be dragged wide enough to squeeze out the track list", async ({ page }) => {
+  await page.goto("/");
+  const tree = page.getByRole("navigation", { name: "Library" });
+  const splitter = page.getByRole("separator", { name: /resize the library tree/i });
+
+  const handle = await splitter.boundingBox();
+  await page.mouse.move((handle?.x ?? 0) + 2, (handle?.y ?? 0) + 100);
+  await page.mouse.down();
+  // Far past the right edge of the window.
+  await page.mouse.move(3000, (handle?.y ?? 0) + 100, { steps: 10 });
+  await page.mouse.up();
+
+  const width = (await tree.boundingBox())?.width ?? 0;
+  const viewport = page.viewportSize()?.width ?? 1280;
+  expect(width).toBeLessThanOrEqual(viewport * 0.5 + 1);
+  // And the table is still there and usable.
+  await expect(page.getByTestId("track-scroll")).toBeVisible();
+});
