@@ -12,12 +12,6 @@ use crate::onset::OnsetEnvelope;
 pub const MIN_BPM: f64 = 70.0;
 pub const MAX_BPM: f64 = 200.0;
 
-/// How much correlation the midpoint between two beats must show, relative to
-/// the beats themselves, before the faster grid is taken as the real one.
-///
-/// Measured against rekordbox's own stamps rather than chosen: see
-/// `cargo run --release -p rbl-analysis --example golden`.
-const SUBDIVISION_RATIO: f64 = 0.30;
 
 /// One beat of the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,10 +56,11 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
     let values = &onsets.values;
     let mut scores = vec![0.0_f64; max_lag + 1];
 
-    // Every lag is scored before any is chosen. Scoring and choosing in one
-    // pass looks equivalent and is not: the harmonic term below reads longer
-    // lags than the one being scored, which in a single ascending pass are
-    // always still zero, so the term silently did nothing.
+    // Every lag is scored before any is chosen, so that the choice below can
+    // read any lag it likes. Merging the two passes is a trap worth naming: a
+    // term that compares a candidate against a *longer* lag reads zero in a
+    // single ascending pass and silently does nothing, which is exactly the
+    // bug that hid here.
     for lag in min_lag..=max_lag {
         let mut sum = 0.0_f64;
         let mut count = 0_usize;
@@ -95,17 +90,12 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
         }
     }
 
-    // Half-time correction.
-    //
-    // A track whose off-beats are quieter than its beats correlates *better*
-    // at twice the beat period, because that lag pairs loud with loud. The
-    // preference above cannot fix it: at 160 BPM the half-time reading of 80
-    // is well inside the range and barely less tempo-like.
-    //
-    // What separates them is the midpoint. If the lag half as long also shows
-    // real correlation, there are onsets between the chosen beats, and the
-    // faster grid is the one that explains the music.
-    let lag = halve_while_supported(&scores, best.1, min_lag);
+    // A half-time correction belongs here and is not yet written. One that
+    // doubled a candidate whenever the midpoint between its beats carried
+    // correlation was tried and measured worse on the real library — real
+    // tracks nearly always have hi-hats at twice the beat, so it fired on
+    // tempos that were already right. See TODO.md for the numbers.
+    let lag = best.1;
 
     if lag == 0 {
         return TempoResult::empty();
@@ -164,29 +154,6 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
         .collect();
 
     TempoResult { bpm, confidence, first_beat_secs, beats }
-}
-
-/// Halves the lag for as long as the midpoints between its beats hold real
-/// correlation of their own.
-///
-/// Halving twice is allowed — quarter-time happens on tracks with a sparse
-/// kick — but no further: below a quarter of a plausible tempo the correlation
-/// is not evidence of anything.
-fn halve_while_supported(scores: &[f64], mut lag: usize, min_lag: usize) -> usize {
-    for _ in 0..2 {
-        let half = lag / 2;
-        if half < min_lag {
-            break;
-        }
-        let (Some(here), Some(there)) = (scores.get(lag), scores.get(half)) else {
-            break;
-        };
-        if *here <= 0.0 || *there < SUBDIVISION_RATIO * *here {
-            break;
-        }
-        lag = half;
-    }
-    lag
 }
 
 /// How readily a tempo is heard *as* the tempo.
