@@ -70,14 +70,19 @@ export function ramp(stops: readonly (readonly number[])[], t: number): string {
 export const BAND_FULL_SCALE = 127;
 
 /**
- * How tall the three bands stacked can be.
+ * What each band contributes to a stacked half waveform, as its full scale.
  *
- * Not three times the band scale: the bands do not peak together. Over 96,000
- * columns of `PWV6` the largest stack was 147, so anything past this is a
- * peak worth clipping rather than headroom worth reserving — reserving it
- * would draw every row preview at a third of its height.
+ * The three are not weighted alike. Measured against a 2x capture of rekordbox
+ * drawing "Take Me Home (ft. Bonn)" — 1,200 painted columns matched column for
+ * column against that track's own `PWV6` — the blue slab rises 0.542 px per
+ * unit over a 60 px band, the amber 0.270 and the near-white 0.567 (r = 0.99,
+ * 0.97, 0.96). That is the low and high bands over 128 and the mid over 256,
+ * and `(2·low + mid + 2·high) / 256` predicts the painted height to within
+ * 3.4 % of the band — closer than an unconstrained least-squares fit, and far
+ * closer than the flat `/150` this used to divide by, which drew the amber
+ * thin, capped every loud passage in white and flattened the whole waveform.
  */
-export const STACK_FULL_SCALE = 150;
+const STACK_SCALE = [128, 256, 128] as const;
 
 /**
  * Draws a three-band waveform: `PWV6` or `PWV7`, three bytes a column.
@@ -143,17 +148,17 @@ export function drawBands(
       high = Math.max(high, data[at + 2] ?? 0);
     }
     const bands = [
-      [low, stops[0]],
-      [mid, stops[1]],
-      [high, stops[2]],
+      [low, stops[0], STACK_SCALE[0]],
+      [mid, stops[1], STACK_SCALE[1]],
+      [high, stops[2], STACK_SCALE[2]],
     ] as const;
 
     if (half) {
       // Stacked from the bottom: blue, then amber on it, then near-white.
       let base = floor;
-      for (const [value, colour] of bands) {
+      for (const [value, colour, scale] of bands) {
         if (value === 0) continue;
-        const tall = (Math.min(value, STACK_FULL_SCALE) / STACK_FULL_SCALE) * usable;
+        const tall = Math.min(value / scale, 1) * usable;
         ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
         ctx.fillRect(x, Math.max(top, base - tall), 1, Math.min(tall, base - top));
         base -= tall;

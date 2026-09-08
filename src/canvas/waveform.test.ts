@@ -121,6 +121,16 @@ describe("the three-band waveform", () => {
     ]);
   });
 
+  it("weighs the three bands the way rekordbox paints them", () => {
+    // Not one scale for all three. Matched column for column against a 2x
+    // capture, the blue rises v/128 of the band, the amber v/256 and the
+    // near-white v/128. Dividing all three by a flat 150 drew the amber thin
+    // and capped every loud passage in white.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([32, 32, 32]), 1, 256, "overview", true);
+    expect(fills.map((f) => f.h)).toEqual([64, 32, 64]);
+  });
+
   it("never draws a stacked column past the top of the cell", () => {
     // The bands do not peak together, so the stack scale is well under three
     // times the band scale — a loud column clips rather than overflowing.
