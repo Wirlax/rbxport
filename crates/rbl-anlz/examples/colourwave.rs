@@ -64,6 +64,17 @@ fn main() {
                     "    band max {maxes:?}  mean {:?}",
                     sums.map(|s| s.checked_div(n).unwrap_or(0))
                 );
+                // Stacked or overlaid? If the three are meant to sit on top of
+                // one another the sum should fill the scale; if they overlap
+                // from a baseline the largest alone should.
+                let mut sum_max = 0_u32;
+                let mut over = 0_u32;
+                for chunk in section.payload.chunks_exact(3) {
+                    let total = u32::from(chunk[0]) + u32::from(chunk[1]) + u32::from(chunk[2]);
+                    sum_max = sum_max.max(total);
+                    if total > 63 { over += 1; }
+                }
+                println!("    stacked max {sum_max}  columns over 63: {over} of {n}");
             }
             // A loud stretch, so the channels are not all near zero.
             let start = section.payload.len() / 3 / stride * stride;

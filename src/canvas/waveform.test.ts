@@ -88,16 +88,48 @@ describe("the three-band waveform", () => {
     }
   });
 
-  it("scales the detail tag by its own full scale, not the overview's", () => {
-    // PWV7 reaches about 127 and PWV6 about 63; using one scale for both draws
-    // the detail at half height or clips it flat.
-    const a = recorder();
-    drawBands(a.ctx, new Uint8Array([127, 0, 0]), 1, 100, "detail");
-    expect(a.fills[0]!.h).toBeCloseTo(100, 5);
+  it("puts both tags on the same seven-bit scale", () => {
+    // Measured across 80 tracks: PWV7 reaches 127 and PWV6 reaches 98. An
+    // earlier reading of 63 came from one track and drew every overview at
+    // double height.
+    for (const band of ["overview", "detail"] as const) {
+      const r = recorder();
+      drawBands(r.ctx, new Uint8Array([127, 0, 0]), 1, 100, band);
+      expect(r.fills[0]!.h).toBeCloseTo(100, 5);
+    }
+  });
 
-    const b = recorder();
-    drawBands(b.ctx, new Uint8Array([63, 0, 0]), 1, 100, "overview");
-    expect(b.fills[0]!.h).toBeCloseTo(100, 5);
+  it("stacks the bands from the bottom for a row preview", () => {
+    // The track list draws a half waveform: blue from the baseline, amber on
+    // top of it, near-white above that. Overlaying from a baseline instead
+    // would hide the amber whenever the lows are louder, which is most of the
+    // time.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([75, 45, 30]), 1, 150, "overview", true);
+    expect(fills).toHaveLength(3);
+
+    // Each sits directly on the one below, and the lowest sits on the floor.
+    expect(fills[0]!.y + fills[0]!.h).toBeCloseTo(150, 5);
+    expect(fills[1]!.y + fills[1]!.h).toBeCloseTo(fills[0]!.y, 5);
+    expect(fills[2]!.y + fills[2]!.h).toBeCloseTo(fills[1]!.y, 5);
+
+    // Blue at the bottom, then amber, then near-white.
+    expect(fills.map((f) => f.style)).toEqual([
+      ramp(bandStops("overview"), 0),
+      ramp(bandStops("overview"), 0.5),
+      ramp(bandStops("overview"), 1),
+    ]);
+  });
+
+  it("never draws a stacked column past the top of the cell", () => {
+    // The bands do not peak together, so the stack scale is well under three
+    // times the band scale — a loud column clips rather than overflowing.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([127, 127, 127]), 1, 40, "overview", true);
+    for (const fill of fills) {
+      expect(fill.y).toBeGreaterThanOrEqual(0);
+      expect(fill.y + fill.h).toBeLessThanOrEqual(40.001);
+    }
   });
 
   it("draws nothing for a silent column, and survives an empty tag", () => {
@@ -116,7 +148,7 @@ describe("the three-band waveform", () => {
     // Four columns into one pixel: the peak must survive, or a transient
     // vanishes at overview width.
     const { ctx, fills } = recorder();
-    const data = new Uint8Array([1, 0, 0, 63, 0, 0, 1, 0, 0, 1, 0, 0]);
+    const data = new Uint8Array([1, 0, 0, 127, 0, 0, 1, 0, 0, 1, 0, 0]);
     drawBands(ctx, data, 1, 100, "overview");
     expect(fills[0]!.h).toBeCloseTo(100, 5);
   });

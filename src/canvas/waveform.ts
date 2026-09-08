@@ -60,13 +60,24 @@ export function ramp(stops: readonly (readonly number[])[], t: number): string {
 }
 
 /**
- * How tall a band's value can be, per tag.
+ * How tall one band's value can be.
  *
- * Measured off the reference library: `PWV6` tops out around 63 and `PWV7`
- * around 127, so they are six- and seven-bit. Dividing by the wrong one draws
- * a waveform at half height or clipped flat.
+ * Seven bits. Measured across 80 tracks of the reference library: `PWV7`
+ * reaches the full 127 and `PWV6` reaches 98, so both are on the same scale.
+ * An earlier reading of 63 came from a single track and drew every overview at
+ * double height.
  */
-export const BAND_FULL_SCALE = { overview: 63, detail: 127 } as const;
+export const BAND_FULL_SCALE = 127;
+
+/**
+ * How tall the three bands stacked can be.
+ *
+ * Not three times the band scale: the bands do not peak together. Over 96,000
+ * columns of `PWV6` the largest stack was 147, so anything past this is a
+ * peak worth clipping rather than headroom worth reserving — reserving it
+ * would draw every row preview at a third of its height.
+ */
+export const STACK_FULL_SCALE = 150;
 
 /**
  * Draws a three-band waveform: `PWV6` or `PWV7`, three bytes a column.
@@ -84,13 +95,22 @@ export function drawBands(
   width: number,
   height: number,
   band: WaveBand = "overview",
+  /**
+   * Half height, growing from the bottom, with the bands stacked rather than
+   * centred and overlaid.
+   *
+   * This is the row preview in the track list. Stacking is what gives the blue
+   * its flat top with the amber riding above it — overlaying from a baseline
+   * would hide the amber entirely whenever the lows are louder, which is most
+   * of the time.
+   */
+  half = false,
 ): void {
   ctx.clearRect(0, 0, width, height);
   const columns = Math.floor(data.length / 3);
   if (columns === 0 || width <= 0 || height <= 0) return;
 
   const stops = bandStops(band);
-  const full = BAND_FULL_SCALE[band];
   const centre = height / 2;
   const step = columns / width;
 
@@ -108,17 +128,33 @@ export function drawBands(
       mid = Math.max(mid, data[at + 1] ?? 0);
       high = Math.max(high, data[at + 2] ?? 0);
     }
-    // Low first so the blue is the outer envelope, high last so the bright
-    // core sits on top of both.
-    for (const [value, colour] of [
+    const bands = [
       [low, stops[0]],
       [mid, stops[1]],
       [high, stops[2]],
-    ] as const) {
+    ] as const;
+
+    if (half) {
+      // Stacked from the bottom: blue, then amber on it, then near-white.
+      let base = height;
+      for (const [value, colour] of bands) {
+        if (value === 0) continue;
+        const tall = (Math.min(value, STACK_FULL_SCALE) / STACK_FULL_SCALE) * height;
+        ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
+        ctx.fillRect(x, Math.max(0, base - tall), 1, Math.min(tall, base));
+        base -= tall;
+        if (base <= 0) break;
+      }
+      continue;
+    }
+
+    // Centred: low first so the blue is the outer envelope, high last so the
+    // bright core sits on top of both.
+    for (const [value, colour] of bands) {
       if (value === 0) continue;
-      const half = Math.max(0.5, (Math.min(value, full) / full) * centre);
+      const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * centre);
       ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
-      ctx.fillRect(x, centre - half, 1, half * 2);
+      ctx.fillRect(x, centre - reach, 1, reach * 2);
     }
   }
 }
@@ -194,7 +230,8 @@ export async function renderPreview(
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  drawBands(ctx, data, w, h, "overview");
+  // The row preview: half height from the baseline, bands stacked.
+  drawBands(ctx, data, w, h, "overview", true);
 
   // An ImageBitmap blits faster than a canvas element; fall back where the
   // browser lacks it rather than failing to draw at all.
