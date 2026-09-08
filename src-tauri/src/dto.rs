@@ -117,3 +117,12 @@ pub struct CueDto {
     pub letter: String,
     pub memory: bool,
 }
+
+/// What an import batch did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReportDto {
+    pub imported: u32,
+    /// One line per file that was not imported, saying why.
+    pub skipped: Vec<String>,
+}

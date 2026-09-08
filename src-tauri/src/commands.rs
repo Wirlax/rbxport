@@ -11,8 +11,8 @@ use rbl_index::Library;
 use tauri::State;
 
 use crate::dto::{
-    CueDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto, TreeNodeDto,
-    ViewHandleDto, ViewSpecDto,
+    CueDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
+    TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -461,6 +461,44 @@ pub async fn missing_tracks(
         Ok(MissingTracksDto { total, tracks: missing })
     })
     .await
+}
+
+/// Adds files to the library.
+///
+/// Reports what happened per file rather than failing the whole batch: a
+/// folder of a hundred tracks with two unreadable ones should import
+/// ninety-eight, not nothing.
+#[tauri::command]
+pub async fn import_files(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    paths: Vec<String>,
+) -> AppResult<ImportReportDto> {
+    let state_for_edit = Arc::clone(&state);
+    let report = blocking("import_files", move || {
+        let location = rbl_db::detect().map_err(write_error)?;
+        let mut writer = rbl_db::write::Writer::open(location, backup_dir()).map_err(write_error)?;
+        let mut imported = 0_u32;
+        let mut skipped = Vec::new();
+        for path in &paths {
+            match writer.import_file(std::path::Path::new(path)) {
+                Ok(_) => imported += 1,
+                Err(rbl_db::DbError::WriteRefused(reason)) => {
+                    skipped.push(format!("{path}: {reason}"));
+                }
+                Err(other) => return Err(write_error(other)),
+            }
+        }
+        Ok(ImportReportDto { imported, skipped })
+    })
+    .await?;
+
+    // Only reload if anything landed; a batch that imported nothing has not
+    // changed the library.
+    if report.imported > 0 {
+        reload(app, state_for_edit).await?;
+    }
+    Ok(report)
 }
 
 #[tauri::command]

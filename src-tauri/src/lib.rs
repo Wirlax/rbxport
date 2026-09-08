@@ -95,6 +95,7 @@ pub fn run() {
             // running, re-checked immediately before the transaction.
             commands::track_cues,
             commands::missing_tracks,
+            commands::import_files,
             commands::relocate_track,
             commands::create_playlist,
             commands::create_folder,

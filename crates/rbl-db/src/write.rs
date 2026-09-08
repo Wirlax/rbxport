@@ -45,7 +45,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rbl_core::ids::{Rng, MAX_PLAYLIST_ID};
+use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_PLAYLIST_ID};
 use rbl_core::time;
 use rusqlite::types::Value;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -419,6 +419,108 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    // ---------------------------------------------------------------- import
+
+    /// Adds a file to the library, returning the new track's id.
+    ///
+    /// The row shape is the one the reference library shows for a track made
+    /// on this machine: `rb_data_status` 0 on all 634 of them, `usn` NULL
+    /// until the sync assigns one.
+    ///
+    /// **`Analysed` is left NULL**, which is the column's own default. Every
+    /// track in the reference library has been analysed, so it cannot show
+    /// what the field holds *before* analysis — and NULL asserts nothing
+    /// rather than asserting something unverified. rekordbox sets it when it
+    /// analyses the track.
+    pub fn import_file(&mut self, path: &Path) -> Result<String> {
+        let tags = crate::import::read_tags(path)
+            .map_err(|e| DbError::WriteRefused(e.to_string()))?;
+        self.prepare()?;
+
+        let id = self.unused_id_below("djmdContent", MAX_CONTENT_ID)?;
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let folder = path.to_string_lossy().into_owned();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        // Already in the library: importing again would give one file two
+        // rows, and every playlist pointing at the wrong one.
+        let existing: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM djmdContent WHERE FolderPath = ?1 AND rb_local_deleted = 0",
+            params![folder],
+            |r| r.get(0),
+        )?;
+        if existing > 0 {
+            return Err(DbError::WriteRefused(format!(
+                "{} is already in the library",
+                path.display()
+            )));
+        }
+
+        let artist = intern(&tx, "djmdArtist", "Name", &tags.artist, &mut self.rng, &stamp)?;
+        let album = intern(&tx, "djmdAlbum", "Name", &tags.album, &mut self.rng, &stamp)?;
+        let genre = intern(&tx, "djmdGenre", "Name", &tags.genre, &mut self.rng, &stamp)?;
+        let label = intern(&tx, "djmdLabel", "Name", &tags.label, &mut self.rng, &stamp)?;
+
+        let usn = next_usn(&tx);
+        tx.execute(
+            "INSERT INTO djmdContent
+                (ID, FolderPath, FileNameL, Title, ArtistID, AlbumID, GenreID, LabelID,
+                 Length, BitRate, SampleRate, FileSize, ReleaseYear, TrackNo, Commnt,
+                 Rating, DJPlayCount, Analysed, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                     ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                     0, 0, NULL, ?16, 0, 0, 0, 0, NULL, ?17, ?18, ?18)",
+            params![
+                id,
+                folder,
+                file_name,
+                tags.title,
+                artist,
+                album,
+                genre,
+                label,
+                i64::from(tags.duration_sec),
+                i64::from(tags.bitrate),
+                i64::from(tags.sample_rate),
+                i64::try_from(tags.file_size).unwrap_or(0),
+                i64::from(tags.year),
+                i64::from(tags.track_no),
+                tags.comment,
+                uuid,
+                usn,
+                stamp
+            ],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Finds an unused id below a ceiling, for tables whose ids are smaller.
+    fn unused_id_below(&mut self, table: &str, limit: u64) -> Result<String> {
+        let sql = format!("SELECT COUNT(*) FROM {table} WHERE ID = ?1");
+        for _ in 0..ID_ATTEMPTS {
+            let candidate = self.rng.numeric_id(limit);
+            let taken: i64 =
+                self.library.connection().query_row(&sql, params![candidate], |r| r.get(0))?;
+            if taken == 0 {
+                return Ok(candidate);
+            }
+        }
+        Err(DbError::WriteRefused(format!(
+            "could not find an unused id for {table} in {ID_ATTEMPTS} attempts"
+        )))
+    }
+
     // ------------------------------------------------------------------ cues
 
     /// Adds a cue to a track.
@@ -707,6 +809,46 @@ impl Writer {
             "could not find an unused id for {table} in {ID_ATTEMPTS} attempts"
         )))
     }
+}
+
+/// Finds a lookup row by name, or makes one, returning its id.
+///
+/// An empty name is `NO_ID` — the empty string — because rekordbox leaves the
+/// reference off rather than pointing at a blank row.
+fn intern(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    name: &str,
+    rng: &mut Rng,
+    stamp: &str,
+) -> Result<Option<String>> {
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let found: Option<String> = conn
+        .query_row(
+            &format!("SELECT ID FROM {table} WHERE {column} = ?1 AND rb_local_deleted = 0"),
+            params![name],
+            |r| r.get(0),
+        )
+        .ok();
+    if let Some(id) = found {
+        return Ok(Some(id));
+    }
+    let id = rng.numeric_id(MAX_PLAYLIST_ID);
+    let usn = next_usn(conn);
+    conn.execute(
+        &format!(
+            "INSERT INTO {table} (ID, {column}, UUID,
+                rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, 0, 0, 0, NULL, ?4, ?5, ?5)"
+        ),
+        params![id, name, rng.uuid4(), usn, stamp],
+    )?;
+    set_counter(conn, usn)?;
+    Ok(Some(id))
 }
 
 /// Whether a playlist or folder exists and is not deleted.

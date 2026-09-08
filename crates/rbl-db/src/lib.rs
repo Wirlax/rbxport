@@ -12,6 +12,7 @@
 //!   user's library even by mistake.
 
 pub mod fixture;
+pub mod import;
 pub mod key;
 pub mod write;
 mod schema;

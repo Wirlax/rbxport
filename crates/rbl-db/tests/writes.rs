@@ -799,3 +799,145 @@ fn a_custom_colour_and_a_loop_are_still_refused() {
         assert!(reason.contains("recording"), "{reason}");
     }
 }
+
+// ----------------------------------------------------------------- import
+
+/// A minimal but genuine WAV, so the tag reader has something real to open.
+fn write_wav(path: &std::path::Path, seconds: u32) {
+    let rate = 44_100_u32;
+    let samples = rate * seconds;
+    let data_len = samples * 2;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16_u32.to_le_bytes());
+    out.extend_from_slice(&1_u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1_u16.to_le_bytes()); // mono
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
+    out.extend_from_slice(&2_u16.to_le_bytes());
+    out.extend_from_slice(&16_u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.resize(44 + data_len as usize, 0);
+    std::fs::write(path, out).unwrap();
+}
+
+#[test]
+fn a_file_is_imported_in_the_shape_a_local_row_has() {
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Some Track.wav");
+    write_wav(&path, 2);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+
+    let (status, local_status, synced, usn): (i64, i64, i64, Option<i64>) = f
+        .conn()
+        .query_row(
+            "SELECT rb_data_status, rb_local_data_status, rb_local_synced, usn
+             FROM djmdContent WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    // The shape all 634 locally-created tracks in the reference library have.
+    assert_eq!((status, local_status, synced), (0, 0, 0));
+    assert_eq!(usn, None, "usn is the sync's to assign");
+}
+
+#[test]
+fn an_imported_track_leaves_analysed_unset() {
+    // Every track in the reference library has been analysed, so it cannot
+    // show what the field holds before analysis. NULL asserts nothing.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Track.wav");
+    write_wav(&path, 1);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let analysed: Option<i64> =
+        f.one("SELECT Analysed FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(analysed, None);
+}
+
+#[test]
+fn an_untagged_file_takes_its_filename_as_its_title() {
+    // A row with no title is unusable, and the filename is what someone
+    // actually recognises.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Bicep - Glue.wav");
+    write_wav(&path, 1);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let title: String = f.one("SELECT Title FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(title, "Bicep - Glue");
+}
+
+#[test]
+fn an_import_records_where_the_file_is_and_how_long_it_runs() {
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Track.wav");
+    write_wav(&path, 3);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let (folder, name, length): (String, String, i64) = f
+        .conn()
+        .query_row(
+            "SELECT FolderPath, FileNameL, Length FROM djmdContent WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(folder, path.to_string_lossy());
+    assert_eq!(name, "Track.wav");
+    assert_eq!(length, 3);
+}
+
+#[test]
+fn importing_the_same_file_twice_is_refused() {
+    // One file with two rows leaves every playlist pointing at the wrong one.
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Track.wav");
+    write_wav(&path, 1);
+
+    let mut f = fixture();
+    f.writer.import_file(&path).unwrap();
+    assert!(matches!(f.writer.import_file(&path), Err(DbError::WriteRefused(_))));
+    assert_eq!(
+        f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0"),
+        41,
+        "forty fixture tracks and the one import"
+    );
+}
+
+#[test]
+fn importing_something_that_is_not_audio_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, b"x").unwrap();
+
+    let mut f = fixture();
+    assert!(matches!(f.writer.import_file(&text), Err(DbError::WriteRefused(_))));
+    assert!(matches!(
+        f.writer.import_file(&dir.path().join("missing.wav")),
+        Err(DbError::WriteRefused(_))
+    ));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent"), 40);
+}
+
+#[test]
+fn an_imported_track_can_go_straight_into_a_playlist() {
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Track.wav");
+    write_wav(&path, 1);
+
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let list = f.writer.create_playlist("New", ROOT).unwrap();
+    f.writer.add_tracks(&list, std::slice::from_ref(&id)).unwrap();
+    assert_eq!(f.order(&list), vec![id]);
+}

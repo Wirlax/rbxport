@@ -332,6 +332,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ]);
     },
 
+    // No picker in a browser, so nothing can be chosen to import.
+    importFiles: () => wait(null),
+
     // Nothing in the mock has a file behind it, so nothing can be missing and
     // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),

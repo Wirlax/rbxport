@@ -553,3 +553,13 @@ test("the player marks a track's cues on its waveforms", async ({ page }) => {
   // Hot cues carry their letter on the detail waveform, where there is room.
   await expect(detail.locator('[title="Hot cue A"]')).toHaveText("A");
 });
+
+test("settings offers adding music, and says what it will not do", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const section = page.getByRole("region", { name: "Add music" });
+  await expect(section.getByRole("button", { name: /add files/i })).toBeVisible();
+  // Honest about not running analysis, rather than leaving it a surprise.
+  await expect(section).toContainText("Analysis is not run");
+});

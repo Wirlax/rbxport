@@ -5,7 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  Backend, Cue, LibrarySummary, MissingTracks, RowDto, TreeNode, ViewHandle, WaveformKind,
+  Backend, Cue, ImportReport, LibrarySummary, MissingTracks, RowDto, TreeNode, ViewHandle,
+  WaveformKind,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -25,6 +26,23 @@ async function realBackend(): Promise<Backend> {
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
+    importFiles: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: true,
+        directory: false,
+        title: "Add music to the library",
+        filters: [
+          {
+            name: "Audio",
+            extensions: ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif", "ogg", "opus"],
+          },
+        ],
+      });
+      // Cancelling is a normal outcome, not an error.
+      if (!Array.isArray(picked) || picked.length === 0) return null;
+      return invoke<ImportReport>("import_files", { paths: picked });
+    },
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
     relocateTrack: async (trackId) => {
       const { open } = await import("@tauri-apps/plugin-dialog");

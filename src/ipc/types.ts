@@ -127,6 +127,15 @@ export interface Backend {
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string): Promise<Cue[]>;
 
+  /**
+   * Asks for files and adds them to the library.
+   *
+   * Resolves to what happened, or `null` if the picker was cancelled. Reports
+   * per file rather than failing the batch: a folder with two unreadable
+   * tracks should import the rest.
+   */
+  importFiles(): Promise<ImportReport | null>;
+
   missingTracks(limit: number): Promise<MissingTracks>;
 
   /**
@@ -150,6 +159,13 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** What an import batch did. */
+export interface ImportReport {
+  imported: number;
+  /** One line per file that was not imported, saying why. */
+  skipped: string[];
 }
 
 /** A track whose audio file is no longer where the library says. */
