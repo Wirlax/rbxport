@@ -7,23 +7,7 @@
 import { memo } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
-
-const FolderIcon = () => (
-  <svg viewBox="0 0 14 12" className={styles.icon} aria-hidden>
-    <path d="M0 2h5l1.5 1.5H14V11H0z" fill="currentColor" />
-  </svg>
-);
-const ListIcon = () => (
-  <svg viewBox="0 0 14 12" className={styles.icon} aria-hidden>
-    <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    <path d="M1 4h12M1 7.5h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4" />
-  </svg>
-);
-const NoteIcon = () => (
-  <svg viewBox="0 0 14 12" className={styles.icon} aria-hidden>
-    <path d="M9 0v8.2a2.3 2.3 0 1 1-1.4-2.1V2.2L4 3.2v6.2a2.3 2.3 0 1 1-1.4-2.1V1.6z" fill="currentColor" />
-  </svg>
-);
+import { FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
 
 const Row = memo(function Row({
   node, selected, onSelect,
@@ -45,7 +29,7 @@ const Row = memo(function Row({
       tabIndex={selected ? 0 : -1}
     >
       <span className={styles.twisty} data-open={node.expanded || undefined} data-leaf={node.expanded === undefined || undefined} />
-      {node.kind === "collection" ? null : <Icon />}
+      {node.kind === "collection" ? null : <Icon className={styles.icon} />}
       <span className={styles.label}>{node.name}</span>
     </div>
   );

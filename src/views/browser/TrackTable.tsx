@@ -15,6 +15,7 @@ import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/
 import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
+import { SortDownIcon, SortUpIcon } from "@/components/icons";
 
 const ROW_H = 25; // --s-row-height
 
@@ -190,8 +191,17 @@ export function TrackTable({ spec, onSortChange, onSelectionChange, title }: Tra
     onSelectionChange?.(selection.ids.size);
   }, [selection.ids, onSelectionChange]);
 
+  // An arrow drawn to rekordbox's geometry rather than the text arrows that
+  // stood in for it: those render in the body font and sit off the baseline.
   const sortIndicator = useCallback(
-    (col: Column) => (col.sortable && col.key === spec.sort ? (spec.descending ? "↓" : "↑") : ""),
+    (col: Column) =>
+      col.sortable && col.key === spec.sort ? (
+        spec.descending ? (
+          <SortDownIcon className={styles.sortArrow} />
+        ) : (
+          <SortUpIcon className={styles.sortArrow} />
+        )
+      ) : null,
     [spec.sort, spec.descending],
   );
 
@@ -206,7 +216,7 @@ export function TrackTable({ spec, onSortChange, onSelectionChange, title }: Tra
           role="columnheader"
         >
           {col.label}
-          <span className={styles.sortArrow}>{sortIndicator(col)}</span>
+          {sortIndicator(col)}
         </div>
       )),
     [spec.sort, onSortChange, sortIndicator],

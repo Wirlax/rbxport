@@ -76,7 +76,14 @@
   cursor: default;
 }
 .headCell[data-sorted] { color: var(--c-accent); }
-.sortArrow { margin-left: 4px; color: var(--c-accent); }
+/* Sized to the column-header cap height so the arrow sits on the text baseline. */
+.sortArrow {
+  margin-left: 4px;
+  width: 9px;
+  height: 9px;
+  flex: none;
+  color: var(--c-accent);
+}
 
 .scroll {
   overflow: auto;

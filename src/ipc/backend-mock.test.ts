@@ -75,7 +75,7 @@ describe("mock edits", () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.setTrackRating("100000", 9);
     const rows = await backend.fetchRows(
-      (await backend.openView({ source: { kind: "allTracks" }, sort: "trackNo", descending: false, query: "" })).viewId,
+      (await backend.openView({ source: { kind: "collection" }, sort: "trackNo", descending: false, query: "" })).viewId,
       0,
       1,
     );
@@ -86,7 +86,7 @@ describe("mock edits", () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.setTrackComment("100000", "5A - Am - 128");
     const handle = await backend.openView({
-      source: { kind: "allTracks" }, sort: "trackNo", descending: false, query: "",
+      source: { kind: "collection" }, sort: "trackNo", descending: false, query: "",
     });
     const rows = await backend.fetchRows(handle.viewId, 0, 1);
     expect(rows[0]?.comment).toBe("5A - Am - 128");
