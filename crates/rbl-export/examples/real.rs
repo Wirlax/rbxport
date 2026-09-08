@@ -8,9 +8,13 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let count: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(20);
+    // `nth(1)` and `nth(2)`: with `cargo run --example real -- 6 /dest` the
+    // program sees [binary, "6", "/dest"]. Reading these one slot further
+    // along made the count silently default to 20 and the destination to a
+    // temporary directory, whatever was asked for.
+    let count: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let dest = std::env::args()
-        .nth(3)
+        .nth(2)
         .map_or_else(|| std::env::temp_dir().join("rbl-export-demo"), PathBuf::from);
 
     let db = match rbl_db::Library::open_installed_read_only() {
