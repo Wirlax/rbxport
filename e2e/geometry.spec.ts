@@ -122,6 +122,24 @@ test("the player is laid out the way the capture measures it", async ({ page }) 
   expect(tops).toEqual([...tops].sort((a, b) => a - b));
 });
 
+test("each transport control sits where the capture measures it", async ({ page }) => {
+  // Distances from the top of the player, in points, off the 2x capture. They
+  // were wrong once because a flex `gap` and a per-item margin were both
+  // applying, which put PLAY 34pt below CUE instead of the measured 10.5.
+  const player = page.getByRole("region", { name: "Preview player" });
+  const top = (await player.boundingBox())?.y ?? 0;
+  for (const [name, want] of [
+    ["Previous track", 36],
+    ["Beat jump back", 82],
+    ["Beat jump size", 110],
+    ["Cue", 156],
+    ["Play", 206.5],
+  ] as const) {
+    const box = await player.getByRole("button", { name, exact: true }).boundingBox();
+    expect((box?.y ?? 0) - top, name).toBeCloseTo(want, 1);
+  }
+});
+
 test("the player carries the controls a deck has", async ({ page }) => {
   const player = page.getByRole("region", { name: "Preview player" });
   for (const name of [

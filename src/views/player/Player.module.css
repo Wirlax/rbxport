@@ -12,18 +12,23 @@
 
 /* ------------------------------------------------------------- transport */
 
+/* No flex `gap` here: every control sits at its own measured distance from
+   the one above, and a shared gap plus per-item margins meant the two added
+   up — which put PLAY 34pt below CUE instead of the measured 10.5. */
 .transport {
   display: flex;
   flex-direction: column;
   align-items: center;
   background: var(--c-panel);
-  /* The first button row sits 36pt below the top of the player. */
-  padding: 36px 12px 0;
-  gap: 24px;
+  padding: 0 12px;
 }
 
 /* Two buttons to a row, 26pt each with a 4pt gap in a 56pt column. */
+/* Measured from the top of the player: the skip row at 36pt, the beat-jump
+   row 24pt below it, the size box 6pt below that. */
 .pair { display: flex; gap: 4px; }
+.pair:first-child { margin-top: 36px; }
+.pair + .pair { margin-top: 24px; }
 
 .square {
   width: var(--s-player-btn-w);
@@ -42,8 +47,7 @@
 
 /* The beat-jump size, a dropdown in rekordbox. */
 .beats {
-  /* It sits closer to the row above than the other gaps. */
-  margin-top: -18px;
+  margin-top: 6px;
   width: 56px;
   height: 26px;
   border: 0;
@@ -81,17 +85,20 @@
   flex: none;
 }
 
+/* Measured: the CUE ring spans y 212..251.5pt, 20pt below the size box, and
+   the PLAY ring y 262..301.5pt — 10.5pt below CUE, not the 34 a shared gap
+   plus a margin was producing. */
 .cue {
-  /* Measured: the CUE circle starts 19pt below the beat-jump box. */
-  margin-top: -5px;
+  margin-top: 20px;
   border: 2px solid var(--c-cue-ring);
-  color: var(--c-cue-ring);
+  /* The ring is amber and the word inside it is white. */
+  color: var(--c-text);
   font-size: var(--f-size-xs);
   font-weight: 700;
 }
 
 .play {
-  margin-top: 10px;
+  margin-top: 10.5px;
   border: 2px solid var(--c-play-ring);
   color: var(--c-play-ring);
 }
