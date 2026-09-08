@@ -94,7 +94,7 @@ design/           reference captures, measurements, tokens
 pnpm dev            # the app
 pnpm dev:mock       # frontend only, mock backend, plain browser
 pnpm test           # vitest
-pnpm e2e            # playwright (chromium + webkit)
+pnpm e2e            # playwright (chromium + webkit), incl. the geometry gate
 pnpm tokens         # regenerate CSS tokens from measurements
 pnpm measure        # re-measure the reference captures
 pnpm icons          # regenerate src/components/icons.tsx from design/icons/ui/
