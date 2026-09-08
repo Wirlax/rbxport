@@ -86,7 +86,12 @@ export const WaveformDetail = memo(function WaveformDetail({
     // runs off the track and leaves half the panel empty.
     const half = span / 2;
     const centre = Math.min(Math.max(progress, half), 1 - half);
-    drawPreview(ctx, data, w, h, { from: centre - half, to: centre + half });
+    // The detail's amber is the darker of the two; the overview strip above it
+    // uses the brighter one.
+    drawPreview(ctx, data, w, h, {
+      window: { from: centre - half, to: centre + half },
+      band: span >= 1 ? "overview" : "detail",
+    });
   }, [data, progress, span, width, height]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;

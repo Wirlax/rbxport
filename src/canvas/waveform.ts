@@ -16,12 +16,46 @@ export interface RenderedWaveform {
 const HEIGHT_MASK = 0x1f;
 const WHITENESS_SHIFT = 5;
 
-/** Column colours, from the measured palette. */
-const LOW = [0x00, 0x55, 0xe1] as const;
-const HIGH = [0xf5, 0xea, 0xd6] as const;
+/**
+ * Which waveform is being drawn.
+ *
+ * Only the middle band differs: the overview strip uses a brighter amber than
+ * the detail does. Both are in the tokens, measured off the capture.
+ */
+export type WaveBand = "overview" | "detail";
 
-function mix(a: readonly number[], b: readonly number[], t: number): string {
-  const c = (i: number) => Math.round((a[i] ?? 0) + ((b[i] ?? 0) - (a[i] ?? 0)) * t);
+/**
+ * The three bands, from `src/styles/tokens.css`.
+ *
+ * rekordbox colours a column by its frequency content: bass blue, mids amber,
+ * highs near-white. `PWAV` gives three bits of "whiteness" per column, which
+ * is that spectrum in miniature, so the ramp runs through all three rather
+ * than straight from blue to white — a two-stop ramp turns every mid-heavy
+ * track grey-blue and loses the thing that makes a waveform readable.
+ */
+const LOW = [0x00, 0x55, 0xe1] as const; // --c-wave-low  #0055E1
+const MID_DETAIL = [0xb2, 0x65, 0x05] as const; // --c-wave-mid  #B26505
+const MID_OVERVIEW = [0xff, 0x8c, 0x00] as const; // --c-wave-mid-ovw #FF8C00
+const HIGH = [0xf5, 0xea, 0xd6] as const; // --c-wave-high #F5EAD6
+
+export function bandStops(band: WaveBand): readonly (readonly number[])[] {
+  return [LOW, band === "overview" ? MID_OVERVIEW : MID_DETAIL, HIGH];
+}
+
+/** Colour at `t` (0..1) along a ramp through every stop in turn. */
+export function ramp(stops: readonly (readonly number[])[], t: number): string {
+  const last = stops.length - 1;
+  if (last < 1) {
+    const only = stops[0] ?? LOW;
+    return `rgb(${only[0] ?? 0},${only[1] ?? 0},${only[2] ?? 0})`;
+  }
+  const clamped = Math.min(Math.max(Number.isFinite(t) ? t : 0, 0), 1);
+  const scaled = clamped * last;
+  const i = Math.min(Math.floor(scaled), last - 1);
+  const a = stops[i] ?? LOW;
+  const b = stops[i + 1] ?? HIGH;
+  const f = scaled - i;
+  const c = (n: number) => Math.round((a[n] ?? 0) + ((b[n] ?? 0) - (a[n] ?? 0)) * f);
   return `rgb(${c(0)},${c(1)},${c(2)})`;
 }
 
@@ -36,13 +70,19 @@ export function drawPreview(
   data: Uint8Array,
   width: number,
   height: number,
-  /**
-   * The slice of the track to draw, as fractions of its length. Defaults to
-   * all of it; the detail waveform passes a window around the playhead, which
-   * is what makes it a *detail* rather than a second copy of the overview.
-   */
-  window?: { from: number; to: number },
+  options?: {
+    /**
+     * The slice of the track to draw, as fractions of its length. Defaults to
+     * all of it; the detail waveform passes a window around the playhead,
+     * which is what makes it a *detail* rather than a second copy.
+     */
+    window?: { from: number; to: number };
+    /** Which palette. Defaults to the overview's brighter amber. */
+    band?: WaveBand;
+  },
 ): void {
+  const window = options?.window;
+  const stops = bandStops(options?.band ?? "overview");
   ctx.clearRect(0, 0, width, height);
   if (data.length === 0) return;
 
@@ -71,7 +111,7 @@ export function drawPreview(
     }
     if (peak === 0) continue;
     const columnHeight = Math.max(1, Math.round((peak / HEIGHT_MASK) * height));
-    ctx.fillStyle = mix(LOW, HIGH, whiteness / 7);
+    ctx.fillStyle = ramp(stops, whiteness / 7);
     ctx.fillRect(x, height - columnHeight, 1, columnHeight);
   }
 }
