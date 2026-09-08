@@ -55,7 +55,7 @@ const ID_ATTEMPTS: usize = 64;
 
 /// Columns [`Writer::touch`] will set. A column name is interpolated into SQL,
 /// so the set of legal names is spelled out rather than trusted.
-const WRITABLE_COLUMNS: &[&str] = &["Name", "Rating", "Commnt", "ColorID"];
+const WRITABLE_COLUMNS: &[&str] = &["Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL"];
 
 /// Things the writer refuses to do, and why.
 ///
@@ -421,6 +421,30 @@ impl Writer {
             "ColorID",
             &color.map_or(Value::Null, |c| Value::Text(c.to_owned())),
         )
+    }
+
+    /// Points a track at a different file.
+    ///
+    /// For a track whose audio has moved. Only the location changes — the
+    /// analysis, cues and playlist memberships all key off the track's id and
+    /// stay where they are.
+    pub fn relocate(&mut self, content: &str, path: &Path) -> Result<Changed> {
+        if !path.is_file() {
+            return Err(DbError::WriteRefused(format!(
+                "{} is not a file; a track must point at one",
+                path.display()
+            )));
+        }
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let full = path.to_string_lossy().into_owned();
+        // Two columns, so two statements under one prepare each; the USN and
+        // stamp bookkeeping happens twice and the later one wins, which is
+        // what rekordbox's own rows look like after an edit.
+        self.touch_content(content, "FolderPath", &Value::Text(full))?;
+        self.touch_content(content, "FileNameL", &Value::Text(name))
     }
 
     /// Soft-deletes a track and every playlist membership pointing at it.

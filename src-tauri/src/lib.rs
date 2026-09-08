@@ -93,6 +93,8 @@ pub fn run() {
             commands::analyse_track,
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.
+            commands::missing_tracks,
+            commands::relocate_track,
             commands::create_playlist,
             commands::create_folder,
             commands::rename_playlist,

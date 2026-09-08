@@ -118,6 +118,28 @@ export interface Backend {
    * Returns an unsubscribe function.
    */
   onLibraryChanged(listener: (generation: number) => void): () => void;
+
+  /**
+   * Tracks whose file has gone. The count is exact; the list is a first page,
+   * because a library can lose thousands when a drive is unplugged and a list
+   * that long is neither useful nor small enough for the IPC cap.
+   */
+  missingTracks(limit: number): Promise<MissingTracks>;
+}
+
+/** A track whose audio file is no longer where the library says. */
+export interface MissingTrack {
+  id: string;
+  title: string;
+  artist: string;
+  /** Where the library still expects it. */
+  path: string;
+}
+
+export interface MissingTracks {
+  /** Every missing track, not just the ones listed. */
+  total: number;
+  tracks: MissingTrack[];
 }
 
 export interface Edits {

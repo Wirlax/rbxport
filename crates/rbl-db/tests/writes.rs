@@ -603,3 +603,63 @@ fn a_large_playlist_stays_consistent_through_many_edits() {
     let expected: Vec<i64> = (1..=remaining.len() as i64).collect();
     assert_eq!(f.track_numbers(&list), expected, "numbering must stay 1..N");
 }
+
+// -------------------------------------------------------------- relocating
+
+#[test]
+fn a_track_can_be_pointed_at_a_moved_file() {
+    let f_dir = tempfile::tempdir().unwrap();
+    let moved = f_dir.path().join("moved elsewhere.mp3");
+    std::fs::write(&moved, b"audio").unwrap();
+
+    let mut f = fixture();
+    f.writer.relocate(&track_id(0), &moved).unwrap();
+
+    let (folder, name): (String, String) = f
+        .conn()
+        .query_row(
+            "SELECT FolderPath, FileNameL FROM djmdContent WHERE ID = ?1",
+            params![track_id(0)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(folder, moved.to_string_lossy());
+    assert_eq!(name, "moved elsewhere.mp3");
+}
+
+#[test]
+fn relocating_to_something_that_is_not_a_file_is_refused() {
+    // Pointing a track at a directory, or at nothing, loses the old location
+    // for no gain.
+    let dir = tempfile::tempdir().unwrap();
+    let mut f = fixture();
+    let before: String =
+        f.one("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+
+    for bad in [dir.path().to_path_buf(), dir.path().join("no-such-file.mp3")] {
+        assert!(matches!(f.writer.relocate(&track_id(0), &bad), Err(DbError::WriteRefused(_))));
+    }
+    let after: String =
+        f.one("SELECT FolderPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(after, before, "a refused relocate must not have moved anything");
+}
+
+#[test]
+fn relocating_leaves_the_analysis_and_memberships_alone() {
+    // Everything else keys off the track's id, so moving the audio must not
+    // disturb it.
+    let f_dir = tempfile::tempdir().unwrap();
+    let moved = f_dir.path().join("elsewhere.mp3");
+    std::fs::write(&moved, b"audio").unwrap();
+
+    let mut f = fixture();
+    let list = f.writer.create_playlist("Set", ROOT).unwrap();
+    f.writer.add_tracks(&list, &[track_id(0), track_id(1)]).unwrap();
+
+    f.writer.relocate(&track_id(0), &moved).unwrap();
+
+    assert_eq!(f.order(&list), vec![track_id(0), track_id(1)]);
+    let deleted: i64 =
+        f.one("SELECT rb_local_deleted FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(deleted, 0);
+}

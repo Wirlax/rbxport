@@ -10,7 +10,10 @@ use std::sync::Arc;
 use rbl_index::Library;
 use tauri::State;
 
-use crate::dto::{LibrarySummaryDto, RowDto, TreeNodeDto, ViewHandleDto, ViewSpecDto};
+use crate::dto::{
+    LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto, TreeNodeDto, ViewHandleDto,
+    ViewSpecDto,
+};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
 
@@ -394,6 +397,56 @@ async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
     // Cached pages are keyed on the generation, so the frontend drops them.
     let _ = tauri::Emitter::emit(&app, "library:changed", generation);
     Ok(generation)
+}
+
+/// Tracks whose audio file is no longer where the library says it is.
+///
+/// Bounded rather than exhaustive: a library can have thousands missing after
+/// a drive is unplugged, and a list that long is neither useful nor small
+/// enough for the IPC cap. The count is exact; the list is the first page.
+#[tauri::command]
+pub async fn missing_tracks(
+    state: State<'_, Arc<AppState>>,
+    limit: u32,
+) -> AppResult<MissingTracksDto> {
+    let library = state.library()?;
+    let wanted = (limit as usize).min(MAX_ROWS as usize);
+    blocking("missing_tracks", move || {
+        let mut missing = Vec::with_capacity(wanted);
+        let mut total = 0_u32;
+        for index in 0..library.len() {
+            let path = library.folder_path.get(index);
+            // An empty path is a track that never had a file, not one that
+            // lost it; those are a different problem.
+            if path.is_empty() || std::path::Path::new(path).exists() {
+                continue;
+            }
+            total = total.saturating_add(1);
+            if missing.len() < wanted {
+                missing.push(MissingTrackDto {
+                    id: library.ids.get(index).copied().unwrap_or(0).to_string(),
+                    title: library.title.get(index).to_owned(),
+                    artist: library.artist_name(u32::try_from(index).unwrap_or(0)).to_owned(),
+                    path: path.to_owned(),
+                });
+            }
+        }
+        Ok(MissingTracksDto { total, tracks: missing })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn relocate_track(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    path: String,
+) -> AppResult<u32> {
+    edit(app, state, "relocate_track", Touched::Tracks, move |w| {
+        w.relocate(&track, std::path::Path::new(&path)).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]

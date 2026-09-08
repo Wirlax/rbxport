@@ -316,6 +316,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     edits,
 
+    // Nothing in the mock has a file behind it, so nothing can be missing.
+    missingTracks: () => wait({ total: 0, tracks: [] }),
+
     onLibraryChanged: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

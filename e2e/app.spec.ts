@@ -526,3 +526,17 @@ test("a comment commits on Enter", async ({ page }) => {
 
   await expect(page.getByRole("contentinfo")).toContainText("Comment saved");
 });
+
+test("settings can check for missing files", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const section = page.getByRole("region", { name: "Missing files" });
+  await expect(section.getByRole("button", { name: /check for missing files/i })).toBeVisible();
+  // Looking must not change anything, so it says so before you press it.
+  await expect(section).toContainText("Nothing is changed by looking");
+
+  await section.getByRole("button", { name: /check for missing files/i }).click();
+  // The mock has no files behind its rows, so nothing can be missing.
+  await expect(section).toContainText("where the library expects it");
+});

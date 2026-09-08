@@ -88,3 +88,22 @@ pub struct ViewSpecDto {
     pub descending: bool,
     pub query: String,
 }
+
+/// A track whose audio file is no longer where the library says.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingTrackDto {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    /// Where the library still expects it.
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingTracksDto {
+    /// Every missing track, not just the ones listed.
+    pub total: u32,
+    pub tracks: Vec<MissingTrackDto>,
+}
