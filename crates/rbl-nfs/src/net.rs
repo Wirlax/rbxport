@@ -1,0 +1,139 @@
+//! Binding the sockets the three RPC programs answer on.
+//!
+//! One blocking thread per socket, using `std::net`. There is no async runtime
+//! here on purpose: a datagram in, a reply out, with no I/O in between except
+//! one bounded file read, so a thread costs a stack and nothing else, while a
+//! runtime would cost a dependency and a scheduler on the read path.
+
+use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::Server;
+
+/// The largest datagram we will read. `NFSv2` caps a read at 8 KB; the rest is
+/// headroom for the reply's attributes and a generous listing.
+const DATAGRAM: usize = 16 * 1024;
+
+/// How long a socket blocks before checking whether it has been asked to stop.
+const POLL: Duration = Duration::from_millis(200);
+
+/// Serves RPC on one bound socket until `stop` is set.
+///
+/// Returns only on an error that is not worth continuing through; a malformed
+/// datagram, or one from a peer that has gone away, is counted and skipped.
+pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -> io::Result<()> {
+    socket.set_read_timeout(Some(POLL))?;
+    let mut buffer = vec![0_u8; DATAGRAM];
+    while !stop.load(Ordering::Relaxed) {
+        let (len, from) = match socket.recv_from(&mut buffer) {
+            Ok(received) => received,
+            Err(error) if is_timeout(&error) => continue,
+            // A datagram whose peer has vanished surfaces here on some
+            // platforms; it says nothing about the socket's health.
+            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => continue,
+            Err(error) => return Err(error),
+        };
+        let Some(reply) = server.handle(buffer.get(..len).unwrap_or(&[])) else {
+            continue;
+        };
+        if let Err(error) = socket.send_to(&reply, from) {
+            tracing::debug!(%from, %error, "could not send an RPC reply");
+        }
+    }
+    Ok(())
+}
+
+fn is_timeout(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+}
+
+/// The three sockets a player needs, bound and serving.
+///
+/// Ports are taken as arguments rather than hard-coded so a test can bind
+/// ephemeral loopback ports: the real ones are held by rekordbox whenever it
+/// is running, and a test that fought it for them would be a test that only
+/// passes when the app under test is closed.
+#[derive(Debug)]
+pub struct Bound {
+    stop: Arc<AtomicBool>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+    portmap: SocketAddr,
+    mount: SocketAddr,
+    nfs: SocketAddr,
+}
+
+impl Bound {
+    /// Binds portmap, mount and NFS on `address`, and starts serving.
+    ///
+    /// A port of 0 asks the OS for a free one, which is what the tests use.
+    pub fn start(
+        exports: crate::Exports,
+        address: std::net::IpAddr,
+        portmap_port: u16,
+        mount_port: u16,
+        nfs_port: u16,
+    ) -> io::Result<Self> {
+        let portmap_socket = UdpSocket::bind(SocketAddr::new(address, portmap_port))?;
+        let mount_socket = UdpSocket::bind(SocketAddr::new(address, mount_port))?;
+        let nfs_socket = UdpSocket::bind(SocketAddr::new(address, nfs_port))?;
+
+        let (portmap, mount, nfs) = (
+            portmap_socket.local_addr()?,
+            mount_socket.local_addr()?,
+            nfs_socket.local_addr()?,
+        );
+
+        // Portmap must report the ports actually bound, which with ephemeral
+        // ports are not known until now.
+        let server = Arc::new(Server::new(exports, nfs.port(), mount.port()));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let mut threads = Vec::with_capacity(3);
+        for (name, socket) in [
+            ("portmap", portmap_socket),
+            ("mount", mount_socket),
+            ("nfs", nfs_socket),
+        ] {
+            let server = Arc::clone(&server);
+            let stop = Arc::clone(&stop);
+            threads.push(std::thread::spawn(move || {
+                if let Err(error) = serve(&server, &socket, &stop) {
+                    tracing::warn!(program = name, %error, "RPC socket stopped");
+                }
+            }));
+        }
+
+        Ok(Self { stop, threads, portmap, mount, nfs })
+    }
+
+    pub const fn portmap_address(&self) -> SocketAddr {
+        self.portmap
+    }
+
+    pub const fn mount_address(&self) -> SocketAddr {
+        self.mount
+    }
+
+    pub const fn nfs_address(&self) -> SocketAddr {
+        self.nfs
+    }
+
+    /// Stops the threads and waits for them.
+    pub fn shutdown(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for thread in self.threads.drain(..) {
+            // A thread that panicked has already logged; there is nothing to
+            // recover here, and the caller is shutting down either way.
+            drop(thread.join());
+        }
+    }
+}
+
+impl Drop for Bound {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "rbl-nfs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SUN-RPC/XDR and a read-only NFSv2 server over a virtual filesystem."
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

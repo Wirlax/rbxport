@@ -1,0 +1,644 @@
+//! The NFS, mount and portmap programs, driven as a real player drives them.
+#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::fs;
+
+use rbl_nfs::rpc::{self, Auth, Call, Reply};
+use rbl_nfs::xdr::{Reader, Writer};
+use rbl_nfs::{
+    mount_proc, nfs_proc, nfs_status, portmap_proc, split_export, Exports, Handle, Server, Vfs,
+    HANDLE_LEN, IPPROTO_TCP, IPPROTO_UDP, MAX_READ, PROGRAM_MOUNT, PROGRAM_NFS, PROGRAM_PORTMAP,
+    VERSION_MOUNT, VERSION_NFS, VERSION_PORTMAP,
+};
+
+const NFS_PORT: u16 = 12049;
+const MOUNT_PORT: u16 = 12005;
+
+/// Builds a server over a temp dir holding two real files, plus an empty dir.
+fn fixture() -> (tempfile::TempDir, Server) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("track.mp3"), vec![7_u8; 20_000]).unwrap();
+    fs::write(dir.path().join("small.dat"), b"hello").unwrap();
+
+    let mut vfs = Vfs::new("/");
+    vfs.add_file(
+        "Contents/ARTBAT/The Abyss.mp3",
+        dir.path().join("track.mp3"),
+        20_000,
+        1_700_000_000,
+    );
+    vfs.add_file("PIONEER/rekordbox/export.pdb", dir.path().join("small.dat"), 5, 1_700_000_001);
+    vfs.add_dir("PIONEER/USBANLZ");
+
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    (dir, Server::new(exports, NFS_PORT, MOUNT_PORT))
+}
+
+fn call(program: u32, version: u32, procedure: u32, arguments: Vec<u8>) -> Vec<u8> {
+    Call {
+        xid: 0x1234,
+        program,
+        version,
+        procedure,
+        credential: Auth { flavor: rpc::AUTH_UNIX, body: vec![0; 8] },
+        verifier: Auth::null(),
+        arguments: &arguments,
+    }
+    .encode()
+}
+
+fn ask(server: &Server, program: u32, version: u32, procedure: u32, args: Vec<u8>) -> Vec<u8> {
+    server.handle(&call(program, version, procedure, args)).expect("a reply")
+}
+
+fn ok_reader(reply: &[u8]) -> Reader<'_> {
+    let parsed = Reply::decode(reply).unwrap();
+    assert!(parsed.is_success(), "{parsed:?}");
+    assert_eq!(parsed.xid, 0x1234);
+    parsed.reader()
+}
+
+/// Mounts `/` and returns the root handle.
+fn mount_root(server: &Server) -> Handle {
+    let mut args = Writer::new();
+    args.utf16("/");
+    let reply = ask(server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    Handle::from_slice(reader.opaque_fixed(HANDLE_LEN).unwrap()).unwrap()
+}
+
+fn lookup(server: &Server, parent: &Handle, name: &str) -> Result<Handle, u32> {
+    let mut args = Writer::new();
+    args.opaque_fixed(parent.as_bytes()).utf16(name);
+    let reply = ask(server, PROGRAM_NFS, VERSION_NFS, nfs_proc::LOOKUP, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    let status = reader.u32().unwrap();
+    if status != nfs_status::OK {
+        return Err(status);
+    }
+    Ok(Handle::from_slice(reader.opaque_fixed(HANDLE_LEN).unwrap()).unwrap())
+}
+
+fn lookup_path(server: &Server, root: &Handle, path: &str) -> Result<Handle, u32> {
+    let mut at = *root;
+    for part in path.split('/').filter(|p| !p.is_empty()) {
+        at = lookup(server, &at, part)?;
+    }
+    Ok(at)
+}
+
+// ---------------------------------------------------------------- XDR
+
+#[test]
+fn xdr_pads_every_field_to_four_bytes() {
+    for (text, expected) in [("", 4), ("a", 8), ("abc", 8), ("abcd", 8), ("abcde", 12)] {
+        let mut writer = Writer::new();
+        writer.string(text);
+        assert_eq!(writer.len(), expected, "{text:?}");
+        assert_eq!(Reader::new(writer.as_slice()).string().unwrap(), text);
+    }
+}
+
+#[test]
+fn utf16_names_declare_a_byte_length_not_a_character_count() {
+    let mut writer = Writer::new();
+    writer.utf16("PIONEER");
+    let bytes = writer.into_bytes();
+    assert_eq!(&bytes[0..4], &14_u32.to_be_bytes(), "seven characters, fourteen bytes");
+    assert_eq!(&bytes[4..8], &[b'P', 0, b'I', 0]);
+    assert_eq!(Reader::new(&bytes).utf16().unwrap(), "PIONEER");
+}
+
+#[test]
+fn an_odd_length_utf16_name_is_rejected_rather_than_truncated() {
+    let mut writer = Writer::new();
+    writer.opaque(&[b'A', 0, b'B']);
+    assert!(Reader::new(writer.as_slice()).utf16().is_err());
+}
+
+#[test]
+fn an_absurd_length_does_not_allocate() {
+    let mut bytes = 0xffff_ffff_u32.to_be_bytes().to_vec();
+    bytes.extend_from_slice(&[0; 4]);
+    assert!(Reader::new(&bytes).opaque().is_err());
+}
+
+#[test]
+fn a_truncated_field_is_an_error_at_every_cut() {
+    let mut writer = Writer::new();
+    writer.u32(1).utf16("Melodic Techno").opaque(&[1, 2, 3]);
+    let bytes = writer.into_bytes();
+    for cut in 0..bytes.len() {
+        let mut reader = Reader::new(&bytes[..cut]);
+        let outcome = reader.u32().and_then(|_| reader.utf16()).and_then(|_| {
+            reader.opaque()?;
+            Ok(())
+        });
+        assert!(outcome.is_err(), "cut at {cut} should not decode");
+    }
+}
+
+// ---------------------------------------------------------------- RPC
+
+#[test]
+fn an_rpc_call_round_trips() {
+    let arguments = vec![1, 2, 3, 4];
+    let original = Call {
+        xid: 99,
+        program: PROGRAM_NFS,
+        version: VERSION_NFS,
+        procedure: nfs_proc::READ,
+        credential: Auth { flavor: rpc::AUTH_UNIX, body: vec![9; 12] },
+        verifier: Auth::null(),
+        arguments: &arguments,
+    };
+    let bytes = original.encode();
+    assert_eq!(Call::decode(&bytes).unwrap(), original);
+}
+
+#[test]
+fn a_reply_is_never_mistaken_for_a_call() {
+    let reply = rpc::accepted_empty(1, rpc::accept::SUCCESS);
+    assert!(matches!(Call::decode(&reply), Err(rpc::RpcError::NotACall(_))));
+}
+
+#[test]
+fn a_wrong_rpc_version_is_answered_with_the_version_we_speak() {
+    let mut bytes = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::NULL, vec![]);
+    bytes[8..12].copy_from_slice(&3_u32.to_be_bytes());
+    let (_dir, server) = fixture();
+    let reply = server.handle(&bytes).expect("a rejection, not silence");
+    let parsed = Reply::decode(&reply).unwrap();
+    assert_eq!(parsed.reply_status, rpc::MSG_DENIED);
+    assert_eq!(parsed.accept_status, rpc::reject::RPC_MISMATCH);
+}
+
+#[test]
+fn garbage_is_dropped_rather_than_answered() {
+    let (_dir, server) = fixture();
+    assert!(server.handle(&[]).is_none());
+    assert!(server.handle(&[0; 3]).is_none());
+    assert!(server.handle(&[0xff; 40]).is_none());
+}
+
+#[test]
+fn an_unknown_program_is_reported_unavailable() {
+    let (_dir, server) = fixture();
+    let reply = ask(&server, 999_999, 1, 0, vec![]);
+    assert_eq!(Reply::decode(&reply).unwrap().accept_status, rpc::accept::PROG_UNAVAIL);
+}
+
+#[test]
+fn a_wrong_program_version_names_the_version_we_serve() {
+    let (_dir, server) = fixture();
+    let reply = ask(&server, PROGRAM_NFS, 3, nfs_proc::NULL, vec![]);
+    let parsed = Reply::decode(&reply).unwrap();
+    assert_eq!(parsed.accept_status, rpc::accept::PROG_MISMATCH);
+    let mut reader = parsed.reader();
+    assert_eq!(reader.u32().unwrap(), VERSION_NFS);
+    assert_eq!(reader.u32().unwrap(), VERSION_NFS);
+}
+
+// ---------------------------------------------------------------- portmap
+
+#[test]
+fn portmap_reports_where_each_program_listens() {
+    let (_dir, server) = fixture();
+    for (program, expected) in [(PROGRAM_NFS, NFS_PORT), (PROGRAM_MOUNT, MOUNT_PORT)] {
+        let mut args = Writer::new();
+        args.u32(program).u32(2).u32(IPPROTO_UDP).u32(0);
+        let reply = ask(
+            &server,
+            PROGRAM_PORTMAP,
+            VERSION_PORTMAP,
+            portmap_proc::GETPORT,
+            args.into_bytes(),
+        );
+        assert_eq!(ok_reader(&reply).u32().unwrap(), u32::from(expected));
+    }
+}
+
+#[test]
+fn portmap_reports_zero_for_tcp_and_for_programs_we_do_not_serve() {
+    let (_dir, server) = fixture();
+    for (program, protocol) in [(PROGRAM_NFS, IPPROTO_TCP), (100_024, IPPROTO_UDP)] {
+        let mut args = Writer::new();
+        args.u32(program).u32(2).u32(protocol).u32(0);
+        let reply = ask(
+            &server,
+            PROGRAM_PORTMAP,
+            VERSION_PORTMAP,
+            portmap_proc::GETPORT,
+            args.into_bytes(),
+        );
+        assert_eq!(ok_reader(&reply).u32().unwrap(), 0, "program {program}");
+    }
+}
+
+#[test]
+fn rekordbox_answers_portmap_on_its_own_port() {
+    // Not 111. A client that assumes the standard port finds nothing, which is
+    // the single most confusing thing about talking to rekordbox over NFS.
+    assert_eq!(rbl_nfs::REKORDBOX_PORTMAP_PORT, 50_111);
+    assert_eq!(rbl_nfs::STANDARD_PORTMAP_PORT, 111);
+    assert_eq!(rbl_nfs::NFS_PORT, 2049);
+}
+
+// ---------------------------------------------------------------- mount
+
+#[test]
+fn the_export_list_is_a_terminated_linked_list() {
+    let (_dir, server) = fixture();
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORT, vec![]);
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), 1, "one entry follows");
+    assert_eq!(reader.utf16().unwrap(), "/");
+    assert_eq!(reader.u32().unwrap(), 0, "no groups");
+    assert_eq!(reader.u32().unwrap(), 0, "end of list");
+    assert_eq!(reader.remaining(), 0);
+}
+
+#[test]
+fn mounting_an_export_that_does_not_exist_says_so() {
+    let (_dir, server) = fixture();
+    let mut args = Writer::new();
+    args.utf16("/D/");
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::NOENT);
+}
+
+#[test]
+fn unmounting_succeeds_even_though_we_hold_no_state() {
+    let (_dir, server) = fixture();
+    for procedure in [mount_proc::UMNT, mount_proc::UMNTALL, mount_proc::NULL] {
+        let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, procedure, vec![]);
+        assert!(Reply::decode(&reply).unwrap().is_success());
+    }
+}
+
+// ---------------------------------------------------------------- NFS
+
+#[test]
+fn a_player_can_walk_from_the_mount_point_to_a_track() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    assert!(lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").is_ok());
+    assert!(lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").is_ok());
+}
+
+#[test]
+fn a_name_that_is_not_there_is_noent_not_a_guess() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    assert_eq!(lookup(&server, &root, "Nope").unwrap_err(), nfs_status::NOENT);
+    // Including one that exists somewhere else in the tree.
+    let contents = lookup(&server, &root, "Contents").unwrap();
+    assert_eq!(lookup(&server, &contents, "PIONEER").unwrap_err(), nfs_status::NOENT);
+}
+
+#[test]
+fn dot_dot_cannot_climb_out_of_the_export() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    // Up from the root is the root, however many times it is asked for.
+    let mut at = root;
+    for _ in 0..8 {
+        at = lookup(&server, &at, "..").unwrap();
+    }
+    assert_eq!(at, root);
+    // And a deep path that climbs too far lands back at the root, not outside.
+    let climbed = lookup_path(&server, &root, "Contents/ARTBAT/../../../../..").unwrap();
+    assert_eq!(climbed, root);
+}
+
+#[test]
+fn a_name_containing_a_separator_matches_nothing() {
+    // The lookup takes one component, so a whole path as a "name" must fail
+    // rather than being split and walked.
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    for name in ["Contents/ARTBAT", "/etc/passwd", "../../etc/passwd", "Contents\\ARTBAT"] {
+        assert_eq!(lookup(&server, &root, name).unwrap_err(), nfs_status::NOENT, "{name}");
+    }
+}
+
+#[test]
+fn looking_up_inside_a_file_is_notdir() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
+    assert_eq!(lookup(&server, &file, "anything").unwrap_err(), nfs_status::NOTDIR);
+}
+
+#[test]
+fn a_forged_handle_is_stale_not_a_node() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+
+    let mut forged = *root.as_bytes();
+    forged[3] = 5; // a plausible index, but the tag will not match
+    let handle = Handle::from_slice(&forged).unwrap();
+    let mut args = Writer::new();
+    args.opaque_fixed(handle.as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
+
+    // So is one whose trailing bytes were changed.
+    let mut tampered = *root.as_bytes();
+    tampered[HANDLE_LEN - 1] = 1;
+    let mut args = Writer::new();
+    args.opaque_fixed(Handle::from_slice(&tampered).unwrap().as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
+}
+
+#[test]
+fn attributes_describe_a_read_only_tree() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
+
+    let mut args = Writer::new();
+    args.opaque_fixed(file.as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    assert_eq!(reader.u32().unwrap(), 1, "regular file");
+    assert_eq!(reader.u32().unwrap(), 0o100_444, "no write bit anywhere");
+    assert_eq!(reader.u32().unwrap(), 1, "nlink");
+    assert_eq!(reader.u32().unwrap(), 0, "uid");
+    assert_eq!(reader.u32().unwrap(), 0, "gid");
+    assert_eq!(reader.u32().unwrap(), 20_000, "size");
+
+    // A directory reports the directory type and mode.
+    let dir = lookup(&server, &root, "Contents").unwrap();
+    let mut args = Writer::new();
+    args.opaque_fixed(dir.as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    assert_eq!(reader.u32().unwrap(), 2, "directory");
+    assert_eq!(reader.u32().unwrap(), 0o040_555);
+}
+
+/// Reads a whole file the way a player does: 8 KB at a time until it is short.
+fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let mut args = Writer::new();
+        args.opaque_fixed(handle.as_bytes())
+            .u32(u32::try_from(out.len()).unwrap())
+            .u32(u32::try_from(MAX_READ).unwrap())
+            .u32(0);
+        let reply = ask(server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+        let mut reader = ok_reader(&reply);
+        assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+        for _ in 0..17 {
+            reader.u32().unwrap(); // the attributes
+        }
+        let chunk = reader.opaque().unwrap();
+        if chunk.is_empty() {
+            return out;
+        }
+        out.extend_from_slice(chunk);
+    }
+}
+
+#[test]
+fn a_file_reads_back_byte_for_byte() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
+    let data = read_whole(&server, &file);
+    assert_eq!(data.len(), 20_000);
+    assert!(data.iter().all(|b| *b == 7));
+
+    let small = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
+    assert_eq!(read_whole(&server, &small), b"hello");
+}
+
+#[test]
+fn a_read_is_capped_at_the_protocol_limit_however_much_is_asked_for() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
+    let mut args = Writer::new();
+    args.opaque_fixed(file.as_bytes()).u32(0).u32(u32::MAX).u32(u32::MAX);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    for _ in 0..17 {
+        reader.u32().unwrap();
+    }
+    assert_eq!(reader.opaque().unwrap().len(), MAX_READ);
+}
+
+#[test]
+fn reading_past_the_end_returns_nothing_rather_than_failing() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
+    let mut args = Writer::new();
+    args.opaque_fixed(file.as_bytes()).u32(1_000_000).u32(4096).u32(0);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    for _ in 0..17 {
+        reader.u32().unwrap();
+    }
+    assert!(reader.opaque().unwrap().is_empty());
+}
+
+#[test]
+fn reading_a_directory_is_isdir() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes()).u32(0).u32(4096).u32(0);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::ISDIR);
+}
+
+/// Lists a directory, following the cookie until the server reports EOF.
+fn list(server: &Server, handle: &Handle, count: u32) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut cookie = 0_u32;
+    for _ in 0..100 {
+        let mut args = Writer::new();
+        args.opaque_fixed(handle.as_bytes()).u32(cookie).u32(count);
+        let reply = ask(server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READDIR, args.into_bytes());
+        let mut reader = ok_reader(&reply);
+        assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+        while reader.u32().unwrap() == 1 {
+            reader.u32().unwrap(); // fileid
+            names.push(reader.utf16().unwrap());
+            cookie = reader.u32().unwrap();
+        }
+        if reader.u32().unwrap() == 1 {
+            return names;
+        }
+    }
+    panic!("listing never reached the end");
+}
+
+#[test]
+fn a_directory_lists_its_children() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    assert_eq!(list(&server, &root, 8192), vec!["Contents", "PIONEER"]);
+
+    let pioneer = lookup(&server, &root, "PIONEER").unwrap();
+    assert_eq!(list(&server, &pioneer, 8192), vec!["rekordbox", "USBANLZ"]);
+
+    let empty = lookup(&server, &pioneer, "USBANLZ").unwrap();
+    assert!(list(&server, &empty, 8192).is_empty());
+}
+
+#[test]
+fn a_listing_that_does_not_fit_resumes_from_its_cookie() {
+    let mut vfs = Vfs::new("/");
+    for i in 0..200 {
+        vfs.add_file(&format!("Contents/track {i:03}.mp3"), "/dev/null", 0, 0);
+    }
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    let server = Server::new(exports, NFS_PORT, MOUNT_PORT);
+
+    let root = mount_root(&server);
+    let contents = lookup(&server, &root, "Contents").unwrap();
+    // A small budget forces many round trips; the result must still be whole,
+    // in order, and free of duplicates.
+    let names = list(&server, &contents, 512);
+    assert_eq!(names.len(), 200);
+    assert_eq!(names.first().map(String::as_str), Some("track 000.mp3"));
+    assert_eq!(names.last().map(String::as_str), Some("track 199.mp3"));
+    assert_eq!(names, list(&server, &contents, 8192));
+}
+
+#[test]
+fn listing_a_file_is_notdir() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
+    let mut args = Writer::new();
+    args.opaque_fixed(file.as_bytes()).u32(0).u32(4096);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READDIR, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::NOTDIR);
+}
+
+#[test]
+fn every_mutating_procedure_is_refused_as_read_only() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes());
+    let args = args.into_bytes();
+
+    for procedure in [
+        nfs_proc::SETATTR,
+        nfs_proc::WRITE,
+        nfs_proc::CREATE,
+        nfs_proc::REMOVE,
+        nfs_proc::RENAME,
+        nfs_proc::LINK,
+        nfs_proc::SYMLINK,
+        nfs_proc::MKDIR,
+        nfs_proc::RMDIR,
+    ] {
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, procedure, args.clone());
+        assert_eq!(
+            ok_reader(&reply).u32().unwrap(),
+            nfs_status::ROFS,
+            "procedure {procedure} must be refused, not ignored"
+        );
+    }
+}
+
+#[test]
+fn statfs_reports_no_free_space_on_a_read_only_export() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::STATFS, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    assert_eq!(reader.u32().unwrap(), u32::try_from(MAX_READ).unwrap(), "tsize");
+    reader.u32().unwrap(); // bsize
+    reader.u32().unwrap(); // blocks
+    assert_eq!(reader.u32().unwrap(), 0, "bfree");
+    assert_eq!(reader.u32().unwrap(), 0, "bavail");
+}
+
+#[test]
+fn a_truncated_request_is_answered_rather_than_dropped() {
+    // Silence is what a client times out on, so a call we can address must
+    // always get a reply, even when its arguments are unusable.
+    let (_dir, server) = fixture();
+    for procedure in [nfs_proc::GETATTR, nfs_proc::LOOKUP, nfs_proc::READ, nfs_proc::READDIR] {
+        for len in [0, 4, 16, 31] {
+            let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, procedure, vec![0; len]);
+            let parsed = Reply::decode(&reply).unwrap();
+            assert_eq!(parsed.accept_status, rpc::accept::GARBAGE_ARGS, "{procedure}/{len}");
+        }
+    }
+}
+
+#[test]
+fn handles_survive_a_rebuild_of_the_same_tree() {
+    // A player caches handles across reconnects. Rebuilding the same export
+    // must hand back the same bytes, or every cached handle goes stale.
+    let build = || {
+        let mut vfs = Vfs::new("/");
+        vfs.add_file("Contents/a.mp3", "/dev/null", 1, 0);
+        vfs.add_file("Contents/b.mp3", "/dev/null", 1, 0);
+        vfs
+    };
+    let (first, second) = (build(), build());
+    for index in 0..first.len() {
+        assert_eq!(first.handle(index), second.handle(index), "node {index}");
+    }
+}
+
+#[test]
+fn a_handle_from_another_export_is_not_accepted() {
+    let mut other = Vfs::new("/B/");
+    other.add_file("Contents/x.mp3", "/dev/null", 1, 0);
+    let foreign = other.handle(1).unwrap();
+
+    let (_dir, server) = fixture();
+    let mut args = Writer::new();
+    args.opaque_fixed(foreign.as_bytes());
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
+}
+
+// ---------------------------------------------------------------- paths
+
+#[test]
+fn an_absolute_path_splits_into_the_export_and_the_path_within_it() {
+    assert_eq!(
+        split_export("/Users/chris/Music/track.mp3"),
+        Some(("/".into(), "Users/chris/Music/track.mp3".into()))
+    );
+    assert_eq!(
+        split_export("C:\\Users\\chris\\Music\\track.mp3"),
+        Some(("/C/".into(), "Users/chris/Music/track.mp3".into()))
+    );
+    assert_eq!(
+        split_export("d:/Music/track.mp3"),
+        Some(("/D/".into(), "Music/track.mp3".into()))
+    );
+    assert_eq!(split_export("relative/path.mp3"), None);
+}
+
+#[test]
+fn building_the_tree_ignores_traversal_in_a_path() {
+    let mut vfs = Vfs::new("/");
+    vfs.add_file("../../etc/passwd", "/dev/null", 1, 0);
+    // The components that could climb out are dropped, not honoured.
+    assert!(vfs.resolve("etc/passwd").is_some());
+    assert_eq!(vfs.resolve(".."), Some(vfs.root()));
+}
