@@ -91,6 +91,7 @@ pnpm test           # vitest
 pnpm e2e            # playwright (chromium + webkit)
 pnpm tokens         # regenerate CSS tokens from measurements
 pnpm measure        # re-measure the reference captures
+./scripts/build-icons.sh   # regenerate app icons from design/icons/app-icon.svg
 cargo test --workspace
 cargo clippy --workspace --all-targets
 
