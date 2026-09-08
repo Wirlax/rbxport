@@ -170,6 +170,29 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   const findNode = (id: string) => tree.find((n) => n.id === id);
 
+  /**
+   * Whether the library has "finished loading".
+   *
+   * The mock answers instantly, which is exactly why the real app could sit on
+   * "Loading…" forever without a test noticing: the backend loads on its own
+   * thread and the first request can arrive before there is anything to answer
+   * with. `?slow` holds the library back until `window.__libraryReady()` is
+   * called, so that race can be driven deliberately.
+   */
+  let ready =
+    typeof location === "undefined" || !new URLSearchParams(location.search).has("slow");
+  const readyListeners = new Set<() => void>();
+  if (typeof window !== "undefined") {
+    (window as unknown as { __libraryReady: () => void }).__libraryReady = () => {
+      ready = true;
+      for (const listener of readyListeners) listener();
+    };
+  }
+
+  /** What the backend says before the library is up. */
+  const notReady = () =>
+    Promise.reject(new Error("The library has not finished loading yet."));
+
   // A browser cannot see a real volume, so the mock carries one. It is
   // mutable: exporting to it changes what a later `listDevices` reports, which
   // is what makes the difference between a first export and a sync visible.
@@ -260,19 +283,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   return {
     librarySummary: () =>
-      wait<LibrarySummary>({
-        trackCount,
-        playlistCount: tree.filter((n) => n.kind === "playlist").length,
-        readOnly: true,
-        dbVersion: null,
-      }),
+      ready
+        ? wait<LibrarySummary>({
+            trackCount,
+            playlistCount: tree.filter((n) => n.kind === "playlist").length,
+            readOnly: true,
+            dbVersion: null,
+          })
+        : notReady(),
 
     // A copy, like the real backend: handing out the internal array lets a
     // caller mutate the backend's own state, and makes a list captured before
     // an edit appear to have changed by itself.
-    playlistTree: () => wait(tree.map((node) => ({ ...node }))),
+    playlistTree: () => (ready ? wait(tree.map((node) => ({ ...node }))) : notReady()),
 
     openView: (spec: ViewSpec) => {
+      // Every real command goes through `state.library()?`, so none of them
+      // answer before the library is up. A mock that served rows while the
+      // summary was still failing would not be standing in for anything.
+      if (!ready) return notReady();
       // Playlists show a deterministic slice so the mock stays stable across runs.
       let candidates: number[];
       if (spec.source.kind === "playlist") {
@@ -407,6 +436,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
+
+    onLibraryReady: (listener) => {
+      readyListeners.add(listener);
+      return () => readyListeners.delete(listener);
+    },
+    onLibraryError: () => () => undefined,
 
     // A browser has no native menu bar. The mock exposes the listener so a
     // test can fire an item the way the shell would; this is the mock, which

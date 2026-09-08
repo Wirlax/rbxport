@@ -809,3 +809,24 @@ test("the sub-browser keeps its own selection, separate from the main one", asyn
   await sub.getByRole("button", { name: "Close" }).click();
   await expect(sub).toBeHidden();
 });
+
+test("a library that is still loading arrives when it is ready", async ({ page }) => {
+  // The backend loads on its own thread, so the first request can easily
+  // arrive before there is anything to answer with. `?slow` holds the mock's
+  // library back until it is released, which is that race made deliberate.
+  await page.goto("/?slow=1");
+
+  const status = page.getByRole("contentinfo");
+  await expect(status).toContainText("Loading the library…");
+
+  // The mock is built on the first backend call, so the release hook appears
+  // a beat after the page does.
+  await page.waitForFunction(() => "__libraryReady" in window);
+  await page.evaluate(() => (window as unknown as { __libraryReady: () => void }).__libraryReady());
+
+  // Without a retry on the ready event this stays on "Loading…" forever, which
+  // is what a 38,681-track collection in a debug build actually did.
+  await expect(status).toContainText("Tracks");
+  await expect(page.locator('[role="row"]').first()).toBeVisible();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+});

@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import type { Backend, Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { TrackTable } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
@@ -55,6 +55,9 @@ export function App() {
   const [infoOpen, setInfoOpen] = useState(false);
   // Also closed by default: browseSetting.xml records `SubBrowse open="0"`.
   const [subOpen, setSubOpen] = useState(false);
+  // Why the library is not there, when it is not. Shown instead of "Loading…",
+  // which is a lie once the load has failed.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   // One piece of state, not two: updating `descending` from inside a `setSort`
@@ -112,21 +115,60 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let stopReady: (() => void) | undefined;
+    let stopError: (() => void) | undefined;
+
+    /** One attempt at the first load. False means the library is not up yet. */
+    const attempt = async (backend: Backend) => {
+      try {
+        // Devices are deliberately not in here. A stick that cannot be read
+        // must not stop the collection from appearing, and it used to: this
+        // was one `Promise.all`, so any of the three failing left the window
+        // on "Loading…" with nothing said.
+        const [nodes, info] = await Promise.all([
+          backend.playlistTree(),
+          backend.librarySummary(),
+        ]);
+        if (cancelled) return true;
+        setTree(nodes);
+        setSummary(info);
+        setLoadError(null);
+        setSelectedNode(nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
+        void backend
+          .listDevices()
+          .then((volumes) => {
+            if (!cancelled) setDevices(volumes);
+          })
+          .catch(() => {
+            // Nothing to say: no devices is the normal case.
+          });
+        return true;
+      } catch {
+        // The usual reason is that the backend is still reading the library,
+        // which the ready event below will tell us about.
+        return false;
+      }
+    };
+
     void (async () => {
       const backend = await getBackend();
-      const [nodes, info, volumes] = await Promise.all([
-        backend.playlistTree(),
-        backend.librarySummary(),
-        backend.listDevices(),
-      ]);
       if (cancelled) return;
-      setTree(nodes);
-      setSummary(info);
-      setDevices(volumes);
-      setSelectedNode(nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
+      // Subscribed before the first attempt, not after. The library can become
+      // ready in the gap between a failed attempt and a later subscription,
+      // and that gap is exactly where the window used to get stuck.
+      stopReady = backend.onLibraryReady(() => {
+        void attempt(backend);
+      });
+      stopError = backend.onLibraryError((message) => {
+        if (!cancelled) setLoadError(message);
+      });
+      await attempt(backend);
     })();
+
     return () => {
       cancelled = true;
+      stopReady?.();
+      stopError?.();
     };
   }, []);
 
@@ -504,7 +546,9 @@ export function App() {
           analysis.running
             ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
               (analysis.state.current ? ` — ${analysis.state.current.title}` : "")
-            : (dropNote ?? (summary ? `${summary.trackCount} Tracks` : "Loading…"))
+            : (dropNote ??
+              loadError ??
+              (summary ? `${summary.trackCount} Tracks` : "Loading the library…"))
         }
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
         analysisFailures={analysis.state.failed.length}

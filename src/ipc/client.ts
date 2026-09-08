@@ -13,6 +13,27 @@ import type {
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/**
+ * Subscribes to a backend event, returning its own unsubscribe.
+ *
+ * The event module is imported lazily, so a caller can unsubscribe before the
+ * import lands; that case has to be handled or the listener outlives its
+ * component.
+ */
+function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+  let live = true;
+  let stop: (() => void) | undefined;
+  void import("@tauri-apps/api/event").then(async ({ listen }) => {
+    const unlisten = await listen<T>(event, (e) => listener(e.payload));
+    if (live) stop = unlisten;
+    else unlisten();
+  });
+  return () => {
+    live = false;
+    stop?.();
+  };
+}
+
 async function realBackend(): Promise<Backend> {
   const { invoke } = await import("@tauri-apps/api/core");
   return {
@@ -67,20 +88,9 @@ async function realBackend(): Promise<Backend> {
       });
     },
     listDevices: () => invoke<Device[]>("list_devices"),
-    onMenu: (listener) => {
-      let live = true;
-      let stop: (() => void) | undefined;
-      void import("@tauri-apps/api/event").then(async ({ listen }) => {
-        const unlisten = await listen<string>("menu", (event) => listener(event.payload));
-        // The caller may have unsubscribed while the import was in flight.
-        if (live) stop = unlisten;
-        else unlisten();
-      });
-      return () => {
-        live = false;
-        stop?.();
-      };
-    },
+    onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
+    onLibraryError: (listener) => subscribe<string>("library:error", listener),
+    onMenu: (listener) => subscribe<string>("menu", listener),
     startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
     stopLinkListening: () => invoke<void>("stop_link_listening"),
     onLinkPeers: (listener) => {

@@ -120,6 +120,21 @@ export interface Backend {
   onLibraryChanged(listener: (generation: number) => void): () => void;
 
   /**
+   * Fires when the backend has finished loading the library.
+   *
+   * The load runs on its own thread and takes as long as the collection is
+   * big, so the first thing the interface asks for can easily arrive before
+   * there is anything to answer with. Without this the window sat on
+   * "Loading…" forever, because the failed first attempt was never retried.
+   *
+   * Returns an unsubscribe function.
+   */
+  onLibraryReady(listener: () => void): () => void;
+
+  /** Fires when the library could not be loaded at all, with the reason. */
+  onLibraryError(listener: (message: string) => void): () => void;
+
+  /**
    * Tracks whose file has gone. The count is exact; the list is a first page,
    * because a library can lose thousands when a drive is unplugged and a list
    * that long is neither useful nor small enough for the IPC cap.
