@@ -1,0 +1,19 @@
+[package]
+name = "rbl-fakecdj"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A stand-in CDJ that browses and fetches over the link protocols, for testing."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-dbserver = { path = "../rbl-dbserver" }
+rbl-nfs = { path = "../rbl-nfs" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
