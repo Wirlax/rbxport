@@ -208,13 +208,29 @@
 }
 .artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+/* The band is not one waveform stretched to fill it. In the capture it is the
+   vocal strip, then a 30pt waveform, then the position bar, with the rest of
+   the 49pt left dark: giving the waveform the whole band drew it half again as
+   tall as rekordbox does and flattened every quiet passage into a slab. */
 .overviewStack {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-rows: var(--s-player-vocal-h) 1fr;
-  gap: 3px;
+  /* Rows, top to bottom: vocal strip, 1pt clear, waveform, 3.5pt clear,
+     position bar, and the rest dark. Placed by index rather than by margin —
+     a margin comes out of its own grid track, which cost the waveform a
+     point of height. */
+  grid-template-rows:
+    var(--s-player-vocal-h)
+    1px
+    var(--s-player-overview-wave-h)
+    3.5px
+    var(--s-player-scrub-h)
+    1fr;
 }
+.overviewStack > .vocal { grid-row: 1; }
+.overviewStack > .overview { grid-row: 3; }
+.overviewStack > .scrub { grid-row: 5; }
 
 .vocal { min-width: 0; overflow: hidden; }
 .vocal canvas { width: 100%; height: 100%; display: block; }
@@ -228,6 +244,16 @@
   cursor: pointer;
 }
 .overview canvas { width: 100%; height: 100%; display: block; }
+
+/* Hollow while unplayed, solid behind the playhead — the capture has the bar
+   at (200,200,200) left of the head and only its two edges to the right. */
+.scrub {
+  box-sizing: border-box;
+  border-top: 1px solid var(--c-scrub);
+  border-bottom: 1px solid var(--c-scrub);
+  min-width: 0;
+}
+.scrubFill { height: 100%; background: var(--c-scrub-played); }
 
 /* ------------------------------------------------------------ the phrase */
 

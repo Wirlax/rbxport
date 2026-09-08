@@ -18,6 +18,8 @@
   --c-wave-mid: #B26505; /* detail view */
   --c-wave-mid-ovw: #FF8C00; /* overview view */
   --c-wave-high: #F5EAD6;
+  --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
+  --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
   --c-cue-e: #11B176;
   --c-cue-f: #FF8C00;
   --c-cue-g: #305AFF;
@@ -65,8 +67,10 @@
   --s-player-gutter-h: 3px; /* capture: the pad bar ends at 335pt and the browser starts at 338pt */
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
   --s-player-right-w: 209px; /* measured from a 2x capture of rekordbox 7.2.11 running; memory/hotcue panel x 1711..1920pt */
-  --s-player-title-h: 22px; /* measured from a 2x capture of rekordbox 7.2.11 running; title row y 56..78pt */
-  --s-player-overview-h: 42px; /* measured from a 2x capture of rekordbox 7.2.11 running; artwork + overview band y 78..120pt */
+  --s-player-title-h: 21px; /* docs/screenshots at 2x: the player spans y 190..746 and the title row y 190..232 */
+  --s-player-overview-h: 49px; /* docs/screenshots at 2x: artwork + vocal + overview + position bar, y 232..330 */
+  --s-player-overview-wave-h: 30px; /* docs/screenshots at 2x: the overview waveform paints y 244..303, its baseline 303 */
+  --s-player-scrub-h: 3px; /* docs/screenshots at 2x: the position bar under the overview, y 310..315 */
   --s-player-vocal-h: 5px; /* measured from a 2x capture of rekordbox 7.2.11 running; vocal strip above the overview */
   --s-player-phrase-h: 14px; /* measured from a 2x capture of rekordbox 7.2.11 running; phrase bar y 127..141pt */
   --s-player-detail-h: 146px; /* measured from a 2x capture of rekordbox 7.2.11 running; detail waveform y 141..287pt */

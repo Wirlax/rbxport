@@ -169,7 +169,8 @@ const JUMPS = [
  *
  * Measured: rekordbox's detail waveform paints y 374..647 inside a band that
  * runs 358..650. The strip above carries the bar count and the heads of the
- * cue markers, which is why it is the larger of the two.
+ * cue markers, which is why it is the larger of the two. The overview does not
+ * take it: its own grid row is already the 30pt the capture paints.
  */
 const WAVE_INSET = { top: 11, bottom: 2 };
 
@@ -455,11 +456,14 @@ export const Player = memo(function Player({ track }: PlayerProps) {
                   width={overview.width}
                   height={overview.height}
                   half
-                  inset={WAVE_INSET}
                 />
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} />
               <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
+            </div>
+            {/* How far through the track the head is, under the overview. */}
+            <div className={styles.scrub} aria-hidden>
+              <div className={styles.scrubFill} style={{ width: `${progress * 100}%` }} />
             </div>
           </div>
         </div>

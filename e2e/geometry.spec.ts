@@ -122,6 +122,19 @@ test("the player is laid out the way the capture measures it", async ({ page }) 
   expect(tops).toEqual([...tops].sort((a, b) => a - b));
 });
 
+test("the overview waveform is the measured height, not the whole band", async ({ page }) => {
+  // The capture has a 49pt band holding a 5pt vocal strip, a 30pt waveform and
+  // a 3pt position bar. Stretching the waveform over the whole band drew it
+  // half again as tall as rekordbox does.
+  const wave = await page.getByTestId("player-overview").boundingBox();
+  expect(wave?.height).toBeCloseTo(await token(page, "--s-player-overview-wave-h"), 1);
+
+  const vocal = await page.getByTestId("player-vocal").boundingBox();
+  const phrase = await page.getByTestId("player-phrase").boundingBox();
+  const band = (phrase?.y ?? 0) - (vocal?.y ?? 0);
+  expect(band).toBeCloseTo(await token(page, "--s-player-overview-h"), 0);
+});
+
 test("a measured gap separates the player from the browser", async ({ page }) => {
   // The capture has the pad bar ending at 335pt and the track list starting at
   // 338pt, so three points of black sit between them. With the player and the
