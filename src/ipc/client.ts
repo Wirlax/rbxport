@@ -5,7 +5,7 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Beat, Cue, Device, ExportReport, Phrase, ImportReport, LibrarySummary, LinkPeer,
+  AnalysisResult, Backend, Cue, Device, ExportReport, Phrase, ImportReport, LibrarySummary, LinkPeer,
   LinkStatus, MissingTracks, RowDto,
   TreeNode, ViewHandle,
 } from "./types";
@@ -54,8 +54,16 @@ async function realBackend(): Promise<Backend> {
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     analyseTrack: (trackId) => invoke<AnalysisResult>("analyse_track", { trackId }),
-    trackBeats: (trackId, fromMs, toMs) =>
-      invoke<Beat[]>("track_beats", { track: trackId, fromMs, toMs }),
+    trackBeats: async (trackId) => {
+      // Raw bytes rather than a JSON array of objects: a long mix has tens of
+      // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an
+      // order of magnitude more to send and to parse.
+      const bytes = await invoke<ArrayBuffer | number[] | Uint8Array>("track_beats", {
+        track: trackId,
+      });
+      if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+      return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+    },
     trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
     trackPhrases: (trackId) => invoke<Phrase[]>("track_phrases", { track: trackId }),
     trackVocals: async (trackId) => {

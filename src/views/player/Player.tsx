@@ -12,9 +12,9 @@
  * backend, rather than an unfinished panel. Controls with nothing behind them
  * yet are drawn the same way, for the same reason.
  */
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Beat, Cue, Phrase, RowDto } from "@/ipc/types";
+import type { Cue, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { artworkUrl } from "@/ipc/artwork";
@@ -22,14 +22,18 @@ import { CutIcon, LockIcon, MetronomeIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
+  NO_BEATS,
   ZOOM_STEPS,
+  beatsIn,
   cuesFor,
   detailSpan,
   headPercent,
+  parseBeatGrid,
   phraseSpans,
   memoryTime,
   splitTime,
   windowAround,
+  type BeatGrid as BeatGridData,
   type CuePanel,
   type PadMode,
 } from "@/lib/player";
@@ -96,7 +100,7 @@ const CueMarkers = memo(function CueMarkers({
 const BeatGrid = memo(function BeatGrid({
   beats, totalMs, window,
 }: {
-  beats: readonly Beat[];
+  beats: readonly { timeMs: number; downbeat: boolean }[];
   totalMs: number;
   window: { from: number; to: number };
 }) {
@@ -251,7 +255,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   const [overviewRef, overview] = useElementSize<HTMLDivElement>();
   const [detailRef, detail] = useElementSize<HTMLDivElement>();
   const [cues, setCues] = useState<Cue[]>([]);
-  const [beats, setBeats] = useState<Beat[]>([]);
+  const [grid, setGrid] = useState<BeatGridData>(NO_BEATS);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [bars, setBars] = useState<number>(DETAIL_BARS);
   const [padMode, setPadMode] = useState<PadMode>("cue");
@@ -288,34 +292,37 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   // Bars rather than a fraction: twelve bars is twelve bars whether the track
   // is three minutes or ninety.
   const span = detailSpan(bars, track?.bpmX100 ?? 0, total);
-  const window = windowAround(progress, span);
+  // Memoised, not rebuilt each render: `BeatGrid` and `CueMarkers` are
+  // `memo()` components taking this object, and a fresh one every render means
+  // neither ever hits its memo.
+  const window = useMemo(() => windowAround(progress, span), [progress, span]);
 
-  // The grid for the detail window only, refetched as the window moves. A
-  // whole track's beats would blow the IPC cap on a long mix. Quantised, so
-  // the refetch happens as the window moves on rather than on every
-  // `timeupdate` — of which a four-minute track fires several hundred.
-  const fromStep = Math.round(window.from * 200);
-  const toStep = Math.round(window.to * 200);
-
+  // The whole grid, once per track, as raw bytes. Fetching a window at a time
+  // still re-read and re-parsed the entire analysis file on every fetch —
+  // several times a second while playing — which is the expensive part however
+  // small the slice that comes back.
   useEffect(() => {
-    if (!track || !track.analysed || total <= 0) {
-      setBeats([]);
+    if (!track || !track.analysed) {
+      setGrid(NO_BEATS);
       return;
     }
     let live = true;
     void (async () => {
       const backend = await getBackend();
-      const found = await backend.trackBeats(
-        track.id,
-        Math.floor((fromStep / 200) * total * 1000),
-        Math.ceil((toStep / 200) * total * 1000),
-      );
-      if (live) setBeats(found);
+      const bytes = await backend.trackBeats(track.id);
+      if (live) setGrid(parseBeatGrid(bytes));
     })();
     return () => {
       live = false;
     };
-  }, [track, total, fromStep, toStep]);
+  }, [track]);
+
+  // The beats the detail window actually draws, found by binary search rather
+  // than by filtering the whole grid on every tick.
+  const beats = useMemo(
+    () => (total > 0 ? beatsIn(grid, window.from * total * 1000, window.to * total * 1000) : []),
+    [grid, window, total],
+  );
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {

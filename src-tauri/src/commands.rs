@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    BeatDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
+    CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -22,9 +22,10 @@ use crate::state::{rows_to_dto, spec_from_wire, AppState};
 /// keeps a response inside the 64 KB cap.
 const MAX_ROWS: u32 = 128;
 
-/// Beats returned for one window. A four-minute track at 128 BPM has about
-/// 500; this is generous for any window worth drawing and bounds the response.
-const MAX_BEATS: usize = 2_000;
+/// Beats returned for one track. A four-minute track at 128 BPM has about 500
+/// and a three-hour mix around 23,000; this bounds the response without
+/// truncating any real grid.
+const MAX_BEATS: usize = 65_536;
 
 /// Phrases returned for one track. The longest song structure in the reference
 /// library has 457 [OBS] — a two-hour DJ mix — and every ordinary track is
@@ -615,18 +616,23 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> Vec<(String, Vec<u8
     out
 }
 
-/// A track's beat grid, as milliseconds and downbeat flags.
+/// A track's whole beat grid, as raw bytes.
 ///
-/// Read from the `PQTZ` tag of the track's analysis file. Bounded: a long mix
-/// has tens of thousands of beats and the whole grid would blow the IPC cap,
-/// so only the window asked for is returned.
+/// Read from the `PQTZ` tag of the track's analysis file. Five bytes a beat —
+/// a little-endian `u32` of milliseconds and the beat's number in its bar —
+/// so a four-minute track costs about 2.5 KB and one fetch per track replaces
+/// a fetch per window. Windowing it meant re-reading and re-parsing the whole
+/// analysis file every time the playhead moved on, which is the expensive part
+/// whatever slice comes back.
+///
+/// The beat number rather than a downbeat flag: it is what the tag holds, it
+/// is the same five bytes, and bar-aligned sync needs the position in the bar
+/// rather than only whether the bar started.
 #[tauri::command]
 pub async fn track_beats(
     state: State<'_, Arc<AppState>>,
     track: String,
-    from_ms: u32,
-    to_ms: u32,
-) -> AppResult<Vec<BeatDto>> {
+) -> AppResult<tauri::ipc::Response> {
     let library = state.library()?;
     let share = state.share_root();
     blocking("track_beats", move || {
@@ -639,29 +645,25 @@ pub async fn track_beats(
         let Ok(bytes) = std::fs::read(&path) else { return Ok(Vec::new()) };
         let Ok(file) = rbl_anlz::parse(&bytes) else { return Ok(Vec::new()) };
 
-        let mut out = Vec::new();
+        let mut out: Vec<u8> = Vec::new();
         for section in &file.sections {
             let Some(beats) = section.as_beat_grid() else { continue };
-            for beat in beats {
-                if beat.time_ms < from_ms || beat.time_ms > to_ms {
-                    continue;
-                }
-                out.push(BeatDto {
-                    time_ms: beat.time_ms,
-                    // 1 is the downbeat; the rest are ordinary beats.
-                    downbeat: beat.beat_number == 1,
-                });
-                // A window this dense is a drawing problem, not a data one.
-                if out.len() >= MAX_BEATS {
-                    return Ok(out);
-                }
+            out.reserve(beats.len().min(MAX_BEATS) * BEAT_BYTES);
+            for beat in beats.iter().take(MAX_BEATS) {
+                out.extend_from_slice(&beat.time_ms.to_le_bytes());
+                // 1 is the downbeat; the tag counts 1..4 within the bar.
+                out.push(u8::try_from(beat.beat_number).unwrap_or(0));
             }
             break;
         }
         Ok(out)
     })
     .await
+    .map(tauri::ipc::Response::new)
 }
+
+/// Bytes one beat takes in that encoding: `u32` milliseconds, then its number.
+const BEAT_BYTES: usize = 5;
 
 /// A track's cue points.
 ///

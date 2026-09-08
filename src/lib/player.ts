@@ -188,3 +188,86 @@ export function cuesFor<T extends { memory: boolean; positionMs: number }>(
   const want = panel === "memory";
   return cues.filter((cue) => cue.memory === want).sort((a, b) => a.positionMs - b.positionMs);
 }
+
+/**
+ * A track's beat grid, held as typed arrays rather than objects.
+ *
+ * Fetched whole, once per track: windowing it meant re-reading and re-parsing
+ * the analysis file every time the playhead moved on. A three-hour mix is
+ * about 23,000 beats, which is 23,000 small objects if this were a list and
+ * 115 KB of typed array if it is not.
+ */
+export interface BeatGrid {
+  /** Each beat's position in milliseconds, ascending. */
+  times: Uint32Array;
+  /** Each beat's number within its bar, 1 to 4. */
+  numbers: Uint8Array;
+}
+
+/** Bytes one beat takes on the wire: a little-endian `u32`, then its number. */
+const BEAT_BYTES = 5;
+
+/** An empty grid, so a track without analysis is still a `BeatGrid`. */
+export const NO_BEATS: BeatGrid = { times: new Uint32Array(), numbers: new Uint8Array() };
+
+/**
+ * Reads the backend's beat bytes.
+ *
+ * A trailing partial record is dropped rather than read past the end: the
+ * backend never writes one, and a truncated read should draw fewer beats
+ * rather than a beat at a garbage position.
+ */
+export function parseBeatGrid(bytes: Uint8Array): BeatGrid {
+  const count = Math.floor(bytes.length / BEAT_BYTES);
+  if (count === 0) return NO_BEATS;
+  const times = new Uint32Array(count);
+  const numbers = new Uint8Array(count);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < count; i++) {
+    times[i] = view.getUint32(i * BEAT_BYTES, true);
+    numbers[i] = view.getUint8(i * BEAT_BYTES + 4);
+  }
+  return { times, numbers };
+}
+
+/**
+ * The most beats one window draws.
+ *
+ * The widest zoom is 64 bars, so 256 beats; this is generous for that and
+ * stops a nonsense window from asking for thousands of spans.
+ */
+const MAX_DRAWN = 1024;
+
+/** The index of the first beat at or after `ms`. */
+function lowerBound(times: Uint32Array, ms: number): number {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((times[mid] ?? 0) < ms) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * The beats inside a window, as the grid component draws them.
+ *
+ * A binary search rather than a filter over the whole grid: this runs on every
+ * tick of the playhead, and scanning 23,000 beats to draw forty-eight of them
+ * is the sort of thing that shows up as a dropped frame.
+ */
+export function beatsIn(
+  grid: BeatGrid,
+  fromMs: number,
+  toMs: number,
+): { timeMs: number; downbeat: boolean }[] {
+  const out: { timeMs: number; downbeat: boolean }[] = [];
+  if (toMs < fromMs) return out;
+  for (let i = lowerBound(grid.times, fromMs); i < grid.times.length; i++) {
+    const timeMs = grid.times[i] ?? 0;
+    if (timeMs > toMs || out.length >= MAX_DRAWN) break;
+    out.push({ timeMs, downbeat: grid.numbers[i] === 1 });
+  }
+  return out;
+}

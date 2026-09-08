@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BEATS_PER_BAR,
   DETAIL_BARS,
+  beatsIn,
   detailSpan,
   headPercent,
   phraseKind,
@@ -10,6 +11,7 @@ import {
   splitTime,
   memoryTime,
   cuesFor,
+  parseBeatGrid,
   windowAround,
 } from "./player";
 
@@ -226,5 +228,83 @@ describe("cuesFor", () => {
     const before = [...cues];
     cuesFor(cues, "memory");
     expect(cues).toEqual(before);
+  });
+});
+
+describe("parseBeatGrid", () => {
+  /** The backend's encoding: a little-endian `u32` of ms, then the beat's number. */
+  const encode = (beats: readonly [number, number][]): Uint8Array => {
+    const bytes = new Uint8Array(beats.length * 5);
+    const view = new DataView(bytes.buffer);
+    beats.forEach(([ms, number], i) => {
+      view.setUint32(i * 5, ms, true);
+      view.setUint8(i * 5 + 4, number);
+    });
+    return bytes;
+  };
+
+  it("reads the five-byte records the backend writes", () => {
+    const grid = parseBeatGrid(encode([[0, 1], [469, 2], [938, 3], [1407, 4]]));
+    expect(Array.from(grid.times)).toEqual([0, 469, 938, 1407]);
+    expect(Array.from(grid.numbers)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("holds a whole track without turning it into objects", () => {
+    // A three-hour mix is about 23,000 beats — a list of objects here is what
+    // the windowed fetch existed to avoid.
+    const beats: [number, number][] = Array.from({ length: 23_000 }, (_, i) => [i * 469, (i % 4) + 1]);
+    const grid = parseBeatGrid(encode(beats));
+    expect(grid.times.length).toBe(23_000);
+    expect(grid.times).toBeInstanceOf(Uint32Array);
+  });
+
+  it("drops a truncated last record rather than reading past it", () => {
+    const grid = parseBeatGrid(encode([[0, 1], [469, 2]]).subarray(0, 7));
+    expect(Array.from(grid.times)).toEqual([0]);
+  });
+
+  it("reads a view into a larger buffer, which is what the IPC hands back", () => {
+    const whole = new Uint8Array(15);
+    whole.set(encode([[1_000, 1]]), 5);
+    const grid = parseBeatGrid(whole.subarray(5, 10));
+    expect(Array.from(grid.times)).toEqual([1_000]);
+  });
+
+  it("gives an empty grid for a track with no analysis", () => {
+    expect(parseBeatGrid(new Uint8Array()).times.length).toBe(0);
+  });
+});
+
+describe("beatsIn", () => {
+  const grid = parseBeatGrid(
+    (() => {
+      const bytes = new Uint8Array(1_000 * 5);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < 1_000; i++) {
+        view.setUint32(i * 5, i * 500, true);
+        view.setUint8(i * 5 + 4, (i % 4) + 1);
+      }
+      return bytes;
+    })(),
+  );
+
+  it("returns the beats inside the window, ends included", () => {
+    const found = beatsIn(grid, 1_000, 2_000);
+    expect(found.map((b) => b.timeMs)).toEqual([1_000, 1_500, 2_000]);
+  });
+
+  it("marks the first beat of a bar as the downbeat", () => {
+    expect(beatsIn(grid, 0, 1_500).map((b) => b.downbeat)).toEqual([true, false, false, false]);
+  });
+
+  it("reads only the window, however long the track", () => {
+    // The point of the binary search: a window near the end of a long mix must
+    // not cost a scan of everything before it.
+    expect(beatsIn(grid, 499_000, 499_500)).toHaveLength(2);
+  });
+
+  it("is empty for a window past the end, and for one the wrong way round", () => {
+    expect(beatsIn(grid, 1_000_000, 1_100_000)).toEqual([]);
+    expect(beatsIn(grid, 2_000, 1_000)).toEqual([]);
   });
 });

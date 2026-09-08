@@ -389,18 +389,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     edits,
 
     // A steady grid at the track's own BPM, so the detail waveform has beats
-    // to draw without an analysis file behind it.
-    trackBeats: (trackId, fromMs, toMs) => {
+    // to draw without an analysis file behind it. Encoded as the backend
+    // encodes it: five bytes a beat, milliseconds then the beat's number.
+    trackBeats: (trackId) => {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
-      if (!row || row.analysed === 0 || row.bpmX100 === 0) return wait([]);
+      if (!row || row.analysed === 0 || row.bpmX100 === 0) return wait(new Uint8Array());
       const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
-      const beats: { timeMs: number; downbeat: boolean }[] = [];
-      const first = Math.max(0, Math.floor(fromMs / beatMs));
-      for (let n = first; n * beatMs <= toMs && beats.length < 2000; n++) {
-        beats.push({ timeMs: Math.round(n * beatMs), downbeat: n % 4 === 0 });
+      const count = Math.min(Math.floor((row.durationSec * 1000) / beatMs) + 1, 65536);
+      const bytes = new Uint8Array(count * 5);
+      const view = new DataView(bytes.buffer);
+      for (let n = 0; n < count; n++) {
+        view.setUint32(n * 5, Math.round(n * beatMs), true);
+        view.setUint8(n * 5 + 4, (n % 4) + 1);
       }
-      return wait(beats);
+      return wait(bytes);
     },
 
     // A memory cue and four hot cues, so the player's markers and list have

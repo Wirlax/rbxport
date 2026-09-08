@@ -159,12 +159,15 @@ export interface Backend {
   analyseTrack(trackId: string): Promise<AnalysisResult>;
 
   /**
-   * A track's beats within a window, from its analysis file.
+   * A track's whole beat grid, as raw bytes: five per beat, a little-endian
+   * `u32` of milliseconds and the beat's number in its bar.
    *
-   * Windowed because a long mix has tens of thousands and the whole grid
-   * would blow the IPC cap.
+   * Whole and once per track rather than a window at a time. Windowing it
+   * still re-read and re-parsed the entire analysis file on every fetch, which
+   * is the expensive part; `parseBeatGrid` turns these bytes into typed arrays
+   * and `beatsIn` slices the window being drawn.
    */
-  trackBeats(trackId: string, fromMs: number, toMs: number): Promise<Beat[]>;
+  trackBeats(trackId: string): Promise<Uint8Array>;
 
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string): Promise<Cue[]>;
