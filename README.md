@@ -30,9 +30,13 @@ Measured against a real 38,681-track library, read-only, with Rekordbox running.
 | Real USB export written and verified | 25 tracks, 319 MB |
 
 Working: browsing the real library with waveforms, sorting, search, playlists,
-track analysis, USB export, and reading Rekordbox's own `export.pdb`.
+track analysis, USB export, and reading Rekordbox's own `export.pdb`. The Pro DJ
+Link protocols are implemented and tested end to end over loopback — a stand-in
+player mounts our NFS export and pulls a track back byte-identically — but the
+database server's *menus* wait on a capture of what Rekordbox actually answers.
 
-Not yet: writing to the library (see below), Pro DJ Link, the preview player.
+Not yet: writing to the library (see below), the preview player, and browsing
+from a real deck.
 
 Known weak: key detection agrees with Rekordbox on 40% of tracks. Tempo is
 accurate where it locks onto the right beat family; about 8% of tracks land on a
@@ -69,6 +73,10 @@ crates/
   rbl-pdb         DeviceSQL read/write for USB exports
   rbl-export      the export pipeline
   rbl-difftool    records what Rekordbox writes, so no field is guessed
+  rbl-prolink     Pro DJ Link announce, keep-alive, device table
+  rbl-dbserver    the remote-database protocol a CDJ browses over
+  rbl-nfs         SUN-RPC/XDR, portmap/mount/NFSv2, read-only virtual FS
+  rbl-fakecdj     a stand-in player, for tests and for recording Rekordbox
 src-tauri/        the shell: commands, panic boundary, state
 src/              React frontend
 design/           reference captures, measurements, tokens
