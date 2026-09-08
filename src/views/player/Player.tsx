@@ -12,7 +12,7 @@
  * backend, rather than an unfinished panel. Controls with nothing behind them
  * yet are drawn the same way, for the same reason.
  */
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Cue, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -254,6 +254,11 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   // on a wide window and wasted resolution on a narrow one.
   const [overviewRef, overview] = useElementSize<HTMLDivElement>();
   const [detailRef, detail] = useElementSize<HTMLDivElement>();
+  // Written to by the frame loop below rather than rendered: see the effect.
+  const overviewHead = useRef<HTMLSpanElement>(null);
+  const detailHead = useRef<HTMLSpanElement>(null);
+  const scrubFill = useRef<HTMLDivElement>(null);
+  const barsLabel = useRef<HTMLSpanElement>(null);
   const [cues, setCues] = useState<Cue[]>([]);
   const [grid, setGrid] = useState<BeatGridData>(NO_BEATS);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
@@ -323,6 +328,41 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     () => (total > 0 ? beatsIn(grid, window.from * total * 1000, window.to * total * 1000) : []),
     [grid, window, total],
   );
+
+  // The tempo, for the bar count the frame loop prints.
+  const bpm = (track?.bpmX100 ?? 0) / 100;
+  const { positionRef, subscribe } = playback;
+
+  /*
+   * The playhead, written straight to its elements every frame.
+   *
+   * Not React state: `position` feeds this whole subtree, so ticking it faster
+   * only re-renders the player faster — the head still steps, it just steps
+   * more often. A transform through a ref moves it on the compositor without
+   * laying anything out, and the state below stays at ten a second for the
+   * readouts and the waveform.
+   */
+  useEffect(() => {
+    const apply = (seconds: number) => {
+      const at = total > 0 ? Math.min(seconds / total, 1) : 0;
+      if (overviewHead.current) {
+        overviewHead.current.style.transform = `translateX(${at * overview.width}px)`;
+      }
+      if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${at})`;
+      // The detail window is centred on the head, so the head only moves near
+      // the ends of the track — but it moves there, and by the same rule.
+      const x = (headPercent(at, span) / 100) * detail.width;
+      if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
+      if (barsLabel.current) {
+        barsLabel.current.style.transform = `translateX(${x}px)`;
+        barsLabel.current.textContent = bpm > 0 ? `${((seconds * bpm) / 60 / 4).toFixed(1)}Bars` : "";
+      }
+    };
+    // At once as well as on every frame: a paused player schedules no frames,
+    // and the head would otherwise sit where the last track left it.
+    apply(positionRef.current);
+    return subscribe(apply);
+  }, [total, span, bpm, overview.width, detail.width, positionRef, subscribe]);
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {
@@ -466,11 +506,16 @@ export const Player = memo(function Player({ track }: PlayerProps) {
                 />
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} />
-              <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
+              <span
+                ref={overviewHead}
+                className={styles.playhead}
+                data-testid="player-head"
+                aria-hidden
+              />
             </div>
             {/* How far through the track the head is, under the overview. */}
             <div className={styles.scrub} aria-hidden>
-              <div className={styles.scrubFill} style={{ width: `${progress * 100}%` }} />
+              <div ref={scrubFill} className={styles.scrubFill} />
             </div>
           </div>
         </div>
@@ -496,15 +541,11 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               />
             ) : null}
             <BeatGrid beats={beats} totalMs={total * 1000} window={window} />
-            {/* Bars elapsed, printed to the left of the playhead. */}
+            {/* Bars elapsed, printed to the left of the playhead. Its text and
+                its position are both the frame loop's, so React renders it
+                empty and never touches it again. */}
             {track && track.bpmX100 > 0 ? (
-              <span
-                className={styles.bars}
-                style={{ left: `${headPercent(progress, span)}%` }}
-                data-testid="player-bars"
-              >
-                {((playback.position * (track.bpmX100 / 100)) / 60 / 4).toFixed(1)}Bars
-              </span>
+              <span ref={barsLabel} className={styles.bars} data-testid="player-bars" />
             ) : null}
             <CueMarkers cues={cues} totalMs={total * 1000} labelled window={window} />
             {/*
@@ -512,11 +553,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               drawn at the centre rather than at the progress fraction — except
               near the ends, where the window is pinned and the head moves.
             */}
-            <span
-              className={styles.playhead}
-              style={{ left: `${headPercent(progress, span)}%` }}
-              aria-hidden
-            />
+            <span ref={detailHead} className={styles.playhead} aria-hidden />
           </div>
         </div>
 

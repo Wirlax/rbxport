@@ -1042,3 +1042,21 @@ test("the memory, hot cue and info tabs change the panel beside the deck", async
   await expect(panel.getByText(/BPM/)).toBeVisible();
   await expect(panel.getByText("CUE(Auto)")).toHaveCount(0);
 });
+
+test("the playhead is moved by a transform, not by laying the strip out again", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // Structural, because a browser build has no rbl:// scheme to play from and
+  // so never advances: what this pins is that the head is driven by a
+  // transform written from the frame loop. `left: %` moved it by laying the
+  // strip out and painting it again on every tick.
+  const head = page.getByTestId("player-head");
+  await expect(head).toHaveCSS("left", "0px");
+  expect(await head.evaluate((el) => getComputedStyle(el).transform)).not.toBe("none");
+
+  // Same for the position bar under the overview: scaled, not resized.
+  const fill = page.locator('[class*="scrubFill"]');
+  await expect(fill).toHaveCSS("transform", "matrix(0, 0, 0, 1, 0, 0)");
+});
