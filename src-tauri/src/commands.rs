@@ -261,15 +261,14 @@ pub async fn analyse_track(
     track_id: String,
 ) -> AppResult<AnalysisResultDto> {
     let library = state.library()?;
-    let Ok(numeric) = track_id.parse::<u64>() else {
-        return Err(AppError::new(ErrorKind::Malformed, "That track id is not valid.")
-            .with_detail(format!("track_id {track_id:?}")));
-    };
-
     blocking("analyse_track", move || {
-        let Some(row) = library.ids.iter().position(|&id| id == numeric) else {
+        // By the id map rather than a scan: a queue analyses hundreds of
+        // tracks, and each scan is 38,681 comparisons.
+        let reported = track_id.clone();
+        let Some(row) = library.row_of(&track_id) else {
             return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
         };
+        let row = row as usize;
         let path = library.folder_path.get(row);
         if path.is_empty() {
             return Err(AppError::new(ErrorKind::NotFound, "That track has no file path."));
@@ -292,7 +291,7 @@ pub async fn analyse_track(
             clamped as u32
         };
         Ok(AnalysisResultDto {
-            track_id: numeric.to_string(),
+            track_id: reported,
             bpm_x100: to_u32(analysis.tempo.bpm * 100.0),
             key: analysis.key.map(|k| k.name).unwrap_or_default(),
             beats: u32::try_from(analysis.tempo.beats.len()).unwrap_or(u32::MAX),

@@ -310,6 +310,10 @@ export interface TrackTableProps {
   libraryGeneration?: number;
   /** Edits shown before the backend has caught up. */
   pendingEdits?: PendingEdits;
+  /** The rows behind the selection, for queueing analysis. */
+  onSelectedTracks?: (tracks: { id: string; title: string }[]) => void;
+  /** Analyse whatever is selected. */
+  onAnalyse?: () => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -318,8 +322,25 @@ export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment,
-  libraryGeneration, pendingEdits,
+  libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
 }: TrackTableProps) {
+  // Analysis is reachable from the keyboard rather than only a menu, since a
+  // row context menu does not exist yet.
+  useEffect(() => {
+    if (!onAnalyse) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      // Plain letter, no modifier: the table has focus and a selection.
+      if (event.key.toLowerCase() === "a" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        onAnalyse();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onAnalyse]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
@@ -421,6 +442,19 @@ export function TrackTable({
   useEffect(() => {
     onSelectionChange?.(selection.ids.size);
   }, [selection.ids, onSelectionChange]);
+
+  // The rows behind the selection, resolved from what is cached. A selection
+  // spanning unfetched rows contributes only what is on hand, which is what
+  // the user can see anyway.
+  useEffect(() => {
+    if (!onSelectedTracks) return;
+    const tracks: { id: string; title: string }[] = [];
+    for (let i = 0; i < view.count && tracks.length < selection.ids.size; i++) {
+      const row = view.rowAt(i);
+      if (row && selection.ids.has(row.id)) tracks.push({ id: row.id, title: row.title });
+    }
+    onSelectedTracks(tracks);
+  }, [selection.ids, view, onSelectedTracks]);
 
   // An arrow drawn to rekordbox's geometry rather than the text arrows that
   // stood in for it: those render in the body font and sit off the baseline.

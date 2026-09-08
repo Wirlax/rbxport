@@ -18,6 +18,7 @@ import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
 import { Settings } from "@/views/settings/Settings";
+import { useAnalysis } from "@/store/useAnalysis";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -48,6 +49,8 @@ export function App() {
     descending: false,
   });
   const [selectedCount, setSelectedCount] = useState(0);
+  // The rows behind the selection, so they can be queued for analysis.
+  const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // The row the player is showing. Set by the browser as the selection moves,
   // so the player reflects what is highlighted rather than nothing.
   const [playerTrack, setPlayerTrack] = useState<RowDto | null>(null);
@@ -69,6 +72,12 @@ export function App() {
         : "collection";
   const cols = useColumns(columnContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // An analysed track's waveform and key change, so its row is stale.
+  const analysis = useAnalysis(
+    useCallback((id: string) => {
+      setPendingEdits((edits) => new Map(edits).set(id, { analysed: 1 }));
+    }, []),
+  );
   // Track ids in flight from the browser to the tree.
   const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);
   const [dropNote, setDropNote] = useState<string | null>(null);
@@ -282,6 +291,12 @@ export function App() {
     };
   }, [dropNote]);
 
+  /** Queues whatever is selected in the browser. */
+  const analyseSelection = useCallback(() => {
+    if (selectedTracks.length === 0) return;
+    analysis.add(selectedTracks);
+  }, [analysis, selectedTracks]);
+
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
@@ -315,6 +330,8 @@ export function App() {
           spec={spec}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
+          onSelectedTracks={setSelectedTracks}
+          onAnalyse={analyseSelection}
           onFocusedRow={setPlayerTrack}
           onDragTracks={setDraggedTracks}
           onRate={rateTrack}
@@ -343,7 +360,14 @@ export function App() {
       ) : null}
 
       <StatusBar
-        activity={dropNote ?? (summary ? `${summary.trackCount} Tracks` : "Loading…")}
+        activity={
+          analysis.running
+            ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
+              (analysis.state.current ? ` — ${analysis.state.current.title}` : "")
+            : (dropNote ?? (summary ? `${summary.trackCount} Tracks` : "Loading…"))
+        }
+        onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
+        analysisFailures={analysis.state.failed.length}
         selection={selectionText}
         readOnly={summary?.readOnly ?? false}
       />

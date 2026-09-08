@@ -607,3 +607,36 @@ test("each kind of table remembers its own columns", async ({ page }) => {
   await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 });
+
+test("analysing a selection reports progress and can be stopped", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Select a run of rows, then analyse them.
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await rows.nth(2).click();
+  await rows.nth(9).click({ modifiers: ["Shift"] });
+  await page.keyboard.press("a");
+
+  const status = page.getByRole("contentinfo");
+  await expect(status).toContainText(/Analyzing: \d+ of \d+/);
+  await expect(status.getByRole("button", { name: "Stop" })).toBeVisible();
+
+  await status.getByRole("button", { name: "Stop" }).click();
+  // The running track finishes, then the run ends and the readout goes back.
+  await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0);
+});
+
+test("a track that cannot be analysed does not stop the run", async ({ page }) => {
+  // The mock fails every seventh track, so a long enough run hits one.
+  await page.goto("/");
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await rows.nth(0).click();
+  await rows.nth(14).click({ modifiers: ["Shift"] });
+  await page.keyboard.press("a");
+
+  const status = page.getByRole("contentinfo");
+  await expect(status).toContainText("failed", { timeout: 15_000 });
+  // And it carried on rather than stopping there.
+  await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 15_000 });
+});

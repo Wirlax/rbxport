@@ -18,3 +18,25 @@
   font-size: var(--f-size-xs);
 }
 .selection { margin-left: auto; }
+
+/* Shown only while analysis runs. The track already being analysed finishes:
+   it is most of a second's work already spent. */
+.stop {
+  margin-right: 8px;
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--c-raised);
+  border-radius: 3px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--f-size-sm);
+  cursor: default;
+}
+.stop:hover { border-color: var(--c-accent); }
+
+.failures { margin-left: 8px; flex: none; color: var(--c-text-dim); font-size: var(--f-size-sm); }
+
+/* The progress readout changes width as it counts; giving it the slack keeps
+   everything around it still. */
+.activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

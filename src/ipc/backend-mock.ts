@@ -30,6 +30,14 @@ const KEYS = ["Am", "Bm", "Cm", "Dm", "Em", "Fm", "Gm", "Abm", "Bbm", "Dbm", "Eb
 const GENRES = ["House", "Tech House", "Melodic House", "Techno", "Trance", "Progressive House", ""];
 const LABELS = ["Spinnin'", "Musical Freedom", "Defected", "Armada", "Toolroom", "Drumcode", ""];
 
+/**
+ * How long the mock pretends analysis takes.
+ *
+ * Long enough that a queue can be watched and stopped, short enough that a
+ * suite of them is not slow.
+ */
+const ANALYSIS_MS = 120;
+
 /** Deterministic PRNG so every run, test and screenshot sees identical data. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -330,6 +338,33 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         { positionMs: Math.round(total * 0.61), letter: "C", memory: false },
         { positionMs: Math.round(total * 0.83), letter: "D", memory: false },
       ]);
+    },
+
+    // Analysis is real work in the app; here it just answers, so the queue's
+    // sequencing and progress can be driven end to end without audio.
+    analyseTrack: (trackId) => {
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row) return Promise.reject(new Error("That track is not in the library."));
+      // Every seventh track fails, so the failure path is exercised too.
+      if (index % 7 === 6) {
+        return Promise.reject(new Error("That file could not be decoded."));
+      }
+      row.analysed = 1;
+      // Deliberately not instant. Real analysis is a decode and a DSP pass —
+      // seconds per track — and a mock that answers immediately makes the
+      // queue's progress, cancellation and failure handling unobservable.
+      return new Promise((resolve) =>
+        setTimeout(
+          () => resolve({
+            trackId,
+            bpmX100: row.bpmX100 || 12_800,
+            key: row.key || "Am",
+            elapsedMs: ANALYSIS_MS,
+          }),
+          ANALYSIS_MS,
+        ),
+      );
     },
 
     // No picker in a browser, so nothing can be chosen to import.

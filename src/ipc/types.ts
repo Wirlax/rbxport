@@ -124,6 +124,13 @@ export interface Backend {
    * because a library can lose thousands when a drive is unplugged and a list
    * that long is neither useful nor small enough for the IPC cap.
    */
+  /**
+   * Analyses one track: tempo, beat grid, key and waveforms.
+   *
+   * Slow — a decode and a DSP pass — so callers run these one at a time.
+   */
+  analyseTrack(trackId: string): Promise<AnalysisResult>;
+
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string): Promise<Cue[]>;
 
@@ -159,6 +166,15 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** What analysing one track found. */
+export interface AnalysisResult {
+  trackId: string;
+  bpmX100: number;
+  key: string;
+  /** How long the analysis took, for the progress readout. */
+  elapsedMs: number;
 }
 
 /** What an import batch did. */
