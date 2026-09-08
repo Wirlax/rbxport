@@ -224,6 +224,12 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
+/// The answer when the handler itself failed, for the caller that catches a
+/// panic around it. A hung request would leave the webview waiting for ever.
+pub fn internal_error() -> Response<Vec<u8>> {
+    status(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 fn status(code: StatusCode) -> Response<Vec<u8>> {
     Response::builder()
         .status(code)

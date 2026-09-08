@@ -152,12 +152,29 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(|app, event| crate::menu::on_event(app, event.id().as_ref()))
-        .register_uri_scheme_protocol("rbl", move |ctx, request| {
+        // Asynchronous, not the plain form. `wry` calls a synchronous handler
+        // straight from the `WKURLSchemeHandler` callback, which is the main
+        // thread on macOS, so every artwork read and every audio range would
+        // block the UI thread — a fast scroll fires one per row inside the
+        // frame loop. The responder lets the read happen on a blocking worker
+        // instead, which is the same rule `commands.rs` already follows.
+        .register_asynchronous_uri_scheme_protocol("rbl", move |ctx, request, responder| {
             // Artwork goes to the webview as an <img> rather than through
             // invoke: a JPEG blows the 64 KB IPC cap and would cost a
             // main-thread base64 decode per row.
-            let state = ctx.app_handle().state::<Arc<AppState>>();
-            crate::protocol::handle(&state, &request)
+            let state = Arc::clone(ctx.app_handle().state::<Arc<AppState>>().inner());
+            tauri::async_runtime::spawn_blocking(move || {
+                // A panic in here must not take the webview with it: the
+                // responder is consumed either way, so a failed read answers
+                // 500 rather than leaving the request hanging for ever.
+                let response = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::protocol::handle(&state, &request)
+                }));
+                responder.respond(response.unwrap_or_else(|_| {
+                    tracing::error!("the rbl:// handler panicked");
+                    crate::protocol::internal_error()
+                }));
+            });
         })
         .invoke_handler(tauri::generate_handler![
             commands::library_summary,
