@@ -94,9 +94,11 @@
 .artwork img { width: 100%; height: 100%; object-fit: cover; }
 
 .title {
-  /* Larger than the UI font in the capture, but that size has not been
-     measured — see TODO.md. Using the measured UI size until it is. */
+  /* Measured, not assumed: the "L" of the title has an 11.5 px cap height at
+     1x, which for Arial's 0.716 em cap is ~16 px — the UI size. It reads as
+     larger because it is bold, not because it is bigger. */
   font-size: var(--f-size-ui);
+  font-weight: 700;
   color: var(--c-text);
   white-space: nowrap;
   overflow: hidden;
