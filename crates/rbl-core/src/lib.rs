@@ -2,6 +2,9 @@
 //!
 //! Nothing here touches the filesystem, the network, or Tauri.
 
+pub mod ids;
+pub mod time;
+
 use serde::{Deserialize, Serialize};
 
 /// A `djmdContent.ID`. Rekordbox stores these as decimal strings; we parse them
