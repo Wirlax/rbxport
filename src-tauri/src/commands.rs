@@ -46,7 +46,7 @@ pub async fn library_summary(state: State<'_, Arc<AppState>>) -> AppResult<Libra
     blocking("library_summary", move || {
         Ok(LibrarySummaryDto {
             track_count: u32::try_from(library.len()).unwrap_or(u32::MAX),
-            playlist_count: u32::try_from(library.playlists.len()).unwrap_or(u32::MAX),
+            playlist_count: u32::try_from(library.playlists().len()).unwrap_or(u32::MAX),
             read_only,
             db_version,
             load_ms,
@@ -62,7 +62,7 @@ pub async fn playlist_tree(state: State<'_, Arc<AppState>>) -> AppResult<Vec<Tre
 }
 
 fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
-    let playlists = &library.playlists;
+    let playlists = library.playlists();
     let mut nodes = vec![
         TreeNodeDto {
             id: "all".into(),
@@ -309,10 +309,21 @@ pub async fn analyse_track(
 /// database open read-write for the life of the app, and rekordbox launching
 /// behind us must be able to take the file back. Opening is cheap next to the
 /// user's own thinking time between edits.
+/// What an edit changed, and therefore how much has to be re-read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Touched {
+    /// Only the playlist tree. Re-reading it costs 24 ms against 233 ms for
+    /// the whole library, and it is by far the most common kind of edit.
+    Playlists,
+    /// A track column changed, so the ranks and the search arena are stale.
+    Tracks,
+}
+
 async fn edit<F>(
     app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     name: &'static str,
+    touched: Touched,
     action: F,
 ) -> AppResult<u32>
 where
@@ -328,11 +339,26 @@ where
     })
     .await;
     changed?;
+    match touched {
+        Touched::Playlists => reload_playlists(app, state).await,
+        Touched::Tracks => reload(app, state).await,
+    }
+}
 
-    // The index is a snapshot; after a write it is stale. Reloading is the
-    // honest option — an incremental update by `rb_local_usn` is the faster one
-    // and is not written yet, so an edit costs a reload of the whole library.
-    reload(app, state).await
+/// Re-reads the playlist tree only, leaving the track columns in place.
+async fn reload_playlists(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
+    let generation = blocking("reload_playlists", move || {
+        let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
+        let library = state.library()?;
+        let playlists = rbl_index::reload_playlists(&db, &library)
+            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        library.set_playlists(playlists);
+        // The tree changed, so every open view over a playlist is stale.
+        Ok(state.invalidate_views())
+    })
+    .await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(generation)
 }
 
 /// Where backups of the library go before the first write of a session.
@@ -377,7 +403,7 @@ pub async fn create_playlist(
     name: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "create_playlist", move |w| w.create_playlist(&name, &parent).map(|_| ())).await
+    edit(app, state, "create_playlist", Touched::Playlists, move |w| w.create_playlist(&name, &parent).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -387,7 +413,7 @@ pub async fn create_folder(
     name: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "create_folder", move |w| w.create_folder(&name, &parent).map(|_| ())).await
+    edit(app, state, "create_folder", Touched::Playlists, move |w| w.create_folder(&name, &parent).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -397,7 +423,7 @@ pub async fn rename_playlist(
     id: String,
     name: String,
 ) -> AppResult<u32> {
-    edit(app, state, "rename_playlist", move |w| w.rename(&id, &name).map(|_| ())).await
+    edit(app, state, "rename_playlist", Touched::Playlists, move |w| w.rename(&id, &name).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -407,7 +433,7 @@ pub async fn move_playlist(
     id: String,
     parent: String,
 ) -> AppResult<u32> {
-    edit(app, state, "move_playlist", move |w| w.move_to(&id, &parent).map(|_| ())).await
+    edit(app, state, "move_playlist", Touched::Playlists, move |w| w.move_to(&id, &parent).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -416,7 +442,7 @@ pub async fn delete_playlist(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> AppResult<u32> {
-    edit(app, state, "delete_playlist", move |w| w.delete_playlist(&id).map(|_| ())).await
+    edit(app, state, "delete_playlist", Touched::Playlists, move |w| w.delete_playlist(&id).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -426,7 +452,7 @@ pub async fn add_tracks_to_playlist(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "add_tracks_to_playlist", move |w| {
+    edit(app, state, "add_tracks_to_playlist", Touched::Playlists, move |w| {
         w.add_tracks(&playlist, &tracks).map(|_| ())
     })
     .await
@@ -439,7 +465,7 @@ pub async fn remove_tracks_from_playlist(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_tracks_from_playlist", move |w| {
+    edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, move |w| {
         w.remove_tracks(&playlist, &tracks).map(|_| ())
     })
     .await
@@ -452,7 +478,7 @@ pub async fn reorder_playlist(
     playlist: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "reorder_playlist", move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
+    edit(app, state, "reorder_playlist", Touched::Playlists, move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -462,7 +488,7 @@ pub async fn set_track_rating(
     track: String,
     stars: u8,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_rating", move |w| w.set_rating(&track, stars).map(|_| ())).await
+    edit(app, state, "set_track_rating", Touched::Tracks, move |w| w.set_rating(&track, stars).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -472,7 +498,7 @@ pub async fn set_track_comment(
     track: String,
     comment: String,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_comment", move |w| w.set_comment(&track, &comment).map(|_| ()))
+    edit(app, state, "set_track_comment", Touched::Tracks, move |w| w.set_comment(&track, &comment).map(|_| ()))
         .await
 }
 
@@ -483,7 +509,7 @@ pub async fn set_track_color(
     track: String,
     color: Option<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_color", move |w| {
+    edit(app, state, "set_track_color", Touched::Tracks, move |w| {
         w.set_color(&track, color.as_deref()).map(|_| ())
     })
     .await

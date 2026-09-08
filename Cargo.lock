@@ -3078,6 +3078,7 @@ name = "rbl-index"
 version = "0.1.0"
 dependencies = [
  "memchr",
+ "parking_lot",
  "rbl-core",
  "rbl-db",
  "rusqlite",

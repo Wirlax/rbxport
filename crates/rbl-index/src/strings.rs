@@ -6,7 +6,7 @@
 //! what makes a full-column scan cache-friendly.
 
 /// Byte arena plus offsets. Indices are row order.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct StrColumn {
     bytes: Vec<u8>,
     spans: Vec<(u32, u32)>,
@@ -49,7 +49,7 @@ impl StrColumn {
 ///
 /// rekordbox already normalises these into their own tables, so a row holds a
 /// `u32` id and the name is stored once.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Interner {
     names: StrColumn,
     /// Lowercased for sorting and search, in the same row order.

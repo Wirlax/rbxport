@@ -42,7 +42,7 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.analysed.push(u8::from(t.bpm_x100 > 0));
     }
     lib.count = tracks.len();
-    lib.playlists = Playlists::default();
+    lib.set_playlists(Playlists::default());
     lib.build_ranks();
     lib.build_search();
     lib
@@ -50,11 +50,13 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
 
 /// Adds a playlist over the given row indices, returning its index.
 pub fn add_playlist(lib: &mut Library, name: &str, rows: &[Row]) -> usize {
-    let index = lib.playlists.ids.len();
-    lib.playlists.ids.push(1000 + u64::try_from(index).unwrap_or(0));
-    lib.playlists.names.push(name);
-    lib.playlists.parent.push(crate::NO_ID);
-    lib.playlists.seq.push(u32::try_from(index).unwrap_or(0));
-    lib.playlists.members.push(rows.to_vec());
+    let mut playlists = (*lib.playlists()).clone();
+    let index = playlists.ids.len();
+    playlists.ids.push(1000 + u64::try_from(index).unwrap_or(0));
+    playlists.names.push(name);
+    playlists.parent.push(crate::NO_ID);
+    playlists.seq.push(u32::try_from(index).unwrap_or(0));
+    playlists.members.push(rows.to_vec());
+    lib.set_playlists(playlists);
     index
 }

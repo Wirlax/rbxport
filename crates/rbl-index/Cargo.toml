@@ -16,6 +16,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 memchr = "2"
+parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]

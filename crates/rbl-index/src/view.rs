@@ -89,7 +89,7 @@ impl Library {
         let mut rows: Vec<Row> = match &spec.source {
             TrackSource::Collection => (0..u32::try_from(self.count).unwrap_or(u32::MAX)).collect(),
             TrackSource::Playlist(index) => {
-                self.playlists.members.get(*index).cloned().unwrap_or_default()
+                self.playlists().members.get(*index).cloned().unwrap_or_default()
             }
         };
 

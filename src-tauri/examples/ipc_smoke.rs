@@ -14,7 +14,7 @@ fn main() {
     println!("loaded {} tracks in {} ms", stats.tracks, t0.elapsed().as_millis());
 
     // The tree the UI will render.
-    let playlists = &library.playlists;
+    let playlists = library.playlists();
     let mut folders = 0;
     let mut leaves = 0;
     for i in 0..playlists.len() {

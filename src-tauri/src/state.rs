@@ -67,6 +67,19 @@ impl AppState {
         inner.generation = inner.generation.wrapping_add(1).max(1);
     }
 
+    /// Drops every open view and bumps the generation.
+    ///
+    /// Used after a playlist edit: the track columns are untouched, but a view
+    /// over a playlist whose membership changed is stale, and so are the pages
+    /// the frontend has cached against the old generation.
+    pub fn invalidate_views(&self) -> u32 {
+        let mut inner = self.inner.write();
+        inner.views.clear();
+        inner.view_order.clear();
+        inner.generation = inner.generation.wrapping_add(1).max(1);
+        inner.generation
+    }
+
     pub fn library(&self) -> AppResult<Arc<Library>> {
         self.inner
             .read()
@@ -140,7 +153,7 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
         TrackSourceDto::Playlist { id } => id
             .parse::<u64>()
             .ok()
-            .and_then(|numeric| library.playlists.index_of(numeric))
+            .and_then(|numeric| library.playlists().index_of(numeric))
             .map_or(TrackSource::Collection, TrackSource::Playlist),
     };
     ViewSpec {

@@ -75,12 +75,12 @@ fn main() {
              us as f64 / 100.0);
 
     println!("== playlists ==");
-    let biggest = (0..lib.playlists.len())
-        .max_by_key(|&i| lib.playlists.members.get(i).map_or(0, Vec::len))
+    let biggest = (0..lib.playlists().len())
+        .max_by_key(|&i| lib.playlists().members.get(i).map_or(0, Vec::len))
         .unwrap_or(0);
     let spec = ViewSpec { source: TrackSource::Playlist(biggest), sort: SortColumn::Title, descending: false, query: String::new() };
     let t = Instant::now();
     let view = lib.open_view(&spec);
     println!("  largest playlist \"{}\": {} tracks, sorted in {} ms",
-             lib.playlists.name(biggest), view.len(), t.elapsed().as_millis());
+             lib.playlists().name(biggest), view.len(), t.elapsed().as_millis());
 }
