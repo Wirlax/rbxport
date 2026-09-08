@@ -178,3 +178,19 @@ pub struct ExportReportDto {
     /// Whether the export read back correctly with the independent parser.
     pub verified: bool,
 }
+
+/// One phrase of the song structure, as the phrase strip needs it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhraseDto {
+    /// The beat the phrase starts on, 1-based.
+    pub beat: u32,
+    /// What rekordbox draws: `INTRO 2`, `UP 3`, `VERSE 1`, and so on. Empty
+    /// for a phrase kind no mood defines.
+    pub label: String,
+    /// The raw kind byte, which only means anything alongside the mood.
+    pub kind: u16,
+    /// Where that beat falls, from the `PQTZ` grid. `None` when the grid does
+    /// not reach the phrase — a phrase strip can still be drawn by beat.
+    pub time_ms: Option<u32>,
+}

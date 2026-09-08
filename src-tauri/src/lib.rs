@@ -175,6 +175,8 @@ pub fn run() {
             commands::list_devices,
             commands::track_beats,
             commands::track_cues,
+            commands::track_phrases,
+            commands::track_vocals,
             commands::missing_tracks,
             commands::import_files,
             commands::relocate_track,

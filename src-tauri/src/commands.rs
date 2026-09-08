@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    BeatDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
+    BeatDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -25,6 +25,11 @@ const MAX_ROWS: u32 = 128;
 /// Beats returned for one window. A four-minute track at 128 BPM has about
 /// 500; this is generous for any window worth drawing and bounds the response.
 const MAX_BEATS: usize = 2_000;
+
+/// Phrases returned for one track. The longest song structure in the reference
+/// library has 457 [OBS] — a two-hour DJ mix — and every ordinary track is
+/// under fifty, so this bounds the response without truncating a real one.
+const MAX_PHRASES: usize = 512;
 
 /// Runs `f` on a blocking thread and converts a panic there into an `AppError`.
 async fn blocking<T, F>(name: &'static str, f: F) -> AppResult<T>
@@ -683,6 +688,86 @@ pub async fn track_cues(
             .collect())
     })
     .await
+}
+
+/// A track's phrases: the `INTRO` / `UP` / `CHORUS` strip rekordbox draws
+/// above the waveform.
+///
+/// From `PSSI` in the `.EXT` file, with each phrase's beat resolved against
+/// the `PQTZ` grid in the `.DAT` so the strip can be drawn on a time axis
+/// without the caller fetching the grid as well.
+#[tauri::command]
+pub async fn track_phrases(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<Vec<PhraseDto>> {
+    let library = state.library()?;
+    let share = state.share_root();
+    blocking("track_phrases", move || {
+        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let relative = library.analysis_path.get(row as usize);
+        if relative.is_empty() {
+            return Ok(Vec::new());
+        }
+        let dat = rbl_anlz::resolve(&share, relative);
+
+        let Ok(ext) = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "EXT")) else {
+            // Not analysed for phrases, or the file is gone: draw no strip
+            // rather than fail the view.
+            return Ok(Vec::new());
+        };
+        let Some(phrases) = ext.phrases() else { return Ok(Vec::new()) };
+
+        // The grid is optional here. A phrase without a time is still worth
+        // returning, since its beat number is what the tag actually holds.
+        let grid = rbl_anlz::Anlz::read(&dat).ok().and_then(|d| d.beat_grid());
+
+        Ok(phrases
+            .into_iter()
+            .take(MAX_PHRASES)
+            .map(|phrase| PhraseDto {
+                beat: u32::from(phrase.beat),
+                label: phrase.label.to_owned(),
+                kind: phrase.kind,
+                // Beat numbers in `PSSI` are 1-based; the grid is a list.
+                time_ms: grid.as_ref().and_then(|g| {
+                    g.get(usize::from(phrase.beat).checked_sub(1)?).map(|b| b.time_ms)
+                }),
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Where rekordbox heard a voice, one intensity byte per 46.44 ms.
+///
+/// From `PVDI` in the `.2EX` file. Raw bytes rather than JSON: a long track
+/// has tens of thousands of them, and `from` / `len` window the strip the same
+/// way [`track_waveform`] windows a waveform, which is what keeps a response
+/// inside the IPC cap.
+#[tauri::command]
+pub async fn track_vocals(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    from: Option<u32>,
+    len: Option<u32>,
+) -> AppResult<tauri::ipc::Response> {
+    let library = state.library()?;
+    let share = state.share_root();
+    blocking("track_vocals", move || {
+        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let relative = library.analysis_path.get(row as usize);
+        if relative.is_empty() {
+            return Ok(Vec::new());
+        }
+        let dat = rbl_anlz::resolve(&share, relative);
+        let Ok(two) = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")) else {
+            return Ok(Vec::new());
+        };
+        Ok(window_of(two.vocals().unwrap_or_default(), 1, from, len))
+    })
+    .await
+    .map(tauri::ipc::Response::new)
 }
 
 /// Tracks whose audio file is no longer where the library says it is.
