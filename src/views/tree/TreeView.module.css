@@ -50,3 +50,6 @@
   color: var(--c-text-dim);
   font-size: var(--f-size-sm);
 }
+
+/* While tracks are being dragged, the playlists that would take them say so. */
+.node[data-droppable] { outline: 1px dashed var(--c-accent); outline-offset: -1px; }

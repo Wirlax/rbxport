@@ -441,3 +441,33 @@ test("settings can put the columns back", async ({ page }) => {
   await page.getByRole("button", { name: "Reset columns" }).click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
 });
+
+test("tracks can be dragged from the browser onto a playlist", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  const row = page.getByRole("row").filter({ has: page.getByRole("gridcell") }).first();
+  const target = page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first();
+
+  await row.dragTo(target);
+
+  // The status bar reports what happened rather than leaving it silent.
+  await expect(page.getByRole("contentinfo")).toContainText(/Added \d+ track/);
+});
+
+test("only playlists offer themselves as a drop target", async ({ page }) => {
+  // A folder holds playlists, so dropping tracks into one would have to invent
+  // which playlist was meant.
+  await page.goto("/");
+  const row = page.getByRole("row").filter({ has: page.getByRole("gridcell") }).first();
+
+  await row.hover();
+  await page.mouse.down();
+  await page.mouse.move(200, 400, { steps: 4 });
+
+  const playlists = page.locator('[role="treeitem"][data-droppable]');
+  await expect.poll(async () => playlists.count()).toBeGreaterThan(0);
+  const folders = page.getByRole("treeitem").filter({ hasText: "CURRENT" });
+  await expect(folders.first()).not.toHaveAttribute("data-droppable", "true");
+  await page.mouse.up();
+});

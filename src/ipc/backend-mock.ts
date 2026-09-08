@@ -180,6 +180,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return bump();
     },
     addTracksToPlaylist: (playlist, tracks) => {
+      // The real backend refuses while Rekordbox holds the database; the mock
+      // never does, so the happy path is what `pnpm dev:mock` exercises.
       const current = membership.get(playlist) ?? [];
       for (const track of tracks) if (!current.includes(track)) current.push(track);
       membership.set(playlist, current);

@@ -61,6 +61,9 @@ export function App() {
   const clock = useClock();
   const cols = useColumns();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Track ids in flight from the browser to the tree.
+  const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);
+  const [dropNote, setDropNote] = useState<string | null>(null);
   // Read once: the platform cannot change while the window is open, and
   // deciding it per key press would run a regex on every stroke.
   const platform = useMemo(detectPlatform, []);
@@ -174,6 +177,37 @@ export function App() {
     event.currentTarget.releasePointerCapture(event.pointerId);
   }, []);
 
+  const addDraggedTo = useCallback(
+    (playlistId: string) => {
+      const ids = draggedTracks;
+      setDraggedTracks(null);
+      if (!ids || ids.length === 0) return;
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          await backend.edits.addTracksToPlaylist(playlistId, [...ids]);
+          const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
+          setDropNote(`Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`);
+          setTree(await backend.playlistTree());
+        } catch (e) {
+          // The refusal that matters is Rekordbox holding the database; say so
+          // rather than letting the drop look as if it worked.
+          setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+        }
+      })();
+    },
+    [draggedTracks, tree],
+  );
+
+  // Clear the note after a moment: it reports an action, not a state.
+  useEffect(() => {
+    if (dropNote === null) return;
+    const timer = setTimeout(() => setDropNote(null), 4000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [dropNote]);
+
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
@@ -186,7 +220,13 @@ export function App() {
         ref={bodyRef}
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}
       >
-        <TreeView nodes={tree} selectedId={selectedNode?.id ?? null} onSelect={setSelectedNode} />
+        <TreeView
+          nodes={tree}
+          selectedId={selectedNode?.id ?? null}
+          onSelect={setSelectedNode}
+          dragging={draggedTracks !== null}
+          onDropTracks={addDraggedTo}
+        />
         <div
           className={styles.splitter}
           onPointerDown={onSplitterDown}
@@ -202,6 +242,7 @@ export function App() {
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
           onFocusedRow={setPlayerTrack}
+          onDragTracks={setDraggedTracks}
           title={selectedNode?.name ?? "Collection"}
           query={query}
           onQueryChange={setQuery}
@@ -224,7 +265,7 @@ export function App() {
       ) : null}
 
       <StatusBar
-        activity={summary ? `${summary.trackCount} Tracks` : "Loading…"}
+        activity={dropNote ?? (summary ? `${summary.trackCount} Tracks` : "Loading…")}
         selection={selectionText}
         readOnly={summary?.readOnly ?? false}
       />

@@ -14,10 +14,13 @@ import {
 import { SourceRail } from "./SourceRail";
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks,
 }: {
   node: TreeNode;
   selected: boolean;
+  /** Whether a track drag could land here. */
+  droppable: boolean;
+  onDropTracks: ((playlistId: string) => void) | undefined;
   /** Whether anything sits under this node, so it can be opened at all. */
   branch: boolean;
   open: boolean;
@@ -31,6 +34,19 @@ const Row = memo(function Row({
       data-selected={selected || undefined}
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       onMouseDown={() => onSelect(node)}
+      onDragOver={(e) => {
+        // Only a playlist takes tracks: a folder holds playlists, and dropping
+        // into one would have to invent which.
+        if (!droppable) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(e) => {
+        if (!droppable) return;
+        e.preventDefault();
+        onDropTracks?.(node.id);
+      }}
+      data-droppable={droppable || undefined}
       role="treeitem"
       aria-selected={selected}
       aria-expanded={branch ? open : undefined}
@@ -61,9 +77,13 @@ export interface TreeViewProps {
   nodes: readonly TreeNode[];
   selectedId: string | null;
   onSelect: (node: TreeNode) => void;
+  /** True while tracks are being dragged, so playlists can offer themselves. */
+  dragging?: boolean;
+  /** Drop the dragged tracks onto a playlist. */
+  onDropTracks?: (playlistId: string) => void;
 }
 
-export function TreeView({ nodes, selectedId, onSelect }: TreeViewProps) {
+export function TreeView({ nodes, selectedId, onSelect, dragging, onDropTracks }: TreeViewProps) {
   // Which nodes the user has closed. Absent means open, so a freshly-loaded
   // tree renders exactly as the backend sent it.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -102,6 +122,8 @@ export function TreeView({ nodes, selectedId, onSelect }: TreeViewProps) {
             open={!collapsed.has(node.id)}
             onSelect={onSelect}
             onToggle={onToggle}
+            droppable={Boolean(dragging) && node.kind === "playlist"}
+            onDropTracks={onDropTracks}
           />
         ))}
         {visible.length === 0 ? (

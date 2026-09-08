@@ -82,7 +82,7 @@ const Stars = memo(function Stars({ rating }: { rating: number }) {
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, index, columns,
+  row, top, selected, onSelect, onDragStart, index, columns,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -90,6 +90,7 @@ const TrackRow = memo(function TrackRow({
   index: number;
   columns: readonly ColumnSpec[];
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
+  onDragStart: (id: string) => void;
 }) {
   if (!row) {
     // Placeholder keeps the row box the exact height so nothing shifts on arrival.
@@ -102,6 +103,13 @@ const TrackRow = memo(function TrackRow({
       data-even={index % 2 === 1 || undefined}
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => onSelect(index, row.id, e)}
+      draggable
+      onDragStart={(e) => {
+        onDragStart(row.id);
+        e.dataTransfer.effectAllowed = "copy";
+        // Firefox will not start a drag without payload.
+        e.dataTransfer.setData("text/plain", row.id);
+      }}
       role="row"
       aria-selected={selected}
     >
@@ -187,6 +195,8 @@ export interface TrackTableProps {
   onColumnAutoSizeAll: () => void;
   /** The row the player should show, as the selection moves. */
   onFocusedRow?: (row: RowDto | null) => void;
+  /** Track ids being dragged, so the tree knows what a drop would add. */
+  onDragTracks?: (ids: readonly string[] | null) => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -194,7 +204,7 @@ export interface TrackTableProps {
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks,
 }: TrackTableProps) {
   const view = useTrackView(spec);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -264,6 +274,17 @@ export function TrackTable({
     const w = visibleWindow(listTop, el.clientHeight, ROW_H, view.count);
     view.ensureRange(w.start, w.end);
   }, [items.length, view, view.count, view.token]);
+
+  const startDraggingTracks = useCallback(
+    (id: string) => {
+      // Whatever is selected, plus the row grabbed if it was not part of it —
+      // dragging an unselected row should move that row, not the selection
+      // somewhere else on screen.
+      const ids = selection.ids.has(id) ? [...selection.ids] : [id];
+      onDragTracks?.(ids);
+    },
+    [selection.ids, onDragTracks],
+  );
 
   const handleSelect = useCallback(
     (index: number, id: string, e: React.MouseEvent) => {
@@ -414,6 +435,7 @@ export function TrackTable({
                 row={row}
                 index={item.index}
                 columns={columns}
+                onDragStart={startDraggingTracks}
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}
