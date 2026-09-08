@@ -85,15 +85,15 @@ const WRITABLE_COLUMNS: &[&str] = &["Name", "Rating", "Commnt", "ColorID", "Fold
 /// Returned as an error rather than silently skipped, so a caller cannot
 /// believe an unsupported edit succeeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Unsupported {
-    /// `Analysed` is a bitfield with 105/104/16/17/1 observed and no known
-    /// meaning; `AnalysisUpdated` is unexplained.
+    /// Whether `Analysed`'s bits track which tags a track carries was tested
+    /// and is unconfirmed — see `analysed_bits`. What the test does establish
+    /// is enough to refuse on: 105, the value on 37,652 of 38,681 tracks,
+    /// comes with PSSI, and our phrase detector produces none.
     AnalysisRegistration,
     /// What RGB a `ColorTableIndex` past the default means is unknown.
     CueColour,
-    /// Nothing left here; kept so the enum can grow without a version bump.
-    #[doc(hidden)]
-    Reserved,
     /// Nothing is known about what rekordbox does with these.
     ContentCueOrFile,
 }
@@ -106,7 +106,6 @@ impl Unsupported {
                 "registering analysis needs the Analysed bitfield explained by a diff recording",
             Self::CueColour =>
                 "setting a cue's colour needs the ColorTableIndex palette explained by a diff recording",
-            Self::Reserved => "not supported",
             Self::ContentCueOrFile =>
                 "contentCue and contentFile are not understood and must not be touched",
         }
