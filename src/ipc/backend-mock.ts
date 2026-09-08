@@ -10,7 +10,8 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  Backend, Edits, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec, WaveformKind,
+  Backend, Device, Edits, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec,
+  WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 
@@ -168,6 +169,26 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   const findNode = (id: string) => tree.find((n) => n.id === id);
+
+  // A browser cannot see a real volume, so the mock carries one. It is
+  // mutable: exporting to it changes what a later `listDevices` reports, which
+  // is what makes the difference between a first export and a sync visible.
+  const devices: Device[] = [
+    {
+      name: "DJ STICK",
+      path: "/Volumes/DJ STICK",
+      totalBytes: 32 * 1024 ** 3,
+      freeBytes: 24 * 1024 ** 3,
+      removable: true,
+      export: null,
+    },
+  ];
+
+  /** How many tracks a playlist holds — the same count `openView` shows. */
+  const playlistSize = (id: string): number => {
+    const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+    return 14 + (seed % 30);
+  };
 
   const edits: Edits = {
     createPlaylist: (name, parent) => {
@@ -355,8 +376,37 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ]);
     },
 
-    // No picker and no filesystem in a browser, so nothing can be written.
-    exportPlaylist: () => wait(null),
+    // No filesystem in a browser, so nothing is written — but the counts are
+    // answered so the device panel's reporting can be driven end to end.
+    exportPlaylist: (playlistId, destination) => {
+      if (destination === undefined) return wait(null);
+      const device = devices.find((d) => d.path === destination);
+      const tracks = playlistSize(playlistId);
+      const already = device?.export;
+      const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
+      if (device) {
+        device.export = {
+          tracks,
+          playlists: 1,
+          ours: true,
+          written: "2026-09-08 00:30:00.000 +00:00",
+        };
+      }
+      return wait({
+        tracks,
+        playlists: 1,
+        bytesCopied: (tracks - reused) * 8_000_000,
+        analysisFiles: tracks - reused,
+        reused,
+        removed: 0,
+        skipped: [],
+        verified: true,
+      });
+    },
+
+    // One device, so the panel has something to show. A browser cannot see a
+    // real volume; the app asks the OS.
+    listDevices: () => wait(devices.map((device) => ({ ...device }))),
 
     // No network in a browser, so there is nothing to listen to. Saying why
     // is better than a panel that silently shows nothing.

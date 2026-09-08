@@ -86,8 +86,7 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
     case "histories":
       return nodes.filter((n) => n.kind === "history");
     case "devices":
-      // Nothing yet: device support is not built. An empty list is honest.
-      return [];
+      return nodes.filter((n) => n.kind === "device");
     case "playlists":
       return nodes.filter((n) => n.kind === "folder" || n.kind === "playlist" || n.kind === "collection");
   }
@@ -115,6 +114,8 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
       return "collection";
     case "history":
       return "histories";
+    case "device":
+      return "devices";
     default:
       return "playlists";
   }

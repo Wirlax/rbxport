@@ -365,14 +365,43 @@ test("the source rail switches which part of the library the tree shows", async 
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 });
 
-test("a source with nothing in it is dimmed rather than hidden", async ({ page }) => {
-  // A missing Devices button reads as a broken app; a dimmed one reads as no
-  // device plugged in.
+test("a connected device appears under Devices", async ({ page }) => {
+  // A missing Devices button reads as a broken app, and a dimmed one reads as
+  // nothing plugged in — so with a stick connected it must be neither.
   await page.goto("/");
   const devices = page.getByRole("tablist", { name: "Library sources" })
     .getByRole("tab", { name: "Devices" });
   await expect(devices).toBeVisible();
-  await expect(devices).toHaveAttribute("data-empty", "true");
+  await expect(devices).not.toHaveAttribute("data-empty", "true");
+
+  await devices.click();
+  await expect(page.getByRole("treeitem", { name: /DJ STICK/ })).toBeVisible();
+});
+
+test("a device shows what is on it, and a second write only syncs the difference", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tablist", { name: "Library sources" })
+    .getByRole("tab", { name: "Devices" })
+    .click();
+  await page.getByRole("treeitem", { name: /DJ STICK/ }).click();
+
+  const panel = page.getByRole("region", { name: "Device DJ STICK" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("No export on this device yet.");
+  await expect(panel.getByRole("progressbar", { name: "Space used" })).toHaveAttribute(
+    "aria-valuenow",
+    "25",
+  );
+
+  // First write: everything goes.
+  await expect(panel.getByRole("button", { name: "Export" })).toBeVisible();
+  await panel.getByRole("button", { name: "Export" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText(/Exported \d+ tracks to DJ STICK/);
+  await expect(panel).toContainText("Only what changed will be copied.");
+
+  // Second write to the same stick: nothing changed, so nothing is copied.
+  await panel.getByRole("button", { name: "Sync" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText(/Synced DJ STICK: \d+ unchanged/);
 });
 
 test("the player shows the track that was clicked", async ({ page }) => {

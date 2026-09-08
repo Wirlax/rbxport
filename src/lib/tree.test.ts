@@ -193,3 +193,25 @@ describe("sourceOf", () => {
     expect(sourceOf(mixed, "gone")).toBe("playlists");
   });
 });
+
+describe("devices in the tree", () => {
+  const nodes: TreeNode[] = [
+    { id: "playlists", name: "Playlists", kind: "collection", depth: 0 },
+    { id: "pl-1", name: "Warm Up", kind: "playlist", depth: 1 },
+    { id: "device:/Volumes/DJ STICK", name: "DJ STICK", kind: "device", depth: 0 },
+  ];
+
+  it("shows connected volumes under Devices and nowhere else", () => {
+    expect(nodesForSource(nodes, "devices").map((n) => n.name)).toEqual(["DJ STICK"]);
+    expect(nodesForSource(nodes, "playlists").map((n) => n.name)).toEqual(["Playlists", "Warm Up"]);
+  });
+
+  it("stops dimming Devices once something is connected", () => {
+    expect(emptySources(nodes).has("devices")).toBe(false);
+    expect(emptySources(nodes.slice(0, 2)).has("devices")).toBe(true);
+  });
+
+  it("puts the rail on Devices when a volume is selected", () => {
+    expect(sourceOf(nodes, "device:/Volumes/DJ STICK")).toBe("devices");
+  });
+});

@@ -5,7 +5,7 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Beat, Cue, ExportReport, ImportReport, LibrarySummary, LinkPeer,
+  AnalysisResult, Backend, Beat, Cue, Device, ExportReport, ImportReport, LibrarySummary, LinkPeer,
   LinkStatus, MissingTracks, RowDto,
   TreeNode, ViewHandle,
   WaveformKind,
@@ -48,20 +48,25 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
-    exportPlaylist: async (playlistId) => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const picked = await open({
-        multiple: false,
-        directory: true,
-        title: "Choose where to write the export",
-      });
-      // Cancelling is a normal outcome, not an error.
-      if (typeof picked !== "string") return null;
+    exportPlaylist: async (playlistId, destination) => {
+      let target = destination;
+      if (target === undefined) {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const picked = await open({
+          multiple: false,
+          directory: true,
+          title: "Choose where to write the export",
+        });
+        // Cancelling is a normal outcome, not an error.
+        if (typeof picked !== "string") return null;
+        target = picked;
+      }
       return invoke<ExportReport>("export_playlist", {
         playlist: playlistId,
-        destination: picked,
+        destination: target,
       });
     },
+    listDevices: () => invoke<Device[]>("list_devices"),
     startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
     stopLinkListening: () => invoke<void>("stop_link_listening"),
     onLinkPeers: (listener) => {

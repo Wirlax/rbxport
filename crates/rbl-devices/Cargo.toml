@@ -1,0 +1,21 @@
+[package]
+name = "rbl-devices"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Finds removable media and reads what is already exported to it."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-export = { path = "../rbl-export" }
+rbl-pdb = { path = "../rbl-pdb" }
+sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+rbl-anlz = { path = "../rbl-anlz" }

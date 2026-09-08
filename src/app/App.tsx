@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import type { Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { TrackTable } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
@@ -16,6 +16,8 @@ import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
+import { deviceId, deviceNodes } from "@/lib/devices";
+import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
 import { Settings } from "@/views/settings/Settings";
@@ -40,6 +42,10 @@ function useClock(): string {
 
 export function App() {
   const [tree, setTree] = useState<readonly TreeNode[]>([]);
+  // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
+  // point is exactly the kind of idle work the budgets forbid.
+  const [devices, setDevices] = useState<readonly Device[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   // One piece of state, not two: updating `descending` from inside a `setSort`
@@ -99,10 +105,15 @@ export function App() {
     let cancelled = false;
     void (async () => {
       const backend = await getBackend();
-      const [nodes, info] = await Promise.all([backend.playlistTree(), backend.librarySummary()]);
+      const [nodes, info, volumes] = await Promise.all([
+        backend.playlistTree(),
+        backend.librarySummary(),
+        backend.listDevices(),
+      ]);
       if (cancelled) return;
       setTree(nodes);
       setSummary(info);
+      setDevices(volumes);
       setSelectedNode(nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
     })();
     return () => {
@@ -298,6 +309,41 @@ export function App() {
     analysis.add(selectedTracks);
   }, [analysis, selectedTracks]);
 
+  const refreshDevices = useCallback(() => {
+    void (async () => {
+      const backend = await getBackend();
+      setDevices(await backend.listDevices());
+    })();
+  }, []);
+
+  // Devices join the tree as nodes so the Devices section renders through the
+  // same path as every other section.
+  const treeNodes = useMemo(() => [...tree, ...deviceNodes(devices)], [tree, devices]);
+  const selectedDevice = useMemo(
+    () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
+    [devices, selectedNode],
+  );
+
+  const syncToDevice = useCallback(
+    async (playlistId: string) => {
+      if (!selectedDevice) return;
+      const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
+      setSyncing(true);
+      setDropNote(`Writing ${name} to ${selectedDevice.name}…`);
+      try {
+        const backend = await getBackend();
+        const report = await backend.exportPlaylist(playlistId, selectedDevice.path);
+        setDropNote(report === null ? null : exportSummary(selectedDevice.name, report));
+        setDevices(await backend.listDevices());
+      } catch (e) {
+        setDropNote(e instanceof Error ? e.message : "That export could not be written.");
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [selectedDevice, tree],
+  );
+
   const exportPlaylist = useCallback((node: TreeNode) => {
     void (async () => {
       const backend = await getBackend();
@@ -328,7 +374,7 @@ export function App() {
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}
       >
         <TreeView
-          nodes={tree}
+          nodes={treeNodes}
           selectedId={selectedNode?.id ?? null}
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
@@ -345,6 +391,15 @@ export function App() {
           aria-label="Resize the library tree"
           aria-valuenow={treeWidth}
         />
+        {selectedDevice ? (
+          <DevicePanel
+            device={selectedDevice}
+            playlists={tree}
+            onSync={syncToDevice}
+            onRefresh={refreshDevices}
+            busy={syncing}
+          />
+        ) : (
         <TrackTable
           spec={spec}
           onSortChange={handleSort}
@@ -368,6 +423,7 @@ export function App() {
           onColumnAutoSize={cols.autoSize}
           onColumnAutoSizeAll={cols.autoSizeEvery}
         />
+        )}
       </div>
       {settingsOpen ? (
         <Settings

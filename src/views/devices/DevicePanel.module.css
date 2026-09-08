@@ -1,0 +1,92 @@
+/* Geometry and colour come from design/tokens; nothing here is a literal. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--c-black);
+  color: var(--c-text);
+  font-size: var(--f-size-ui);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.name {
+  margin: 0;
+  font-size: var(--f-size-ui);
+  font-weight: 700;
+}
+
+.path {
+  color: var(--c-text-dim);
+  font-size: var(--f-size-sm);
+  /* A long mount point must not push Refresh off the panel. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refresh,
+.sync {
+  margin-left: auto;
+  border: 1px solid var(--c-raised);
+  border-radius: 2px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  padding: 2px 10px;
+  cursor: default;
+}
+.refresh:hover:not(:disabled),
+.sync:hover:not(:disabled) { border-color: var(--c-accent); }
+.refresh:disabled,
+.sync:disabled { color: var(--c-text-dim); }
+
+.sync { margin-left: 0; }
+
+.capacity { display: flex; align-items: center; gap: 10px; }
+
+.bar {
+  flex: 1;
+  min-width: 0;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c-panel);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+
+.capacityText,
+.note { color: var(--c-text-dim); font-size: var(--f-size-sm); }
+
+.contents { margin: 0; }
+.note { margin: 0; }
+
+.actions { display: flex; align-items: center; gap: 8px; }
+
+.label { color: var(--c-text-dim); font-size: var(--f-size-sm); }
+
+.select {
+  flex: 1;
+  min-width: 0;
+  max-width: 320px;
+  border: 1px solid var(--c-raised);
+  border-radius: 2px;
+  background: var(--c-field);
+  color: var(--c-text);
+  font: inherit;
+  padding: 2px 6px;
+}

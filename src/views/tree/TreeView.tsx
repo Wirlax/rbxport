@@ -7,7 +7,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
-import { FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
+import { DeviceIcon, FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
 import {
   branchIds, emptySources, nodesForSource, sourceOf, toggle, visibleNodes, type Source,
 } from "@/lib/tree";
@@ -28,7 +28,14 @@ const Row = memo(function Row({
   onSelect: (node: TreeNode) => void;
   onToggle: (id: string) => void;
 }) {
-  const Icon = node.kind === "folder" ? FolderIcon : node.kind === "allTracks" ? NoteIcon : ListIcon;
+  const Icon =
+    node.kind === "folder"
+      ? FolderIcon
+      : node.kind === "allTracks"
+        ? NoteIcon
+        : node.kind === "device"
+          ? DeviceIcon
+          : ListIcon;
   return (
     <div
       className={styles.node}

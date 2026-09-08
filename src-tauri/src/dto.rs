@@ -136,6 +136,31 @@ pub struct BeatDto {
     pub downbeat: bool,
 }
 
+/// A volume an export could be written to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDto {
+    pub name: String,
+    /// Where it is mounted; this is what an export is written to.
+    pub path: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+    pub removable: bool,
+    /// What is already on it, absent when it holds no export.
+    pub export: Option<DeviceExportDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceExportDto {
+    pub tracks: u32,
+    pub playlists: u32,
+    /// True when we wrote it, which is what makes the next export a sync.
+    pub ours: bool,
+    /// When our own export last ran; empty when this is not one of ours.
+    pub written: String,
+}
+
 /// What an export wrote.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

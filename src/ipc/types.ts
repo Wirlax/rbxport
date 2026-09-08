@@ -61,7 +61,7 @@ export interface ViewHandle {
 export interface TreeNode {
   id: string;
   name: string;
-  kind: "collection" | "folder" | "playlist" | "history" | "allTracks";
+  kind: "collection" | "folder" | "playlist" | "history" | "allTracks" | "device";
   depth: number;
   /** Undefined for leaves. */
   expanded?: boolean;
@@ -152,17 +152,22 @@ export interface Backend {
   importFiles(): Promise<ImportReport | null>;
 
   /**
+   * Writes a playlist to `destination`, asking for one when none is given.
+   *
+   * Resolves to what was written, or `null` if the picker was cancelled. A
+   * destination that already holds one of our exports is synced rather than
+   * rewritten.
+   */
+  exportPlaylist(playlistId: string, destination?: string): Promise<ExportReport | null>;
+
+  /** The volumes an export could be written to, and what is on each. */
+  listDevices(): Promise<Device[]>;
+
+  /**
    * Listens for devices on the link network. Listen-only — nothing is
    * transmitted, because announcing as a source needs the database server's
    * menus, which are not built.
    */
-  /**
-   * Asks for a destination and writes a playlist to it.
-   *
-   * Resolves to what was written, or `null` if the picker was cancelled.
-   */
-  exportPlaylist(playlistId: string): Promise<ExportReport | null>;
-
   startLinkListening(): Promise<LinkStatus>;
   stopLinkListening(): Promise<void>;
   /** Called as the set of devices on the network changes. */
@@ -191,6 +196,29 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** A volume an export could be written to. */
+export interface Device {
+  name: string;
+  /** Where it is mounted; this is what an export is written to. */
+  path: string;
+  totalBytes: number;
+  freeBytes: number;
+  /** Whether the OS calls it removable. External SSDs often say no. */
+  removable: boolean;
+  /** What is already on it, null when it holds no export. */
+  export: DeviceExport | null;
+}
+
+/** What a device already holds. */
+export interface DeviceExport {
+  tracks: number;
+  playlists: number;
+  /** True when we wrote it, which is what makes the next export a sync. */
+  ours: boolean;
+  /** When our own export last ran; empty when this is not one of ours. */
+  written: string;
 }
 
 /** What an export wrote. */

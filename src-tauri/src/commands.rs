@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    BeatDto, CueDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
+    BeatDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -531,6 +531,37 @@ pub async fn export_playlist(
 
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
     Ok(report)
+}
+
+/// Lists the volumes an export could be written to, and what is on each.
+///
+/// Enumeration is cheap; reading a stick to see what it holds is not, so that
+/// happens once per device here rather than on any timer. There is no polling
+/// behind this — the panel asks when it is opened.
+#[tauri::command]
+pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
+    blocking("list_devices", || {
+        Ok(rbl_devices::list()
+            .into_iter()
+            .map(|device| {
+                let found = rbl_devices::inspect(&device.mount_point);
+                DeviceDto {
+                    name: device.name,
+                    path: device.mount_point.to_string_lossy().into_owned(),
+                    total_bytes: device.total_bytes,
+                    free_bytes: device.free_bytes,
+                    removable: device.removable,
+                    export: found.map(|export| DeviceExportDto {
+                        tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
+                        playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),
+                        ours: export.ours,
+                        written: export.written,
+                    }),
+                }
+            })
+            .collect())
+    })
+    .await
 }
 
 /// Reads a track's analysis files, so the export re-emits rather than

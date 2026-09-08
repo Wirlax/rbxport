@@ -97,6 +97,7 @@ pub fn run() {
             commands::start_link_listening,
             commands::stop_link_listening,
             commands::export_playlist,
+            commands::list_devices,
             commands::track_beats,
             commands::track_cues,
             commands::missing_tracks,

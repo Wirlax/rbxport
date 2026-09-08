@@ -3082,6 +3082,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-devices"
+version = "0.1.0"
+dependencies = [
+ "rbl-anlz",
+ "rbl-export",
+ "rbl-pdb",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-difftool"
 version = "0.1.0"
 dependencies = [
@@ -3278,6 +3291,7 @@ dependencies = [
  "rbl-audio",
  "rbl-core",
  "rbl-db",
+ "rbl-devices",
  "rbl-export",
  "rbl-index",
  "rbl-prolink",
