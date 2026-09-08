@@ -43,9 +43,20 @@ impl OnsetEnvelope {
 /// thirds of rekordbox's tempo for that reason. Onsets taken from below a
 /// couple of hundred hertz simply do not contain the hi-hats.
 ///
-/// **Untested against the real library.** The hypothesis above is the reason
-/// this exists; whether it fixes those three tracks without costing others is
-/// a measurement that has not been run. See TODO.md.
+/// **Measured, and the hypothesis lost.** On 150 tracks of the reference
+/// library, tempo from `Band::LOW` scored 79% against the full band's 95%,
+/// fixing 5 tracks and breaking 30.
+///
+/// The reason is this module's own frame size, not the idea. `FRAME` is 1024
+/// samples, so a bin is 43 Hz wide at 44.1 kHz and everything below 200 Hz is
+/// **four and a half bins**. Spectral flux over four bins is too coarse to
+/// place an onset, so the low band trades the hi-hat ambiguity for a much
+/// worse one. A future attempt needs a longer frame for the low band — or an
+/// onset measure that is not an FFT at all — rather than a different cutoff.
+///
+/// Kept because the tuning rig scores it (`tempotune`'s pass 1d) and because
+/// `Band::FULL` is the path everything uses. Nothing shipping reads
+/// `Band::LOW`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
     pub low_hz: f32,
