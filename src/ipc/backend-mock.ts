@@ -346,22 +346,32 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(out);
     },
 
-    trackWaveform: (trackId: string, _kind: WaveformKind) => {
-      // Synthesised so the mock exercises the same drawing path as real data:
-      // one byte per column, low five bits height, top three whiteness.
+    trackWaveform: (trackId: string, kind: WaveformKind, window) => {
+      // Three bytes a column — low, mid, high band energy — which is what the
+      // real backend serves from `PWV6` and `PWV7`. Synthesising the old
+      // one-byte `PWAV` shape here drew the bands from garbage.
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
       if (!row || row.analysed === 0) return wait(new Uint8Array());
       const rnd = mulberry32(index + 1);
-      const columns = 400;
-      const out = new Uint8Array(columns);
+      // `PWV6` is 1,200 columns for any track; `PWV7` is far denser.
+      const columns = kind === "bandsDetail" ? 12_000 : 1200;
+      const out = new Uint8Array(columns * 3);
       for (let i = 0; i < columns; i++) {
-        const shape = 0.35 + 0.65 * Math.abs(Math.sin((i / columns) * Math.PI * 3));
-        const height = Math.round(shape * (0.6 + rnd() * 0.4) * 31);
-        const whiteness = Math.round(rnd() * 7);
-        out[i] = (whiteness << 5) | (height & 0x1f);
+        const at = i / columns;
+        // A shape with quiet intros and outros, so the overview reads as a
+        // track rather than a block.
+        const envelope = Math.min(1, Math.min(at, 1 - at) * 6) * (0.55 + 0.45 * Math.abs(Math.sin(at * Math.PI * 5)));
+        const jitter = 0.75 + rnd() * 0.25;
+        out[i * 3] = Math.round(envelope * jitter * 110);
+        out[i * 3 + 1] = Math.round(envelope * jitter * 70);
+        // Highs are sparse, which is what puts the bright core in the middle.
+        out[i * 3 + 2] = Math.round(envelope * (rnd() > 0.7 ? rnd() * 45 : rnd() * 8));
       }
-      return wait(out);
+      if (!window) return wait(out);
+      const first = Math.min(window.from, columns) * 3;
+      const len = Math.min(window.len, columns - window.from) * 3;
+      return wait(out.subarray(first, first + Math.max(0, len)));
     },
 
     viewIdsInRange: (viewId, from, to) => {
@@ -407,6 +417,40 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         { positionMs: Math.round(total * 0.61), letter: "C", memory: false },
         { positionMs: Math.round(total * 0.83), letter: "D", memory: false },
       ]);
+    },
+
+    // A plausible structure, so the phrase bar can be driven without an
+    // analysis file: a real track's phrases tile it end to end.
+    trackPhrases: (trackId) => {
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row || row.analysed === 0) return wait([]);
+      const total = row.durationSec * 1000;
+      const shape = [
+        "INTRO 2", "CHORUS 1", "DOWN", "UP 1", "UP 3", "CHORUS 1",
+        "DOWN", "UP 1", "CHORUS 1", "DOWN", "OUTRO",
+      ];
+      return wait(
+        shape.map((label, i) => ({
+          beat: i * 32,
+          timeMs: Math.round((total * i) / shape.length),
+          kind: i,
+          label,
+        })),
+      );
+    },
+
+    // Vocals over the middle two thirds, so the strip has something to draw.
+    trackVocals: (trackId) => {
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row || row.analysed === 0) return wait(new Uint8Array());
+      const out = new Uint8Array(1200);
+      for (let i = 0; i < out.length; i++) {
+        const at = i / out.length;
+        out[i] = at > 0.25 && at < 0.85 && Math.floor(at * 40) % 3 !== 0 ? 200 : 0;
+      }
+      return wait(out);
     },
 
     // No filesystem in a browser, so nothing is written — but the counts are

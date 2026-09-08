@@ -187,6 +187,16 @@ export interface Backend {
    */
   exportPlaylist(playlistId: string, destination?: string): Promise<ExportReport | null>;
 
+  /** A track's phrase structure, empty when it has no `PSSI` tag. */
+  trackPhrases(trackId: string): Promise<Phrase[]>;
+
+  /**
+   * Per-column vocal presence, empty when the track has no `PVDI` tag.
+   *
+   * Raw bytes rather than JSON: this is one value per overview column.
+   */
+  trackVocals(trackId: string): Promise<Uint8Array>;
+
   /** The volumes an export could be written to, and what is on each. */
   listDevices(): Promise<Device[]>;
 
@@ -270,6 +280,27 @@ export interface ExportReport {
   skipped: string[];
   /** Whether the export read back correctly with the independent parser. */
   verified: boolean;
+}
+
+/**
+ * One phrase of a track's structure, from the `PSSI` analysis tag.
+ *
+ * `label` is what rekordbox prints in the phrase bar — "INTRO 2", "CHORUS 1",
+ * "UP 1" — and `kind` is the raw numeric value it came from, kept so a label
+ * we do not recognise can still be traced back.
+ */
+export interface Phrase {
+  /** Beat the phrase starts on, 1-based. */
+  beat: number;
+  /**
+   * Milliseconds from the start, resolved against the beat grid.
+   *
+   * Absent when the grid does not reach the phrase, which happens on a track
+   * whose analysis is older than its length. The strip falls back to the beat.
+   */
+  timeMs: number | null;
+  kind: number;
+  label: string;
 }
 
 /** One beat of the grid. */

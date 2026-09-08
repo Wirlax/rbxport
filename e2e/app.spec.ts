@@ -189,6 +189,9 @@ test("a folder in the tree collapses and expands", async ({ page }) => {
   await page.goto("/");
   const tree = page.getByRole("tree");
   await expect(tree.getByRole("treeitem").first()).toBeVisible();
+  // Connected devices join the tree, and they arrive after the playlists do.
+  // Counting before they land makes the count move under the test.
+  await expect(tree.getByRole("treeitem").filter({ hasText: "DJ STICK" })).toBeVisible();
 
   // A folder the mock nests playlists under.
   const folder = tree.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
@@ -232,7 +235,7 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
   const bar = page.getByRole("banner");
   await expect(bar.getByRole("button", { name: "Information" })).toBeVisible();
   await expect(bar.getByText("Professional")).toBeVisible();
-  await expect(bar.getByRole("button", { name: "Settings" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
   await expect(bar.getByRole("button", { name: "Headphone monitoring" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Master level" })).toBeVisible();
 
@@ -244,7 +247,7 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
   for (const item of [
     bar.getByRole("button", { name: "Information" }),
     bar.getByText("Professional"),
-    bar.getByRole("button", { name: "Settings" }),
+    bar.getByRole("button", { name: "Settings", exact: true }),
     bar.getByRole("button", { name: "Headphone monitoring" }),
     bar.getByRole("meter", { name: "Master level" }),
     page.getByTestId("clock"),
@@ -270,7 +273,7 @@ test("the player's cue and play sit at the foot of the transport", async ({ page
   // buttons are at the top of the column, then a gap, then the two circles.
   await page.goto("/");
   const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
-  const cue = await page.getByRole("button", { name: "Cue" }).boundingBox();
+  const cue = await page.getByRole("button", { name: "Cue", exact: true }).boundingBox();
   const play = await page
     .getByRole("region", { name: "Preview player" })
     .getByRole("button", { name: "Play", exact: true })
@@ -504,7 +507,7 @@ test("the player draws the transport, disabled where there is no backend", async
   await page.goto("/");
   const player = page.getByRole("region", { name: "Preview player" });
   await expect(player.getByRole("button", { name: "Play" })).toBeDisabled();
-  await expect(player.getByRole("button", { name: "Cue" })).toBeDisabled();
+  await expect(player.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
   await expect(page.getByTestId("player-overview")).toBeVisible();
   await expect(page.getByTestId("player-detail")).toBeVisible();
 });
@@ -512,8 +515,9 @@ test("the player draws the transport, disabled where there is no backend", async
 test("the player shows a position and a total once a track is chosen", async ({ page }) => {
   await page.goto("/");
   await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
-  // Position over total, from the track's own length before any file loads.
-  await expect(page.getByTestId("player-time")).toHaveText(/^\d?\d:\d\d \/ \d?\d:\d\d$/);
+  // Time *remaining*, with the tenths in a smaller face — which is what
+  // rekordbox shows in that slot, not position over total.
+  await expect(page.getByTestId("player-time")).toHaveText(/^-\d?\d:\d\d\.\d$/);
 });
 
 test("the waveform is a seek target", async ({ page }) => {
@@ -529,7 +533,7 @@ test("the waveform is a seek target", async ({ page }) => {
 
 test("the gear opens settings, and Escape closes them", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Settings" });
   await expect(dialog).toBeVisible();
@@ -548,7 +552,7 @@ test("settings can put the columns back", async ({ page }) => {
     .getByRole("menuitemcheckbox", { name: "Genre" }).click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Reset columns" }).click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
 });
@@ -640,7 +644,7 @@ test("a comment commits on Enter", async ({ page }) => {
 
 test("settings can check for missing files", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
 
   const section = page.getByRole("region", { name: "Missing files" });
   await expect(section.getByRole("button", { name: /check for missing files/i })).toBeVisible();
@@ -673,7 +677,7 @@ test("the player marks a track's cues on its waveforms", async ({ page }) => {
 
 test("settings offers adding music, and says what it will not do", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
 
   const section = page.getByRole("region", { name: "Add music" });
   await expect(section.getByRole("button", { name: /add files/i })).toBeVisible();
@@ -760,7 +764,7 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
 
 test("settings can look for link devices, and says why a browser cannot", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
 
   const section = page.getByRole("region", { name: "Link" });
   // Honest about listening only, rather than implying it appears as a source.
@@ -901,9 +905,14 @@ test("the last screen is drawn while the library is still being read", async ({ 
   await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
   const title = await page.locator('[role="gridcell"][data-col="title"]').first().innerText();
   // Let the session be written.
-  await expect.poll(async () =>
-    page.evaluate(() => JSON.parse(localStorage.getItem("rbl.session") ?? "{}").rows?.length ?? 0),
-  ).toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const stored = localStorage.getItem("rbl.session") ?? "{}";
+        return (JSON.parse(stored) as { rows?: unknown[] }).rows?.length ?? 0;
+      }),
+    )
+    .toBeGreaterThan(0);
 
   // Now start again with the library held back.
   await page.goto("/?slow=1");

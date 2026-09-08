@@ -100,3 +100,44 @@ test("each default column is its measured width", async ({ page }) => {
     expect(Math.round(box?.width ?? 0), label).toBe(width);
   }
 });
+
+test("the player is laid out the way the capture measures it", async ({ page }) => {
+  // Every number here is measured off a 2x capture of rekordbox 7.2.11
+  // running — see the `source` on each token in design/tokens/tokens.json.
+  const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
+  expect(player?.height).toBe(279);
+
+  const transport = await page.locator("section[aria-label='Preview player'] > div").first().boundingBox();
+  expect(transport?.width).toBe(80);
+
+  const side = await page.getByRole("complementary", { name: "Cue list" }).boundingBox();
+  expect(side?.width).toBe(209);
+
+  // The bands stack in rekordbox's order, top to bottom.
+  const tops = await Promise.all(
+    ["player-vocal", "player-overview", "player-phrase", "player-detail"].map(async (id) =>
+      (await page.getByTestId(id).boundingBox())?.y ?? 0,
+    ),
+  );
+  expect(tops).toEqual([...tops].sort((a, b) => a - b));
+});
+
+test("the player carries the controls a deck has", async ({ page }) => {
+  const player = page.getByRole("region", { name: "Preview player" });
+  for (const name of [
+    "Previous track", "Next track",
+    "Beat jump back", "Beat jump forward",
+    "Zoom in", "Zoom out",
+    "Cue", "Play",
+    "Hot cue A", "Hot cue H",
+  ]) {
+    await expect(player.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  // The pad modes, the memory transport and the cue-list tabs.
+  await expect(player.getByRole("button", { name: "CUE/LOOP" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "GRID" })).toBeVisible();
+  await expect(player.getByRole("group", { name: "Cue mode" })).toBeVisible();
+  await expect(player.getByRole("tab", { name: "MEMORY" })).toBeVisible();
+  await expect(player.getByRole("tab", { name: "HOT CUE" })).toBeVisible();
+  await expect(player.getByRole("tab", { name: "INFO" })).toBeVisible();
+});

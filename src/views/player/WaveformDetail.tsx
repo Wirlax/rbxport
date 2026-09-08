@@ -21,26 +21,27 @@ const bytesByTrack = new Map<string, Uint8Array>();
 /** In-flight fetches, shared so StrictMode's double effect does not double-fetch. */
 const inFlight = new Map<string, Promise<Uint8Array>>();
 
-async function load(trackId: string): Promise<Uint8Array> {
-  const cached = bytesByTrack.get(trackId);
+async function load(trackId: string, kind: "bands" | "bandsDetail"): Promise<Uint8Array> {
+  const key = `${trackId}:${kind}`;
+  const cached = bytesByTrack.get(key);
   if (cached) return cached;
-  const existing = inFlight.get(trackId);
+  const existing = inFlight.get(key);
   if (existing) return existing;
 
   const pending = (async () => {
     try {
       const backend = await getBackend();
-      const data = await backend.trackWaveform(trackId, "bands");
-      bytesByTrack.set(trackId, data);
+      const data = await backend.trackWaveform(trackId, kind);
+      bytesByTrack.set(key, data);
       return data;
     } catch {
       // A track without analysis simply stays blank.
       return new Uint8Array();
     } finally {
-      inFlight.delete(trackId);
+      inFlight.delete(key);
     }
   })();
-  inFlight.set(trackId, pending);
+  inFlight.set(key, pending);
   return pending;
 }
 
@@ -53,10 +54,14 @@ export interface WaveformDetailProps {
   /** The space the canvas occupies, in CSS pixels. */
   width: number;
   height: number;
+  /** Half height from the baseline, bands stacked — the overview's form. */
+  half?: boolean;
+  /** Read the full-resolution `PWV7` rather than the 1,200-column `PWV6`. */
+  detail?: boolean;
 }
 
 export const WaveformDetail = memo(function WaveformDetail({
-  trackId, progress, span = 0.08, width, height,
+  trackId, progress, span = 0.08, width, height, half = false, detail = false,
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<Uint8Array | null>(null);
@@ -64,13 +69,13 @@ export const WaveformDetail = memo(function WaveformDetail({
   useEffect(() => {
     let live = true;
     setData(null);
-    void load(trackId).then((bytes) => {
+    void load(trackId, detail ? "bandsDetail" : "bands").then((bytes) => {
       if (live) setData(bytes);
     });
     return () => {
       live = false;
     };
-  }, [trackId]);
+  }, [trackId, detail]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -84,17 +89,17 @@ export const WaveformDetail = memo(function WaveformDetail({
 
     // Centred on the playhead, and pinned at either end so the window never
     // runs off the track and leaves half the panel empty.
-    const half = span / 2;
-    const centre = Math.min(Math.max(progress, half), 1 - half);
+    const reach = Math.min(span, 1) / 2;
+    const centre = Math.min(Math.max(progress, reach), 1 - reach);
     // The detail's amber is the darker of the two; the overview strip above it
     // uses the brighter one.
-    // `PWV6` is 1,200 columns for the whole track, so a window into it is a
-    // slice of those columns rather than a second fetch.
+    // Both tags cover the whole track, so a window into one is a slice of its
+    // columns rather than a second fetch.
     const columns = Math.floor(data.length / 3);
-    const first = Math.max(0, Math.floor((centre - half) * columns)) * 3;
-    const last = Math.min(data.length, Math.ceil((centre + half) * columns) * 3);
-    drawBands(ctx, data.subarray(first, last), w, h, "overview");
-  }, [data, progress, span, width, height]);
+    const first = Math.max(0, Math.floor((centre - reach) * columns)) * 3;
+    const last = Math.min(data.length, Math.ceil((centre + reach) * columns) * 3);
+    drawBands(ctx, data.subarray(first, last), w, h, detail ? "detail" : "overview", half);
+  }, [data, progress, span, width, height, half, detail]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });
