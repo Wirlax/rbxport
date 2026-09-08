@@ -18,7 +18,7 @@ pub mod testing;
 mod load;
 mod view;
 
-pub use load::{load, reload_playlists, LoadStats};
+pub use load::{content_version, load, reload_playlists, LoadStats};
 pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};

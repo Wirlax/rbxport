@@ -19,7 +19,7 @@ import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
-import { loadSession, saveSession } from "@/lib/session";
+import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/session";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -50,7 +50,7 @@ export function App() {
   // window closed with rather than the default that then jumps.
   const [restored] = useState(loadSession);
 
-  const [tree, setTree] = useState<readonly TreeNode[]>([]);
+  const [tree, setTree] = useState<readonly TreeNode[]>(restored.tree);
   // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
@@ -77,7 +77,7 @@ export function App() {
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // The row the player is showing. Set by the browser as the selection moves,
   // so the player reflects what is highlighted rather than nothing.
-  const [playerTrack, setPlayerTrack] = useState<RowDto | null>(null);
+  const [playerTrack, setPlayerTrack] = useState<RowDto | null>(restored.player);
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -466,6 +466,16 @@ export function App() {
     })();
   }, []);
 
+  // The top of the current view, kept only to write the next start's opening
+  // screen. The library itself still lives entirely in Rust.
+  const [screen, setScreen] = useState<{ rows: RowDto[]; count: number }>({
+    rows: restored.rows,
+    count: restored.count,
+  });
+  const onFirstRows = useCallback((rows: RowDto[], count: number) => {
+    setScreen({ rows, count });
+  }, []);
+
   // Written on every change rather than on exit: a window that is force-quit,
   // or a machine that loses power, still comes back where it was. It is a few
   // hundred bytes to localStorage, not something worth batching.
@@ -476,8 +486,24 @@ export function App() {
       sort: sortState,
       infoOpen,
       subOpen,
+      // Only once the real library is up: storing the seed back over itself
+      // would keep the first run's rows alive forever.
+      tree: [...tree].slice(0, SEEDED_NODES),
+      rows: screen.rows.slice(0, SEEDED_ROWS),
+      count: screen.count,
+      player: playerTrack,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, playerTrack]);
+
+  // The last screen, handed to the table until the backend answers. Dropped as
+  // soon as the library is up, so a stale row cannot outlive its replacement.
+  const seed = useMemo(
+    () =>
+      summary === null && restored.rows.length > 0
+        ? { count: restored.count, rows: restored.rows }
+        : undefined,
+    [summary, restored.count, restored.rows],
+  );
 
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
@@ -542,6 +568,8 @@ export function App() {
           onColumnToggle={cols.toggle}
           onColumnAutoSize={cols.autoSize}
           onColumnAutoSizeAll={cols.autoSizeEvery}
+          seed={seed}
+          onFirstRows={onFirstRows}
         />
         )}
         {subOpen ? (

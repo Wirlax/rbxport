@@ -892,6 +892,35 @@ test("the sub-browser keeps its own selection, separate from the main one", asyn
   await expect(sub).toBeHidden();
 });
 
+test("the last screen is drawn while the library is still being read", async ({ page }) => {
+  // Reading 38,681 rows out of SQLCipher takes long enough to see. Rather than
+  // an empty window for that time, the previous run's screen is drawn and
+  // replaced the moment the real one arrives.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  const title = await page.locator('[role="gridcell"][data-col="title"]').first().innerText();
+  // Let the session be written.
+  await expect.poll(async () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("rbl.session") ?? "{}").rows?.length ?? 0),
+  ).toBeGreaterThan(0);
+
+  // Now start again with the library held back.
+  await page.goto("/?slow=1");
+
+  // The tree, the rows and the player are all there before the backend has
+  // answered anything.
+  await expect(page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first()).toBeVisible();
+  await expect(page.locator('[role="row"]').first()).toBeVisible();
+  await expect(page.locator('[role="gridcell"][data-col="title"]').first()).toHaveText(title);
+  await expect(page.getByRole("contentinfo")).toContainText("Loading the library…");
+
+  // And the real data replaces it.
+  await page.waitForFunction(() => "__libraryReady" in window);
+  await page.evaluate(() => (window as unknown as { __libraryReady: () => void }).__libraryReady());
+  await expect(page.getByRole("contentinfo")).toContainText("Tracks");
+});
+
 test("a library that is still loading arrives when it is ready", async ({ page }) => {
   // The backend loads on its own thread, so the first request can easily
   // arrive before there is anything to answer with. `?slow` holds the mock's

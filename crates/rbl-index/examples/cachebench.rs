@@ -12,7 +12,8 @@ fn main() {
     };
     let master = db.location().master_db.clone();
     let version = db.schema().db_version.and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
-    let fp = rbl_index::cache::Fingerprint::of(&master, version).expect("fingerprint");
+    let content = rbl_index::content_version(&db).unwrap_or(0);
+    let fp = rbl_index::cache::Fingerprint::of(&master, version, content).expect("fingerprint");
 
     let t0 = Instant::now();
     let (library, _) = rbl_index::load(&db).expect("load");

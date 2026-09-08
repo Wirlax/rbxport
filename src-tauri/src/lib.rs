@@ -48,8 +48,12 @@ fn spawn_library_load(app: tauri::AppHandle) {
                 // a start costs, and none of it gets faster — the work is the
                 // decryption. A snapshot of the built columns turns the same
                 // start into a sequential read.
+                // Content rather than file times: rekordbox rewrites the WAL
+                // without changing a row, and keying on that refused the
+                // snapshot on every start it was running for.
+                let content = rbl_index::content_version(&db).unwrap_or(0);
                 let fingerprint = cache_path.as_ref().and_then(|_| {
-                    rbl_index::cache::Fingerprint::of(&master_db, schema_key(db_version))
+                    rbl_index::cache::Fingerprint::of(&master_db, schema_key(db_version), content)
                 });
                 if let (Some(path), Some(fp)) = (cache_path.as_ref(), fingerprint) {
                     if let Some(library) = rbl_index::cache::load(path, fp) {
@@ -88,10 +92,13 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         // that no longer exist would be served on a later
                         // start as though it were current.
                         if let (Some(path), Some(before)) = (cache_path.as_ref(), fingerprint) {
-                            let after = rbl_index::cache::Fingerprint::of(
-                                &master_db,
-                                schema_key(db_version),
-                            );
+                            let after = rbl_index::content_version(&db).ok().and_then(|now| {
+                                rbl_index::cache::Fingerprint::of(
+                                    &master_db,
+                                    schema_key(db_version),
+                                    now,
+                                )
+                            });
                             if after == Some(before) {
                                 let held = app.state::<Arc<AppState>>();
                                 if let Ok(library) = held.library() {

@@ -35,10 +35,22 @@ export interface TrackView {
  */
 export type PendingEdits = ReadonlyMap<string, Partial<RowDto>>;
 
+/**
+ * Rows to draw before the backend has answered.
+ *
+ * The last screen, kept from the previous run so the window is not empty while
+ * the library is read. Dropped the instant a real page lands.
+ */
+export interface Seed {
+  count: number;
+  rows: readonly RowDto[];
+}
+
 export function useTrackView(
   spec: ViewSpec,
   libraryGeneration = 0,
   pending?: PendingEdits,
+  seed?: Seed,
 ): TrackView {
   // `specKey` records which spec this state describes. Loading is derived from
   // comparing it against the current spec rather than set by an effect: an
@@ -159,12 +171,18 @@ export function useTrackView(
     [state.viewId],
   );
 
+  // Nothing has been opened yet, so the seed is all there is to draw. Once a
+  // view exists the seed is gone for good — it is a picture of the last run,
+  // not a fallback for a slow page.
+  const unopened = state.viewId === 0;
+  const seeded = unopened && seed !== undefined && seed.rows.length > 0;
+
   return {
-    count: state.count,
+    count: seeded ? seed.count : state.count,
     token,
     loading: state.specKey !== specKey,
     error: state.error,
-    rowAt,
+    rowAt: seeded ? (index: number) => seed.rows[index] : rowAt,
     ensureRange,
     idsInRange,
   };

@@ -95,6 +95,38 @@ fn load_lookup(
     Ok(map)
 }
 
+/// A number that changes when the library's content does, and not otherwise.
+///
+/// `MAX(rb_local_usn)` over the tables the index reads, mixed with each one's
+/// live row count so a deletion moves it too. Two queries per table against
+/// indexed columns, which is milliseconds — far cheaper than the 543 ms of
+/// decryption it decides whether to skip.
+///
+/// This exists because rekordbox rewrites the write-ahead log constantly
+/// without changing a row, so a snapshot keyed to the file was refused on
+/// every start rekordbox happened to be running for.
+pub fn content_version(db: &Db) -> rusqlite::Result<u64> {
+    let conn = db.connection();
+    let mut mixed: u64 = 0;
+    for table in ["djmdContent", "djmdPlaylist", "djmdSongPlaylist"] {
+        let (usn, rows): (i64, i64) = conn.query_row(
+            &format!(
+                "SELECT COALESCE(MAX(rb_local_usn), 0), COUNT(*) FROM {table}
+                 WHERE rb_local_deleted = 0"
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        // Order matters, so a row moving between tables cannot cancel out.
+        mixed = mixed
+            .rotate_left(17)
+            .wrapping_add(usn.unsigned_abs())
+            .rotate_left(17)
+            .wrapping_add(rows.unsigned_abs());
+    }
+    Ok(mixed)
+}
+
 /// Builds the index from an open (read-only is fine) library.
 pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     let conn = db.connection();

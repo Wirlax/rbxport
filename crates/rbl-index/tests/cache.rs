@@ -14,6 +14,7 @@ fn fingerprint() -> Fingerprint {
         wal_len: 7,
         wal_modified_ns: 5,
         db_version: 6000,
+        content: 42,
     }
 }
 
@@ -76,14 +77,27 @@ fn a_snapshot_of_a_different_database_is_refused() {
     // Every field on its own must be enough to reject it: this is the whole
     // defence against showing somebody a library that has moved on.
     for changed in [
-        Fingerprint { db_len: 9999, ..fingerprint() },
-        Fingerprint { db_modified_ns: 100, ..fingerprint() },
-        Fingerprint { wal_len: 8, ..fingerprint() },
-        Fingerprint { wal_modified_ns: 6, ..fingerprint() },
+        Fingerprint { content: 43, ..fingerprint() },
         Fingerprint { db_version: 6001, ..fingerprint() },
         Fingerprint { format: rbl_index::cache::FORMAT + 1, ..fingerprint() },
     ] {
         assert!(decode(&bytes, changed).is_none(), "{changed:?} should have been refused");
+    }
+}
+
+#[test]
+fn a_rewritten_log_alone_does_not_throw_the_snapshot_away() {
+    // rekordbox rewrites the write-ahead log constantly without changing a
+    // row. Refusing the snapshot for that made it useless on every start
+    // rekordbox happened to be running for, which is most of them.
+    let bytes = encode(&built(), fingerprint());
+    for same_content in [
+        Fingerprint { wal_len: 8, ..fingerprint() },
+        Fingerprint { wal_modified_ns: 999, ..fingerprint() },
+        Fingerprint { db_len: 9999, ..fingerprint() },
+        Fingerprint { db_modified_ns: 100, ..fingerprint() },
+    ] {
+        assert!(decode(&bytes, same_content).is_some(), "{same_content:?} should still match");
     }
 }
 

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SESSION, DEFAULT_TREE_WIDTH, sanitiseSession } from "./session";
+import {
+  DEFAULT_SESSION,
+  DEFAULT_TREE_WIDTH,
+  sanitiseSession,
+  SEEDED_NODES,
+  SEEDED_ROWS,
+} from "./session";
 import { DEFAULT_SORT } from "./viewSpec";
 
 describe("sanitiseSession", () => {
@@ -11,8 +17,35 @@ describe("sanitiseSession", () => {
       sort: { column: "bpm", descending: true },
       infoOpen: true,
       subOpen: false,
+      tree: [{ id: "pl-7", name: "Set", kind: "playlist", depth: 1 }],
+      rows: [{ id: "100", title: "One" }],
+      count: 14,
+      player: { id: "100", title: "One" },
     };
     expect(sanitiseSession(session)).toEqual(session);
+  });
+
+  it("keeps only records that could be drawn", () => {
+    // The opening screen is written by us but read back as untrusted: a row
+    // without an id cannot be keyed, and a keyed list is the one thing the
+    // table needs.
+    const session = sanitiseSession({
+      tree: [{ id: "a" }, "nope", null, { name: "no id" }],
+      rows: [{ id: "1" }, 7],
+      player: { title: "no id" },
+      count: -3,
+    });
+    expect(session.tree).toHaveLength(1);
+    expect(session.rows).toHaveLength(1);
+    expect(session.player).toBeNull();
+    expect(session.count).toBe(0);
+  });
+
+  it("caps what it will store, so one library cannot fill the disk", () => {
+    const many = Array.from({ length: 9000 }, (_, i) => ({ id: String(i) }));
+    const session = sanitiseSession({ tree: many, rows: many });
+    expect(session.tree.length).toBeLessThanOrEqual(SEEDED_NODES);
+    expect(session.rows.length).toBeLessThanOrEqual(SEEDED_ROWS);
   });
 
   it("falls back on anything that is not a session", () => {

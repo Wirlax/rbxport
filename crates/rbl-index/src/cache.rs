@@ -49,6 +49,15 @@ pub struct Fingerprint {
     pub wal_len: u64,
     pub wal_modified_ns: i64,
     pub db_version: u32,
+    /// The library's own change counter: `MAX(rb_local_usn)` across the tables
+    /// we read, with the live row count.
+    ///
+    /// This is what makes the snapshot usable at all while rekordbox is open.
+    /// rekordbox touches the write-ahead log constantly — checkpointing, its
+    /// own bookkeeping — so keying on the file alone missed on every start it
+    /// was running for, which is most of them. The counter only moves when a
+    /// row actually changes.
+    pub content: u64,
 }
 
 impl Fingerprint {
@@ -57,7 +66,7 @@ impl Fingerprint {
     /// A missing WAL is normal — rekordbox removes it on a clean exit — and
     /// records as zeroes rather than as a failure.
     #[must_use]
-    pub fn of(master_db: &Path, db_version: u32) -> Option<Self> {
+    pub fn of(master_db: &Path, db_version: u32, content: u64) -> Option<Self> {
         let (db_len, db_modified_ns) = stamp(master_db)?;
         let wal = master_db.with_extension(
             master_db
@@ -65,7 +74,15 @@ impl Fingerprint {
                 .map_or_else(|| "db-wal".to_owned(), |e| format!("{}-wal", e.to_string_lossy())),
         );
         let (wal_len, wal_modified_ns) = stamp(&wal).unwrap_or((0, 0));
-        Some(Self { format: FORMAT, db_len, db_modified_ns, wal_len, wal_modified_ns, db_version })
+        Some(Self {
+            format: FORMAT,
+            db_len,
+            db_modified_ns,
+            wal_len,
+            wal_modified_ns,
+            db_version,
+            content,
+        })
     }
 }
 
@@ -147,6 +164,7 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     w.u64(fingerprint.wal_len);
     w.i64(fingerprint.wal_modified_ns);
     w.u32(fingerprint.db_version);
+    w.u64(fingerprint.content);
 
     w.u64(library.len() as u64);
     w.u64s(&library.ids);
@@ -291,8 +309,16 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         wal_len: r.u64()?,
         wal_modified_ns: r.i64()?,
         db_version: r.u32()?,
+        content: r.u64()?,
     };
-    if found != want {
+    // The file stamps are recorded but deliberately not compared: rekordbox
+    // rewrites the WAL without changing a single row, and refusing the
+    // snapshot for that made it useless whenever rekordbox was open. What must
+    // match is the content counter, the schema, and the format.
+    if found.format != want.format
+        || found.db_version != want.db_version
+        || found.content != want.content
+    {
         return None;
     }
 

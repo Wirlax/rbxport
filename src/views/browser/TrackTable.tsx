@@ -9,7 +9,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { RowDto, SortColumn, ViewSpec } from "@/ipc/types";
-import { useTrackView, type PendingEdits } from "@/store/useTrackView";
+import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
+import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
 import { visibleWindow } from "@/lib/virtual";
@@ -323,6 +324,15 @@ export interface TrackTableProps {
   onSelectedTracks?: (tracks: { id: string; title: string }[]) => void;
   /** Analyse whatever is selected. */
   onAnalyse?: () => void;
+  /** The last run's rows, drawn until the backend answers. */
+  seed?: Seed | undefined;
+  /**
+   * The first rows of the current view, once they exist.
+   *
+   * The app keeps them only to write the next start's opening screen — it
+   * still never holds the library, just the handful of rows that were on it.
+   */
+  onFirstRows?: (rows: RowDto[], count: number) => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -330,7 +340,7 @@ export interface TrackTableProps {
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
 }: TrackTableProps) {
   // Analysis is reachable from the keyboard rather than only a menu, since a
@@ -350,7 +360,26 @@ export function TrackTable({
       window.removeEventListener("keydown", onKey);
     };
   }, [onAnalyse]);
-  const view = useTrackView(spec, libraryGeneration, pendingEdits);
+  const view = useTrackView(spec, libraryGeneration, pendingEdits, seed);
+
+  // Hand the top of the view up once it is real, for the next start's opening
+  // screen. Only the first page, and only when it is filled.
+  const reported = useRef("");
+  useEffect(() => {
+    if (!onFirstRows || view.loading || view.count === 0) return;
+    const first = view.rowAt(0);
+    if (!first) return;
+    const stamp = `${view.token}:${view.count}:${first.id}`;
+    if (reported.current === stamp) return;
+    reported.current = stamp;
+    const rows: RowDto[] = [];
+    for (let i = 0; i < Math.min(view.count, SEEDED_ROWS); i++) {
+      const row = view.rowAt(i);
+      if (!row) break;
+      rows.push(row);
+    }
+    onFirstRows(rows, view.count);
+  }, [onFirstRows, view]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
