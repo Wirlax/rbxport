@@ -212,3 +212,10 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
 
   await expect(title).toHaveText(before ?? "");
 });
+
+test("the top bar offers settings, and not rekordbox's export controls", async ({ page }) => {
+  // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+  await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
+});

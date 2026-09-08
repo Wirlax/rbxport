@@ -15,6 +15,12 @@ export const FolderIcon = (props: IconProps) => (
   </svg>
 );
 
+export const GearIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.4"/> <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"> <path d="M8 1.2v2.0M8 12.8v2.0M1.2 8h2.0M12.8 8h2.0"/> <path d="M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/> </g>
+  </svg>
+);
+
 export const ListIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M1 7.5h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/>
