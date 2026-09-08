@@ -43,6 +43,18 @@ impl StrColumn {
     pub fn heap_bytes(&self) -> usize {
         self.bytes.capacity() + self.spans.capacity() * std::mem::size_of::<(u32, u32)>()
     }
+
+    /// The arena and its spans, for the on-disk snapshot.
+    pub(crate) fn raw(&self) -> (&[u8], &[(u32, u32)]) {
+        (&self.bytes, &self.spans)
+    }
+
+    /// Rebuilds from a snapshot. Spans are not validated here because `get`
+    /// already treats an out-of-range or non-UTF-8 span as an empty string, so
+    /// a damaged file reads as blank fields rather than as a panic.
+    pub(crate) fn from_raw(bytes: Vec<u8>, spans: Vec<(u32, u32)>) -> Self {
+        Self { bytes, spans }
+    }
 }
 
 /// Interning table for lookup columns (artist, album, genre, label, key).
@@ -57,6 +69,14 @@ pub struct Interner {
 }
 
 impl Interner {
+    pub(crate) fn parts(&self) -> (&StrColumn, &StrColumn) {
+        (&self.names, &self.folded)
+    }
+
+    pub(crate) fn from_parts(names: StrColumn, folded: StrColumn) -> Self {
+        Self { names, folded }
+    }
+
     pub fn push(&mut self, name: &str) -> u32 {
         let id = u32::try_from(self.names.len()).unwrap_or(u32::MAX);
         self.names.push(name);

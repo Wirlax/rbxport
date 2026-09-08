@@ -19,6 +19,22 @@ use tauri::Manager;
 ///
 /// Read-only always: this application never opens the user's library for
 /// writing during startup, and `rbl-db` refuses it while rekordbox runs.
+/// Where the library snapshot lives.
+///
+/// Under the app's own data directory, not the library's: it is derived, it is
+/// ours, and nothing outside this app should ever find it next to rekordbox's
+/// files.
+fn cache_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager as _;
+    Some(app.path().app_cache_dir().ok()?.join("library.snapshot"))
+}
+
+/// The schema version as a plain number, so a library whose schema changed
+/// never reads a snapshot built against the old one.
+fn schema_key(db_version: Option<i64>) -> u32 {
+    db_version.and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
+}
+
 fn spawn_library_load(app: tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
@@ -26,6 +42,28 @@ fn spawn_library_load(app: tauri::AppHandle) {
             Ok(db) => {
                 let db_version = db.schema().db_version;
                 let share_root = db.location().share_root.clone();
+                let master_db = db.location().master_db.clone();
+                let cache_path = cache_path(&app);
+                // Reading 38,681 rows out of SQLCipher is 543 ms of the 680 ms
+                // a start costs, and none of it gets faster — the work is the
+                // decryption. A snapshot of the built columns turns the same
+                // start into a sequential read.
+                let fingerprint = cache_path.as_ref().and_then(|_| {
+                    rbl_index::cache::Fingerprint::of(&master_db, schema_key(db_version))
+                });
+                if let (Some(path), Some(fp)) = (cache_path.as_ref(), fingerprint) {
+                    if let Some(library) = rbl_index::cache::load(path, fp) {
+                        let load_ms =
+                            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        tracing::info!(tracks = library.len(), load_ms, "library from cache");
+                        let read_only = rbl_db::is_rekordbox_running();
+                        app.state::<Arc<AppState>>().set_library(
+                            library, read_only, db_version, load_ms, share_root,
+                        );
+                        let _ = tauri::Emitter::emit(&app, "library:ready", ());
+                        return;
+                    }
+                }
                 match rbl_index::load(&db) {
                     Ok((library, stats)) => {
                         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -42,6 +80,29 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         app.state::<Arc<AppState>>()
                             .set_library(library, read_only, db_version, load_ms, share_root);
                         let _ = tauri::Emitter::emit(&app, "library:ready", ());
+
+                        // Written after the interface is live, and only if the
+                        // database has not moved since the fingerprint was
+                        // taken — rekordbox may have written while we read,
+                        // and a snapshot of a half-read library keyed to bytes
+                        // that no longer exist would be served on a later
+                        // start as though it were current.
+                        if let (Some(path), Some(before)) = (cache_path.as_ref(), fingerprint) {
+                            let after = rbl_index::cache::Fingerprint::of(
+                                &master_db,
+                                schema_key(db_version),
+                            );
+                            if after == Some(before) {
+                                let held = app.state::<Arc<AppState>>();
+                                if let Ok(library) = held.library() {
+                                    if let Err(e) =
+                                        rbl_index::cache::save(path, &library, before)
+                                    {
+                                        tracing::warn!(error = %e, "could not write the library cache");
+                                    }
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "could not index the library");

@@ -12,6 +12,7 @@
 //! - Sort order is precomputed per column as a rank array, which turns a sort
 //!   into `sort_unstable_by_key` over `u32`s.
 
+pub mod cache;
 pub mod strings;
 pub mod testing;
 mod load;
@@ -138,6 +139,14 @@ pub struct Playlists {
     pub seq: Vec<u32>,
     /// Row indices per playlist, in `TrackNo` order.
     pub members: Vec<Vec<Row>>,
+}
+
+impl Library {
+    /// Sets the row count. Only the snapshot reader needs this: every other
+    /// path counts rows as it pushes them.
+    pub(crate) fn set_count(&mut self, count: usize) {
+        self.count = count;
+    }
 }
 
 impl Playlists {
