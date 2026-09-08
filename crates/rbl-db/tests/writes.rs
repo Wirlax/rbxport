@@ -790,12 +790,11 @@ fn every_hot_cue_slot_rekordbox_uses_can_be_written() {
 #[test]
 fn a_custom_cue_colour_is_still_refused() {
     // What RGB an index past the default means is unknown.
-    for action in [Unsupported::CueColour] {
-        let DbError::WriteRefused(reason) = Writer::refuse(action) else {
-            panic!("{action:?} should be a refusal");
-        };
-        assert!(reason.contains("recording"), "{reason}");
-    }
+    let DbError::WriteRefused(reason) = Writer::refuse(Unsupported::CueColour) else {
+        panic!("a custom cue colour should be a refusal");
+    };
+    // The reason has to say what would settle it, or it is just a "no".
+    assert!(reason.contains("recording"), "{reason}");
 }
 
 // ----------------------------------------------------------------- import
