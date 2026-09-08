@@ -3026,6 +3026,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-dbserver"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-difftool"
 version = "0.1.0"
 dependencies = [
@@ -3055,6 +3063,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-fakecdj"
+version = "0.1.0"
+dependencies = [
+ "rbl-dbserver",
+ "rbl-nfs",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-index"
 version = "0.1.0"
 dependencies = [
@@ -3069,9 +3088,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-nfs"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "rbl-pdb"
 version = "0.1.0"
 dependencies = [
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "rbl-prolink"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
