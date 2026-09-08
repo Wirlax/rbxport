@@ -196,16 +196,106 @@ fn run_inspect(table: &str, key: &str) -> ExitCode {
     }
 }
 
+/// The eight recordings the plan calls for, and the one action each needs.
+///
+/// Named here rather than left to memory: a recording of two actions at once
+/// is worthless, because the diff cannot say which change came from which.
+const ACTIONS: [(&str, &str); 8] = [
+    ("create-playlist", "Create ONE new playlist. Do not put anything in it."),
+    ("add-track", "Drag ONE track into that playlist."),
+    ("hot-cue", "Set hot cue A on ONE track."),
+    ("loop", "Save a 4-beat loop on ONE track."),
+    ("rating", "Give ONE track a 4-star rating."),
+    ("analyze", "Analyse ONE track that has never been analysed."),
+    ("import", "Import ONE audio file from outside the library."),
+    ("delete", "Delete ONE playlist you created for this."),
+];
+
+/// Runs the whole record-diff-record cycle, waiting for rekordbox in between.
+///
+/// The protocol was five commands typed in the right order with a quit either
+/// side, which is easy to get wrong in a way that silently produces a useless
+/// recording. This is one command that waits for the right moments itself.
+/// Everything it does to the database is a read.
 fn run_record(name: &str) -> ExitCode {
-    println!(
-        "Recording \"{name}\".\n\n\
-         1. Quit rekordbox now.\n\
-         2. Run:  rbl-difftool snapshot recordings/{name}.before.json\n\
-         3. Start rekordbox, perform ONLY this action, then quit it.\n\
-         4. Run:  rbl-difftool snapshot recordings/{name}.after.json\n\
-         5. Run:  rbl-difftool diff recordings/{name}.before.json recordings/{name}.after.json\n\n\
-         Keep the diff next to the snapshots: it documents what rekordbox\n\
-         actually writes, which is what our writer must reproduce."
-    );
+    let action = ACTIONS.iter().find(|(n, _)| *n == name).map(|(_, a)| *a);
+    let Some(action) = action else {
+        eprintln!("unknown recording {name:?}. One of:");
+        for (n, a) in ACTIONS {
+            eprintln!("  {n:<16} {a}");
+        }
+        return ExitCode::FAILURE;
+    };
+
+    let dir = Path::new("recordings");
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        eprintln!("could not create {}: {e}", dir.display());
+        return ExitCode::FAILURE;
+    }
+    let before = dir.join(format!("{name}.before.json.gz"));
+    let after = dir.join(format!("{name}.after.json.gz"));
+
+    println!("Recording \"{name}\".\n");
+    if !wait_for_rekordbox(false, "Quit rekordbox to start the recording.") {
+        return ExitCode::FAILURE;
+    }
+    println!("\nTaking the \"before\" snapshot…");
+    if run_snapshot(&before) != ExitCode::SUCCESS {
+        return ExitCode::FAILURE;
+    }
+
+    println!("\n  ACTION: {action}\n         Do that and nothing else.\n");
+    if !wait_for_rekordbox(true, "Start rekordbox when you are ready.") {
+        return ExitCode::FAILURE;
+    }
+    if !wait_for_rekordbox(false, "Quit rekordbox once the action is done.") {
+        return ExitCode::FAILURE;
+    }
+    // rekordbox flushes on exit; a snapshot taken the instant the process
+    // disappears can miss the last write.
+    std::thread::sleep(std::time::Duration::from_secs(3));
+
+    println!("\nTaking the \"after\" snapshot…");
+    if run_snapshot(&after) != ExitCode::SUCCESS {
+        return ExitCode::FAILURE;
+    }
+
+    let (Ok(a), Ok(b)) = (
+        rbl_difftool::read_snapshot(&before),
+        rbl_difftool::read_snapshot(&after),
+    ) else {
+        eprintln!("could not read back both snapshots");
+        return ExitCode::FAILURE;
+    };
+    let summary = rbl_difftool::diff(&a, &b).summarise();
+    let out = dir.join(format!("{name}.diff.txt"));
+    if let Err(e) = std::fs::write(&out, &summary) {
+        eprintln!("could not write {}: {e}", out.display());
+        return ExitCode::FAILURE;
+    }
+    println!("\n{summary}");
+    println!("kept as {}", out.display());
     ExitCode::SUCCESS
+}
+
+/// Blocks until rekordbox is running (or not), printing the prompt once.
+///
+/// Polls at 2 Hz, which is invisible next to a person switching applications
+/// and costs nothing measurable.
+fn wait_for_rekordbox(want_running: bool, prompt: &str) -> bool {
+    if rbl_db::is_rekordbox_running() == want_running {
+        return true;
+    }
+    println!("{prompt}  (waiting)");
+    let started = std::time::Instant::now();
+    while rbl_db::is_rekordbox_running() != want_running {
+        // Ten minutes is long enough for any single action and short enough
+        // that a forgotten terminal does not poll all night.
+        if started.elapsed() > std::time::Duration::from_secs(600) {
+            eprintln!("gave up waiting after ten minutes; nothing was written");
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    true
 }
