@@ -640,3 +640,15 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
   // And it carried on rather than stopping there.
   await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 15_000 });
 });
+
+test("settings can look for link devices, and says why a browser cannot", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const section = page.getByRole("region", { name: "Link" });
+  // Honest about listening only, rather than implying it appears as a source.
+  await expect(section).toContainText("Nothing is sent");
+
+  await section.getByRole("button", { name: /look for devices/i }).click();
+  await expect(section).toContainText("browser has no access to the network");
+});

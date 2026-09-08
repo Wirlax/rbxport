@@ -143,6 +143,16 @@ export interface Backend {
    */
   importFiles(): Promise<ImportReport | null>;
 
+  /**
+   * Listens for devices on the link network. Listen-only — nothing is
+   * transmitted, because announcing as a source needs the database server's
+   * menus, which are not built.
+   */
+  startLinkListening(): Promise<LinkStatus>;
+  stopLinkListening(): Promise<void>;
+  /** Called as the set of devices on the network changes. */
+  onLinkPeers(listener: (peers: LinkPeer[]) => void): () => void;
+
   missingTracks(limit: number): Promise<MissingTracks>;
 
   /**
@@ -166,6 +176,22 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** A device heard on the Pro DJ Link network. */
+export interface LinkPeer {
+  name: string;
+  deviceNumber: number;
+  kind: string;
+  address: string;
+  lastSeenMs: number;
+}
+
+export interface LinkStatus {
+  listening: boolean;
+  /** Why not, when it is not. */
+  problem: string | null;
+  peers: LinkPeer[];
 }
 
 /** What analysing one track found. */

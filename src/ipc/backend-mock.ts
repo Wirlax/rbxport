@@ -340,6 +340,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ]);
     },
 
+    // No network in a browser, so there is nothing to listen to. Saying why
+    // is better than a panel that silently shows nothing.
+    startLinkListening: () =>
+      wait({
+        listening: false,
+        problem: "Link needs the desktop application; a browser has no access to the network.",
+        peers: [],
+      }),
+    stopLinkListening: () => wait(undefined),
+    onLinkPeers: () => () => undefined,
+
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.
     analyseTrack: (trackId) => {

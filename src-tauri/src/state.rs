@@ -35,6 +35,8 @@ struct Inner {
     next_view_id: u32,
     /// Bumped when the library is reloaded; invalidates cached pages.
     generation: u32,
+    /// The Pro DJ Link listener, while one is running.
+    link: Option<crate::link::Listener>,
 }
 
 impl Default for AppState {
@@ -78,6 +80,16 @@ impl AppState {
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
         inner.generation
+    }
+
+    /// Starts or replaces the link listener. Returns the previous one, if any,
+    /// so the caller can drop it outside the lock.
+    pub fn set_link(&self, listener: Option<crate::link::Listener>) -> Option<crate::link::Listener> {
+        std::mem::replace(&mut self.inner.write().link, listener)
+    }
+
+    pub fn link_running(&self) -> bool {
+        self.inner.read().link.is_some()
     }
 
     pub fn library(&self) -> AppResult<Arc<Library>> {

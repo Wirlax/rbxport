@@ -2,6 +2,7 @@
 //! a thin adapter so the backend stays testable without a webview.
 
 mod commands;
+mod link;
 mod protocol;
 mod dto;
 mod error;
@@ -93,6 +94,8 @@ pub fn run() {
             commands::analyse_track,
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.
+            commands::start_link_listening,
+            commands::stop_link_listening,
             commands::track_cues,
             commands::missing_tracks,
             commands::import_files,

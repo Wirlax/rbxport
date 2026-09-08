@@ -5,7 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Cue, ImportReport, LibrarySummary, MissingTracks, RowDto,
+  AnalysisResult, Backend, Cue, ImportReport, LibrarySummary, LinkPeer,
+  LinkStatus, MissingTracks, RowDto,
   TreeNode, ViewHandle,
   WaveformKind,
 } from "./types";
@@ -44,6 +45,21 @@ async function realBackend(): Promise<Backend> {
       // Cancelling is a normal outcome, not an error.
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
+    },
+    startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
+    stopLinkListening: () => invoke<void>("stop_link_listening"),
+    onLinkPeers: (listener) => {
+      let live = true;
+      let stop: (() => void) | undefined;
+      void import("@tauri-apps/api/event").then(async ({ listen }) => {
+        const unlisten = await listen<LinkPeer[]>("link:peers", (e) => listener(e.payload));
+        if (live) stop = unlisten;
+        else unlisten();
+      });
+      return () => {
+        live = false;
+        stop?.();
+      };
     },
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
     relocateTrack: async (trackId) => {

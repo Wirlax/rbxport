@@ -3277,6 +3277,7 @@ dependencies = [
  "rbl-core",
  "rbl-db",
  "rbl-index",
+ "rbl-prolink",
  "serde",
  "serde_json",
  "tauri",

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use rbl_index::Library;
 use tauri::State;
 
+use crate::link::LinkStatusDto;
 use crate::dto::{
     CueDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
@@ -396,6 +397,42 @@ async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
     // Cached pages are keyed on the generation, so the frontend drops them.
     let _ = tauri::Emitter::emit(&app, "library:changed", generation);
     Ok(generation)
+}
+
+/// Starts listening for devices on the link network.
+///
+/// Listen-only: nothing is transmitted. Announcing ourselves as a source needs
+/// the database server's menus, which are not built, and a device that
+/// announces and then cannot answer is worse than one that stays quiet.
+#[tauri::command]
+pub async fn start_link_listening(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<LinkStatusDto> {
+    if state.link_running() {
+        return Ok(LinkStatusDto { listening: true, problem: None, peers: Vec::new() });
+    }
+    let emitter = app.clone();
+    match crate::link::Listener::start(move |peers| {
+        let _ = tauri::Emitter::emit(&emitter, "link:peers", peers);
+    }) {
+        Ok(listener) => {
+            drop(state.set_link(Some(listener)));
+            Ok(LinkStatusDto { listening: true, problem: None, peers: Vec::new() })
+        }
+        Err(e) => Ok(LinkStatusDto {
+            listening: false,
+            problem: Some(crate::link::explain(&e)),
+            peers: Vec::new(),
+        }),
+    }
+}
+
+#[tauri::command]
+pub async fn stop_link_listening(state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    // Dropped outside the lock: the listener's Drop stops its thread.
+    drop(state.set_link(None));
+    Ok(())
 }
 
 /// A track's cue points.
