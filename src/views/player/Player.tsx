@@ -164,6 +164,15 @@ const JUMPS = [
   { id: "jump-forward", label: "Beat jump forward", glyph: "›" },
 ] as const;
 
+/**
+ * What the waveform leaves clear at the top and bottom of its band.
+ *
+ * Measured: rekordbox's detail waveform paints y 374..647 inside a band that
+ * runs 358..650. The strip above carries the bar count and the heads of the
+ * cue markers, which is why it is the larger of the two.
+ */
+const WAVE_INSET = { top: 8, bottom: 2 };
+
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 
@@ -446,6 +455,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
                   width={overview.width}
                   height={overview.height}
                   half
+                  inset={WAVE_INSET}
                 />
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} />
@@ -471,6 +481,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
                 width={detail.width}
                 height={detail.height}
                 detail
+                inset={WAVE_INSET}
               />
             ) : null}
             <BeatGrid beats={beats} totalMs={total * 1000} window={window} />

@@ -144,6 +144,42 @@ describe("the three-band waveform", () => {
     expect(empty.fills).toHaveLength(0);
   });
 
+  it("leaves the measured margin clear at the top and bottom", () => {
+    // rekordbox's detail waveform paints y 374..647 inside a band running
+    // 358..650: the strip above carries the bar count and the cue heads.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([127, 0, 0]), 1, 100, "detail", false, { top: 8, bottom: 2 });
+    const fill = fills[0]!;
+    expect(fill.y).toBeCloseTo(8, 5);
+    expect(fill.y + fill.h).toBeCloseTo(98, 5);
+  });
+
+  it("insets a stacked half waveform from the same edges", () => {
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([150, 0, 0]), 1, 100, "overview", true, { top: 8, bottom: 2 });
+    const fill = fills[0]!;
+    expect(fill.y + fill.h).toBeCloseTo(98, 5);
+    expect(fill.y).toBeGreaterThanOrEqual(8);
+  });
+
+  it("still fills the band when no inset is asked for", () => {
+    // The row preview passes none, and must keep every pixel of a 25px row.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([150, 0, 0]), 1, 25, "overview", true);
+    expect(fills[0]!.y + fills[0]!.h).toBeCloseTo(25, 5);
+  });
+
+  it("survives an inset taller than the strip", () => {
+    const { ctx, fills } = recorder();
+    expect(() =>
+      drawBands(ctx, new Uint8Array([127, 0, 0]), 1, 6, "detail", false, { top: 40, bottom: 40 }),
+    ).not.toThrow();
+    for (const fill of fills) {
+      expect(fill.y).toBeGreaterThanOrEqual(0);
+      expect(fill.y + fill.h).toBeLessThanOrEqual(6.001);
+    }
+  });
+
   it("takes the loudest column when many share a pixel", () => {
     // Four columns into one pixel: the peak must survive, or a transient
     // vanishes at overview width.

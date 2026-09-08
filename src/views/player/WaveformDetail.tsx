@@ -58,10 +58,13 @@ export interface WaveformDetailProps {
   half?: boolean;
   /** Read the full-resolution `PWV7` rather than the 1,200-column `PWV6`. */
   detail?: boolean;
+  /** Rows to leave clear at the top and bottom, in CSS pixels. */
+  inset?: { top: number; bottom: number };
 }
 
 export const WaveformDetail = memo(function WaveformDetail({
   trackId, progress, span = 0.08, width, height, half = false, detail = false,
+  inset = { top: 0, bottom: 0 },
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<Uint8Array | null>(null);
@@ -98,8 +101,13 @@ export const WaveformDetail = memo(function WaveformDetail({
     const columns = Math.floor(data.length / 3);
     const first = Math.max(0, Math.floor((centre - reach) * columns)) * 3;
     const last = Math.min(data.length, Math.ceil((centre + reach) * columns) * 3);
-    drawBands(ctx, data.subarray(first, last), w, h, detail ? "detail" : "overview", half);
-  }, [data, progress, span, width, height, half, detail]);
+    // The inset is given in CSS pixels; the canvas is in device pixels.
+    const scale = h / Math.max(height, 1);
+    drawBands(ctx, data.subarray(first, last), w, h, detail ? "detail" : "overview", half, {
+      top: inset.top * scale,
+      bottom: inset.bottom * scale,
+    });
+  }, [data, progress, span, width, height, half, detail, inset.top, inset.bottom]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });

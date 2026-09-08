@@ -105,13 +105,27 @@ export function drawBands(
    * of the time.
    */
   half = false,
+  /**
+   * Rows left clear at the top and bottom, in device pixels.
+   *
+   * rekordbox's waveform does not reach the edges of its band: the strip above
+   * it carries the bar count and the heads of the cue markers. Measured at 8pt
+   * above and 2pt below.
+   */
+  inset: { top: number; bottom: number } = { top: 0, bottom: 0 },
 ): void {
   ctx.clearRect(0, 0, width, height);
   const columns = Math.floor(data.length / 3);
   if (columns === 0 || width <= 0 || height <= 0) return;
 
   const stops = bandStops(band);
-  const centre = height / 2;
+  // The band the waveform actually draws into. Clamped so a large inset on a
+  // short strip leaves something rather than inverting it.
+  const top = Math.max(0, Math.min(inset.top, height / 2 - 1));
+  const bottom = Math.max(0, Math.min(inset.bottom, height / 2 - 1));
+  const usable = Math.max(1, height - top - bottom);
+  const floor = height - bottom;
+  const centre = top + usable / 2;
   const step = columns / width;
 
   for (let x = 0; x < width; x++) {
@@ -136,14 +150,14 @@ export function drawBands(
 
     if (half) {
       // Stacked from the bottom: blue, then amber on it, then near-white.
-      let base = height;
+      let base = floor;
       for (const [value, colour] of bands) {
         if (value === 0) continue;
-        const tall = (Math.min(value, STACK_FULL_SCALE) / STACK_FULL_SCALE) * height;
+        const tall = (Math.min(value, STACK_FULL_SCALE) / STACK_FULL_SCALE) * usable;
         ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
-        ctx.fillRect(x, Math.max(0, base - tall), 1, Math.min(tall, base));
+        ctx.fillRect(x, Math.max(top, base - tall), 1, Math.min(tall, base - top));
         base -= tall;
-        if (base <= 0) break;
+        if (base <= top) break;
       }
       continue;
     }
@@ -152,7 +166,7 @@ export function drawBands(
     // bright core sits on top of both.
     for (const [value, colour] of bands) {
       if (value === 0) continue;
-      const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * centre);
+      const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * (usable / 2));
       ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
       ctx.fillRect(x, centre - reach, 1, reach * 2);
     }

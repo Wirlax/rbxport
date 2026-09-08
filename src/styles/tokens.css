@@ -67,6 +67,8 @@
   --s-player-vocal-h: 5px; /* measured from a 2x capture of rekordbox 7.2.11 running; vocal strip above the overview */
   --s-player-phrase-h: 14px; /* measured from a 2x capture of rekordbox 7.2.11 running; phrase bar y 127..141pt */
   --s-player-detail-h: 146px; /* measured from a 2x capture of rekordbox 7.2.11 running; detail waveform y 141..287pt */
+  --s-wave-inset-top: 8px; /* measured from docs/screenshots: the detail band is y 358..650 and the waveform paints 374..647; the top strip carries the bars label and the cue heads */
+  --s-wave-inset-bottom: 2px; /* measured from docs/screenshots: the detail band is y 358..650 and the waveform paints 374..647 */
   --s-player-pad-h: 48px; /* measured from a 2x capture of rekordbox 7.2.11 running; hot-cue / memory bar y 287..335pt */
   --s-pad-tab-w: 80px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the CUE/LOOP and GRID tabs, x 83..163pt */
   --s-pad-tab-h: 24px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: each tab is half the 48pt row */
