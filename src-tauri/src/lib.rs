@@ -83,6 +83,19 @@ pub fn run() {
             commands::view_ids_in_range,
             commands::track_waveform,
             commands::analyse_track,
+            // Editing. Every one of these is refused while rekordbox is
+            // running, re-checked immediately before the transaction.
+            commands::create_playlist,
+            commands::create_folder,
+            commands::rename_playlist,
+            commands::move_playlist,
+            commands::delete_playlist,
+            commands::add_tracks_to_playlist,
+            commands::remove_tracks_from_playlist,
+            commands::reorder_playlist,
+            commands::set_track_rating,
+            commands::set_track_comment,
+            commands::set_track_color,
         ])
         .run(tauri::generate_context!());
 

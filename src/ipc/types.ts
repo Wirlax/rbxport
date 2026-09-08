@@ -98,4 +98,30 @@ export interface Backend {
    * numbers and JSON would multiply that and cost a parse on the UI thread.
    */
   trackWaveform(trackId: string, kind: WaveformKind): Promise<Uint8Array>;
+
+  /**
+   * Editing. Each returns the library's new generation, which invalidates every
+   * cached page: the backend re-reads the library after a write.
+   *
+   * All of these are refused while Rekordbox is running — it holds the
+   * database — and the refusal arrives as an `AppError` of kind `readOnly`.
+   */
+  edits: Edits;
 }
+
+export interface Edits {
+  createPlaylist(name: string, parent: string): Promise<number>;
+  createFolder(name: string, parent: string): Promise<number>;
+  renamePlaylist(id: string, name: string): Promise<number>;
+  movePlaylist(id: string, parent: string): Promise<number>;
+  deletePlaylist(id: string): Promise<number>;
+  addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  setTrackRating(track: string, stars: number): Promise<number>;
+  setTrackComment(track: string, comment: string): Promise<number>;
+  setTrackColor(track: string, color: string | null): Promise<number>;
+}
+
+/** `ParentID` of a playlist or folder at the top of the tree. */
+export const TREE_ROOT = "root";

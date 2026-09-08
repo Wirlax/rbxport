@@ -22,6 +22,22 @@ async function realBackend(): Promise<Backend> {
       const bytes = await invoke<number[] | Uint8Array>("track_waveform", { trackId, kind });
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
+    edits: {
+      createPlaylist: (name, parent) => invoke<number>("create_playlist", { name, parent }),
+      createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),
+      renamePlaylist: (id, name) => invoke<number>("rename_playlist", { id, name }),
+      movePlaylist: (id, parent) => invoke<number>("move_playlist", { id, parent }),
+      deletePlaylist: (id) => invoke<number>("delete_playlist", { id }),
+      addTracksToPlaylist: (playlist, tracks) =>
+        invoke<number>("add_tracks_to_playlist", { playlist, tracks }),
+      removeTracksFromPlaylist: (playlist, tracks) =>
+        invoke<number>("remove_tracks_from_playlist", { playlist, tracks }),
+      reorderPlaylist: (playlist, tracks) =>
+        invoke<number>("reorder_playlist", { playlist, tracks }),
+      setTrackRating: (track, stars) => invoke<number>("set_track_rating", { track, stars }),
+      setTrackComment: (track, comment) => invoke<number>("set_track_comment", { track, comment }),
+      setTrackColor: (track, color) => invoke<number>("set_track_color", { track, color }),
+    },
   };
 }
 

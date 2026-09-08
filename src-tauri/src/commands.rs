@@ -300,3 +300,191 @@ pub async fn analyse_track(
     })
     .await
 }
+
+// ---------------------------------------------------------------- editing
+
+/// Opens the library for writing, runs one action, and reloads the index.
+///
+/// The writer is opened per action rather than held: holding it would keep the
+/// database open read-write for the life of the app, and rekordbox launching
+/// behind us must be able to take the file back. Opening is cheap next to the
+/// user's own thinking time between edits.
+async fn edit<F>(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    name: &'static str,
+    action: F,
+) -> AppResult<u32>
+where
+    F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
+{
+    let state = Arc::clone(&state);
+    let changed = blocking(name, move || {
+        let location = rbl_db::detect().map_err(write_error)?;
+        let backups = backup_dir();
+        let mut writer = rbl_db::write::Writer::open(location, backups).map_err(write_error)?;
+        action(&mut writer).map_err(write_error)?;
+        Ok(())
+    })
+    .await;
+    changed?;
+
+    // The index is a snapshot; after a write it is stale. Reloading is the
+    // honest option — an incremental update by `rb_local_usn` is the faster one
+    // and is not written yet, so an edit costs a reload of the whole library.
+    reload(app, state).await
+}
+
+/// Where backups of the library go before the first write of a session.
+fn backup_dir() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("rekordbox-lite/backups")
+}
+
+/// Maps a database refusal onto the error kind the frontend distinguishes.
+fn write_error(error: rbl_db::DbError) -> AppError {
+    match error {
+        rbl_db::DbError::WriteRefused(reason) => AppError::new(ErrorKind::ReadOnly, reason),
+        other => AppError::new(ErrorKind::Internal, other.to_string()),
+    }
+}
+
+/// Re-reads the library and returns the new generation.
+async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
+    let generation = blocking("reload", move || {
+        let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
+        let db_version = db.schema().db_version;
+        let share_root = db.location().share_root.clone();
+        let started = std::time::Instant::now();
+        let (library, _) = rbl_index::load(&db)
+            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let read_only = rbl_db::is_rekordbox_running();
+        state.set_library(library, read_only, db_version, load_ms, share_root);
+        Ok(state.summary().3)
+    })
+    .await?;
+    // Cached pages are keyed on the generation, so the frontend drops them.
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(generation)
+}
+
+#[tauri::command]
+pub async fn create_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    parent: String,
+) -> AppResult<u32> {
+    edit(app, state, "create_playlist", move |w| w.create_playlist(&name, &parent).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn create_folder(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    parent: String,
+) -> AppResult<u32> {
+    edit(app, state, "create_folder", move |w| w.create_folder(&name, &parent).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn rename_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+) -> AppResult<u32> {
+    edit(app, state, "rename_playlist", move |w| w.rename(&id, &name).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn move_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    parent: String,
+) -> AppResult<u32> {
+    edit(app, state, "move_playlist", move |w| w.move_to(&id, &parent).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn delete_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> AppResult<u32> {
+    edit(app, state, "delete_playlist", move |w| w.delete_playlist(&id).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn add_tracks_to_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "add_tracks_to_playlist", move |w| {
+        w.add_tracks(&playlist, &tracks).map(|_| ())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn remove_tracks_from_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "remove_tracks_from_playlist", move |w| {
+        w.remove_tracks(&playlist, &tracks).map(|_| ())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn reorder_playlist(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "reorder_playlist", move |w| w.reorder(&playlist, &tracks).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn set_track_rating(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    stars: u8,
+) -> AppResult<u32> {
+    edit(app, state, "set_track_rating", move |w| w.set_rating(&track, stars).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn set_track_comment(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    comment: String,
+) -> AppResult<u32> {
+    edit(app, state, "set_track_comment", move |w| w.set_comment(&track, &comment).map(|_| ()))
+        .await
+}
+
+#[tauri::command]
+pub async fn set_track_color(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    color: Option<String>,
+) -> AppResult<u32> {
+    edit(app, state, "set_track_color", move |w| {
+        w.set_color(&track, color.as_deref()).map(|_| ())
+    })
+    .await
+}
