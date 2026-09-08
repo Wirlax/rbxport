@@ -77,6 +77,7 @@ crates/
   rbl-anlz        ANLZ read/write, byte-exact
   rbl-pdb         DeviceSQL read/write for USB exports
   rbl-export      the export pipeline
+  rbl-onelibrary  exportLibrary.db, which rekordbox reads a stick back from
   rbl-difftool    records what Rekordbox writes, so no field is guessed
   rbl-prolink     Pro DJ Link announce, keep-alive, device table
   rbl-dbserver    the remote-database protocol a CDJ browses over

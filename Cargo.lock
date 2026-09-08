@@ -3054,8 +3054,10 @@ dependencies = [
  "rbl-analysis",
  "rbl-anlz",
  "rbl-audio",
+ "rbl-core",
  "rbl-db",
  "rbl-index",
+ "rbl-onelibrary",
  "rbl-pdb",
  "tempfile",
  "thiserror 2.0.20",
@@ -3092,6 +3094,18 @@ dependencies = [
 name = "rbl-nfs"
 version = "0.1.0"
 dependencies = [
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "rbl-onelibrary"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "rbl-core",
+ "rusqlite",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",

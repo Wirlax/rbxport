@@ -173,3 +173,47 @@ fn analysis_files_land_where_the_database_says_they_do() {
     // And it must still be a valid analysis file.
     assert!(rbl_anlz::parse(&std::fs::read(&on_disk).unwrap()).is_ok());
 }
+
+#[test]
+fn an_export_carries_a_readable_export_library_beside_the_pdb() {
+    // A player never opens this file; rekordbox does, to read a stick back.
+    let dir = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let tracks = vec![
+        track(source.path(), 1, "The Abyss", "ARTBAT"),
+        track(source.path(), 2, "Take Me Home", "MORTEN"),
+    ];
+    let playlists = vec![rbl_export::SourcePlaylist {
+        name: "Friday".to_owned(),
+        track_indices: vec![1, 0],
+    }];
+
+    let report = rbl_export::export(dir.path(), &tracks, &playlists).expect("export");
+    assert!(report.one_library, "the report must say it was written");
+
+    let path = dir.path().join("PIONEER/rekordbox/exportLibrary.db");
+    assert!(path.exists(), "exportLibrary.db is missing");
+
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&path).expect("open");
+    assert_eq!(db.count("content").unwrap(), 2);
+    assert_eq!(db.count("playlist").unwrap(), 1);
+    assert_eq!(db.count("playlist_content").unwrap(), 2);
+
+    // The two databases must agree: the playlist order here is the order the
+    // export was asked for, not the order the tracks were listed in.
+    let mut stmt = db
+        .connection()
+        .prepare("SELECT content_id FROM playlist_content WHERE playlist_id = 1 ORDER BY sequenceNo")
+        .unwrap();
+    let order: Vec<i64> =
+        stmt.query_map([], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+    assert_eq!(order, vec![2, 1]);
+
+    // And a path in one is the same path as in the other.
+    let audio: String = db
+        .connection()
+        .query_row("SELECT path FROM content WHERE content_id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert!(audio.starts_with("/Contents/"), "{audio}");
+    assert!(dir.path().join(audio.trim_start_matches('/')).exists(), "{audio} is not on the stick");
+}

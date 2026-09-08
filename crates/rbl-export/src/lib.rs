@@ -30,6 +30,8 @@ pub enum ExportError {
     Empty,
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("could not write exportLibrary.db: {0}")]
+    OneLibrary(String),
 }
 
 pub type Result<T> = std::result::Result<T, ExportError>;
@@ -79,6 +81,8 @@ pub struct ExportReport {
     pub pdb_bytes: usize,
     /// Tracks skipped because their audio was missing or unreadable.
     pub skipped: Vec<String>,
+    /// Whether `exportLibrary.db` was written.
+    pub one_library: bool,
 }
 
 /// The eight colour labels rekordbox writes to every export.
@@ -173,6 +177,7 @@ pub fn export(
     let mut keys = Intern::default();
 
     let mut track_rows: Vec<Vec<u8>> = Vec::with_capacity(tracks.len());
+    let mut one_library_tracks: Vec<OneLibraryTrack> = Vec::with_capacity(tracks.len());
     // Export ids are assigned here and are what playlists reference.
     let mut export_ids: Vec<u32> = Vec::with_capacity(tracks.len());
     let interns = Interns {
@@ -229,6 +234,28 @@ pub fn export(
                 }
             }
         }
+
+        // The same facts the pdb row carries, kept for exportLibrary.db.
+        // Gathered here rather than re-derived later, so the two databases
+        // cannot disagree about a path or a size.
+        one_library_tracks.push(OneLibraryTrack {
+            export_id,
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            genre: track.genre.clone(),
+            label: track.label.clone(),
+            key: track.key.clone(),
+            color_id: track.color_id,
+            bpm_x100: track.bpm_x100,
+            duration_sec: track.duration_sec,
+            rating: track.rating,
+            comment: track.comment.clone(),
+            date_added: track.date_added.clone(),
+            audio_path: relative_audio.clone(),
+            file_name: safe_name.clone(),
+            analysis_path: analyze_path.clone(),
+        });
 
         track_rows.push(track_row(&TrackInput {
             id: export_id,
@@ -304,7 +331,105 @@ pub fn export(
     report.pdb_bytes = pdb.len();
     std::fs::write(db_dir.join("export.pdb"), &pdb)?;
 
+    // A player never opens this; rekordbox does, to read the stick back.
+    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids)?;
+    report.one_library = true;
+
     Ok(report)
+}
+
+/// The subset of a track `exportLibrary.db` needs.
+struct OneLibraryTrack {
+    export_id: u32,
+    title: String,
+    artist: String,
+    album: String,
+    genre: String,
+    label: String,
+    key: String,
+    color_id: u8,
+    bpm_x100: u32,
+    duration_sec: u16,
+    rating: u8,
+    comment: String,
+    date_added: String,
+    audio_path: String,
+    file_name: String,
+    analysis_path: String,
+}
+
+/// Writes `exportLibrary.db` beside `export.pdb`.
+fn write_one_library(
+    db_dir: &Path,
+    tracks: &[OneLibraryTrack],
+    playlists: &[SourcePlaylist],
+    export_ids: &[u32],
+) -> Result<()> {
+    use rbl_onelibrary::build::{Builder, LookupTable, Track};
+
+    let path = db_dir.join("exportLibrary.db");
+    // An export is written into a fresh directory, but a resumed one may find
+    // the previous attempt's file; replacing it is correct, keeping it is not.
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    let mut builder = Builder::create(&path).map_err(|e| one_library_error(&e))?;
+
+    for track in tracks {
+        let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(|e| one_library_error(&e))?;
+        let album = builder.intern(LookupTable::Album, &track.album).map_err(|e| one_library_error(&e))?;
+        let genre = builder.intern(LookupTable::Genre, &track.genre).map_err(|e| one_library_error(&e))?;
+        let label = builder.intern(LookupTable::Label, &track.label).map_err(|e| one_library_error(&e))?;
+        let key = builder.intern(LookupTable::Key, &track.key).map_err(|e| one_library_error(&e))?;
+        builder
+            .add_track(&Track {
+                content_id: i64::from(track.export_id),
+                title: track.title.clone(),
+                artist_id: Some(artist),
+                album_id: Some(album),
+                genre_id: Some(genre),
+                label_id: Some(label),
+                key_id: Some(key),
+                color_id: Some(i64::from(track.color_id)),
+                bpm_x100: i64::from(track.bpm_x100),
+                length: i64::from(track.duration_sec),
+                track_no: i64::from(track.export_id),
+                path: track.audio_path.clone(),
+                file_name: track.file_name.clone(),
+                file_size: 0,
+                analysis_path: track.analysis_path.clone(),
+                // Stars are multiples of 51 here as everywhere else.
+                rating: i64::from(track.rating) * 51,
+                comment: track.comment.clone(),
+                date_added: track.date_added.clone(),
+            })
+            .map_err(|e| one_library_error(&e))?;
+    }
+
+    for (i, playlist) in playlists.iter().enumerate() {
+        let playlist_id = i64::try_from(i).unwrap_or(0) + 1;
+        builder
+            .add_playlist(playlist_id, &playlist.name, 0, i64::try_from(i).unwrap_or(0))
+            .map_err(|e| one_library_error(&e))?;
+        for (position, &track_index) in playlist.track_indices.iter().enumerate() {
+            let Some(&export_id) = export_ids.get(track_index) else { continue };
+            builder
+                .add_to_playlist(
+                    playlist_id,
+                    i64::from(export_id),
+                    i64::try_from(position).unwrap_or(0) + 1,
+                )
+                .map_err(|e| one_library_error(&e))?;
+        }
+    }
+
+    // The date only, which is what rekordbox's own export carries.
+    let created = rbl_core::time::now().get(..10).unwrap_or("").to_owned();
+    builder.finish("REKORDBOX-LITE", &created).map_err(|e| one_library_error(&e))
+}
+
+fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {
+    ExportError::OneLibrary(error.to_string())
 }
 
 /// Errors that mean the media was unplugged mid-write.
