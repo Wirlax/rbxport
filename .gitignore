@@ -10,6 +10,7 @@ src-tauri/gen/
 # generated / local-only
 design/sketch/dist/
 design/reference/**/*@2x.png
+docs/screenshots/
 fixtures/build/
 test-results/
 playwright-report/
