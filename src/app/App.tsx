@@ -5,7 +5,7 @@
  * bar. The preview player region is reserved but not yet implemented (it lands
  * with `rbl-audio` in Milestone 1).
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { LibrarySummary, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { TrackTable } from "@/views/browser/TrackTable";
@@ -13,6 +13,7 @@ import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
+import { detectPlatform, dispatch } from "@/lib/shortcuts";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -43,7 +44,12 @@ export function App() {
     descending: false,
   });
   const [selectedCount, setSelectedCount] = useState(0);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
+  // Read once: the platform cannot change while the window is open, and
+  // deciding it per key press would run a regex on every stroke.
+  const platform = useMemo(detectPlatform, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,9 +74,9 @@ export function App() {
           : { kind: "collection" },
       sort: sortState.column,
       descending: sortState.descending,
-      query: "",
+      query,
     }),
-    [selectedNode, sortState],
+    [selectedNode, sortState, query],
   );
 
   const handleSort = useCallback((column: SortColumn) => {
@@ -78,6 +84,38 @@ export function App() {
       s.column === column ? { column, descending: !s.descending } : { column, descending: false },
     );
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = dispatch(event, platform, event.target as HTMLElement | null);
+      if (action === null) return;
+      // Only the actions handled here are swallowed; everything else falls
+      // through to the browser and the OS.
+      switch (action) {
+        case "focusSearch":
+          event.preventDefault();
+          searchRef.current?.focus();
+          searchRef.current?.select();
+          break;
+        case "clearSearch":
+          // Escape in an empty box should blur rather than do nothing, so the
+          // next arrow key reaches the track list.
+          if (query === "") {
+            searchRef.current?.blur();
+          } else {
+            setQuery("");
+          }
+          break;
+        default:
+          // Movement and selection live in the table; it listens for itself.
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [platform, query]);
 
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
@@ -93,6 +131,9 @@ export function App() {
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
           title={selectedNode?.name ?? "Collection"}
+          query={query}
+          onQueryChange={setQuery}
+          searchRef={searchRef}
         />
       </div>
       <StatusBar

@@ -151,3 +151,19 @@
 }
 
 .stars { letter-spacing: 1px; color: var(--c-text); }
+
+/* The search field reads as part of the chrome, not as a form control: no
+   border of its own, and the surrounding .search block draws the well. */
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font: inherit;
+  color: var(--c-text);
+}
+.searchInput::placeholder { color: var(--c-text-dim); }
+/* WebKit draws its own clear button and magnifier inside a search input. */
+.searchInput::-webkit-search-decoration,
+.searchInput::-webkit-search-cancel-button { appearance: none; }

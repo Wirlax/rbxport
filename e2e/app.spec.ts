@@ -97,3 +97,44 @@ test("analysed tracks draw a waveform, unanalysed ones stay blank", async ({ pag
   expect(painted.drawn).toBeGreaterThan(5);
   expect(painted.blank).toBe(0);
 });
+
+test("typing in the search box filters the list, and Escape clears it", async ({ page }) => {
+  await page.goto("/");
+  const search = page.getByRole("searchbox", { name: /search within/i });
+  const title = page.getByTestId("browser-title");
+
+  // A count appears only once the view has settled, so waiting for one is
+  // waiting for the load.
+  await expect(title).toContainText("Tracks)");
+  const before = await title.textContent();
+
+  await search.fill("Extended");
+  // Rust does the filtering; the count in the title is what proves it landed.
+  await expect(title).toContainText("Tracks)");
+  await expect(title).not.toHaveText(before ?? "");
+
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(title).toHaveText(before ?? "");
+});
+
+test("the search shortcut puts the caret in the box from anywhere", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("track-scroll").click();
+
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+f`);
+
+  const search = page.getByRole("searchbox", { name: /search within/i });
+  await expect(search).toBeFocused();
+});
+
+test("a search that matches nothing empties the list without breaking it", async ({ page }) => {
+  await page.goto("/");
+  const search = page.getByRole("searchbox", { name: /search within/i });
+  await search.fill("zzzzzzzzzz-no-such-track");
+
+  await expect(page.getByTestId("browser-title")).toContainText("(0 Tracks)");
+  // The table must still be there and still scrollable, not collapsed.
+  await expect(page.getByTestId("track-scroll")).toBeVisible();
+});

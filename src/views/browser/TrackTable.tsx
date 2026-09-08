@@ -148,9 +148,16 @@ export interface TrackTableProps {
   onSortChange: (column: SortColumn) => void;
   onSelectionChange?: (count: number) => void;
   title: string;
+  /** The live search text. Rust does the filtering; this is only the box. */
+  query: string;
+  onQueryChange: (query: string) => void;
+  /** Lets the keyboard shortcut put the caret here from anywhere. */
+  searchRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-export function TrackTable({ spec, onSortChange, onSelectionChange, title }: TrackTableProps) {
+export function TrackTable({
+  spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
+}: TrackTableProps) {
   const view = useTrackView(spec);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
@@ -225,12 +232,30 @@ export function TrackTable({ spec, onSortChange, onSelectionChange, title }: Tra
   return (
     <div className={styles.browser} style={{ ["--cols" as string]: GRID, ["--table-w" as string]: `${TOTAL_WIDTH}px` }}>
       <div className={styles.browserHead}>
-        <span className={styles.title}>
-          {title} ({view.count} Tracks)
+        <span className={styles.title} data-testid="browser-title">
+          {/*
+            The count belongs to the list, so it appears only once the list
+            has settled. While a view is opening, `view.count` is still the
+            previous view's, and pairing it with the new title showed a
+            playlist's name beside the whole collection's count.
+          */}
+          {view.loading ? title : `${title} (${view.count} Tracks)`}
         </span>
         <div className={styles.search} role="search">
           <span className={styles.searchIcon} aria-hidden />
-          Search within this track list
+          <input
+            ref={searchRef}
+            className={styles.searchInput}
+            type="search"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="Search within this track list"
+            aria-label="Search within this track list"
+            // The browser's own clear button and history dropdown do not
+            // belong in an application window.
+            autoComplete="off"
+            spellCheck={false}
+          />
         </div>
       </div>
 
