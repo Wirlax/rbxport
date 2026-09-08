@@ -316,8 +316,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     edits,
 
-    // Nothing in the mock has a file behind it, so nothing can be missing.
+    // Nothing in the mock has a file behind it, so nothing can be missing and
+    // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),
+    relocateTrack: () => wait(null),
 
     onLibraryChanged: (listener) => {
       listeners.add(listener);

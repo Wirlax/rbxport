@@ -25,6 +25,24 @@ async function realBackend(): Promise<Backend> {
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
+    relocateTrack: async (trackId) => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Choose the file for this track",
+        filters: [
+          {
+            name: "Audio",
+            extensions: ["mp3", "m4a", "aiff", "aif", "wav", "flac", "aac", "ogg"],
+          },
+        ],
+      });
+      // Cancelling is a normal outcome, not an error.
+      if (typeof picked !== "string") return null;
+      await invoke<number>("relocate_track", { track: trackId, path: picked });
+      return picked;
+    },
     onLibraryChanged: (listener) => {
       // Tauri's listen resolves asynchronously; unsubscribing before it does
       // has to still work, so the flag is checked when it lands.

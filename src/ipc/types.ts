@@ -125,6 +125,14 @@ export interface Backend {
    * that long is neither useful nor small enough for the IPC cap.
    */
   missingTracks(limit: number): Promise<MissingTracks>;
+
+  /**
+   * Asks the user for a file and points a track at it.
+   *
+   * Resolves to the chosen path, or `null` if they cancelled. Outside Tauri
+   * there is no picker, so it resolves to `null` immediately.
+   */
+  relocateTrack(trackId: string): Promise<string | null>;
 }
 
 /** A track whose audio file is no longer where the library says. */
