@@ -15,7 +15,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
-import { useColumns } from "@/store/useColumns";
+import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
 import { Settings } from "@/views/settings/Settings";
 
@@ -59,7 +59,15 @@ export function App() {
   const dragFrom = useRef<{ x: number; width: number } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
-  const cols = useColumns();
+  // The table's layout follows the kind of thing being browsed, as
+  // browseSetting.xml does, rather than each individual playlist.
+  const columnContext: ColumnContext =
+    selectedNode?.kind === "playlist"
+      ? "playlist"
+      : selectedNode?.kind === "history"
+        ? "history"
+        : "collection";
+  const cols = useColumns(columnContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Track ids in flight from the browser to the tree.
   const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);

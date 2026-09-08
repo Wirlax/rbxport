@@ -586,3 +586,24 @@ test("an edited comment shows before the backend catches up", async ({ page }) =
   await expect(page.locator('[role="gridcell"][data-col="comment"]').nth(3))
     .toHaveText("shown at once");
 });
+
+test("each kind of table remembers its own columns", async ({ page }) => {
+  // rekordbox keys these by context in browseSetting.xml, not per playlist, so
+  // browsing a second playlist does not start from scratch.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Add Genre while a playlist is selected.
+  await page.getByRole("columnheader", { name: /BPM/ }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Genre" }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+
+  // The collection is a different context and keeps the defaults.
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
+
+  // Back to a playlist and the change is still there.
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+});

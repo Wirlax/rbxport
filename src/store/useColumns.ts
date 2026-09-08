@@ -6,7 +6,7 @@
  * themselves are pure functions in `@/lib/columns` — this only holds the
  * state and writes it back.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   autoSizeAll,
@@ -22,11 +22,25 @@ import {
   type Layout,
 } from "@/lib/columns";
 
-const STORAGE_KEY = "rbl.columns.v1";
+/**
+ * Which table a layout belongs to.
+ *
+ * rekordbox keys these by context in `browseSetting.xml` — `TableHeader-<
+ * Context>`, thirty of them — and by the *kind* of table rather than by each
+ * individual playlist, so browsing a second playlist does not start from
+ * scratch.
+ */
+export type ColumnContext = "collection" | "playlist" | "history";
 
-function load(): Layout {
+const STORAGE_PREFIX = "rbl.columns.v2";
+
+function keyFor(context: ColumnContext): string {
+  return `${STORAGE_PREFIX}.${context}`;
+}
+
+function load(context: ColumnContext): Layout {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(keyFor(context));
     // sanitise handles null, so a first run needs no special case.
     return sanitise(raw === null ? null : JSON.parse(raw));
   } catch {
@@ -48,17 +62,30 @@ export interface Columns {
   reset: () => void;
 }
 
-export function useColumns(): Columns {
-  const [layout, setLayout] = useState<Layout>(load);
+export function useColumns(context: ColumnContext): Columns {
+  const [layout, setLayout] = useState<Layout>(() => load(context));
+
+  // Switching context loads that table's own layout. Reading in an effect
+  // rather than during render keeps the two stores from crossing over when
+  // the context changes and a save is still pending.
+  const loaded = useRef(context);
+  useEffect(() => {
+    if (loaded.current === context) return;
+    loaded.current = context;
+    setLayout(load(context));
+  }, [context]);
 
   useEffect(() => {
+    // Guard against writing the previous context's layout under the new key
+    // in the render between the context changing and the load above.
+    if (loaded.current !== context) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+      localStorage.setItem(keyFor(context), JSON.stringify(layout));
     } catch {
       // Not being able to remember the layout is not a reason to break the
       // session that is running.
     }
-  }, [layout]);
+  }, [layout, context]);
 
   const columns = useMemo(() => resolve(layout), [layout]);
 
