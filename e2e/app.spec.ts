@@ -800,14 +800,25 @@ test("the detail waveform draws a beat grid with heavier downbeats", async ({ pa
   // beats: enough to be a grid, few enough to be readable.
   await expect.poll(async () => detail.locator("span").count()).toBeGreaterThan(10);
 
-  // Downbeats are red and every fourth, beats grey — measured off the capture
-  // by spacing: the red lines sit at exactly four times the grey pitch.
+  // Every fourth marker is white where the others are grey, and each carries a
+  // triangle at either end — measured: the red in rekordbox's grid is the
+  // downbeat's head, not its line.
   const marks = await detail.locator("span").evaluateAll((els) =>
-    els.map((e) => getComputedStyle(e).backgroundColor),
+    els.map((e) => {
+      const style = getComputedStyle(e);
+      const head = getComputedStyle(e, "::before");
+      return `${style.backgroundColor}|${head.borderTopColor}`;
+    }),
   );
-  expect(new Set(marks).size).toBeGreaterThan(1);
-  expect(marks).toContain("rgb(234, 51, 35)");
-  expect(marks).toContain("rgb(114, 114, 114)");
+  expect(marks).toContain("rgb(255, 255, 255)|rgb(234, 51, 35)");
+  expect(marks).toContain("rgb(76, 76, 76)|rgb(124, 124, 124)");
+
+  // And they do not span the band: the capture insets them at both ends.
+  const band = await detail.boundingBox();
+  const marker = await detail.locator("span").first().boundingBox();
+  expect((marker?.y ?? 0) - (band?.y ?? 0)).toBeGreaterThan(20);
+  expect((band?.y ?? 0) + (band?.height ?? 0) - ((marker?.y ?? 0) + (marker?.height ?? 0)))
+    .toBeGreaterThan(4);
 });
 
 test("the waveforms follow the window rather than stretching a fixed canvas", async ({ page }) => {

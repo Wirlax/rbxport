@@ -22,7 +22,7 @@
   --c-cue-f: #FF8C00;
   --c-cue-g: #305AFF;
   --c-cue-h: #E2AA01;
-  --c-downbeat: #EA3323; /* measured: the lines every 217pt against the beats' 54pt, i.e. every fourth beat */
+  --c-downbeat: #FFFFFF; /* measured from docs/screenshots; the detail band runs y 358..650: every fourth marker's line, white where the others are grey */
   --c-phrase-intro: #B83F1D; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: INTRO */
   --c-phrase-up: #8138F6; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: UP 1 */
   --c-phrase-up2: #6B36F6; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: UP 2 — interpolated between UP 1 and UP 3, not sampled */
@@ -35,7 +35,7 @@
   --c-phrase-bridge: #7A4FA8; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: BRIDGE — not present in the captured track, unmeasured */
   --c-vocal: #3FA9F5; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: the vocal strip above the overview */
   --c-play-ring: #36642A; /* sampled from the PLAY circle's stroke in a 2x capture of rekordbox 7.2.11 */
-  --c-beat: #727272; /* sampled from the beat ticks under the detail waveform, 2x capture */
+  --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
   --c-cue-memory: #9AA0A6; /* UNMEASURED — the memory-cue marker on the detail waveform has not been isolated */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
   --c-pad-set: #77E866; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
@@ -43,6 +43,9 @@
   --c-pad-label: #646464; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the text on an inactive button, e.g. MA */
   --c-tab-active: #457FE5; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the selected MEMORY/HOT CUE/INFO tab — a lighter blue than the pad buttons' #3571E3 */
   --c-outline: #646464; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the border on an unselected panel tab */
+  --c-beat-head: #7C7C7C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's triangle heads, lighter than its line */
+  --c-downbeat-head: #EA3323; /* measured from docs/screenshots; the detail band runs y 358..650: a downbeat's triangle heads — the red is the head, not the line */
+  --c-bars-label: #367BDA; /* measured from docs/screenshots; the detail band runs y 358..650: the bar count above the playhead */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -67,8 +70,11 @@
   --s-player-vocal-h: 5px; /* measured from a 2x capture of rekordbox 7.2.11 running; vocal strip above the overview */
   --s-player-phrase-h: 14px; /* measured from a 2x capture of rekordbox 7.2.11 running; phrase bar y 127..141pt */
   --s-player-detail-h: 146px; /* measured from a 2x capture of rekordbox 7.2.11 running; detail waveform y 141..287pt */
-  --s-wave-inset-top: 8px; /* measured from docs/screenshots: the detail band is y 358..650 and the waveform paints 374..647; the top strip carries the bars label and the cue heads */
-  --s-wave-inset-bottom: 2px; /* measured from docs/screenshots: the detail band is y 358..650 and the waveform paints 374..647 */
+  --s-wave-inset-top: 11px; /* measured from docs/screenshots; the detail band runs y 358..650; the waveform paints y 380..647 */
+  --s-wave-inset-bottom: 2px; /* measured from docs/screenshots; the detail band runs y 358..650; the waveform paints y 380..647 */
+  --s-beat-marker-top: 26px; /* measured from docs/screenshots; the detail band runs y 358..650: a marker's head starts at y 410 */
+  --s-beat-marker-bottom: 6.5px; /* measured from docs/screenshots; the detail band runs y 358..650: a marker's foot ends at y 637 */
+  --s-beat-head-h: 4px; /* measured from docs/screenshots; the detail band runs y 358..650: the triangle at each end of a marker, y 410..417 */
   --s-player-pad-h: 48px; /* measured from a 2x capture of rekordbox 7.2.11 running; hot-cue / memory bar y 287..335pt */
   --s-pad-tab-w: 80px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the CUE/LOOP and GRID tabs, x 83..163pt */
   --s-pad-tab-h: 24px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: each tab is half the 48pt row */

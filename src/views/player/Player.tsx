@@ -171,7 +171,7 @@ const JUMPS = [
  * runs 358..650. The strip above carries the bar count and the heads of the
  * cue markers, which is why it is the larger of the two.
  */
-const WAVE_INSET = { top: 8, bottom: 2 };
+const WAVE_INSET = { top: 11, bottom: 2 };
 
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
@@ -485,6 +485,16 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               />
             ) : null}
             <BeatGrid beats={beats} totalMs={total * 1000} window={window} />
+            {/* Bars elapsed, printed to the left of the playhead. */}
+            {track && track.bpmX100 > 0 ? (
+              <span
+                className={styles.bars}
+                style={{ left: `${headPercent(progress, span)}%` }}
+                data-testid="player-bars"
+              >
+                {((playback.position * (track.bpmX100 / 100)) / 60 / 4).toFixed(1)}Bars
+              </span>
+            ) : null}
             <CueMarkers cues={cues} totalMs={total * 1000} labelled window={window} />
             {/*
               The detail window is centred on the playhead, so the head is

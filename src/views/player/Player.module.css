@@ -341,10 +341,60 @@
   width: 1px;
   pointer-events: none;
 }
-/* Beats grey at a 54pt pitch, downbeats red every fourth — measured off the
-   capture by spacing, which is what settles which is which. */
-.beat { background: var(--c-beat); }
-.downbeat { background: var(--c-downbeat); width: 2px; }
+/* A beat marker is a line with a small triangle at each end, and it does not
+   span the band: measured, the head starts 26pt below the band's top and the
+   foot ends 6.5pt above its bottom. Every fourth is white with red heads. */
+.beat,
+.downbeat {
+  position: absolute;
+  top: var(--s-beat-marker-top);
+  bottom: var(--s-beat-marker-bottom);
+  width: 1px;
+  background: var(--c-beat);
+  pointer-events: none;
+}
+.downbeat { background: var(--c-downbeat); }
+
+.beat::before,
+.beat::after,
+.downbeat::before,
+.downbeat::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+}
+/* Pointing inward from each end, as the capture shows. */
+.beat::before,
+.downbeat::before {
+  top: calc(var(--s-beat-head-h) * -1 - 1px);
+  border-top: var(--s-beat-head-h) solid var(--c-beat-head);
+}
+.beat::after,
+.downbeat::after {
+  bottom: calc(var(--s-beat-head-h) * -1 - 1px);
+  border-bottom: var(--s-beat-head-h) solid var(--c-beat-head);
+}
+.downbeat::before { border-top-color: var(--c-downbeat-head); }
+.downbeat::after { border-bottom-color: var(--c-downbeat-head); }
+
+/* The bar count, sitting above the playhead in the strip the waveform leaves
+   clear at the top of the band. */
+.bars {
+  position: absolute;
+  top: 0;
+  translate: -100% 0;
+  padding-right: 6px;
+  font-size: var(--f-size-title);
+  font-weight: 700;
+  color: var(--c-bars-label);
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 /* -------------------------------------------------------------- the pads */
 
