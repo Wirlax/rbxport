@@ -166,11 +166,21 @@ pub fn detect_tempo_with(
         }
     }
 
-    // A half-time correction belongs here and is not yet written. One that
-    // doubled a candidate whenever the midpoint between its beats carried
-    // correlation was tried and measured worse on the real library — real
-    // tracks nearly always have hi-hats at twice the beat, so it fired on
-    // tempos that were already right. See TODO.md for the numbers.
+    // Two corrections belong here and neither survived measurement.
+    //
+    // One doubled a candidate whenever the midpoint between its beats carried
+    // correlation. Real tracks nearly always have hi-hats at twice the beat,
+    // so it fired on tempos that were already right: 13 octave errors in 40
+    // against 5 without it.
+    //
+    // The other re-ranked the chosen period against its metrical relatives
+    // — a half, two thirds, three halves, a double — using the comb score
+    // below, which unlike autocorrelation can tell a beat from three halves of
+    // one. It fixed the 3:2 case it was written for and broke a 92.5 BPM case
+    // in the same synthetic, and on 150 real tracks it cost three points of
+    // accuracy (95% to 92%) and gained an octave error. The check is
+    // symmetric: it moves a tempo in the wrong direction exactly as readily as
+    // the right one. See TODO.md for both sets of numbers.
     let lag = best.1;
 
     if lag == 0 {
@@ -249,7 +259,17 @@ fn tempo_prior(bpm: f64, options: TempoOptions) -> f64 {
 /// Searches a fine grid either side of the integer peak, scoring each candidate
 /// by a comb filter: sum the envelope at every multiple of the candidate period,
 /// reading between samples by linear interpolation. The true period maximises it.
-fn refine_lag(values: &[f32], coarse: usize, phases: usize) -> f64 {
+/// How much onset energy lands on a grid of this period, at its best phase.
+///
+/// Normalised per beat, so a longer period is not rewarded simply for fitting
+/// fewer beats into the track. This is the score that can tell a beat from a
+/// subdivision of one: a grid on the real beat lands on full beats every time,
+/// while one at three halves of it alternates between beats and the hi-hats
+/// between them, and averages lower.
+fn comb_score(values: &[f32], period: f64, phases: usize) -> f64 {
+    if period < 2.0 || values.is_empty() {
+        return 0.0;
+    }
     let sample_at = |x: f64| -> f64 {
         if x < 0.0 {
             return 0.0;
@@ -261,38 +281,38 @@ fn refine_lag(values: &[f32], coarse: usize, phases: usize) -> f64 {
         a + (b - a) * frac
     };
 
-    // Score a candidate period by how much energy lands on its grid, taking the
-    // best phase for that period.
-    let score_for = |period: f64| -> f64 {
-        if period < 2.0 {
-            return 0.0;
+    let mut best = 0.0_f64;
+    let steps = phases.max(1);
+    for step in 0..steps {
+        let phase = period * step as f64 / steps as f64;
+        let mut sum = 0.0;
+        let mut x = phase;
+        while x < values.len() as f64 {
+            sum += sample_at(x);
+            x += period;
         }
-        let mut best = 0.0_f64;
-        let steps = phases.max(1);
-        for step in 0..steps {
-            let phase = period * step as f64 / steps as f64;
-            let mut sum = 0.0;
-            let mut x = phase;
-            while x < values.len() as f64 {
-                sum += sample_at(x);
-                x += period;
-            }
-            // Normalise by the number of beats so longer periods are not penalised.
-            let beats = ((values.len() as f64 - phase) / period).max(1.0);
-            let normalised = sum / beats;
-            if normalised > best {
-                best = normalised;
-            }
+        let beats = ((values.len() as f64 - phase) / period).max(1.0);
+        let normalised = sum / beats;
+        if normalised > best {
+            best = normalised;
         }
-        best
-    };
+    }
+    best
+}
 
-    let mut best = (score_for(coarse as f64), coarse as f64);
+/// Finds the fractional lag that best explains the onset envelope.
+///
+/// Searches a fine grid either side of the integer peak. Integer lags quantise
+/// the tempo badly: at 172 envelope samples per second the lags either side of
+/// 128 BPM are 1.6 BPM apart, which put the median error at 0.375 BPM against
+/// rekordbox. Scoring fractional lags removes that entirely.
+fn refine_lag(values: &[f32], coarse: usize, phases: usize) -> f64 {
+    let mut best = (comb_score(values, coarse as f64, phases), coarse as f64);
     // +/- one integer lag covers the quantisation error; 0.002 steps put the
     // residual tempo error well under 0.01 BPM.
     let mut candidate = coarse as f64 - 1.0;
     while candidate <= coarse as f64 + 1.0 {
-        let score = score_for(candidate);
+        let score = comb_score(values, candidate, phases);
         if score > best.0 {
             best = (score, candidate);
         }
