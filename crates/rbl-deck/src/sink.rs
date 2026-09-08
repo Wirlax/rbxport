@@ -1,0 +1,264 @@
+//! Where the mixed audio goes.
+//!
+//! Behind a trait so the engine can be tested without an audio device: the
+//! null sink pulls the same callback the real one does, on the calling thread,
+//! so a test can ask for exactly 512 frames and look at them.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Mutex;
+
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+use crate::{DeckError, Result};
+
+/// Fills a stereo interleaved buffer. Called on the audio thread, so it obeys
+/// the realtime rules: no allocation, no lock, no syscall, no panic.
+pub type Render = Box<dyn FnMut(&mut [f32]) + Send>;
+
+pub trait Sink: Send + Sync {
+    /// The rate everything downstream of the resampler runs at.
+    fn sample_rate(&self) -> u32;
+    /// Starts pulling. Called when a deck starts playing.
+    fn start(&self) -> Result<()>;
+    /// Stops pulling, so an idle app costs nothing.
+    fn stop(&self) -> Result<()>;
+}
+
+/// What the thread that owns the cpal stream is asked to do.
+enum Ask {
+    Start,
+    Stop,
+    Quit,
+}
+
+/// The real device.
+///
+/// The stream lives on its own thread because `cpal::Stream` is not `Send` on
+/// every platform — Core Audio's is not — and the engine has to be `Send` and
+/// `Sync` to sit in Tauri's state. The thread owns it and takes instructions.
+pub struct CpalSink {
+    ask: Sender<Ask>,
+    sample_rate: u32,
+    running: AtomicBool,
+}
+
+impl CpalSink {
+    /// Opens the default output device.
+    pub fn open(render: Render) -> Result<Self> {
+        let (ask_tx, ask_rx) = std::sync::mpsc::channel();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+
+        std::thread::Builder::new()
+            .name("rbl-deck-device".to_owned())
+            .spawn(move || device_thread(render, &ask_rx, &ready_tx))
+            .map_err(DeckError::Io)?;
+
+        // The rate decides what the decoders resample to, so opening is not
+        // finished until the device has said what it is.
+        let sample_rate = ready_rx
+            .recv()
+            .map_err(|_| DeckError::Device("the audio thread stopped while starting".to_owned()))??;
+
+        Ok(Self { ask: ask_tx, sample_rate, running: AtomicBool::new(false) })
+    }
+}
+
+impl Sink for CpalSink {
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn start(&self) -> Result<()> {
+        if self.running.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.ask
+            .send(Ask::Start)
+            .map_err(|_| DeckError::Device("the audio thread has stopped".to_owned()))
+    }
+
+    fn stop(&self) -> Result<()> {
+        if !self.running.swap(false, Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.ask
+            .send(Ask::Stop)
+            .map_err(|_| DeckError::Device("the audio thread has stopped".to_owned()))
+    }
+}
+
+impl Drop for CpalSink {
+    fn drop(&mut self) {
+        let _ = self.ask.send(Ask::Quit);
+    }
+}
+
+/// Owns the stream and does as it is told.
+fn device_thread(render: Render, ask: &Receiver<Ask>, ready: &Sender<Result<u32>>) {
+    let stream = match build_stream(render) {
+        Ok((stream, rate)) => {
+            if ready.send(Ok(rate)).is_err() {
+                return;
+            }
+            stream
+        }
+        Err(e) => {
+            let _ = ready.send(Err(e));
+            return;
+        }
+    };
+
+    while let Ok(next) = ask.recv() {
+        match next {
+            Ask::Start => {
+                if let Err(e) = stream.play() {
+                    tracing::error!(error = %e, "the audio device would not start");
+                }
+            }
+            Ask::Stop => {
+                if let Err(e) = stream.pause() {
+                    tracing::error!(error = %e, "the audio device would not stop");
+                }
+            }
+            Ask::Quit => break,
+        }
+    }
+    // Dropping the stream here, on the thread that built it.
+    drop(stream);
+}
+
+/// Builds an output stream on the default device, in whatever format it wants.
+fn build_stream(render: Render) -> Result<(cpal::Stream, u32)> {
+    let host = cpal::default_host();
+    let device = host.default_output_device().ok_or(DeckError::NoDevice)?;
+    let supported = device
+        .default_output_config()
+        .map_err(|e| DeckError::Device(e.to_string()))?;
+    let format = supported.sample_format();
+    let config: cpal::StreamConfig = supported.into();
+    let rate = config.sample_rate;
+    let channels = config.channels;
+
+    let error = |e: cpal::Error| tracing::error!(error = %e, "audio device error");
+    let stream = match format {
+        cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error),
+        cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error),
+        cpal::SampleFormat::U16 => build::<u16>(&device, config, channels, render, error),
+        cpal::SampleFormat::I32 => build::<i32>(&device, config, channels, render, error),
+        other => Err(DeckError::Device(format!("this device wants {other} samples, which we do not write"))),
+    }?;
+    Ok((stream, rate))
+}
+
+/// The device's own buffer never reaches this in practice; a callback asking
+/// for more is served in several passes rather than by allocating.
+const SCRATCH_FRAMES: usize = 4096;
+
+fn build<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    channels: u16,
+    mut render: Render,
+    error: fn(cpal::Error),
+) -> Result<cpal::Stream>
+where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    // Allocated here, on the control thread, and only written to inside the
+    // callback: the callback itself never allocates.
+    let mut scratch = vec![0.0_f32; SCRATCH_FRAMES * 2];
+    let lanes = channels.max(1) as usize;
+
+    device
+        .build_output_stream(
+            config,
+            move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
+                for chunk in out.chunks_mut(SCRATCH_FRAMES * lanes) {
+                    let frames = chunk.len() / lanes;
+                    // The chunk is bounded by the scratch, so this cannot be
+                    // short; silence is the right answer if it ever were.
+                    let Some(stereo) = scratch.get_mut(..frames * 2) else {
+                        for sample in chunk.iter_mut() {
+                            *sample = T::from_sample(0.0_f32);
+                        }
+                        continue;
+                    };
+                    stereo.fill(0.0);
+                    render(stereo);
+                    // Stereo into however many lanes the device has: a third
+                    // and further channels stay silent rather than repeating.
+                    for (frame, lane) in stereo.chunks_exact(2).zip(chunk.chunks_mut(lanes)) {
+                        for (at, sample) in lane.iter_mut().enumerate() {
+                            let value = if at < 2 { frame.get(at).copied().unwrap_or(0.0) } else { 0.0 };
+                            *sample = T::from_sample(value);
+                        }
+                    }
+                }
+            },
+            error,
+            None,
+        )
+        .map_err(|e| DeckError::Device(e.to_string()))
+}
+
+/// A sink with no device behind it: the test pulls it by hand.
+pub struct NullSink {
+    render: Mutex<Render>,
+    sample_rate: u32,
+    running: AtomicBool,
+}
+
+impl NullSink {
+    pub fn new(sample_rate: u32, render: Render) -> Self {
+        Self { render: Mutex::new(render), sample_rate, running: AtomicBool::new(false) }
+    }
+
+    /// Pulls `frames` stereo frames, as a device callback would.
+    ///
+    /// Returns silence while stopped, which is what a paused stream produces.
+    pub fn pull(&self, frames: usize) -> Vec<f32> {
+        let mut out = vec![0.0_f32; frames * 2];
+        if !self.running.load(Ordering::SeqCst) {
+            return out;
+        }
+        if let Ok(mut render) = self.render.lock() {
+            render(&mut out);
+        }
+        out
+    }
+
+    pub fn running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+}
+
+impl Sink for NullSink {
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn start(&self) -> Result<()> {
+        self.running.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn stop(&self) -> Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stopped_null_sink_gives_silence_and_does_not_pull() {
+        let sink = NullSink::new(44_100, Box::new(|out| out.fill(0.5)));
+        assert_eq!(sink.pull(4), vec![0.0; 8]);
+        sink.start().expect("start");
+        assert_eq!(sink.pull(4), vec![0.5; 8]);
+    }
+}
