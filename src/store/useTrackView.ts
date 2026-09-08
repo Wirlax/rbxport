@@ -26,7 +26,17 @@ export interface TrackView {
 }
 
 export function useTrackView(spec: ViewSpec): TrackView {
-  const [state, setState] = useState({ viewId: 0, count: 0, gen: 0, loading: true, error: null as string | null });
+  // `specKey` records which spec this state describes. Loading is derived from
+  // comparing it against the current spec rather than set by an effect: an
+  // effect runs *after* the render that changed the spec, so for one frame the
+  // new playlist's title was drawn beside the previous view's row count.
+  const [state, setState] = useState({
+    viewId: 0,
+    count: 0,
+    gen: 0,
+    specKey: "",
+    error: null as string | null,
+  });
   const cache = useRef(new RowCache<RowDto>(PAGE_SIZE));
   const inFlight = useRef(new Set<number>());
   // Bumped when a page lands, to re-render the rows it filled.
@@ -44,17 +54,25 @@ export function useTrackView(spec: ViewSpec): TrackView {
     let cancelled = false;
     cache.current.clear();
     inFlight.current.clear();
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({ ...s, error: null }));
 
     void (async () => {
       try {
         const backend = await getBackend();
         const handle = await backend.openView(spec);
         if (cancelled) return;
-        setState({ viewId: handle.viewId, count: handle.len, gen: handle.gen, loading: false, error: null });
+        setState({
+          viewId: handle.viewId,
+          count: handle.len,
+          gen: handle.gen,
+          specKey,
+          error: null,
+        });
       } catch (e) {
         if (cancelled) return;
-        setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e.message : String(e) }));
+        // Mark the failure as belonging to this spec, or it reads as still
+        // loading and retries forever.
+        setState((s) => ({ ...s, specKey, error: e instanceof Error ? e.message : String(e) }));
       }
     })();
 
@@ -67,7 +85,8 @@ export function useTrackView(spec: ViewSpec): TrackView {
 
   const ensureRange = useCallback(
     (start: number, end: number) => {
-      const { viewId, count, loading } = state;
+      const { viewId, count } = state;
+      const loading = state.specKey !== specKey;
       // Fetching while a view swap is in flight would fill the cache from the
       // outgoing view under the incoming token.
       if (!viewId || count === 0 || loading) return;
@@ -110,7 +129,7 @@ export function useTrackView(spec: ViewSpec): TrackView {
   return {
     count: state.count,
     token,
-    loading: state.loading,
+    loading: state.specKey !== specKey,
     error: state.error,
     rowAt,
     ensureRange,

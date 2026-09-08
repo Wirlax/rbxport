@@ -204,13 +204,23 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
   // navigate.
   await page.goto("/");
   const title = page.getByTestId("browser-title");
+  // Wait for the title to settle rather than for one appearance of a count:
+  // the view opens asynchronously, so a single read can catch it mid-change.
   await expect(title).toContainText("Tracks)");
-  const before = await title.textContent();
+  let before = "";
+  await expect
+    .poll(async () => {
+      const now = (await title.textContent()) ?? "";
+      const stable = now === before;
+      before = now;
+      return stable;
+    })
+    .toBe(true);
 
   const folder = page.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
   await folder.getByRole("button").click();
 
-  await expect(title).toHaveText(before ?? "");
+  await expect(title).toHaveText(before);
 });
 
 test("the top bar offers settings, and not rekordbox's export controls", async ({ page }) => {
