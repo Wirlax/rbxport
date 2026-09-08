@@ -214,3 +214,36 @@ fn a_memory_cue_is_distinguishable_from_a_hot_one() {
     assert!(Cue { position_ms: 0, kind: 0 }.is_memory());
     assert!(!Cue { position_ms: 0, kind: 1 }.is_memory());
 }
+
+#[test]
+fn a_playlist_keeps_its_own_order_when_sorting_is_off() {
+    // `TrackNo` means "the order this view produced", not a column to rank by.
+    // Ranking by it puts a playlist into collection order, so turning sorting
+    // off would silently rearrange somebody's set — a one-way door.
+    let mut library = library_from(&sample());
+    // Deliberately not ascending row order: that is the whole point.
+    let members = vec![4_u32, 1, 3, 0];
+    add_playlist(&mut library, "Set", &members);
+
+    let natural = ViewSpec {
+        source: TrackSource::Playlist(0),
+        sort: SortColumn::TrackNo,
+        descending: false,
+        query: String::new(),
+    };
+    assert_eq!(library.open_view(&natural).rows, members, "the membership order, untouched");
+
+    let backwards = ViewSpec { descending: true, ..natural.clone() };
+    assert_eq!(library.open_view(&backwards).rows, vec![0_u32, 3, 1, 4]);
+
+    // And sorting by something real still sorts it.
+    let by_title = ViewSpec { sort: SortColumn::Title, ..natural };
+    assert_ne!(library.open_view(&by_title).rows, members);
+}
+
+#[test]
+fn the_collection_in_its_own_order_is_the_row_order() {
+    let library = library_from(&sample());
+    let rows = library.open_view(&spec(SortColumn::TrackNo, false, "")).rows;
+    assert_eq!(rows, vec![0_u32, 1, 2, 3, 4]);
+}

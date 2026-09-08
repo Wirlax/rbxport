@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SORT, nextSort, specForNode } from "./viewSpec";
+import { DEFAULT_SORT, NO_SORT, nextSort, specForNode } from "./viewSpec";
 import type { TreeNode } from "@/ipc/types";
 
 const playlist: TreeNode = { id: "pl-1", name: "Warm Up", kind: "playlist", depth: 1 };
@@ -35,12 +35,20 @@ describe("specForNode", () => {
 });
 
 describe("nextSort", () => {
-  it("cycles ascending, descending, then back to the default", () => {
+  it("cycles ascending, descending, off", () => {
     const first = nextSort(DEFAULT_SORT, "bpm");
     expect(first).toEqual({ column: "bpm", descending: false });
     const second = nextSort(first, "bpm");
     expect(second).toEqual({ column: "bpm", descending: true });
-    expect(nextSort(second, "bpm")).toEqual(DEFAULT_SORT);
+    // Off is the view's own order, not another column's: a playlist that could
+    // not be put back the way it was would make sorting it a one-way door.
+    expect(nextSort(second, "bpm")).toEqual(NO_SORT);
+    expect(NO_SORT.column).toBe("trackNo");
+  });
+
+  it("opens a view in its own order", () => {
+    expect(DEFAULT_SORT).toEqual(NO_SORT);
+    expect(specForNode(playlist, "", null).sort).toBe("trackNo");
   });
 
   it("starts a different column ascending rather than continuing the cycle", () => {

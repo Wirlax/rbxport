@@ -98,7 +98,17 @@ impl Library {
             rows.retain(|&r| self.row_matches(r, &query));
         }
 
-        self.sort_rows(&mut rows, spec.sort, spec.descending);
+        // `TrackNo` is not a column to sort by — it *is* the view's own order:
+        // the collection's row order, or a playlist's membership order. Ranking
+        // by it would reorder a playlist into collection order, which is
+        // exactly what turning sorting off must not do.
+        if spec.sort == SortColumn::TrackNo {
+            if spec.descending {
+                rows.reverse();
+            }
+        } else {
+            self.sort_rows(&mut rows, spec.sort, spec.descending);
+        }
         View { rows }
     }
 

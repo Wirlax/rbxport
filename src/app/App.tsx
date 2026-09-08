@@ -18,7 +18,7 @@ import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
-import { specForNode } from "@/lib/viewSpec";
+import { nextSort, specForNode, DEFAULT_SORT, type SortState } from "@/lib/viewSpec";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -63,10 +63,9 @@ export function App() {
   // One piece of state, not two: updating `descending` from inside a `setSort`
   // updater made the toggle a side effect, and StrictMode's double invocation
   // cancelled it out.
-  const [sortState, setSortState] = useState<{ column: SortColumn; descending: boolean }>({
-    column: "trackNo",
-    descending: false,
-  });
+  // Opens in the view's own order: a playlist's is the order somebody put it
+  // in, and the collection has no more meaningful default.
+  const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT);
   const [selectedCount, setSelectedCount] = useState(0);
   // The rows behind the selection, so they can be queued for analysis.
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
@@ -178,9 +177,7 @@ export function App() {
   );
 
   const handleSort = useCallback((column: SortColumn) => {
-    setSortState((s) =>
-      s.column === column ? { column, descending: !s.descending } : { column, descending: false },
-    );
+    setSortState((s) => nextSort(s, column));
   }, []);
 
   useEffect(() => {
