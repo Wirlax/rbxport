@@ -52,7 +52,7 @@ function mulberry32(seed: number): () => number {
 
 function makeRows(count: number): RowDto[] {
   const rnd = mulberry32(20260907);
-  const rows: RowDto[] = new Array(count);
+  const rows: RowDto[] = Array.from({ length: count });
   for (let i = 0; i < count; i++) {
     const analysed = rnd() > 0.12 ? 1 : 0;
     const artist = ARTISTS[Math.floor(rnd() * ARTISTS.length)] ?? "";

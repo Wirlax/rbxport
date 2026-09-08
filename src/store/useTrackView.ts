@@ -129,7 +129,10 @@ export function useTrackView(
         })();
       }
     },
-    [state, token],
+    // `specKey` matters as much as `state`: between a spec change and its
+    // fetch resolving, only `specKey` has moved, and a stale one here reads as
+    // "not loading" and fills the cache from the outgoing view.
+    [state, token, specKey],
   );
 
   const rowAt = useCallback(
@@ -141,6 +144,9 @@ export function useTrackView(
       const edit = pending.get(row.id);
       return edit ? { ...row, ...edit } : row;
     },
+    // `pagesLoaded` is not read here on purpose: the cache is a ref, so this
+    // counter is the only signal that a page arrived and callers must redraw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, pagesLoaded, pending],
   );
 

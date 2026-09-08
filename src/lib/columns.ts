@@ -188,9 +188,9 @@ export function sanitise(value: unknown): Layout {
   const seen = new Set<ColumnKey>();
   const order = (Array.isArray(raw.order) ? raw.order : []).filter(
     (key): key is ColumnKey => {
-      if (typeof key !== "string" || !BY_KEY.has(key as ColumnKey)) return false;
-      if (seen.has(key as ColumnKey)) return false;
-      seen.add(key as ColumnKey);
+      if (typeof key !== "string" || !BY_KEY.has(key)) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     },
   );
