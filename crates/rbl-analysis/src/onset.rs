@@ -34,8 +34,40 @@ impl OnsetEnvelope {
     }
 }
 
-/// Computes the spectral-flux onset envelope.
+/// The frequencies an envelope is built from.
+///
+/// The full band is what tempo estimation has always used. A low band exists
+/// because the kick drum defines the beat while the hi-hats between the beats
+/// are what make a period of three halves of a beat score as well as the beat
+/// itself — three tracks in the reference library come back at exactly two
+/// thirds of rekordbox's tempo for that reason. Onsets taken from below a
+/// couple of hundred hertz simply do not contain the hi-hats.
+///
+/// **Untested against the real library.** The hypothesis above is the reason
+/// this exists; whether it fixes those three tracks without costing others is
+/// a measurement that has not been run. See TODO.md.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Band {
+    pub low_hz: f32,
+    /// `f32::INFINITY` for everything up to Nyquist.
+    pub high_hz: f32,
+}
+
+impl Band {
+    /// Every frequency the signal carries.
+    pub const FULL: Self = Self { low_hz: 0.0, high_hz: f32::INFINITY };
+    /// Kick territory: low enough to exclude a hi-hat, wide enough to keep a
+    /// kick's attack, which is not a pure tone.
+    pub const LOW: Self = Self { low_hz: 0.0, high_hz: 200.0 };
+}
+
+/// Computes the spectral-flux onset envelope over every frequency.
 pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
+    onset_envelope_band(samples, sample_rate, Band::FULL)
+}
+
+/// Computes the spectral-flux onset envelope over one band.
+pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> OnsetEnvelope {
     let rate = f64::from(sample_rate) / HOP as f64;
     if samples.len() < FRAME || sample_rate == 0 {
         return OnsetEnvelope { values: Vec::new(), rate };
@@ -55,6 +87,16 @@ pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
         })
         .collect();
 
+    // The FFT bins the band covers. Bin `i` is centred at
+    // `i * sample_rate / FRAME` hertz.
+    let hz_per_bin = f64::from(sample_rate) / FRAME as f64;
+    let first_bin = (f64::from(band.low_hz) / hz_per_bin).floor().max(0.0) as usize;
+    let last_bin = if band.high_hz.is_finite() {
+        (f64::from(band.high_hz) / hz_per_bin).ceil() as usize
+    } else {
+        usize::MAX
+    };
+
     let frames = (samples.len().saturating_sub(FRAME)) / HOP + 1;
     let mut values = Vec::with_capacity(frames);
     let mut previous = vec![0.0_f32; output.len()];
@@ -73,12 +115,15 @@ pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
         for (i, bin) in output.iter().enumerate() {
             let magnitude = bin.norm();
             let rise = magnitude - previous.get(i).copied().unwrap_or(0.0);
-            // Only increases count: a decay is not an onset.
-            if rise > 0.0 {
-                flux += rise;
-            }
+            // Every bin's history is kept, in or out of band: a rise measured
+            // against a spectrum that skipped frames would not be a rise.
             if let Some(slot) = previous.get_mut(i) {
                 *slot = magnitude;
+            }
+            // Only increases count, and only inside the band: a decay is not
+            // an onset, and neither is a hi-hat when the band excludes it.
+            if rise > 0.0 && i >= first_bin && i <= last_bin {
+                flux += rise;
             }
         }
         values.push(flux);

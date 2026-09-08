@@ -291,3 +291,110 @@ fn a_real_shaped_beat_is_measured_to_within_the_gate() {
         assert!(error <= 0.05, "at {bpm} BPM we said {} (off by {error:.3})", result.bpm);
     }
 }
+
+/// Impulses at `bpm`, each a burst of a single frequency.
+fn tone_clicks(bpm: f64, hz: f32, seconds: f64, sample_rate: u32) -> Vec<f32> {
+    let count = (f64::from(sample_rate) * seconds) as usize;
+    let period = f64::from(sample_rate) * 60.0 / bpm;
+    let mut samples = vec![0.0_f32; count];
+    let mut at = period;
+    while at < count as f64 {
+        let start = at as usize;
+        // A short burst, windowed so it is an onset rather than a step.
+        for i in 0..1024 {
+            let Some(slot) = samples.get_mut(start + i) else { break };
+            let t = i as f32 / sample_rate as f32;
+            let decay = (-20.0_f32 * t).exp();
+            *slot += (t * hz * std::f32::consts::TAU).sin() * decay;
+        }
+        at += period;
+    }
+    samples
+}
+
+/// Mean envelope value at the positions `period` samples apart from `offset`.
+fn energy_at(envelope: &rbl_analysis::onset::OnsetEnvelope, beat_secs: f64, offset: f64) -> f32 {
+    let mut total = 0.0_f32;
+    let mut count = 0_usize;
+    let mut at = beat_secs + offset;
+    while (at * envelope.rate) < envelope.values.len() as f64 {
+        // The nearest envelope sample, plus its neighbours: an onset spans a
+        // couple of hops and the grid does not land exactly on one.
+        let centre = (at * envelope.rate) as usize;
+        let mut peak = 0.0_f32;
+        for i in centre.saturating_sub(2)..=(centre + 2) {
+            peak = peak.max(envelope.values.get(i).copied().unwrap_or(0.0));
+        }
+        total += peak;
+        count += 1;
+        at += beat_secs;
+    }
+    if count == 0 { 0.0 } else { total / count as f32 }
+}
+
+#[test]
+fn a_low_band_envelope_hears_the_kick_and_not_the_hi_hat() {
+    use rbl_analysis::onset::{onset_envelope_band, Band};
+
+    // The exact arrangement that produces the 3:2 error: a kick on the beat,
+    // a hi-hat exactly between the beats. A full-band envelope sees an onset
+    // every half beat, so a grid at three halves of the beat lands on one
+    // every time and scores as well as the beat itself.
+    let rate = 44_100;
+    let beat_secs = 0.5; // 120 BPM
+    let mut mixed = tone_clicks(120.0, 60.0, 10.0, rate);
+    let hats = tone_clicks(120.0, 6_000.0, 10.0, rate);
+    let half = (beat_secs / 2.0 * f64::from(rate)) as usize;
+    for (i, value) in hats.iter().enumerate() {
+        if let Some(slot) = mixed.get_mut(i + half) {
+            *slot += *value;
+        }
+    }
+
+    // The envelope is peak-normalised, so what matters is the ratio between
+    // the on-beat and off-beat positions inside one envelope, never the total
+    // of one envelope against another's.
+    let full = onset_envelope_band(&mixed, rate, Band::FULL);
+    let low = onset_envelope_band(&mixed, rate, Band::LOW);
+
+    let full_ratio = energy_at(&full, beat_secs, beat_secs / 2.0) / energy_at(&full, beat_secs, 0.0);
+    let low_ratio = energy_at(&low, beat_secs, beat_secs / 2.0) / energy_at(&low, beat_secs, 0.0);
+
+    assert!(
+        full_ratio > 0.4,
+        "across the whole band the hi-hat should look much like the kick, got {full_ratio:.3}"
+    );
+    assert!(
+        low_ratio < full_ratio / 2.0,
+        "below 200 Hz the hi-hat should mostly be gone: off-beat/on-beat {low_ratio:.3} against {full_ratio:.3}"
+    );
+}
+
+#[test]
+fn a_low_band_envelope_keeps_the_kick() {
+    use rbl_analysis::onset::{onset_envelope_band, Band};
+
+    let rate = 44_100;
+    let kick = tone_clicks(120.0, 60.0, 10.0, rate);
+    let low = onset_envelope_band(&kick, rate, Band::LOW);
+    assert!(low.values.iter().sum::<f32>() > 0.0, "a 60 Hz kick is an onset below 200 Hz");
+
+    // And the tempo still reads out of it, which is the whole point.
+    let result = rbl_analysis::tempo::detect_tempo(&low, rate);
+    assert!(
+        (result.bpm - 120.0).abs() <= 0.5,
+        "tempo from the low band was {} rather than 120",
+        result.bpm
+    );
+}
+
+#[test]
+fn the_full_band_is_what_the_plain_call_still_does() {
+    use rbl_analysis::onset::{onset_envelope, onset_envelope_band, Band};
+
+    let rate = 44_100;
+    let mixed = tone_clicks(120.0, 60.0, 6.0, rate);
+    let plain = onset_envelope(&mixed, rate);
+    let explicit = onset_envelope_band(&mixed, rate, Band::FULL);
+    assert_eq!(plain.values, explicit.values, "adding a band must not move the default");
+}
