@@ -182,3 +182,33 @@ test("the column header stays visible when scrolled down", async ({ page }) => {
   const after = await heading.boundingBox();
   expect(Math.abs((after?.y ?? 0) - (top?.y ?? 0))).toBeLessThan(2);
 });
+
+test("a folder in the tree collapses and expands", async ({ page }) => {
+  await page.goto("/");
+  const tree = page.getByRole("tree");
+  await expect(tree.getByRole("treeitem").first()).toBeVisible();
+
+  // A folder the mock nests playlists under.
+  const folder = tree.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
+  const before = await tree.getByRole("treeitem").count();
+
+  await folder.getByRole("button").click();
+  await expect.poll(async () => tree.getByRole("treeitem").count()).toBeLessThan(before);
+
+  await folder.getByRole("button").click();
+  await expect.poll(async () => tree.getByRole("treeitem").count()).toBe(before);
+});
+
+test("collapsing a folder does not change the selected playlist", async ({ page }) => {
+  // The twisty and the row are different intentions; opening a folder must not
+  // navigate.
+  await page.goto("/");
+  const title = page.getByTestId("browser-title");
+  await expect(title).toContainText("Tracks)");
+  const before = await title.textContent();
+
+  const folder = page.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
+  await folder.getByRole("button").click();
+
+  await expect(title).toHaveText(before ?? "");
+});

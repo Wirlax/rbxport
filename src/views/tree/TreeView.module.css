@@ -6,18 +6,7 @@
   overflow: hidden;
 }
 
-.tabs { display: flex; gap: 6px; align-items: center; padding: 11px 4px 0; }
 
-.tab {
-  width: 98px;
-  height: 22px;
-  line-height: 22px;
-  text-align: center;
-  font-size: var(--f-size-sm);
-  color: var(--c-text-dim);
-  background: var(--c-raised);
-}
-.tab[data-active] { background: var(--c-accent); color: var(--c-icon-on); }
 
 .nodes { overflow: auto; min-height: 0; }
 
