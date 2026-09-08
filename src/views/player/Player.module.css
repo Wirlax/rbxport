@@ -128,6 +128,23 @@
 }
 .overview, .detail { cursor: pointer; }
 
+/* Cue points. No colour is taken from the database: ColorTableIndex decides
+   what rekordbox draws and is not understood, so hot cues take the accent and
+   memory cues the dim text colour. */
+.hotCue,
+.memoryCue {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+  font-size: var(--f-size-xs);
+  line-height: 1;
+  color: var(--c-icon-on);
+}
+.hotCue { background: var(--c-accent); }
+.memoryCue { background: var(--c-text-dim); }
+
 /* Where playback has reached. One pixel wide and in the cue colour, as
    rekordbox draws it. */
 .playhead {

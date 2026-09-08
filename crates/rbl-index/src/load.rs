@@ -10,7 +10,7 @@ use std::time::Instant;
 use rbl_db::Library as Db;
 use rusqlite::Connection;
 
-use crate::{strings::StrColumn, Library, Playlists, Row, NO_ID};
+use crate::{Cue, strings::StrColumn, Library, Playlists, Row, NO_ID};
 
 /// Converts a REAL to an integer without a lossy cast: NaN becomes 0 and
 /// out-of-range values saturate.
@@ -179,6 +179,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     lib.count = lib.ids.len();
     stats.tracks = lib.count;
 
+    load_cues(conn, &mut lib, &content_row)?;
     load_playlists(conn, &mut lib, &content_row, &mut stats)?;
     stats.read_ms = t0.elapsed().as_millis();
 
@@ -189,6 +190,47 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     stats.heap_bytes = lib.heap_bytes();
 
     Ok((lib, stats))
+}
+
+/// Reads `djmdCue`, keeping only cues whose track is still live.
+///
+/// `ContentID` names 198,855 tracks against 38,681 live ones — it retains cues
+/// for content long deleted — so this joins rather than trusting the table.
+fn load_cues(
+    conn: &Connection,
+    lib: &mut Library,
+    content_row: &HashMap<u64, Row>,
+) -> rusqlite::Result<()> {
+    let tracks = lib.len();
+    // Gathered per track first, because the table is not in track order and
+    // the index wants each track's cues contiguous.
+    let mut per_track: Vec<Vec<Cue>> = vec![Vec::new(); tracks];
+
+    let mut stmt = conn.prepare(
+        "SELECT ContentID, Kind, InMsec FROM djmdCue WHERE rb_local_deleted = 0",
+    )?;
+    let mut rows = stmt.query([])?;
+    while let Some(r) = rows.next()? {
+        let Some(content): Option<String> = r.get(0)? else { continue };
+        let Ok(key) = content.parse::<u64>() else { continue };
+        let Some(&row) = content_row.get(&key) else { continue };
+        let kind = u8::try_from(num(r, 1)?).unwrap_or(0);
+        let position_ms = u32::try_from(num(r, 2)?.max(0)).unwrap_or(0);
+        if let Some(list) = per_track.get_mut(row as usize) {
+            list.push(Cue { position_ms, kind });
+        }
+    }
+
+    lib.cue_index = Vec::with_capacity(tracks + 1);
+    lib.cues = Vec::with_capacity(per_track.iter().map(Vec::len).sum());
+    for list in &mut per_track {
+        lib.cue_index.push(u32::try_from(lib.cues.len()).unwrap_or(u32::MAX));
+        list.sort_by_key(|c| (c.position_ms, c.kind));
+        lib.cues.append(list);
+    }
+    // One past the end, so the last track's slice has a bound.
+    lib.cue_index.push(u32::try_from(lib.cues.len()).unwrap_or(u32::MAX));
+    Ok(())
 }
 
 fn load_playlists(

@@ -186,3 +186,31 @@ fn every_sort_column_produces_a_full_permutation() {
         }
     }
 }
+
+#[test]
+fn hot_cue_letters_follow_rekordbox_s_kind_numbering() {
+    use rbl_index::Cue;
+    // 1,2,3 then 5 — kind 4 is unused, which is why D is 5. Counted across all
+    // 1,040,598 cues in the reference library.
+    let letter = |kind: u8| Cue { position_ms: 0, kind }.hot_letter();
+    assert_eq!(letter(0), None, "kind 0 is a memory cue");
+    assert_eq!(letter(1), Some('A'));
+    assert_eq!(letter(2), Some('B'));
+    assert_eq!(letter(3), Some('C'));
+    assert_eq!(letter(4), None, "kind 4 is not used");
+    assert_eq!(letter(5), Some('D'));
+    assert_eq!(letter(6), Some('E'));
+    assert_eq!(letter(9), Some('H'));
+    // rekordbox 7 has sixteen hot cues, not the eight recorded before.
+    assert_eq!(letter(10), Some('I'));
+    assert_eq!(letter(17), Some('P'));
+    assert_eq!(letter(18), None, "past the sixteenth");
+    assert_eq!(letter(255), None);
+}
+
+#[test]
+fn a_memory_cue_is_distinguishable_from_a_hot_one() {
+    use rbl_index::Cue;
+    assert!(Cue { position_ms: 0, kind: 0 }.is_memory());
+    assert!(!Cue { position_ms: 0, kind: 1 }.is_memory());
+}

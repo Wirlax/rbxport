@@ -124,6 +124,9 @@ export interface Backend {
    * because a library can lose thousands when a drive is unplugged and a list
    * that long is neither useful nor small enough for the IPC cap.
    */
+  /** A track's cue points, ordered by position. */
+  trackCues(trackId: string): Promise<Cue[]>;
+
   missingTracks(limit: number): Promise<MissingTracks>;
 
   /**
@@ -133,6 +136,20 @@ export interface Backend {
    * there is no picker, so it resolves to `null` immediately.
    */
   relocateTrack(trackId: string): Promise<string | null>;
+}
+
+/**
+ * One cue point.
+ *
+ * No colour: what colour rekordbox draws a cue is decided by
+ * `djmdCue.ColorTableIndex`, which is not understood, so none is reported
+ * rather than a guessed one.
+ */
+export interface Cue {
+  positionMs: number;
+  /** `A` to `P` for a hot cue, empty for a memory cue. */
+  letter: string;
+  memory: boolean;
 }
 
 /** A track whose audio file is no longer where the library says. */

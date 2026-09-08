@@ -316,6 +316,22 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     edits,
 
+    // A memory cue and four hot cues, so the player's markers and list have
+    // something to draw without a database behind them.
+    trackCues: (trackId) => {
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row || row.analysed === 0) return wait([]);
+      const total = row.durationSec * 1000;
+      return wait([
+        { positionMs: Math.round(total * 0.02), letter: "", memory: true },
+        { positionMs: Math.round(total * 0.12), letter: "A", memory: false },
+        { positionMs: Math.round(total * 0.34), letter: "B", memory: false },
+        { positionMs: Math.round(total * 0.61), letter: "C", memory: false },
+        { positionMs: Math.round(total * 0.83), letter: "D", memory: false },
+      ]);
+    },
+
     // Nothing in the mock has a file behind it, so nothing can be missing and
     // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),

@@ -540,3 +540,16 @@ test("settings can check for missing files", async ({ page }) => {
   // The mock has no files behind its rows, so nothing can be missing.
   await expect(section).toContainText("where the library expects it");
 });
+
+test("the player marks a track's cues on its waveforms", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+
+  const detail = page.getByTestId("player-detail");
+  // Four hot cues and one memory cue in the mock's data.
+  await expect.poll(async () => detail.locator('[title^="Hot cue"]').count()).toBe(4);
+  await expect(detail.locator('[title="Memory cue"]')).toHaveCount(1);
+  // Hot cues carry their letter on the detail waveform, where there is room.
+  await expect(detail.locator('[title="Hot cue A"]')).toHaveText("A");
+});

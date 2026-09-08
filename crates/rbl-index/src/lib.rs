@@ -80,12 +80,54 @@ pub struct Library {
     /// Row index by track id. Built on first lookup, not at load.
     by_id: OnceLock<HashMap<u64, Row>>,
 
+    /// Every cue, grouped by track and ordered by position.
+    pub(crate) cues: Vec<Cue>,
+    /// Where each track's cues start in `cues`; one longer than the track
+    /// count, so a track's slice is `[cue_index[row], cue_index[row + 1])`.
+    pub(crate) cue_index: Vec<u32>,
+
     /// Per-column collation ranks; `ranks[col][row]` orders rows without
     /// touching strings during a sort.
     pub(crate) ranks: Vec<Vec<u32>>,
 
     /// One folded haystack per row: title, artist, album, comment.
     pub(crate) search: StrColumn,
+}
+
+/// One cue point.
+///
+/// `Kind` 0 is a memory cue; 1, 2, 3 and 5 are hot cues A to D, 6 to 9 are E
+/// to H, and 10 to 17 are I to P — rekordbox 7 has sixteen. Kind 4 is unused,
+/// which is why D is 5. Counted across all 1,040,598 cues in the reference
+/// library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cue {
+    /// Milliseconds from the start of the track.
+    pub position_ms: u32,
+    /// `djmdCue.Kind`, raw. Use [`Cue::hot_letter`] to read it.
+    pub kind: u8,
+}
+
+impl Cue {
+    /// `None` for a memory cue, otherwise `A` to `P`.
+    #[must_use]
+    pub fn hot_letter(&self) -> Option<char> {
+        // 1,2,3 then 5.. — kind 4 is not used, so D is 5 and the run is
+        // contiguous from there.
+        // Kind 0 is a memory cue and 4 is unused; both fall through to None
+        // for different reasons, which is why they are not one arm.
+        let slot = match self.kind {
+            1..=3 => u32::from(self.kind) - 1,
+            5..=17 => u32::from(self.kind) - 2,
+            _ => return None,
+        };
+        char::from_u32(u32::from(b'A') + slot)
+    }
+
+    #[must_use]
+    pub const fn is_memory(&self) -> bool {
+        self.kind == 0
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -115,6 +157,19 @@ impl Playlists {
 }
 
 impl Library {
+    /// The row a track's display id names.
+    pub fn row_of(&self, display_id: &str) -> Option<Row> {
+        let wanted: u64 = display_id.parse().ok()?;
+        self.row_by_id().get(&wanted).copied()
+    }
+
+    /// A track's cues, ordered by position.
+    pub fn cues_of(&self, row: Row) -> &[Cue] {
+        let start = self.cue_index.get(row as usize).copied().unwrap_or(0) as usize;
+        let end = self.cue_index.get(row as usize + 1).copied().unwrap_or(0) as usize;
+        self.cues.get(start..end).unwrap_or(&[])
+    }
+
     /// The share-relative artwork path for a track's display id, if it has one.
     ///
     /// Backed by a map built on first use. Scanning `ids` instead would be

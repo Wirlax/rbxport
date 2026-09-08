@@ -11,8 +11,8 @@ use rbl_index::Library;
 use tauri::State;
 
 use crate::dto::{
-    LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto, TreeNodeDto, ViewHandleDto,
-    ViewSpecDto,
+    CueDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto, TreeNodeDto,
+    ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -397,6 +397,33 @@ async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
     // Cached pages are keyed on the generation, so the frontend drops them.
     let _ = tauri::Emitter::emit(&app, "library:changed", generation);
     Ok(generation)
+}
+
+/// A track's cue points.
+///
+/// Positions and kinds only. What colour rekordbox draws a cue is decided by
+/// `djmdCue.ColorTableIndex`, which is not understood — 735,427 of the
+/// reference library's cues use index 21 and nothing explains it — so no
+/// colour is reported rather than a guessed one.
+#[tauri::command]
+pub async fn track_cues(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<Vec<CueDto>> {
+    let library = state.library()?;
+    blocking("track_cues", move || {
+        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        Ok(library
+            .cues_of(row)
+            .iter()
+            .map(|cue| CueDto {
+                position_ms: cue.position_ms,
+                letter: cue.hot_letter().map(String::from).unwrap_or_default(),
+                memory: cue.is_memory(),
+            })
+            .collect())
+    })
+    .await
 }
 
 /// Tracks whose audio file is no longer where the library says it is.

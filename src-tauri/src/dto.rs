@@ -107,3 +107,13 @@ pub struct MissingTracksDto {
     pub total: u32,
     pub tracks: Vec<MissingTrackDto>,
 }
+
+/// One cue point, as the interface needs it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CueDto {
+    pub position_ms: u32,
+    /// `A` to `P` for a hot cue, empty for a memory cue.
+    pub letter: String,
+    pub memory: bool,
+}

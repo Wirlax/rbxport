@@ -11,9 +11,10 @@
  * scheme, so the transport is drawn and disabled: a player waiting for a
  * backend, rather than an unfinished panel.
  */
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 
-import type { RowDto } from "@/ipc/types";
+import type { Cue, RowDto } from "@/ipc/types";
+import { getBackend } from "@/ipc/client";
 import { artworkUrl } from "@/ipc/artwork";
 import { formatBpm, formatDuration } from "@/lib/format";
 import { usePlayback } from "@/store/usePlayback";
@@ -25,6 +26,39 @@ export interface PlayerProps {
   track: RowDto | null;
 }
 
+/**
+ * Cue points on a waveform.
+ *
+ * No colour: `djmdCue.ColorTableIndex` decides what rekordbox draws and is not
+ * understood, so hot cues take the accent and memory cues the dim text colour
+ * rather than a guessed palette. Hot cues carry their letter where there is
+ * room for it.
+ */
+const CueMarkers = memo(function CueMarkers({
+  cues, totalMs, labelled,
+}: {
+  cues: readonly Cue[];
+  totalMs: number;
+  labelled?: boolean;
+}) {
+  if (totalMs <= 0) return null;
+  return (
+    <>
+      {cues.map((cue) => (
+        <span
+          key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
+          className={cue.memory ? styles.memoryCue : styles.hotCue}
+          style={{ left: `${Math.min((cue.positionMs / totalMs) * 100, 100)}%` }}
+          title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
+          aria-hidden
+        >
+          {labelled && !cue.memory ? cue.letter : null}
+        </span>
+      ))}
+    </>
+  );
+});
+
 /** Transport buttons, drawn in the order rekordbox has them. */
 const TRANSPORT = [
   { id: "previous", label: "Previous track", glyph: "◀❘" },
@@ -33,6 +67,24 @@ const TRANSPORT = [
 
 export const Player = memo(function Player({ track }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null);
+  const [cues, setCues] = useState<Cue[]>([]);
+
+  useEffect(() => {
+    if (!track) {
+      setCues([]);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      const found = await backend.trackCues(track.id);
+      // The track may have changed while this was in flight.
+      if (live) setCues(found);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [track]);
   // The fraction played, for the playhead. Falls back to the track's own
   // length before the file's metadata has loaded, so the head does not jump.
   const total = playback.duration || track?.durationSec || 0;
@@ -123,6 +175,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           {track && track.analysed ? (
             <WaveformPreview trackId={track.id} width={1200} height={14} />
           ) : null}
+          <CueMarkers cues={cues} totalMs={total * 1000} />
           <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
         </div>
 
@@ -138,6 +191,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           {track && track.analysed ? (
             <WaveformPreview trackId={track.id} width={1200} height={68} />
           ) : null}
+          <CueMarkers cues={cues} totalMs={total * 1000} labelled />
           <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
         </div>
         {playback.error ? (
