@@ -387,6 +387,25 @@
 
 .hotCues { display: flex; gap: var(--s-pad-cue-gap); flex: none; }
 
+/* GRID puts its own set of controls in the same slot the pads use.
+   **Arrangement unmeasured**: no capture of rekordbox's GRID row exists, so
+   this is the set of edits rbl-anlz::grid implements, laid out by us. */
+.gridEdits { display: flex; gap: 6px; flex: none; }
+
+.gridEdit {
+  height: var(--s-pad-cue-h);
+  min-width: 54px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  cursor: default;
+  padding: 0 10px;
+}
+.gridEdit:disabled { color: var(--c-pad-label); }
+
 /* A pad is a dark well; a cue is a small bright square inside it, not a
    filled button. */
 .pad {
@@ -489,23 +508,36 @@
 
 .cueList { overflow: auto; min-height: 0; }
 
+/* A whole row is the target: a cue list is for jumping to a cue. */
 .cueRow {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   height: 22px;
   padding: 0 8px;
   font-size: var(--f-size-sm);
+  border: 0;
   border-bottom: 1px solid var(--c-panel);
+  background: none;
+  cursor: default;
+  text-align: left;
 }
+.cueRow:hover { background: var(--c-button); }
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
-.cueDelete {
-  border: 0;
-  background: none;
-  color: var(--c-icon-off);
-  cursor: default;
-  padding: 0;
+
+/* The INFO tab: the same fields the browser's information panel shows. */
+.info { margin: 0; overflow: auto; min-height: 0; padding: 6px 8px; }
+.infoRow { display: grid; grid-template-columns: 68px 1fr; gap: 8px; align-items: baseline; }
+.infoLabel { font-size: var(--f-size-xs); color: var(--c-text-dim); }
+.infoValue {
+  margin: 0;
+  font-size: var(--f-size-sm);
+  color: var(--c-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sideTabs { display: flex; gap: 1px; }

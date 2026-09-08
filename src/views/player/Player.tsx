@@ -22,11 +22,14 @@ import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
   ZOOM_STEPS,
+  cuesFor,
   detailSpan,
   headPercent,
   phraseSpans,
   splitTime,
   windowAround,
+  type CuePanel,
+  type PadMode,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
 import { WaveformDetail } from "./WaveformDetail";
@@ -162,6 +165,33 @@ const JUMPS = [
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 
+/**
+ * The grid-editing controls, which is what GRID puts in the pad row.
+ *
+ * These are the four edits `rbl-anlz::grid` implements, plus a reset. The set
+ * is right; **the arrangement is ours**, because no capture of rekordbox's
+ * GRID row has been taken — recorded in TODO.md.
+ *
+ * They are drawn and inert. Saving a grid edit needs the `PQT2` tag, whose
+ * per-beat payload is not understood, and a grid editor that cannot save is a
+ * trap rather than a feature.
+ */
+const GRID_EDITS = [
+  { id: "nudge-back", label: "Nudge grid earlier", text: "◀ NUDGE" },
+  { id: "nudge-forward", label: "Nudge grid later", text: "NUDGE ▶" },
+  { id: "halve", label: "Halve the tempo", text: "÷2" },
+  { id: "double", label: "Double the tempo", text: "×2" },
+  { id: "downbeat", label: "Set the downbeat here", text: "DOWNBEAT" },
+  { id: "reset", label: "Reset the grid", text: "RESET" },
+] as const;
+
+/** The panel tabs beside the deck. */
+const PANELS = [
+  { id: "memory", label: "MEMORY" },
+  { id: "hotCue", label: "HOT CUE" },
+  { id: "info", label: "INFO" },
+] as const;
+
 export const Player = memo(function Player({ track }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null);
   // The waveforms follow their containers, which change with the window and
@@ -173,6 +203,8 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   const [beats, setBeats] = useState<Beat[]>([]);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [bars, setBars] = useState<number>(DETAIL_BARS);
+  const [padMode, setPadMode] = useState<PadMode>("cue");
+  const [panel, setPanel] = useState<CuePanel>("memory");
 
   useEffect(() => {
     if (!track) {
@@ -422,14 +454,41 @@ export const Player = memo(function Player({ track }: PlayerProps) {
             the capture shows and the opposite of the usual convention.
           */}
           <div className={styles.modes} role="tablist" aria-label="Pad mode">
-            <button type="button" role="tab" aria-selected className={styles.mode} data-on>
-              CUE/LOOP
-            </button>
-            <button type="button" role="tab" aria-selected={false} className={styles.mode}>
-              GRID
-            </button>
+            {([["cue", "CUE/LOOP"], ["grid", "GRID"]] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={padMode === id}
+                className={styles.mode}
+                data-on={padMode === id || undefined}
+                onClick={() => setPadMode(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
+          {padMode === "grid" ? (
+            <div className={styles.padCluster}>
+              <div className={styles.gridEdits} aria-label="Beat grid">
+                {GRID_EDITS.map((edit) => (
+                  <button
+                    key={edit.id}
+                    type="button"
+                    className={styles.gridEdit}
+                    aria-label={edit.label}
+                    // Saving needs the PQT2 tag, whose payload is not
+                    // understood; an editor that cannot save is a trap.
+                    disabled
+                    title="Grid editing needs the PQT2 tag, which is not yet understood"
+                  >
+                    {edit.text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
           <div className={styles.padCluster}>
             <div className={styles.hotCues} aria-label="Hot cues">
               {PADS.map((letter) => {
@@ -471,6 +530,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               <button type="button" className={styles.step} aria-label="Next page" disabled>›</button>
             </div>
           </div>
+          )}
 
           <button type="button" className={styles.chip} aria-label="Quantize" data-on>Q</button>
           <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
@@ -482,29 +542,60 @@ export const Player = memo(function Player({ track }: PlayerProps) {
       </div>
 
       <aside className={styles.side} aria-label="Cue list">
-        <div className={styles.cueList}>
-          {cues.map((cue) => (
-            <div key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`} className={styles.cueRow}>
-              <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
-              <span className={styles.cueName}>
-                {cue.memory ? "CUE(Auto)" : `HOT CUE ${cue.letter}`}
-              </span>
-              <button type="button" className={styles.cueDelete} aria-label="Delete cue" disabled>
-                ✕
+        {panel === "info" ? (
+          <dl className={styles.info}>
+            {(track
+              ? [
+                  ["Artist", track.artist],
+                  ["Album", track.album],
+                  ["Genre", track.genre],
+                  ["Label", track.label],
+                  ["Key", track.key],
+                  ["BPM", formatBpm(track.bpmX100)],
+                  ["Time", splitTime(track.durationSec).main],
+                  ["Comments", track.comment],
+                ]
+              : []
+            ).map(([name, value]) => (
+              <div key={name} className={styles.infoRow}>
+                <dt className={styles.infoLabel}>{name}</dt>
+                {/* An empty field keeps its row: one that vanishes makes the
+                    panel jump as the selection moves. */}
+                <dd className={styles.infoValue}>{value || "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <div className={styles.cueList}>
+            {cuesFor(cues, panel).map((cue) => (
+              <button
+                key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
+                type="button"
+                className={styles.cueRow}
+                onClick={() => playback.seek(cue.positionMs / 1000)}
+              >
+                <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
+                <span className={styles.cueName}>
+                  {cue.memory ? "CUE(Auto)" : `HOT CUE ${cue.letter}`}
+                </span>
               </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
         <div className={styles.sideTabs} role="tablist" aria-label="Cue list view">
-          <button type="button" role="tab" aria-selected className={styles.sideTab} data-on>
-            MEMORY
-          </button>
-          <button type="button" role="tab" aria-selected={false} className={styles.sideTab}>
-            HOT CUE
-          </button>
-          <button type="button" role="tab" aria-selected={false} className={styles.sideTab}>
-            INFO
-          </button>
+          {PANELS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={panel === tab.id}
+              className={styles.sideTab}
+              data-on={panel === tab.id || undefined}
+              onClick={() => setPanel(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </aside>
     </section>

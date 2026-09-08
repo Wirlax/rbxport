@@ -8,6 +8,7 @@ import {
   phraseKind,
   phraseSpans,
   splitTime,
+  cuesFor,
   windowAround,
 } from "./player";
 
@@ -172,5 +173,34 @@ describe("phraseSpans", () => {
       90_000,
     );
     expect(spans.map((s) => s.label)).toEqual(["CHORUS"]);
+  });
+});
+
+describe("cuesFor", () => {
+  const cues = [
+    { memory: false, letter: "B", positionMs: 30_000 },
+    { memory: true, letter: "", positionMs: 60_000 },
+    { memory: false, letter: "A", positionMs: 10_000 },
+    { memory: true, letter: "", positionMs: 5_000 },
+  ];
+
+  it("splits the one list the two tabs share", () => {
+    // Memory cues and hot cues are the same rows told apart by a flag.
+    expect(cuesFor(cues, "memory").map((c) => c.positionMs)).toEqual([5_000, 60_000]);
+    expect(cuesFor(cues, "hotCue").map((c) => c.letter)).toEqual(["A", "B"]);
+  });
+
+  it("orders by position, so the list can be read as the track", () => {
+    expect(cuesFor(cues, "hotCue").map((c) => c.positionMs)).toEqual([10_000, 30_000]);
+  });
+
+  it("lists nothing for the info tab, which shows fields instead", () => {
+    expect(cuesFor(cues, "info")).toEqual([]);
+  });
+
+  it("does not reorder the array it was given", () => {
+    const before = [...cues];
+    cuesFor(cues, "memory");
+    expect(cues).toEqual(before);
   });
 });

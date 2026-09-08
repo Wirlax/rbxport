@@ -987,3 +987,42 @@ test("a playlist that has gone since last time does not leave an empty window", 
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await expect(page.locator('[role="row"]').first()).toBeVisible();
 });
+
+test("CUE/LOOP and GRID swap which controls the pad row shows", async ({ page }) => {
+  await page.goto("/");
+  const player = page.getByRole("region", { name: "Preview player" });
+
+  // CUE/LOOP is the hot cues and the memory transport.
+  await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeVisible();
+  await expect(player.getByRole("group", { name: "Beat grid" })).toBeHidden();
+
+  await player.getByRole("tab", { name: "GRID" }).click();
+  await expect(player.getByRole("tab", { name: "GRID" })).toHaveAttribute("aria-selected", "true");
+  // GRID is a different set of buttons entirely, not the same row relabelled.
+  await expect(player.getByRole("button", { name: "Double the tempo" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "Set the downbeat here" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeHidden();
+
+  await player.getByRole("tab", { name: "CUE/LOOP" }).click();
+  await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeVisible();
+});
+
+test("the memory, hot cue and info tabs change the panel beside the deck", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const panel = page.getByRole("complementary", { name: "Cue list" });
+  // Memory cues and hot cues are the same rows told apart by a flag, so the
+  // two tabs must genuinely list different things.
+  await expect(panel.getByText("CUE(Auto)").first()).toBeVisible();
+  await expect(panel.getByText("HOT CUE A")).toHaveCount(0);
+
+  await panel.getByRole("tab", { name: "HOT CUE" }).click();
+  await expect(panel.getByText("HOT CUE A")).toBeVisible();
+  await expect(panel.getByText("CUE(Auto)")).toHaveCount(0);
+
+  await panel.getByRole("tab", { name: "INFO" }).click();
+  await expect(panel.getByText("BPM")).toBeVisible();
+  await expect(panel.getByText("HOT CUE A")).toHaveCount(0);
+});

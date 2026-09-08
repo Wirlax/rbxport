@@ -147,3 +147,25 @@ export function phraseSpans(
 
 /** Column keys the player's readouts correspond to, for the info panel. */
 export const READOUT_COLUMNS: readonly SortColumn[] = ["key", "bpm"];
+
+/** Which set of controls the pad row is showing. */
+export type PadMode = "cue" | "grid";
+
+/** Which list the panel beside the deck is showing. */
+export type CuePanel = "memory" | "hotCue" | "info";
+
+/**
+ * The cues one panel tab lists.
+ *
+ * Memory cues and hot cues are the same rows told apart by a flag, so the two
+ * tabs are one filter rather than two fetches. Ordered by position, because a
+ * cue list read out of order is unusable for finding a section.
+ */
+export function cuesFor<T extends { memory: boolean; positionMs: number }>(
+  cues: readonly T[],
+  panel: CuePanel,
+): T[] {
+  if (panel === "info") return [];
+  const want = panel === "memory";
+  return cues.filter((cue) => cue.memory === want).sort((a, b) => a.positionMs - b.positionMs);
+}
