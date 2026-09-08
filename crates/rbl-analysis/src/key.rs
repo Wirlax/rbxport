@@ -1,8 +1,21 @@
-//! Musical key by chromagram plus Krumhansl-Schmuckler profile matching.
+//! Musical key by chromagram plus profile matching.
 //!
-//! Energy is folded onto the twelve pitch classes, then correlated against
-//! empirically-derived major and minor profiles. The best of the 24 rotations
-//! is the key.
+//! Spectral energy is folded onto the twelve pitch classes, then correlated
+//! against major and minor profiles. The best of the 24 rotations is the key.
+//!
+//! # Provisional
+//!
+//! Every choice below was picked by measurement against rekordbox's own key
+//! stamps, using `cargo run --release -p rbl-analysis --example keytune`. On
+//! 150 real tracks it took agreement from **25% to 49% exact**, and from 52%
+//! to 84% once a relative key or a neighbour on the Camelot wheel counts —
+//! which for mixing purposes it does.
+//!
+//! Those numbers are **not yet validated on held-out tracks**: 192 variants
+//! were scored against the same 150, so some of the gain is fitting. The
+//! harness now splits train and test for exactly that reason, and the constants
+//! here should be re-picked once a larger cache exists. Treat them as the best
+//! current guess, not a settled answer.
 
 use realfft::RealFftPlanner;
 
@@ -14,12 +27,29 @@ use realfft::RealFftPlanner;
 /// scale read as F major. 8192 gives ~5.4 Hz, enough down to about 90 Hz.
 const KEY_FRAME: usize = 8192;
 
-/// Krumhansl-Kessler profiles: how strongly each scale degree is perceived as
-/// belonging to the key.
-const MAJOR: [f64; 12] =
-    [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-const MINOR: [f64; 12] =
-    [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+/// What belongs to a key, weighted by how much it defines it: the tonic and
+/// dominant carry it, the rest of the scale supports, everything else is zero.
+///
+/// This beat the Krumhansl-Kessler and Temperley profiles by several points in
+/// the measurement above. Those were fitted to listeners rating classical
+/// probe tones; a dance track states its key with a bass line and a chord stab,
+/// and a flat profile of "the notes of the key" describes that better.
+const MAJOR: [f64; 12] = [3.0, 0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 2.5, 0.0, 1.0, 0.0, 1.0];
+const MINOR: [f64; 12] = [3.0, 0.0, 1.0, 2.0, 0.0, 1.0, 0.0, 2.5, 1.0, 0.0, 1.0, 0.5];
+
+/// How much a minor reading is favoured over a major one.
+///
+/// Not a thumb on the scale: 89% of the tracks in this library are minor, and
+/// a profile correlation alone has no way to know that. Added rather than
+/// multiplied, because a correlation is signed and scaling a negative score
+/// makes it worse — which is the opposite of a preference.
+const MINOR_BIAS: f64 = 0.10;
+
+/// How much of a pitch class's energy to remove from the classes its own
+/// harmonics land on: a fifth above (third harmonic) and a major third above
+/// (fifth harmonic).
+const FIFTH_LEAK: f64 = 0.30;
+const THIRD_LEAK: f64 = 0.15;
 
 /// Names matching `djmdKey.ScaleName`, so a detected key can be interned
 /// against rekordbox's own table.
@@ -52,17 +82,19 @@ impl MusicalKey {
 /// Detects the key. Returns `None` when the audio is too short or has no
 /// discernible pitch content, rather than guessing C major.
 pub fn detect_key(samples: &[f32], sample_rate: u32) -> Option<MusicalKey> {
-    let chroma = chromagram(samples, sample_rate)?;
+    let mut chroma = chromagram(samples, sample_rate)?;
     let total: f64 = chroma.iter().sum();
     if total <= f64::EPSILON {
         return None;
     }
+    remove_harmonic_leakage(&mut chroma);
 
     let mut best: Option<(f64, usize, bool)> = None;
     for tonic in 0..12 {
         for minor in [false, true] {
             let profile = if minor { &MINOR } else { &MAJOR };
-            let score = correlate(&chroma, profile, tonic);
+            let score = correlate(&chroma, profile, tonic)
+                + if minor { MINOR_BIAS } else { 0.0 };
             if best.is_none_or(|(b, _, _)| score > b) {
                 best = Some((score, tonic, minor));
             }
@@ -76,6 +108,28 @@ pub fn detect_key(samples: &[f32], sample_rate: u32) -> Option<MusicalKey> {
         tonic: u8::try_from(tonic).ok()?,
         minor,
     })
+}
+
+/// Removes the chroma a note's own harmonics contribute to other pitch classes.
+///
+/// A note sounding C also puts energy on G and E, so a C minor track reads as
+/// partly G and partly E major. Subtracting a fixed fraction of every class
+/// from the two it leaks into was the most consistent single improvement
+/// measured — it helped under every profile and every compression.
+fn remove_harmonic_leakage(chroma: &mut [f64; 12]) {
+    let before = *chroma;
+    for class in 0..12 {
+        let energy = before.get(class).copied().unwrap_or(0.0);
+        if let Some(slot) = chroma.get_mut((class + 7) % 12) {
+            *slot -= FIFTH_LEAK * energy;
+        }
+        if let Some(slot) = chroma.get_mut((class + 4) % 12) {
+            *slot -= THIRD_LEAK * energy;
+        }
+    }
+    for slot in chroma.iter_mut() {
+        *slot = slot.max(0.0);
+    }
 }
 
 /// Pearson correlation between the chroma and a profile rotated to `tonic`.
@@ -135,19 +189,24 @@ fn chromagram(samples: &[f32], sample_rate: u32) -> Option<[f64; 12]> {
                 continue;
             }
             let freq = f64::from(sample_rate) * bin as f64 / KEY_FRAME as f64;
-            // Outside this range the window cannot resolve a semitone (low) or
-            // the content is percussive rather than pitched (high).
-            if !(90.0..=2500.0).contains(&freq) {
+            // Wider than it was: the bass line states the key as clearly as
+            // anything above it, and cutting at 90 Hz threw that away.
+            if !(55.0..=5000.0).contains(&freq) {
                 continue;
             }
-            // MIDI note number, then fold to a pitch class with A4 = 440 Hz.
+            // MIDI note number, with A4 = 440 Hz.
             let midi = 69.0 + 12.0 * (freq / 440.0).log2();
+            // Only bins within a sixth of a semitone of a note count. The rest
+            // are the leakage skirt around it, and counting them is counting
+            // noise — measurably so.
+            if ((midi * 3.0).round() as i64).rem_euclid(3) != 0 {
+                continue;
+            }
             let class = (midi.round() as i64).rem_euclid(12) as usize;
             if let Some(slot) = chroma.get_mut(class) {
-                // Energy rather than magnitude: it sharpens real partials
-                // against the leakage skirts around them.
-                let magnitude = f64::from(value.norm());
-                *slot += magnitude * magnitude;
+                // Log compression, not energy: squaring let one loud partial
+                // outweigh a whole track's worth of quieter pitched content.
+                *slot += (1.0 + f64::from(value.norm())).ln();
             }
         }
         start += KEY_FRAME;
