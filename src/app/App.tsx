@@ -18,6 +18,7 @@ import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
+import { InfoPanel } from "@/views/info/InfoPanel";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
@@ -47,6 +48,9 @@ export function App() {
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
   const [syncing, setSyncing] = useState(false);
+  // Closed by default, which is what browseSetting.xml records for the user's
+  // own rekordbox (`ListInfo open="0"`).
+  const [infoOpen, setInfoOpen] = useState(false);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   // One piece of state, not two: updating `descending` from inside a `setSort`
@@ -348,6 +352,10 @@ export function App() {
           void importFromMenu();
           return;
         }
+        if (outcome.action === "info") {
+          setInfoOpen((open) => !open);
+          return;
+        }
         // Both the settings panel and the missing-file manager live in
         // Settings, so either opens it.
         setSettingsOpen(true);
@@ -419,6 +427,7 @@ export function App() {
         className={styles.body}
         ref={bodyRef}
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}
+        data-info={infoOpen ? "" : undefined}
       >
         <TreeView
           nodes={treeNodes}
@@ -471,6 +480,7 @@ export function App() {
           onColumnAutoSizeAll={cols.autoSizeEvery}
         />
         )}
+        {infoOpen ? <InfoPanel track={playerTrack} onClose={() => setInfoOpen(false)} /> : null}
       </div>
       {settingsOpen ? (
         <Settings

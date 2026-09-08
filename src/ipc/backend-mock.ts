@@ -408,8 +408,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
 
-    // A browser has no native menu bar, so nothing ever fires.
-    onMenu: () => () => undefined,
+    // A browser has no native menu bar. The mock exposes the listener so a
+    // test can fire an item the way the shell would; this is the mock, which
+    // exists to be driven, rather than a seam in the app.
+    onMenu: (listener) => {
+      const w = window as unknown as { __menu?: (id: string) => void };
+      w.__menu = listener;
+      return () => {
+        delete w.__menu;
+      };
+    },
 
     // No network in a browser, so there is nothing to listen to. Saying why
     // is better than a panel that silently shows nothing.

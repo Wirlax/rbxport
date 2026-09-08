@@ -755,3 +755,29 @@ test("a playlist offers export, and a folder does not", async ({ page }) => {
   await folder.click({ button: "right" });
   await expect(page.getByRole("contentinfo")).not.toContainText("Exporting");
 });
+
+test("the information window shows the focused track and closes again", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Closed by default, which is what browseSetting.xml records for the real
+  // rekordbox — so the default view is the one the captures were taken of.
+  const panel = page.getByRole("complementary", { name: "Information" });
+  await expect(panel).toBeHidden();
+
+  const title = await page.locator('[role="gridcell"][data-col="title"]').nth(3).innerText();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+
+  // Fired the way the native menu bar fires it; a browser has none.
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText(title);
+  await expect(panel).toContainText("BPM");
+
+  // It gives up its width to the browser rather than overlaying it.
+  const browser = page.getByTestId("browser-title");
+  await expect(browser).toBeVisible();
+
+  await panel.getByRole("button", { name: "Close" }).click();
+  await expect(panel).toBeHidden();
+});

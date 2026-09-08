@@ -70,6 +70,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let view = SubmenuBuilder::new(app, label("View"))
         .item(
+            &MenuItemBuilder::with_id("info", label("Information Window"))
+                .accelerator("CmdOrCtrl+I")
+                .build(app)?,
+        )
+        .separator()
+        .item(
             &MenuItemBuilder::with_id("fullscreen", label("Full screen"))
                 .accelerator("CmdOrCtrl+Ctrl+F")
                 .build(app)?,

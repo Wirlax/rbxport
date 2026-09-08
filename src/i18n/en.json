@@ -69,10 +69,11 @@
   },
   "menu": {
     "File": "File",
-    "View": "View",
+    "Full screen": "Full screen",
     "Import": "Import",
+    "Information Window": "Information Window",
     "Missing File Manager": "Missing File Manager",
-    "Full screen": "Full screen"
+    "View": "View"
   },
   "tree": {
     "Collection": "Collection",

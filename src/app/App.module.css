@@ -10,10 +10,20 @@
   border-bottom: 1px solid var(--c-panel);
 }
 
+/* With the information panel open the browser gives up its width to it, at the
+   width browseSetting.xml records. The panel is capped at a third of the
+   window so a narrow one still leaves a usable track list. */
+.body[data-info] {
+  grid-template-columns:
+    var(--tree-w, var(--s-tree-w)) 4px 1fr
+    min(var(--s-info-w), 33%);
+}
+
 .body {
   display: grid;
   /* --tree-w is set by the splitter drag; the token is the starting width. */
   grid-template-columns: var(--tree-w, var(--s-tree-w)) 4px 1fr;
+  min-width: 0;
   min-height: 0; /* let the browser scroll instead of the page */
 }
 
