@@ -76,11 +76,14 @@ test("the status bar and top bar are the measured heights", async ({ page }) => 
   }
 });
 
-test("default columns are the twelve the captured header menu ticks", async ({ page }) => {
+test("default columns are the twelve the captured header menu ticks, behind the row number", async ({ page }) => {
   const headings = await page
     .getByRole("columnheader")
     .evaluateAll((h) => h.map((c) => c.textContent?.replace(/[↑↓]/g, "").trim() ?? ""));
   expect(headings).toEqual([
+    // `#` leads and is not one of the twelve: it is a fixed column, absent
+    // from the captured menu and from german.lang's column names alike.
+    "#",
     "Preview", "Artwork", "Track Title", "Key", "BPM", "Time",
     "Rating", "Artist", "Comments", "Label", "Date Added", "Release Date",
   ]);

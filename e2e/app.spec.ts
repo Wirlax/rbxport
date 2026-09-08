@@ -404,16 +404,50 @@ test("a device shows what is on it, and a second write only syncs the difference
   await expect(page.getByRole("contentinfo")).toContainText(/Synced DJ STICK: \d+ unchanged/);
 });
 
-test("the player shows the track that was clicked", async ({ page }) => {
+test("a track loads into the player on a double-click, not a click", async ({ page }) => {
   await page.goto("/");
   const title = page.getByTestId("player-title");
   await expect(title).toHaveText("No track loaded");
 
   const firstTitle = page.locator('[role="gridcell"][data-col="title"]').first();
   const text = await firstTitle.innerText();
-  await firstTitle.click();
 
+  // Selecting and playing are different intentions: arrowing down a playlist
+  // to see what is in it must not load every track on the way past.
+  await firstTitle.click();
+  await expect(page.locator('[role="row"][data-selected]')).toHaveCount(1);
+  await expect(title).toHaveText("No track loaded");
+
+  await firstTitle.dblclick();
   await expect(title).toHaveText(text);
+});
+
+test("editing a comment does not also load the track", async ({ page }) => {
+  // The comment cell opens its editor on a double-click, which would otherwise
+  // reach the row underneath and start playback.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="comment"]').first().dblclick();
+  await expect(page.locator('[role="gridcell"][data-col="comment"] input')).toBeVisible();
+  await expect(page.getByTestId("player-title")).toHaveText("No track loaded");
+});
+
+test("a playlist numbers its rows in the order they are in", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+
+  // The position is what makes a playlist's order readable, so it is always
+  // there — rekordbox does not offer it in the header menu either.
+  const numbers = page.locator('[role="gridcell"][data-col="trackNo"]');
+  await expect(numbers.first()).toHaveText("1");
+  await expect(numbers.nth(1)).toHaveText("2");
+  await expect(numbers.nth(2)).toHaveText("3");
+
+  // And it cannot be turned off.
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(page.getByRole("menuitemcheckbox", { name: "#" })).toHaveCount(0);
 });
 
 test("the player draws the transport, disabled where there is no backend", async ({ page }) => {
@@ -429,14 +463,14 @@ test("the player draws the transport, disabled where there is no backend", async
 
 test("the player shows a position and a total once a track is chosen", async ({ page }) => {
   await page.goto("/");
-  await page.locator('[role="gridcell"][data-col="title"]').first().click();
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
   // Position over total, from the track's own length before any file loads.
   await expect(page.getByTestId("player-time")).toHaveText(/^\d?\d:\d\d \/ \d?\d:\d\d$/);
 });
 
 test("the waveform is a seek target", async ({ page }) => {
   await page.goto("/");
-  await page.locator('[role="gridcell"][data-col="title"]').first().click();
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
   const overview = page.getByTestId("player-overview");
   await expect(overview).toHaveAttribute("role", "slider");
   await expect(overview).toHaveAttribute("aria-valuenow", "0");
@@ -573,7 +607,7 @@ test("settings can check for missing files", async ({ page }) => {
 test("the player marks a track's cues on its waveforms", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   // The overview spans the whole track, so it holds every cue. The detail is a
   // window and holds only what falls inside it.
@@ -691,7 +725,7 @@ test("settings can look for link devices, and says why a browser cannot", async 
 test("the detail waveform shows a window, not the whole track again", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   const overview = page.getByTestId("player-overview");
   const detail = page.getByTestId("player-detail");
@@ -707,7 +741,7 @@ test("the detail waveform shows a window, not the whole track again", async ({ p
 test("the detail waveform draws a beat grid with heavier downbeats", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   const detail = page.getByTestId("player-detail");
   // A window of 8% of a ~5 minute track at ~128 BPM is on the order of 50
@@ -725,7 +759,7 @@ test("the waveforms follow the window rather than stretching a fixed canvas", as
   await page.setViewportSize({ width: 1200, height: 900 });
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   const canvas = page.getByTestId("player-detail").locator("canvas");
   await expect(canvas).toBeVisible();
@@ -766,7 +800,7 @@ test("the information window shows the focused track and closes again", async ({
   await expect(panel).toBeHidden();
 
   const title = await page.locator('[role="gridcell"][data-col="title"]').nth(3).innerText();
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   // Fired the way the native menu bar fires it; a browser has none.
   await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));

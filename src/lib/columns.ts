@@ -28,6 +28,15 @@ export interface ColumnSpec {
   width: number;
   align?: "right";
   sortable: boolean;
+  /**
+   * Always shown, and absent from the header menu.
+   *
+   * `#` is the only one. Two independent sources agree it is not a menu item:
+   * neither the captured header menu nor `german.lang`'s 39 column names has
+   * it. It is the row's place in the view, which a playlist is unreadable
+   * without, so it is fixed rather than optional.
+   */
+  fixed?: true;
 }
 
 /** How narrow a column may be dragged before it stops being readable. */
@@ -43,6 +52,7 @@ export const MAX_COLUMN_WIDTH = 1200;
  * never been visible to measure — so they take a default and are marked below.
  */
 export const CATALOGUE: readonly ColumnSpec[] = [
+  { key: "trackNo", label: "#", width: 47, align: "right", sortable: false, fixed: true },
   { key: "attr", label: "Attribute", width: 67, sortable: false },
   { key: "preview", label: "Preview", width: 128, sortable: false },
   { key: "artwork", label: "Artwork", width: 80, sortable: false },
@@ -91,6 +101,12 @@ export const DEFAULT_VISIBLE: readonly ColumnKey[] = [
   "artist", "comment", "label", "dateAdded", "releaseDate",
 ];
 
+/** Columns that are always present, whatever the saved layout says. */
+export const FIXED: readonly ColumnKey[] = CATALOGUE.filter((c) => c.fixed).map((c) => c.key);
+
+/** The columns the header menu offers, which is everything but the fixed ones. */
+export const MENU_COLUMNS: readonly ColumnSpec[] = CATALOGUE.filter((c) => !c.fixed);
+
 /** A column's place in the table: which, in what order, how wide. */
 export interface Layout {
   /** Visible columns, left to right. */
@@ -114,9 +130,15 @@ export function widthOf(layout: Layout, key: ColumnKey): number {
   return layout.widths[key] ?? specOf(key)?.width ?? 120;
 }
 
-/** The visible columns as full specs, at their current widths. */
+/**
+ * The visible columns as full specs, at their current widths.
+ *
+ * Fixed columns lead, whatever the saved layout holds — including a layout
+ * saved before they existed, which is every layout already on disk.
+ */
 export function resolve(layout: Layout): ColumnSpec[] {
-  return layout.order
+  const chosen = layout.order.filter((key) => !FIXED.includes(key));
+  return [...FIXED, ...chosen]
     .map((key) => specOf(key))
     .filter((spec): spec is ColumnSpec => spec !== undefined)
     .map((spec) => ({ ...spec, width: widthOf(layout, spec.key) }));
@@ -130,7 +152,7 @@ export function resolve(layout: Layout): ColumnSpec[] {
  * menu implies it will be.
  */
 export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
-  if (!BY_KEY.has(key)) return layout;
+  if (!BY_KEY.has(key) || FIXED.includes(key)) return layout;
   if (layout.order.includes(key)) {
     return { ...layout, order: layout.order.filter((k) => k !== key) };
   }
@@ -143,13 +165,22 @@ export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
   return { ...layout, order };
 }
 
-/** Moves a column to a new position, clamped to the row. */
+/**
+ * Moves a column to a new position, clamped to the row.
+ *
+ * `to` counts the *rendered* headers, which lead with the fixed columns, and
+ * `order` does not hold those — so the two coordinate spaces differ by however
+ * many are fixed. Converting here rather than at the call site keeps that
+ * detail with the code that knows about fixed columns at all.
+ */
 export function moveColumn(layout: Layout, key: ColumnKey, to: number): Layout {
+  if (FIXED.includes(key)) return layout;
   const from = layout.order.indexOf(key);
   if (from === -1) return layout;
+  const target = to - FIXED.length;
   const order = [...layout.order];
   order.splice(from, 1);
-  order.splice(Math.max(0, Math.min(to, order.length)), 0, key);
+  order.splice(Math.max(0, Math.min(target, order.length)), 0, key);
   return { ...layout, order };
 }
 

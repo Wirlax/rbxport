@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef } from "react";
 
-import { CATALOGUE, type ColumnKey } from "@/lib/columns";
+import { MENU_COLUMNS, type ColumnKey } from "@/lib/columns";
 import styles from "./ColumnMenu.module.css";
 
 /** Matches `.menu`'s min-width, for keeping the menu inside the window. */
@@ -96,7 +96,7 @@ export function ColumnMenu({
       </button>
       <div className={styles.separator} role="separator" />
       <div className={styles.list}>
-        {CATALOGUE.map((column) => (
+        {MENU_COLUMNS.map((column) => (
           <button
             key={column.key}
             type="button"

@@ -337,7 +337,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const end = Math.min(view.order.length, offset + len);
       for (let i = Math.max(0, offset); i < end; i++) {
         const row = all[view.order[i] ?? 0];
-        if (row) out.push(row);
+        // The position in *this* view, which is what the `#` column shows and
+        // what the real backend computes in `rows_to_dto`. Handing back the
+        // row's stored number would show the collection's order inside a
+        // playlist.
+        if (row) out.push({ ...row, trackNo: i + 1 });
       }
       return wait(out);
     },

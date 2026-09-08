@@ -92,6 +92,9 @@ const Stars = memo(function Stars({
             // Clicking the star already set clears the rating, which is how
             // rekordbox behaves and the only way to get back to none.
             onMouseDown={(e) => e.stopPropagation()}
+            // Two quick clicks on a star are two ratings, not a request to
+            // play the track.
+            onDoubleClick={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               onRate(rating === star ? 0 : star);
@@ -135,7 +138,10 @@ const EditableCell = memo(function EditableCell({
         className={styles.cell}
         data-col="comment"
         role="gridcell"
-        onDoubleClick={() => {
+        onDoubleClick={(e) => {
+          // Editing a comment is not asking to play the track: without this
+          // the row's own double-click loads it into the player as well.
+          e.stopPropagation();
           setDraft(value);
           setEditing(true);
         }}
@@ -174,7 +180,7 @@ const EditableCell = memo(function EditableCell({
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, onDragStart, index, columns, onRate, onComment,
+  row, top, selected, onSelect, onOpen, onDragStart, index, columns, onRate, onComment,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -182,6 +188,8 @@ const TrackRow = memo(function TrackRow({
   index: number;
   columns: readonly ColumnSpec[];
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
+  /** Load the track into the player. A double-click, as in rekordbox. */
+  onOpen: (index: number) => void;
   onDragStart: (id: string) => void;
   /** Set the track's rating. Absent in a build that cannot write. */
   onRate: ((id: string, stars: number) => void) | undefined;
@@ -199,6 +207,7 @@ const TrackRow = memo(function TrackRow({
       data-even={index % 2 === 1 || undefined}
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => onSelect(index, row.id, e)}
+      onDoubleClick={() => onOpen(index)}
       draggable
       onDragStart={(e) => {
         onDragStart(row.id);
@@ -423,9 +432,6 @@ export function TrackTable({
 
   const handleSelect = useCallback(
     (index: number, id: string, e: React.MouseEvent) => {
-      // The player follows the row just clicked, whatever the modifier does to
-      // the rest of the selection.
-      onFocusedRow?.(view.rowAt(index) ?? null);
       const modifier = modifierFor(e);
       if (modifier === "range" && selection.anchorIndex !== null) {
         const anchor = selection.anchorIndex;
@@ -436,7 +442,21 @@ export function TrackTable({
       }
       setSelection((s) => applyClick(s, { id, index }, modifier));
     },
-    [selection.anchorIndex, view, onFocusedRow],
+    [selection.anchorIndex, view],
+  );
+
+  /**
+   * Loads a row into the player.
+   *
+   * A double-click, not a click. Selecting a track and playing it are
+   * different intentions — arrowing through a playlist to see what is in it
+   * should not load forty tracks on the way past.
+   */
+  const handleOpen = useCallback(
+    (index: number) => {
+      onFocusedRow?.(view.rowAt(index) ?? null);
+    },
+    [view, onFocusedRow],
   );
 
   useEffect(() => {
@@ -589,6 +609,7 @@ export function TrackTable({
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}
+                onOpen={handleOpen}
               />
             );
           })}

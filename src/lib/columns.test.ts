@@ -5,6 +5,8 @@ import {
   autoSizeColumn,
   CATALOGUE,
   DEFAULT_VISIBLE,
+  FIXED,
+  MENU_COLUMNS,
   defaultLayout,
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
@@ -21,10 +23,23 @@ import {
 describe("the catalogue", () => {
   it("matches the header menu that was captured", () => {
     // Thirty-nine columns, in the menu's order — counted off the capture. If
-    // this number moves, the capture and the code have drifted apart.
-    expect(CATALOGUE).toHaveLength(39);
-    expect(CATALOGUE[0]?.label).toBe("Attribute");
-    expect(CATALOGUE.at(-1)?.label).toBe("File Name");
+    // this number moves, the capture and the code have drifted apart. `#` is
+    // not among them: it is a fixed column, and neither the capture nor
+    // german.lang's column names has it.
+    expect(MENU_COLUMNS).toHaveLength(39);
+    expect(MENU_COLUMNS[0]?.label).toBe("Attribute");
+    expect(MENU_COLUMNS.at(-1)?.label).toBe("File Name");
+    expect(MENU_COLUMNS.some((c) => c.key === "trackNo")).toBe(false);
+  });
+
+  it("keeps the row number out of the menu and always in the table", () => {
+    // Hiding the position in a playlist would make the order unreadable, and
+    // rekordbox does not offer it either.
+    expect(FIXED).toEqual(["trackNo"]);
+    const hidden = toggleColumn(defaultLayout(), "trackNo");
+    expect(resolve(hidden).map((c) => c.key)).toContain("trackNo");
+    // And it leads, wherever a move tries to put it.
+    expect(resolve(moveColumn(defaultLayout(), "trackNo", 5))[0]?.key).toBe("trackNo");
   });
 
   it("has no duplicate keys or labels", () => {
@@ -90,11 +105,23 @@ describe("toggleColumn", () => {
 
 describe("moveColumn", () => {
   it("moves a column left and right", () => {
+    // `to` counts the rendered headers, which lead with the fixed row number,
+    // so a drop on header 4 is order position 3. Getting this offset wrong
+    // stopped the drag reordering anything at all.
     const start = defaultLayout();
     const first = start.order[0] as ColumnKey;
-    const moved = moveColumn(start, first, 3);
+    const moved = moveColumn(start, first, 3 + FIXED.length);
     expect(moved.order[3]).toBe(first);
     expect(moved.order).toHaveLength(start.order.length);
+  });
+
+  it("puts a column where the header it was dropped on sits", () => {
+    // The end-to-end meaning: resolve() and moveColumn() must agree on what
+    // position 4 refers to.
+    const start = defaultLayout();
+    const key = start.order[0] as ColumnKey;
+    const moved = resolve(moveColumn(start, key, 4));
+    expect(moved[4]?.key).toBe(key);
   });
 
   it("clamps a target past either end", () => {
@@ -163,7 +190,8 @@ describe("resolve", () => {
   it("returns the visible columns in order, at their current widths", () => {
     const layout = resizeColumn(defaultLayout(), "bpm", 200);
     const columns = resolve(layout);
-    expect(columns.map((c) => c.key)).toEqual(layout.order);
+    // The fixed row number leads, then the layout's own order.
+    expect(columns.map((c) => c.key)).toEqual([...FIXED, ...layout.order]);
     expect(columns.find((c) => c.key === "bpm")?.width).toBe(200);
   });
 });

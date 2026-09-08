@@ -70,7 +70,7 @@ test("the built app runs under the policy the shell ships", async ({ page }) => 
   expect(new Set(offsets).size, `rows share a transform: ${offsets.join(" | ")}`).toBeGreaterThan(1);
 
   // And the parts that draw to canvas.
-  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
   await expect(page.getByTestId("player-detail").locator("canvas")).toBeVisible();
 
   violations.push(
