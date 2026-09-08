@@ -219,9 +219,12 @@
 .vocal { min-width: 0; overflow: hidden; }
 .vocal canvas { width: 100%; height: 100%; display: block; }
 
+/* Clipped: a cue at the very edge of the window is drawn at 100% and its two
+   pixels landed in the panel beside the deck. */
 .overview {
   position: relative;
   min-width: 0;
+  overflow: hidden;
   cursor: pointer;
 }
 .overview canvas { width: 100%; height: 100%; display: block; }
@@ -298,6 +301,7 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   cursor: pointer;
 }
 .detail canvas { width: 100%; height: 100%; display: block; }
@@ -387,14 +391,65 @@
 
 .hotCues { display: flex; gap: var(--s-pad-cue-gap); flex: none; }
 
-/* GRID puts its own set of controls in the same slot the pads use.
-   **Arrangement unmeasured**: no capture of rekordbox's GRID row exists, so
-   this is the set of edits rbl-anlz::grid implements, laid out by us. */
-.gridEdits { display: flex; gap: 6px; flex: none; }
+/* GRID replaces the pads with two labelled sections, measured off
+   docs/screenshots: a section label along the top and the buttons below it,
+   grouped in pairs with a wider gap between groups. */
+.gridRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  padding-left: 10px;
+  overflow: hidden;
+}
 
-.gridEdit {
-  height: var(--s-pad-cue-h);
-  min-width: 54px;
+.editGroup { display: flex; flex-direction: column; flex: none; }
+
+.sectionLabel {
+  height: var(--s-pad-section-h);
+  line-height: var(--s-pad-section-h);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  color: var(--c-text-dim);
+}
+
+.editButtons { display: flex; gap: 10px; }
+.editPair { display: flex; gap: var(--s-pad-edit-gap); align-items: center; }
+
+.editButton {
+  width: var(--s-pad-edit-w);
+  height: var(--s-pad-edit-h);
+  border: 0;
+  border-radius: 2px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font-size: var(--f-size-xs);
+  line-height: 1;
+  cursor: default;
+  padding: 0;
+}
+.editButton:disabled { color: var(--c-pad-label); }
+.editIcon { width: 12px; height: 12px; }
+/* The mark button carries rekordbox's red bar rather than a glyph. */
+.editButton[data-mark] { color: var(--c-downbeat); font-size: var(--f-size-ui); }
+.editButton[data-mark]:disabled { color: var(--c-downbeat); }
+
+.bpmField {
+  width: var(--s-pad-field-w);
+  height: var(--s-pad-edit-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-pad-well);
+  border-radius: 2px;
+  color: var(--c-text);
+  font-size: var(--f-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.wideButton {
+  height: var(--s-pad-edit-h);
+  min-width: 62px;
   border: 0;
   border-radius: 2px;
   background: var(--c-button);
@@ -404,7 +459,15 @@
   cursor: default;
   padding: 0 10px;
 }
-.gridEdit:disabled { color: var(--c-pad-label); }
+.wideButton:disabled { color: var(--c-pad-label); }
+
+.phraseField {
+  width: 96px;
+  height: var(--s-pad-edit-h);
+  background: var(--c-panel);
+  border: 1px solid var(--c-raised);
+  border-radius: 2px;
+}
 
 /* A pad is a dark well; a cue is a small bright square inside it, not a
    filled button. */
@@ -502,7 +565,7 @@
   display: grid;
   grid-template-rows: 1fr auto;
   min-height: 0;
-  background: var(--c-top);
+  background: var(--c-pad-well);
   border-left: 1px solid var(--c-panel);
 }
 
@@ -512,46 +575,89 @@
 .cueRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  height: 22px;
+  height: 26px;
   padding: 0 8px;
   font-size: var(--f-size-sm);
   border: 0;
   border-bottom: 1px solid var(--c-panel);
   background: none;
+  color: var(--c-text);
   cursor: default;
   text-align: left;
 }
-.cueRow:hover { background: var(--c-button); }
-.cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; }
-.cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cueRow:hover:not([data-empty]) { background: var(--c-button); }
 
-/* The INFO tab: the same fields the browser's information panel shows. */
-.info { margin: 0; overflow: auto; min-height: 0; padding: 6px 8px; }
-.infoRow { display: grid; grid-template-columns: 68px 1fr; gap: 8px; align-items: baseline; }
-.infoLabel { font-size: var(--f-size-xs); color: var(--c-text-dim); }
-.infoValue {
-  margin: 0;
+/* The hot-cue list is eight fixed slots; an empty one shows its letter and
+   nothing else, so the list reads as the pads do. */
+.cueChip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s-pad-cue-inner);
+  height: var(--s-pad-cue-inner);
+  border-radius: 1px;
   font-size: var(--f-size-sm);
-  color: var(--c-text);
+  font-weight: 700;
+  color: var(--c-pad-label);
+  flex: none;
+}
+.cueChip[data-set] { background: var(--c-pad-set); color: var(--c-black); }
+
+.cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
+.cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cueDelete { color: var(--c-text); flex: none; }
+
+/* INFO is a stack of lines with hairlines between the blocks, not a
+   label/value grid. */
+.info {
+  overflow: auto;
+  min-height: 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.infoBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  min-height: 18px;
+  border-bottom: 1px solid var(--c-panel);
+}
+.infoBlock:last-child { border-bottom: 0; }
+
+.infoStars { color: var(--c-text-dim); letter-spacing: 3px; font-size: var(--f-size-ui); }
+.infoIcon { color: var(--c-text-dim); font-size: var(--f-size-xs); }
+.infoLine {
+  font-size: var(--f-size-sm);
+  color: var(--c-text-dim);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.sideTabs { display: flex; gap: 1px; }
+/* Three equal tabs: the selected one is a lighter blue than the pad buttons,
+   the others are outlined. */
+.sideTabs { display: flex; gap: 4px; padding: 4px; }
 .sideTab {
   flex: 1;
-  border: 0;
-  background: var(--c-button);
-  color: var(--c-text-dim);
+  border: 1px solid var(--c-outline);
+  border-radius: 2px;
+  background: var(--c-panel);
+  color: var(--c-text);
   font-size: var(--f-size-xs);
   font-weight: 700;
   padding: 5px 0;
   cursor: default;
 }
-.sideTab[data-on] { background: var(--c-accent); color: var(--c-icon-on); }
+.sideTab[data-on] {
+  background: var(--c-tab-active);
+  border-color: var(--c-tab-active);
+  color: var(--c-icon-on);
+}
 
 .error {
   grid-column: 1 / -1;

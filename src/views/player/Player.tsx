@@ -18,6 +18,7 @@ import type { Beat, Cue, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { artworkUrl } from "@/ipc/artwork";
+import { CutIcon, LockIcon, MetronomeIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
@@ -26,6 +27,7 @@ import {
   detailSpan,
   headPercent,
   phraseSpans,
+  memoryTime,
   splitTime,
   windowAround,
   type CuePanel,
@@ -166,24 +168,63 @@ const JUMPS = [
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 
 /**
- * The grid-editing controls, which is what GRID puts in the pad row.
+ * What GRID puts in the pad row, read off `docs/screenshots`.
  *
- * These are the four edits `rbl-anlz::grid` implements, plus a reset. The set
- * is right; **the arrangement is ours**, because no capture of rekordbox's
- * GRID row has been taken — recorded in TODO.md.
+ * Two labelled sections, GRID EDIT and PHRASE EDIT, with the buttons grouped
+ * in pairs. The glyphs are ours — Pioneer's own are reference for geometry
+ * only — so each carries an `aria-label` saying what it does.
  *
- * They are drawn and inert. Saving a grid edit needs the `PQT2` tag, whose
- * per-beat payload is not understood, and a grid editor that cannot save is a
- * trap rather than a feature.
+ * Every one is inert. Saving a grid edit needs the `PQT2` tag, whose per-beat
+ * payload is not understood, and an editor that cannot save is a trap.
  */
-const GRID_EDITS = [
-  { id: "nudge-back", label: "Nudge grid earlier", text: "◀ NUDGE" },
-  { id: "nudge-forward", label: "Nudge grid later", text: "NUDGE ▶" },
-  { id: "halve", label: "Halve the tempo", text: "÷2" },
-  { id: "double", label: "Double the tempo", text: "×2" },
-  { id: "downbeat", label: "Set the downbeat here", text: "DOWNBEAT" },
-  { id: "reset", label: "Reset the grid", text: "RESET" },
+const GRID_EDITS: readonly (readonly { id: string; label: string; text: string }[])[] = [
+  [{ id: "mark", label: "Mark the downbeat here", text: "▌" }],
+  [{ id: "tap", label: "Tap the tempo", text: "TAP" }],
+  [
+    { id: "shift-back", label: "Shift the grid earlier", text: "◀|||" },
+    { id: "shift-forward", label: "Shift the grid later", text: "|||▶" },
+  ],
+  [
+    { id: "widen", label: "Slow the grid", text: "◀|▶" },
+    { id: "narrow", label: "Speed the grid up", text: "▶|◀" },
+  ],
+  [
+    { id: "double", label: "Double the tempo", text: "×2" },
+    { id: "halve", label: "Halve the tempo", text: "×\u00bd" },
+  ],
+  [
+    { id: "snap-start", label: "Snap the grid to the start", text: "|↓|" },
+    { id: "snap-here", label: "Snap the grid here", text: "||↓" },
+  ],
+  [
+    { id: "undo", label: "Undo the last grid edit", text: "↺" },
+    { id: "redo", label: "Redo the last grid edit", text: "↻" },
+  ],
+  [
+    { id: "cut-grid", label: "Cut the grid here", text: "" },
+    { id: "metronome", label: "Metronome", text: "" },
+    { id: "lock", label: "Lock the grid", text: "" },
+  ],
+];
+
+/** Buttons whose face is one of our icons rather than a glyph. */
+const EDIT_ICONS: Record<string, (props: { className?: string | undefined }) => React.ReactElement> = {
+  "cut-grid": CutIcon,
+  metronome: MetronomeIcon,
+  lock: LockIcon,
+};
+
+/** The phrase-editing controls, to the right of the grid ones. */
+const PHRASE_EDITS = [
+  { id: "phrase-cut", label: "Cut the phrase here", text: "CUT" },
+  { id: "phrase-clear", label: "Clear the phrase", text: "CLEAR" },
 ] as const;
+
+/** The file's kind, from its name. Nothing else about the file is indexed. */
+function fileKind(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(dot + 1).toUpperCase()} File` : "Audio File";
+}
 
 /** The panel tabs beside the deck. */
 const PANELS = [
@@ -470,23 +511,56 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           </div>
 
           {padMode === "grid" ? (
-            <div className={styles.padCluster}>
-              <div className={styles.gridEdits} aria-label="Beat grid">
-                {GRID_EDITS.map((edit) => (
-                  <button
-                    key={edit.id}
-                    type="button"
-                    className={styles.gridEdit}
-                    aria-label={edit.label}
-                    // Saving needs the PQT2 tag, whose payload is not
-                    // understood; an editor that cannot save is a trap.
-                    disabled
-                    title="Grid editing needs the PQT2 tag, which is not yet understood"
-                  >
-                    {edit.text}
-                  </button>
-                ))}
-              </div>
+            <div className={styles.gridRow}>
+              <section className={styles.editGroup} aria-label="Beat grid">
+                <span className={styles.sectionLabel}>GRID EDIT</span>
+                <div className={styles.editButtons}>
+                  {GRID_EDITS.map((group, at) => (
+                    <div key={group[0]?.id ?? at} className={styles.editPair}>
+                      {at === 1 ? <span className={styles.bpmField}>{formatBpm(track?.bpmX100 ?? 0)}</span> : null}
+                      {group.map((edit) => (
+                        <button
+                          key={edit.id}
+                          type="button"
+                          className={styles.editButton}
+                          data-mark={edit.id === "mark" || undefined}
+                          aria-label={edit.label}
+                          // Saving needs the PQT2 tag, whose payload is not
+                          // understood; an editor that cannot save is a trap.
+                          disabled
+                          title="Grid editing needs the PQT2 tag, which is not yet understood"
+                        >
+                          {EDIT_ICONS[edit.id]
+                            ? // Our own icons: Pioneer's are reference for
+                              // geometry only, and an emoji renders in colour.
+                              (() => {
+                                const Icon = EDIT_ICONS[edit.id];
+                                return Icon ? <Icon className={styles.editIcon} /> : null;
+                              })()
+                            : edit.text}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <span className={styles.padSpacer} />
+
+              <section className={styles.editGroup} aria-label="Phrase">
+                <span className={styles.sectionLabel}>PHRASE EDIT</span>
+                <div className={styles.editButtons}>
+                  <div className={styles.editPair}>
+                    <button type="button" className={styles.wideButton} aria-label={PHRASE_EDITS[0].label} disabled>
+                      {PHRASE_EDITS[0].text}
+                    </button>
+                    <span className={styles.phraseField} aria-hidden />
+                    <button type="button" className={styles.wideButton} aria-label={PHRASE_EDITS[1].label} disabled>
+                      {PHRASE_EDITS[1].text}
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
           ) : (
           <div className={styles.padCluster}>
@@ -543,41 +617,70 @@ export const Player = memo(function Player({ track }: PlayerProps) {
 
       <aside className={styles.side} aria-label="Cue list">
         {panel === "info" ? (
-          <dl className={styles.info}>
-            {(track
-              ? [
-                  ["Artist", track.artist],
-                  ["Album", track.album],
-                  ["Genre", track.genre],
-                  ["Label", track.label],
-                  ["Key", track.key],
-                  ["BPM", formatBpm(track.bpmX100)],
-                  ["Time", splitTime(track.durationSec).main],
-                  ["Comments", track.comment],
-                ]
-              : []
-            ).map(([name, value]) => (
-              <div key={name} className={styles.infoRow}>
-                <dt className={styles.infoLabel}>{name}</dt>
-                {/* An empty field keeps its row: one that vanishes makes the
-                    panel jump as the selection moves. */}
-                <dd className={styles.infoValue}>{value || "—"}</dd>
-              </div>
-            ))}
-          </dl>
+          <div className={styles.info}>
+            <div className={styles.infoBlock}>
+              <span className={styles.infoStars}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <span key={star}>{(track?.rating ?? 0) >= star ? "★" : "☆"}</span>
+                ))}
+              </span>
+            </div>
+            <div className={styles.infoBlock} />
+            <div className={styles.infoBlock}>
+              <span className={styles.infoIcon} aria-hidden>▬</span>
+              <span className={styles.infoLine}>{track?.comment || "—"}</span>
+            </div>
+            <div className={styles.infoBlock}>
+              {/*
+                Only what the index actually holds. rekordbox also lists the
+                file's size, sample rate and bit rate; those columns are not
+                read yet, and inventing them would be worse than their absence.
+              */}
+              <span className={styles.infoLine}>{track ? fileKind(track.title) : "—"}</span>
+              <span className={styles.infoLine}>{track ? formatBpm(track.bpmX100) : "—"} BPM</span>
+              <span className={styles.infoLine}>{track?.key || "—"}</span>
+              <span className={styles.infoLine}>{track ? splitTime(track.durationSec).main : "—"}</span>
+            </div>
+          </div>
+        ) : panel === "hotCue" ? (
+          /* Eight slots, always: an empty one is a slot you can fill, and
+             hiding it makes the list read as a shorter track. */
+          <div className={styles.cueList}>
+            {PADS.map((letter) => {
+              const cue = cues.find((c) => !c.memory && c.letter === letter);
+              return (
+                <button
+                  key={letter}
+                  type="button"
+                  className={styles.cueRow}
+                  data-empty={cue ? undefined : ""}
+                  disabled={!cue}
+                  onClick={() => cue && playback.seek(cue.positionMs / 1000)}
+                >
+                  <span className={styles.cueChip} data-set={cue ? "" : undefined}>{letter}</span>
+                  {cue ? (
+                    <>
+                      <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
+                      <span className={styles.cueName}>CUE(Auto)</span>
+                      <span className={styles.cueDelete} aria-hidden>✕</span>
+                    </>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         ) : (
           <div className={styles.cueList}>
             {cuesFor(cues, panel).map((cue) => (
               <button
-                key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
+                key={`m-${cue.positionMs}`}
                 type="button"
                 className={styles.cueRow}
                 onClick={() => playback.seek(cue.positionMs / 1000)}
               >
-                <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
-                <span className={styles.cueName}>
-                  {cue.memory ? "CUE(Auto)" : `HOT CUE ${cue.letter}`}
-                </span>
+                <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
+                <span className={styles.cueName}>CUE(Auto)</span>
+                <span className={styles.cueDelete} aria-hidden>✕</span>
               </button>
             ))}
           </div>

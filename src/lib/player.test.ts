@@ -8,6 +8,7 @@ import {
   phraseKind,
   phraseSpans,
   splitTime,
+  memoryTime,
   cuesFor,
   windowAround,
 } from "./player";
@@ -74,14 +75,37 @@ describe("headPercent", () => {
 
 describe("splitTime", () => {
   it("splits minutes from tenths, the way rekordbox prints them", () => {
-    expect(splitTime(338.1)).toEqual({ main: "5:38", tenths: "1" });
-    expect(splitTime(0)).toEqual({ main: "0:00", tenths: "0" });
-    expect(splitTime(65.95)).toEqual({ main: "1:05", tenths: "9" });
+    expect(splitTime(338.1)).toEqual({ main: "05:38", tenths: "1" });
+    expect(splitTime(0)).toEqual({ main: "00:00", tenths: "0" });
+    expect(splitTime(65.95)).toEqual({ main: "01:05", tenths: "9" });
+  });
+
+  it("pads the minutes, so the readout does not shift at ten minutes", () => {
+    // Unpadded, the whole row of readouts beside it moves by a character.
+    expect(splitTime(599).main).toHaveLength(5);
+    expect(splitTime(601).main).toHaveLength(5);
   });
 
   it("never prints a negative or a NaN", () => {
-    expect(splitTime(-5).main).toBe("0:00");
-    expect(splitTime(Number.NaN).main).toBe("0:00");
+    expect(splitTime(-5).main).toBe("00:00");
+    expect(splitTime(Number.NaN).main).toBe("00:00");
+  });
+});
+
+describe("memoryTime", () => {
+  it("prints to the millisecond, minutes padded like everything else", () => {
+    expect(memoryTime(46)).toBe("00:00:046");
+    expect(memoryTime(165_046)).toBe("02:45:046");
+  });
+
+  it("agrees with splitTime about the minutes and seconds", () => {
+    // Two lists disagreeing about padding is what stops columns lining up.
+    expect(memoryTime(338_100).startsWith(splitTime(338.1).main)).toBe(true);
+  });
+
+  it("never prints a negative or a NaN", () => {
+    expect(memoryTime(-1)).toBe("00:00:000");
+    expect(memoryTime(Number.NaN)).toBe("00:00:000");
   });
 });
 

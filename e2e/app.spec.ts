@@ -994,13 +994,14 @@ test("CUE/LOOP and GRID swap which controls the pad row shows", async ({ page })
 
   // CUE/LOOP is the hot cues and the memory transport.
   await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeVisible();
-  await expect(player.getByRole("group", { name: "Beat grid" })).toBeHidden();
+  await expect(player.getByRole("region", { name: "Beat grid" })).toBeHidden();
 
   await player.getByRole("tab", { name: "GRID" }).click();
   await expect(player.getByRole("tab", { name: "GRID" })).toHaveAttribute("aria-selected", "true");
   // GRID is a different set of buttons entirely, not the same row relabelled.
   await expect(player.getByRole("button", { name: "Double the tempo" })).toBeVisible();
-  await expect(player.getByRole("button", { name: "Set the downbeat here" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "Mark the downbeat here" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "Cut the phrase here" })).toBeVisible();
   await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeHidden();
 
   await player.getByRole("tab", { name: "CUE/LOOP" }).click();
@@ -1015,14 +1016,18 @@ test("the memory, hot cue and info tabs change the panel beside the deck", async
   const panel = page.getByRole("complementary", { name: "Cue list" });
   // Memory cues and hot cues are the same rows told apart by a flag, so the
   // two tabs must genuinely list different things.
-  await expect(panel.getByText("CUE(Auto)").first()).toBeVisible();
-  await expect(panel.getByText("HOT CUE A")).toHaveCount(0);
+  // MEMORY prints its positions to the millisecond; the hot-cue list does not.
+  await expect(panel.getByText(/^\d\d:\d\d:\d\d\d$/).first()).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Hot cue A" })).toHaveCount(0);
 
   await panel.getByRole("tab", { name: "HOT CUE" }).click();
-  await expect(panel.getByText("HOT CUE A")).toBeVisible();
-  await expect(panel.getByText("CUE(Auto)")).toHaveCount(0);
+  // Eight slots, always — an empty one is a slot you can fill, and hiding it
+  // makes the list read as a shorter track. The tabs are role=tab, not button.
+  await expect(panel.getByRole("button")).toHaveCount(8);
+  await expect(panel.getByRole("button", { disabled: true })).toHaveCount(4);
+  await expect(panel.getByText(/^\d\d:\d\d:\d\d\d$/)).toHaveCount(0);
 
   await panel.getByRole("tab", { name: "INFO" }).click();
-  await expect(panel.getByText("BPM")).toBeVisible();
-  await expect(panel.getByText("HOT CUE A")).toHaveCount(0);
+  await expect(panel.getByText(/BPM/)).toBeVisible();
+  await expect(panel.getByText("CUE(Auto)")).toHaveCount(0);
 });

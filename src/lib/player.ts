@@ -56,10 +56,13 @@ export function headPercent(at: number, span: number): number {
 }
 
 /**
- * `-5:38.1` — time remaining, tenths in a smaller face.
+ * `-05:38.1` — time remaining, tenths in a smaller face.
  *
- * Returned split so the caller can size the fraction differently, which is how
- * rekordbox draws it.
+ * Minutes are padded to two digits, as rekordbox prints them everywhere in the
+ * player: unpadded, the readout shifts by a character as a track crosses ten
+ * minutes and the columns beside it move with it.
+ *
+ * Returned split so the caller can size the fraction differently.
  */
 export function splitTime(seconds: number): { main: string; tenths: string } {
   const safe = Number.isFinite(seconds) ? Math.max(seconds, 0) : 0;
@@ -67,7 +70,23 @@ export function splitTime(seconds: number): { main: string; tenths: string } {
   const tenths = Math.floor((safe - whole) * 10);
   const minutes = Math.floor(whole / 60);
   const rest = whole % 60;
-  return { main: `${minutes}:${String(rest).padStart(2, "0")}`, tenths: String(tenths) };
+  return {
+    main: `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`,
+    tenths: String(tenths),
+  };
+}
+
+/**
+ * `00:00:046` — how the memory list prints a position, to the millisecond.
+ *
+ * Built on `splitTime` so the minute padding is decided in one place; the two
+ * lists disagreeing about that is exactly the sort of thing nobody notices
+ * until the columns stop lining up.
+ */
+export function memoryTime(positionMs: number): string {
+  const safe = Number.isFinite(positionMs) ? Math.max(positionMs, 0) : 0;
+  const ms = Math.round(safe) % 1000;
+  return `${splitTime(safe / 1000).main}:${String(ms).padStart(3, "0")}`;
 }
 
 /** Phrase kinds, as the colour tokens name them. */
