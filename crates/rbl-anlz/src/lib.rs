@@ -14,6 +14,7 @@
 //! derived from those. Re-emitting a parsed file therefore reproduces it byte
 //! for byte, including tags we cannot author ourselves.
 
+pub mod grid;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -229,6 +230,46 @@ impl Anlz {
     /// Re-emits the file exactly as parsed.
     pub fn to_bytes(&self) -> Vec<u8> {
         write::render(&self.header_extra, &self.sections)
+    }
+
+    /// Whether the file carries `PQT2`, the extended beat grid.
+    ///
+    /// 112 of the first 120 `.EXT` files in the reference library have one
+    /// [OBS]; the eight that do not also lack `PSSI`. Its 44-byte header
+    /// decodes as: two reserved words, the constant `0x0100_0002`, then
+    /// `(first beat number << 16) | tempo`, the first beat's time in
+    /// milliseconds, `(last beat number << 16) | tempo`, the last beat's
+    /// time, and the beat count — each confirmed against the `PQTZ` grid in
+    /// the sibling `.DAT` [OBS]. Its payload is one big-endian `u16` per beat
+    /// whose meaning is **[UNKNOWN]**: the values fall by roughly 84 per beat
+    /// modulo about a thousand, which looks like a phase but does not divide
+    /// evenly into the beat interval.
+    ///
+    /// That last unknown is why nothing here writes a `PQT2`. A grid edit
+    /// invalidates it, and inventing a payload would put a guess into the
+    /// user's library.
+    #[must_use]
+    pub fn has_extended_grid(&self) -> bool {
+        self.section(b"PQT2").is_some()
+    }
+
+    /// The file with its beat grid replaced and every other section
+    /// byte-for-byte as it was.
+    ///
+    /// A file with no `PQTZ` gains one, placed first — which is where every
+    /// real `.DAT` carries it, after `PPTH` [OBS].
+    #[must_use]
+    pub fn with_beat_grid(&self, beats: &[Beat]) -> Vec<u8> {
+        let replacement = write::beat_grid_section(beats);
+        let mut sections = self.sections.clone();
+        if let Some(at) = sections.iter().position(|s| s.tag == FourCc::new(b"PQTZ")) {
+            sections[at] = replacement;
+        } else {
+            let after_path =
+                usize::from(sections.first().is_some_and(|s| s.tag == FourCc::new(b"PPTH")));
+            sections.insert(after_path, replacement);
+        }
+        write::render(&self.header_extra, &sections)
     }
 }
 

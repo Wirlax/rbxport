@@ -278,3 +278,51 @@ fn a_file_with_no_sections_is_still_valid() {
     assert!(anlz.sections.is_empty());
     assert!(anlz.beat_grid().is_none());
 }
+
+#[test]
+fn replacing_the_grid_leaves_every_other_section_alone() {
+    use rbl_anlz::grid::{apply, Edit};
+
+    let beats: Vec<rbl_anlz::Beat> = (0..8)
+        .map(|i| rbl_anlz::Beat {
+            beat_number: (i % 4) + 1,
+            tempo_x100: 12_000,
+            time_ms: 500 + u32::from(i) * 500,
+        })
+        .collect();
+
+    let mut builder = rbl_anlz::AnlzBuilder::new();
+    builder.path("/Music/one.mp3");
+    builder.beat_grid(&beats);
+    builder.waveform_preview(b"PWAV", &[1, 2, 3, 4]);
+    let original = builder.finish();
+    let parsed = rbl_anlz::parse(&original).unwrap();
+
+    // Replacing the grid with itself must be a no-op down to the byte, or the
+    // rewrite is not safe to run over a file rekordbox authored.
+    assert_eq!(parsed.with_beat_grid(&beats), original);
+
+    let nudged = apply(&beats, Edit::Nudge(-40));
+    let rewritten = rbl_anlz::parse(&parsed.with_beat_grid(&nudged)).unwrap();
+    assert_eq!(rewritten.beat_grid().unwrap(), nudged);
+    assert_eq!(rewritten.path().as_deref(), Some("/Music/one.mp3"));
+    assert_eq!(rewritten.waveform(b"PWAV"), parsed.waveform(b"PWAV"));
+    assert_eq!(rewritten.sections.len(), parsed.sections.len());
+}
+
+#[test]
+fn a_file_with_no_grid_gains_one_after_its_path() {
+    let mut builder = rbl_anlz::AnlzBuilder::new();
+    builder.path("/Music/one.mp3");
+    builder.waveform_preview(b"PWAV", &[1, 2, 3]);
+    let parsed = rbl_anlz::parse(&builder.finish()).unwrap();
+    assert!(parsed.beat_grid().is_none());
+
+    let beat = rbl_anlz::Beat { beat_number: 1, tempo_x100: 12_000, time_ms: 500 };
+    let grown = rbl_anlz::parse(&parsed.with_beat_grid(&[beat])).unwrap();
+    assert_eq!(grown.beat_grid().unwrap(), vec![beat]);
+    // PPTH first, then the grid — where every real .DAT carries it.
+    assert_eq!(grown.sections[0].tag.as_str(), "PPTH");
+    assert_eq!(grown.sections[1].tag.as_str(), "PQTZ");
+    assert!(!grown.has_extended_grid());
+}

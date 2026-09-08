@@ -46,6 +46,27 @@ pub fn render(header_extra: &[u8], sections: &[Section]) -> Vec<u8> {
     out
 }
 
+/// One `PQTZ` section for a grid.
+///
+/// Separate from the builder so an existing file's grid can be replaced
+/// without rebuilding the file around it.
+#[must_use]
+pub fn beat_grid_section(beats: &[Beat]) -> Section {
+    let mut header = Vec::with_capacity(12);
+    header.extend_from_slice(&be32(0));
+    // Constant observed in every real file.
+    header.extend_from_slice(&be32(0x0008_0000));
+    header.extend_from_slice(&be32(u32::try_from(beats.len()).unwrap_or(0)));
+
+    let mut payload = Vec::with_capacity(beats.len() * 8);
+    for beat in beats {
+        payload.extend_from_slice(&be16(beat.beat_number));
+        payload.extend_from_slice(&be16(beat.tempo_x100));
+        payload.extend_from_slice(&be32(beat.time_ms));
+    }
+    Section::new(b"PQTZ", header, payload)
+}
+
 /// Builds an ANLZ file section by section.
 #[derive(Debug)]
 pub struct AnlzBuilder {
@@ -84,19 +105,7 @@ impl AnlzBuilder {
 
     /// `PQTZ` — the beat grid.
     pub fn beat_grid(&mut self, beats: &[Beat]) -> &mut Self {
-        let mut header = Vec::with_capacity(12);
-        header.extend_from_slice(&be32(0));
-        // Constant observed in every real file.
-        header.extend_from_slice(&be32(0x0008_0000));
-        header.extend_from_slice(&be32(u32::try_from(beats.len()).unwrap_or(0)));
-
-        let mut payload = Vec::with_capacity(beats.len() * 8);
-        for beat in beats {
-            payload.extend_from_slice(&be16(beat.beat_number));
-            payload.extend_from_slice(&be16(beat.tempo_x100));
-            payload.extend_from_slice(&be32(beat.time_ms));
-        }
-        self.sections.push(Section::new(b"PQTZ", header, payload));
+        self.sections.push(beat_grid_section(beats));
         self
     }
 
