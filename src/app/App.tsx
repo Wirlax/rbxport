@@ -17,6 +17,7 @@ import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
+import { resolveMenu } from "@/lib/menu";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
@@ -308,6 +309,52 @@ export function App() {
     if (selectedTracks.length === 0) return;
     analysis.add(selectedTracks);
   }, [analysis, selectedTracks]);
+
+  const importFromMenu = useCallback(async () => {
+    setDropNote("Choosing files to import…");
+    try {
+      const backend = await getBackend();
+      const report = await backend.importFiles();
+      if (report === null) {
+        setDropNote(null);
+        return;
+      }
+      const total = report.imported + report.skipped.length;
+      setDropNote(
+        report.skipped.length === 0
+          ? `Imported ${report.imported} of ${total} files.`
+          : `Imported ${report.imported} of ${total} files; ${report.skipped.length} skipped.`,
+      );
+      setTree(await backend.playlistTree());
+    } catch (e) {
+      setDropNote(e instanceof Error ? e.message : "Those files could not be imported.");
+    }
+  }, []);
+
+  // Native menu clicks. The shell sends the item's id and nothing else; what
+  // it means, and whether it is allowed right now, is decided in one place.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const backend = await getBackend();
+      stop = backend.onMenu((id) => {
+        const outcome = resolveMenu(id, summary?.readOnly ?? false);
+        if (!outcome) return;
+        if ("refused" in outcome) {
+          setDropNote(outcome.refused);
+          return;
+        }
+        if (outcome.action === "import") {
+          void importFromMenu();
+          return;
+        }
+        // Both the settings panel and the missing-file manager live in
+        // Settings, so either opens it.
+        setSettingsOpen(true);
+      });
+    })();
+    return () => stop?.();
+  }, [summary?.readOnly, importFromMenu]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {

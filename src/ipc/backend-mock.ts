@@ -408,6 +408,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
 
+    // A browser has no native menu bar, so nothing ever fires.
+    onMenu: () => () => undefined,
+
     // No network in a browser, so there is nothing to listen to. Saying why
     // is better than a panel that silently shows nothing.
     startLinkListening: () =>

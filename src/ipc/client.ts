@@ -67,6 +67,20 @@ async function realBackend(): Promise<Backend> {
       });
     },
     listDevices: () => invoke<Device[]>("list_devices"),
+    onMenu: (listener) => {
+      let live = true;
+      let stop: (() => void) | undefined;
+      void import("@tauri-apps/api/event").then(async ({ listen }) => {
+        const unlisten = await listen<string>("menu", (event) => listener(event.payload));
+        // The caller may have unsubscribed while the import was in flight.
+        if (live) stop = unlisten;
+        else unlisten();
+      });
+      return () => {
+        live = false;
+        stop?.();
+      };
+    },
     startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
     stopLinkListening: () => invoke<void>("stop_link_listening"),
     onLinkPeers: (listener) => {

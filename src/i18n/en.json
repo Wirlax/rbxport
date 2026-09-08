@@ -1,5 +1,31 @@
 {
   "$comment": "English UI strings. rekordbox ships english.lang as a stub; the English source strings are the LEFT-HAND KEYS of any translated .lang file. Extracted from Contents/Resources/locale/german.lang (rekordbox 7.2.11) so our wording matches the real app exactly rather than being invented.",
+  "action": {
+    "Sync Manager": "Sync Manager",
+    "Playlist Sync Manager": "Playlist Sync Manager",
+    "Analyzing": "Analyzing",
+    "Unanalyzed": "Unanalyzed",
+    "EXPORT mode": "EXPORT mode",
+    "PERFORMANCE mode": "PERFORMANCE mode",
+    "Library Backup": "Library Backup",
+    "Library Restoration": "Library Restoration",
+    "Missing File Manager": "Missing File Manager",
+    "Analyze Track": "Analyze Track",
+    "Import Playlist": "Import Playlist",
+    "Create New Playlist": "Create New Playlist",
+    "Create New Folder": "Create New Folder",
+    "Rename": "Rename",
+    "Delete": "Delete",
+    "Reload Tag": "Reload Tag",
+    "Search": "Search",
+    "Preferences": "Preferences",
+    "File": "File",
+    "Edit": "Edit",
+    "View": "View",
+    "Track": "Track",
+    "Playlist": "Playlist",
+    "Help": "Help"
+  },
   "column": {
     "Track Title": "Track Title",
     "Artist": "Artist",
@@ -41,6 +67,13 @@
     "Cue": "Cue",
     "My Tag": "My Tag"
   },
+  "menu": {
+    "File": "File",
+    "View": "View",
+    "Import": "Import",
+    "Missing File Manager": "Missing File Manager",
+    "Full screen": "Full screen"
+  },
   "tree": {
     "Collection": "Collection",
     "Playlists": "Playlists",
@@ -61,31 +94,5 @@
     "Full Browser": "Full Browser",
     "Sub-Browser Window": "Sub-Browser Window",
     "Tree View": "Tree View"
-  },
-  "action": {
-    "Sync Manager": "Sync Manager",
-    "Playlist Sync Manager": "Playlist Sync Manager",
-    "Analyzing": "Analyzing",
-    "Unanalyzed": "Unanalyzed",
-    "EXPORT mode": "EXPORT mode",
-    "PERFORMANCE mode": "PERFORMANCE mode",
-    "Library Backup": "Library Backup",
-    "Library Restoration": "Library Restoration",
-    "Missing File Manager": "Missing File Manager",
-    "Analyze Track": "Analyze Track",
-    "Import Playlist": "Import Playlist",
-    "Create New Playlist": "Create New Playlist",
-    "Create New Folder": "Create New Folder",
-    "Rename": "Rename",
-    "Delete": "Delete",
-    "Reload Tag": "Reload Tag",
-    "Search": "Search",
-    "Preferences": "Preferences",
-    "File": "File",
-    "Edit": "Edit",
-    "View": "View",
-    "Track": "Track",
-    "Playlist": "Playlist",
-    "Help": "Help"
   }
 }

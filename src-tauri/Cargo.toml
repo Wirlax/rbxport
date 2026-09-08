@@ -38,4 +38,13 @@ parking_lot = "0.12"
 dirs = "5"
 
 [dev-dependencies]
+# `test` gives a mock app, so the native menu can be built and inspected
+# without opening a window — which cannot be screenshotted on this machine.
+tauri = { version = "2", features = ["test"] }
 tempfile = "3"
+
+# macOS builds menu items on the main thread only, and the test harness runs
+# every test on a spawned one. Without a harness, `main` is the main thread.
+[[test]]
+name = "menu"
+harness = false

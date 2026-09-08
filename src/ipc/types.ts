@@ -164,6 +164,14 @@ export interface Backend {
   listDevices(): Promise<Device[]>;
 
   /**
+   * Native menu clicks, as the item's id.
+   *
+   * One subscription rather than one per item, so adding a menu item does not
+   * mean adding another listener. Returns its own unsubscribe.
+   */
+  onMenu(listener: (id: string) => void): () => void;
+
+  /**
    * Listens for devices on the link network. Listen-only — nothing is
    * transmitted, because announcing as a source needs the database server's
    * menus, which are not built.

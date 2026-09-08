@@ -3,6 +3,7 @@
 
 mod commands;
 mod link;
+pub mod menu;
 mod protocol;
 mod dto;
 mod error;
@@ -75,8 +76,10 @@ pub fn run() {
         .manage(Arc::new(AppState::new()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());
+            app.set_menu(crate::menu::build(app.handle())?)?;
             Ok(())
         })
+        .on_menu_event(|app, event| crate::menu::on_event(app, event.id().as_ref()))
         .register_uri_scheme_protocol("rbl", move |ctx, request| {
             // Artwork goes to the webview as an <img> rather than through
             // invoke: a JPEG blows the 64 KB IPC cap and would cost a
