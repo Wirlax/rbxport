@@ -347,3 +347,30 @@ test("the column layout survives a reload", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 });
+
+test("the source rail switches which part of the library the tree shows", async ({ page }) => {
+  await page.goto("/");
+  const rail = page.getByRole("tablist", { name: "Library sources" });
+  await expect(rail.getByRole("tab")).toHaveCount(4);
+
+  // A shortcut, not a filter: the tree keeps showing everything and the rail
+  // jumps the selection to that section. browseSetting.xml calls it
+  // TreeShortcut, and rekordbox does the same.
+  await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
+
+  await rail.getByRole("tab", { name: "Collection" }).click();
+  await expect(rail.getByRole("tab", { name: "Collection" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toHaveAttribute("aria-selected", "true");
+  // Still there, not filtered away.
+  await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
+});
+
+test("a source with nothing in it is dimmed rather than hidden", async ({ page }) => {
+  // A missing Devices button reads as a broken app; a dimmed one reads as no
+  // device plugged in.
+  await page.goto("/");
+  const devices = page.getByRole("tablist", { name: "Library sources" })
+    .getByRole("tab", { name: "Devices" });
+  await expect(devices).toBeVisible();
+  await expect(devices).toHaveAttribute("data-empty", "true");
+});

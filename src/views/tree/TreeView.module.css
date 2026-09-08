@@ -1,6 +1,7 @@
 .tree {
-  display: grid;
-  grid-template-rows: 44px 1fr;
+  /* The source rail beside the node list. The grid rows here were for the
+     Tree View / Column View tabs, which are gone. */
+  display: flex;
   background: var(--c-panel);
   min-height: 0;
   overflow: hidden;
@@ -8,7 +9,7 @@
 
 
 
-.nodes { overflow: auto; min-height: 0; }
+.nodes { flex: 1; min-width: 0; overflow: auto; }
 
 .node {
   display: flex;
@@ -41,3 +42,11 @@
 
 .icon { width: 14px; height: 12px; flex: none; color: var(--c-text); }
 .label { overflow: hidden; text-overflow: ellipsis; }
+
+/* A section with nothing in it says so, rather than showing a blank panel. */
+.emptyNote {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--c-text-dim);
+  font-size: var(--f-size-sm);
+}

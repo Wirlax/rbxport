@@ -8,7 +8,10 @@ import { memo, useCallback, useMemo, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
-import { branchIds, toggle, visibleNodes } from "@/lib/tree";
+import {
+  branchIds, emptySources, nodesForSource, sourceOf, toggle, visibleNodes, type Source,
+} from "@/lib/tree";
+import { SourceRail } from "./SourceRail";
 
 const Row = memo(function Row({
   node, selected, branch, open, onSelect, onToggle,
@@ -64,16 +67,31 @@ export function TreeView({ nodes, selectedId, onSelect }: TreeViewProps) {
   // Which nodes the user has closed. Absent means open, so a freshly-loaded
   // tree renders exactly as the backend sent it.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+
   const onToggle = useCallback((id: string) => {
     setCollapsed((c) => toggle(c, id));
   }, []);
 
+  const empty = useMemo(() => emptySources(nodes), [nodes]);
   // Both derived in one pass each; per-row lookups would scan the array.
   const branches = useMemo(() => branchIds(nodes), [nodes]);
   const visible = useMemo(() => visibleNodes(nodes, collapsed), [nodes, collapsed]);
 
+  // The rail is a shortcut, not a filter — `browseSetting.xml` calls it
+  // TreeShortcut. rekordbox keeps one tree and jumps to a section; filtering
+  // instead would hide Collection whenever Playlists was picked.
+  const source = useMemo(() => sourceOf(nodes, selectedId), [nodes, selectedId]);
+  const jumpTo = useCallback(
+    (wanted: Source) => {
+      const first = nodesForSource(nodes, wanted)[0];
+      if (first) onSelect(first);
+    },
+    [nodes, onSelect],
+  );
+
   return (
     <nav className={styles.tree} aria-label="Library">
+      <SourceRail selected={source} onSelect={jumpTo} empty={empty} />
       <div className={styles.nodes} role="tree">
         {visible.map((node) => (
           <Row
@@ -86,6 +104,9 @@ export function TreeView({ nodes, selectedId, onSelect }: TreeViewProps) {
             onToggle={onToggle}
           />
         ))}
+        {visible.length === 0 ? (
+          <p className={styles.emptyNote}>Nothing here yet.</p>
+        ) : null}
       </div>
     </nav>
   );

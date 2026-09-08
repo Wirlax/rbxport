@@ -68,3 +68,54 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
   if (!next.delete(id)) next.add(id);
   return next;
 }
+
+/** Which part of the library the tree is showing. */
+export type Source = "collection" | "playlists" | "histories" | "devices";
+
+/**
+ * The nodes belonging to one source.
+ *
+ * The backend sends one flat tree covering every section, so the rail narrows
+ * it here rather than asking for a different tree — switching sections is then
+ * instant and costs no round trip.
+ */
+export function nodesForSource(nodes: readonly TreeNode[], source: Source): TreeNode[] {
+  switch (source) {
+    case "collection":
+      return nodes.filter((n) => n.kind === "allTracks");
+    case "histories":
+      return nodes.filter((n) => n.kind === "history");
+    case "devices":
+      // Nothing yet: device support is not built. An empty list is honest.
+      return [];
+    case "playlists":
+      return nodes.filter((n) => n.kind === "folder" || n.kind === "playlist" || n.kind === "collection");
+  }
+}
+
+/** Sources with nothing under them, so the rail can dim rather than hide them. */
+export function emptySources(nodes: readonly TreeNode[]): Set<Source> {
+  const empty = new Set<Source>();
+  for (const source of ["collection", "playlists", "histories", "devices"] as const) {
+    if (nodesForSource(nodes, source).length === 0) empty.add(source);
+  }
+  return empty;
+}
+
+/**
+ * Which section a selected node belongs to, so the rail can show where you are.
+ *
+ * Defaults to playlists when nothing is selected, because that is what the
+ * tree opens on.
+ */
+export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null): Source {
+  const node = nodes.find((n) => n.id === selectedId);
+  switch (node?.kind) {
+    case "allTracks":
+      return "collection";
+    case "history":
+      return "histories";
+    default:
+      return "playlists";
+  }
+}

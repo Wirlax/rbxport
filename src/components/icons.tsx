@@ -9,6 +9,18 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
+export const CollectionIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" strokeWidth="1.4"/> <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+  </svg>
+);
+
+export const DeviceIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="4.2" y="1.6" width="7.6" height="9.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.4 11v2.2h3.2V11" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.6 4.2h2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+  </svg>
+);
+
 export const FolderIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <path d="M0 2h5l1.5 1.5H14V11H0z" fill="currentColor"/>
@@ -18,6 +30,12 @@ export const FolderIcon = (props: IconProps) => (
 export const GearIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.4"/> <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"> <path d="M8 1.2v2.0M8 12.8v2.0M1.2 8h2.0M12.8 8h2.0"/> <path d="M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/> </g>
+  </svg>
+);
+
+export const HistoryIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M8 4.6V8l2.6 1.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
 

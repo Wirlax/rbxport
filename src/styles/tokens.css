@@ -42,6 +42,7 @@
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
   --s-rail-w: 36px;
   --s-right-rail-w: 24px;
+  --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

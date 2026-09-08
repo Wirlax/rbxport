@@ -1,0 +1,5 @@
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!-- A stack of records: the whole collection. -->
+  <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+</svg>
