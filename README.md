@@ -27,6 +27,8 @@ Measured against a real 38,681-track library, read-only, with Rekordbox running.
 | Analysis files parsed | **97,954 / 97,954** |
 | Analysis files re-emitted byte-identically | **99,032 / 99,032** |
 | BPM vs Rekordbox's own stamps | median error **0.025 BPM**, 78% within 0.05 |
+| Tracks landing on the wrong beat multiple | 5 / 40 (**12%**) |
+| Key vs Rekordbox | **49%** exact, 84% harmonically compatible |
 | Real USB export written and verified | 25 tracks, 319 MB |
 
 Working: browsing the real library with waveforms, sorting, search, playlists,
@@ -38,9 +40,12 @@ database server's *menus* wait on a capture of what Rekordbox actually answers.
 Not yet: writing to the library (see below), the preview player, and browsing
 from a real deck.
 
-Known weak: key detection agrees with Rekordbox on 40% of tracks. Tempo is
-accurate where it locks onto the right beat family; about 8% of tracks land on a
-wrong multiple. Both numbers are measured, not estimated.
+Known weak: key detection agrees with Rekordbox on 49% of tracks exactly, and
+84% once a relative key or a neighbour on the Camelot wheel counts — up from
+25% and 52%, though those constants are provisional (see `TODO.md`). Tempo is
+accurate where it locks onto the right beat family; **12% of tracks land on a
+wrong multiple**, and an attempt to fix that made it worse and was reverted.
+Both numbers are measured, not estimated.
 
 ## Safety around your library
 
