@@ -397,3 +397,29 @@ test("the player draws the transport even though there is no audio yet", async (
   await expect(page.getByTestId("player-overview")).toBeVisible();
   await expect(page.getByTestId("player-detail")).toBeVisible();
 });
+
+test("the gear opens settings, and Escape closes them", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  // Real information, not placeholder rows.
+  await expect(dialog.getByText("Tracks")).toBeVisible();
+  await expect(dialog.getByText("Database version")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("settings can put the columns back", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: /BPM/ }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Genre" }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Reset columns" }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
+});

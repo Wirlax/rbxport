@@ -17,6 +17,7 @@ import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { useColumns } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
+import { Settings } from "@/views/settings/Settings";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -59,6 +60,7 @@ export function App() {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
   const cols = useColumns();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Read once: the platform cannot change while the window is open, and
   // deciding it per key press would run a regex on every stroke.
   const platform = useMemo(detectPlatform, []);
@@ -177,7 +179,7 @@ export function App() {
 
   return (
     <div className={styles.window}>
-      <TopBar clock={clock} />
+      <TopBar clock={clock} onOpenSettings={() => setSettingsOpen(true)} />
       <Player track={playerTrack} />
       <div
         className={styles.body}
@@ -212,6 +214,15 @@ export function App() {
           onColumnAutoSizeAll={cols.autoSizeEvery}
         />
       </div>
+      {settingsOpen ? (
+        <Settings
+          summary={summary}
+          onResetColumns={cols.reset}
+          onResetLayout={() => setTreeWidth(clampWidth(305, bounds()))}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+
       <StatusBar
         activity={summary ? `${summary.trackCount} Tracks` : "Loading…"}
         selection={selectionText}
