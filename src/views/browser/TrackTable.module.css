@@ -59,7 +59,10 @@
 .colHead {
   display: grid;
   grid-template-columns: var(--cols);
-  width: var(--table-w);
+  /* Follows the window down to the sum of the column widths, then stops and
+     lets the scroller take over. */
+  min-width: var(--table-w);
+  width: 100%;
   background: var(--c-panel);
   height: var(--s-col-header-h);
   /* Pinned vertically, but inside the scroller so it moves sideways with the
@@ -99,13 +102,14 @@
   min-height: 0;
 }
 
-.inner { position: relative; width: var(--table-w); }
+.inner { position: relative; min-width: var(--table-w); width: 100%; }
 
 .row {
   position: absolute;
   left: 0;
   top: 0;
-  width: var(--table-w);
+  min-width: var(--table-w);
+  width: 100%;
   height: var(--s-row-height);
   display: grid;
   grid-template-columns: var(--cols);

@@ -48,7 +48,10 @@ export const PLAYLIST_COLUMNS: Column[] = [
   { key: "releaseDate", label: "Release Date", width: 128, align: "right", sortable: true },
 ];
 
-const GRID = PLAYLIST_COLUMNS.map((c) => `${c.width}px`).join(" ");
+// A trailing `1fr` absorbs whatever the window has spare, so the table fills
+// the width instead of stopping at the sum of its columns. Below that sum the
+// row's `min-width` takes over and the scroller does its job.
+const GRID = `${PLAYLIST_COLUMNS.map((c) => `${c.width}px`).join(" ")} 1fr`;
 const TOTAL_WIDTH = PLAYLIST_COLUMNS.reduce((a, c) => a + c.width, 0);
 
 function cellText(row: RowDto, key: Column["key"]): string {
