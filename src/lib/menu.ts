@@ -7,7 +7,7 @@
  * refused while rekordbox holds it, exactly as the other write paths are.
  */
 
-export type MenuAction = "settings" | "import" | "missing" | "info";
+export type MenuAction = "settings" | "import" | "missing" | "info" | "sub";
 
 export interface MenuCommand {
   action: MenuAction;
@@ -20,6 +20,7 @@ const COMMANDS: Record<string, MenuCommand> = {
   import: { action: "import", writes: true },
   missing: { action: "missing", writes: true },
   info: { action: "info", writes: false },
+  sub: { action: "sub", writes: false },
 };
 
 /** The command an item id names, or null when it is not one of ours. */

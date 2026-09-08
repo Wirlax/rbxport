@@ -1,0 +1,42 @@
+/* Geometry and colour come from design/tokens; nothing here is a literal. */
+.sub {
+  display: grid;
+  grid-template-rows: var(--s-browser-head-h) 1fr;
+  min-width: 0;
+  min-height: 0;
+  background: var(--c-black);
+  border-left: 1px solid var(--c-raised);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--c-panel);
+}
+
+.title { font-size: var(--f-size-ui); color: var(--c-text); }
+
+.close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--c-icon-off);
+  font: inherit;
+  font-size: var(--f-size-ui);
+  line-height: 1;
+  cursor: default;
+  padding: 0 2px;
+}
+.close:hover { color: var(--c-icon-on); }
+
+/* Its own tree and its own list, which is what makes it a sub-browser rather
+   than a second view of the same selection. The tree is narrower than the
+   main one: this panel is for comparing, not for navigating from. */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 180px) 1fr;
+  min-height: 0;
+  min-width: 0;
+}

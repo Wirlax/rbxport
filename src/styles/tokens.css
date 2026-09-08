@@ -45,6 +45,7 @@
   --s-right-rail-w: 24px;
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
   --s-info-w: 557px; /* browseSetting.xml BrowseLayout ListInfo w=557 */
+  --s-sub-browse-w: 1107px; /* browseSetting.xml BrowseLayout SubBrowse w=1107 */
   --s-player-transport-w: 80px; /* left transport column; gutter at x 80..86 */
   --s-player-overview-h: 14px; /* measured from playlist-player@2x.png by saturation banding */
   --s-player-phrase-h: 14px; /* measured from playlist-player@2x.png by saturation banding */

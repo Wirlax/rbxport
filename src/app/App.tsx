@@ -18,7 +18,9 @@ import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
+import { specForNode } from "@/lib/viewSpec";
 import { InfoPanel } from "@/views/info/InfoPanel";
+import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
@@ -51,6 +53,8 @@ export function App() {
   // Closed by default, which is what browseSetting.xml records for the user's
   // own rekordbox (`ListInfo open="0"`).
   const [infoOpen, setInfoOpen] = useState(false);
+  // Also closed by default: browseSetting.xml records `SubBrowse open="0"`.
+  const [subOpen, setSubOpen] = useState(false);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   // One piece of state, not two: updating `descending` from inside a `setSort`
@@ -127,15 +131,7 @@ export function App() {
   }, []);
 
   const spec: ViewSpec = useMemo(
-    () => ({
-      source:
-        selectedNode?.kind === "playlist"
-          ? { kind: "playlist", id: selectedNode.id }
-          : { kind: "collection" },
-      sort: sortState.column,
-      descending: sortState.descending,
-      query,
-    }),
+    () => specForNode(selectedNode, query, sortState),
     [selectedNode, sortState, query],
   );
 
@@ -356,6 +352,10 @@ export function App() {
           setInfoOpen((open) => !open);
           return;
         }
+        if (outcome.action === "sub") {
+          setSubOpen((open) => !open);
+          return;
+        }
         // Both the settings panel and the missing-file manager live in
         // Settings, so either opens it.
         setSettingsOpen(true);
@@ -428,6 +428,7 @@ export function App() {
         ref={bodyRef}
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}
         data-info={infoOpen ? "" : undefined}
+        data-sub={subOpen ? "" : undefined}
       >
         <TreeView
           nodes={treeNodes}
@@ -480,6 +481,13 @@ export function App() {
           onColumnAutoSizeAll={cols.autoSizeEvery}
         />
         )}
+        {subOpen ? (
+          <SubBrowser
+            nodes={tree}
+            libraryGeneration={libraryGeneration}
+            onClose={() => setSubOpen(false)}
+          />
+        ) : null}
         {infoOpen ? <InfoPanel track={playerTrack} onClose={() => setInfoOpen(false)} /> : null}
       </div>
       {settingsOpen ? (

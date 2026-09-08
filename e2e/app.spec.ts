@@ -781,3 +781,31 @@ test("the information window shows the focused track and closes again", async ({
   await panel.getByRole("button", { name: "Close" }).click();
   await expect(panel).toBeHidden();
 });
+
+test("the sub-browser keeps its own selection, separate from the main one", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Closed by default, as browseSetting.xml records for the real rekordbox.
+  const sub = page.getByRole("region", { name: "Sub-Browser" });
+  await expect(sub).toBeHidden();
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("sub"));
+  await expect(sub).toBeVisible();
+
+  // Pick a playlist in the main tree, and a different one in the sub-browser's.
+  const main = page.getByRole("tree").first();
+  await main.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await expect(page.getByTestId("browser-title").first()).toContainText("Melodic Vox");
+
+  const subTree = sub.getByRole("tree");
+  const other = subTree.getByRole("treeitem").filter({ hasText: "All Tracks" }).first();
+  await other.click();
+
+  // The point of a sub-browser: two selections at once. The main browser must
+  // not have followed the sub-browser's click.
+  await expect(page.getByTestId("browser-title").first()).toContainText("Melodic Vox");
+  await expect(sub.getByTestId("browser-title")).toContainText("All Tracks");
+
+  await sub.getByRole("button", { name: "Close" }).click();
+  await expect(sub).toBeHidden();
+});

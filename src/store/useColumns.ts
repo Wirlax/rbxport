@@ -30,7 +30,9 @@ import {
  * individual playlist, so browsing a second playlist does not start from
  * scratch.
  */
-export type ColumnContext = "collection" | "playlist" | "history";
+/// The sub-browser keeps its own set: it is usually left narrow, and sharing
+/// the main table's widths would make it unusable.
+export type ColumnContext = "collection" | "playlist" | "history" | "subBrowser";
 
 const STORAGE_PREFIX = "rbl.columns.v2";
 

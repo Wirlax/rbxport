@@ -74,6 +74,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .accelerator("CmdOrCtrl+I")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("sub", label("Sub-Browser Window"))
+                .accelerator("CmdOrCtrl+B")
+                .build(app)?,
+        )
         .separator()
         .item(
             &MenuItemBuilder::with_id("fullscreen", label("Full screen"))
