@@ -18,6 +18,9 @@ import styles from "./TrackTable.module.css";
 import { SortDownIcon, SortUpIcon } from "@/components/icons";
 
 const ROW_H = 25; // --s-row-height
+/// --s-col-header-h. The column header sits inside the scroller so it moves
+/// with the rows horizontally, which costs it this much of the vertical scroll.
+const COL_HEADER_H = 23;
 
 export interface Column {
   key: SortColumn | "preview" | "artwork" | "attr" | "comment";
@@ -87,14 +90,14 @@ const TrackRow = memo(function TrackRow({
 }) {
   if (!row) {
     // Placeholder keeps the row box the exact height so nothing shifts on arrival.
-    return <div className={styles.row} style={{ transform: `translateY(${top}px)` }} aria-hidden />;
+    return <div className={styles.row} style={{ transform: `translate3d(0, ${top}px, 0)` }} aria-hidden />;
   }
   return (
     <div
       className={styles.row}
       data-selected={selected || undefined}
       data-even={index % 2 === 1 || undefined}
-      style={{ transform: `translateY(${top}px)` }}
+      style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => onSelect(index, row.id, e)}
       role="row"
       aria-selected={selected}
@@ -167,6 +170,10 @@ export function TrackTable({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,
     overscan: 8,
+    // The sticky column header is in the scroller's flow, so the list starts
+    // this far down it. Without this the virtualizer's idea of which rows are
+    // visible is a header's worth out.
+    scrollMargin: COL_HEADER_H,
   });
 
   const items = virtualizer.getVirtualItems();
@@ -175,7 +182,9 @@ export function TrackTable({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const w = visibleWindow(el.scrollTop, el.clientHeight, ROW_H, view.count);
+    // scrollTop counts the sticky header; the list's own offset does not.
+    const listTop = Math.max(0, el.scrollTop - COL_HEADER_H);
+    const w = visibleWindow(listTop, el.clientHeight, ROW_H, view.count);
     view.ensureRange(w.start, w.end);
   }, [items.length, view, view.count, view.token]);
 
@@ -259,11 +268,17 @@ export function TrackTable({
         </div>
       </div>
 
-      <div className={styles.colHead} role="row">
-        {header}
-      </div>
-
       <div className={styles.scroll} ref={scrollRef} data-testid="track-scroll" role="grid" aria-rowcount={view.count}>
+        {/*
+          Inside the scroller, not above it. As a sibling it stayed put while
+          the rows moved sideways, so every column sheared away from its own
+          heading; sticky keeps it pinned vertically while it scrolls
+          horizontally with them.
+        */}
+        <div className={styles.colHead} role="row">
+          {header}
+        </div>
+
         <div className={styles.inner} style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {items.map((item) => {
             const row = view.rowAt(item.index);

@@ -1,7 +1,8 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal. */
 .browser {
   display: grid;
-  grid-template-rows: var(--s-browser-head-h) var(--s-col-header-h) 1fr;
+  /* The column header lives inside the scroller now, so it is not a row here. */
+  grid-template-rows: var(--s-browser-head-h) 1fr;
   min-width: 0;
   /* Without this a grid item floors at its content height, so .scroll would be
      as tall as the whole list and the virtualizer would render every row. */
@@ -61,6 +62,12 @@
   width: var(--table-w);
   background: var(--c-panel);
   height: var(--s-col-header-h);
+  /* Pinned vertically, but inside the scroller so it moves sideways with the
+     rows. As a sibling above the scroller it stayed put and the columns
+     sheared away from their headings. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .headCell {
@@ -105,6 +112,11 @@
   background: var(--c-top);
   /* Isolates each row so a scroll tick repaints only what moved. */
   contain: layout style paint;
+  /* translate3d, not translateY: the 3d form is what gets the row its own
+     compositor layer. Without it WKWebView scrolls on the compositor thread
+     while these transforms are updated on the main thread, and the rows lag
+     the scroll by a frame. */
+  will-change: transform;
 }
 .row[data-even] { background: var(--c-panel); }
 .row[data-selected] { background: var(--c-select); }

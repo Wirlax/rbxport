@@ -138,3 +138,47 @@ test("a search that matches nothing empties the list without breaking it", async
   // The table must still be there and still scrollable, not collapsed.
   await expect(page.getByTestId("track-scroll")).toBeVisible();
 });
+
+test("the column headers stay aligned with the rows when scrolled sideways", async ({ page }) => {
+  // As a sibling above the scroller the header stayed put while the rows moved,
+  // so every column sheared away from its own heading.
+  await page.goto("/");
+  const scroll = page.getByTestId("track-scroll");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  const columnLeft = async () => {
+    const head = page.getByRole("row").first().getByText("BPM", { exact: true });
+    const cell = await head.boundingBox();
+    return cell?.x ?? 0;
+  };
+
+  const before = await columnLeft();
+  await scroll.evaluate((el) => {
+    el.scrollLeft = 300;
+  });
+  await expect
+    .poll(async () => Math.round((await scroll.evaluate((el) => el.scrollLeft)) as number))
+    .toBeGreaterThan(0);
+
+  const after = await columnLeft();
+  // The heading has to travel with its column, not stay behind.
+  expect(Math.round(before - after)).toBeGreaterThan(200);
+});
+
+test("the column header stays visible when scrolled down", async ({ page }) => {
+  // Sticky, so moving with the rows sideways must not let it scroll away.
+  await page.goto("/");
+  const scroll = page.getByTestId("track-scroll");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  const heading = page.getByRole("row").first().getByText("BPM", { exact: true });
+  const top = await heading.boundingBox();
+
+  await scroll.evaluate((el) => {
+    el.scrollTop = 2000;
+  });
+  await expect.poll(async () => (await heading.boundingBox())?.y ?? -1).toBeGreaterThan(0);
+
+  const after = await heading.boundingBox();
+  expect(Math.abs((after?.y ?? 0) - (top?.y ?? 0))).toBeLessThan(2);
+});
