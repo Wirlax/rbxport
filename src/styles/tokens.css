@@ -53,6 +53,7 @@
   --s-info-w: 557px; /* browseSetting.xml BrowseLayout ListInfo w=557 */
   --s-sub-browse-w: 1107px; /* browseSetting.xml BrowseLayout SubBrowse w=1107 */
   --s-player-h: 279px; /* measured from a 2x capture of rekordbox 7.2.11 running; player spans y 56..335pt */
+  --s-player-gutter-h: 3px; /* capture: the pad bar ends at 335pt and the browser starts at 338pt */
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
   --s-player-right-w: 209px; /* measured from a 2x capture of rekordbox 7.2.11 running; memory/hotcue panel x 1711..1920pt */
   --s-player-title-h: 22px; /* measured from a 2x capture of rekordbox 7.2.11 running; title row y 56..78pt */

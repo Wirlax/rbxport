@@ -1,14 +1,20 @@
 .window {
   display: grid;
-  grid-template-rows: var(--s-top-bar-h) var(--s-player-h) 1fr var(--s-status-bar-h);
+  /* The gutter between the player and the browser is a real row, measured:
+     the pad bar ends at 335pt and the track list starts at 338pt. A border on
+     the player drew a line in the panel colour instead of the black gap the
+     capture has. */
+  grid-template-rows:
+    var(--s-top-bar-h)
+    var(--s-player-h)
+    var(--s-player-gutter-h)
+    1fr
+    var(--s-status-bar-h);
   height: 100%;
   background: var(--c-black);
 }
 
-.player {
-  background: var(--c-black);
-  border-bottom: 1px solid var(--c-panel);
-}
+.playerGutter { background: var(--c-black); }
 
 /* With a panel open the browser gives up width to it, at the width
    browseSetting.xml records, capped as a fraction of the window so a narrow

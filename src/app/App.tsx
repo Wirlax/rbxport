@@ -512,7 +512,10 @@ export function App() {
     <div className={styles.window}>
       <TopBar clock={clock} onOpenSettings={() => setSettingsOpen(true)} />
       <Player track={playerTrack} />
+      {/* The measured black gap between the deck and the browser. */}
+      <div className={styles.playerGutter} aria-hidden />
       <div
+        data-testid="body"
         className={styles.body}
         ref={bodyRef}
         style={{ ["--tree-w" as string]: `${treeWidth}px` }}

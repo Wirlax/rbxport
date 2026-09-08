@@ -122,6 +122,16 @@ test("the player is laid out the way the capture measures it", async ({ page }) 
   expect(tops).toEqual([...tops].sort((a, b) => a - b));
 });
 
+test("a measured gap separates the player from the browser", async ({ page }) => {
+  // The capture has the pad bar ending at 335pt and the track list starting at
+  // 338pt, so three points of black sit between them. With the player and the
+  // browser butted together the deck reads as part of the list.
+  const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
+  const body = await page.getByTestId("body").boundingBox();
+  const gap = (body?.y ?? 0) - ((player?.y ?? 0) + (player?.height ?? 0));
+  expect(gap).toBeCloseTo(await token(page, "--s-player-gutter-h"), 1);
+});
+
 test("each transport control sits where the capture measures it", async ({ page }) => {
   // Distances from the top of the player, in points, off the 2x capture. They
   // were wrong once because a flex `gap` and a per-item margin were both
