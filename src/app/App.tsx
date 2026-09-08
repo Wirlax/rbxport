@@ -15,6 +15,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
+import { useColumns } from "@/store/useColumns";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -53,6 +54,7 @@ export function App() {
   const dragFrom = useRef<{ x: number; width: number } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const clock = useClock();
+  const cols = useColumns();
   // Read once: the platform cannot change while the window is open, and
   // deciding it per key press would run a regex on every stroke.
   const platform = useMemo(detectPlatform, []);
@@ -197,6 +199,12 @@ export function App() {
           query={query}
           onQueryChange={setQuery}
           searchRef={searchRef}
+          columns={cols.columns}
+          onColumnMove={cols.move}
+          onColumnResize={cols.resize}
+          onColumnToggle={cols.toggle}
+          onColumnAutoSize={cols.autoSize}
+          onColumnAutoSizeAll={cols.autoSizeEvery}
         />
       </div>
       <StatusBar

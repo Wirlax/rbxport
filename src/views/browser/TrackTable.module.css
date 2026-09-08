@@ -86,6 +86,20 @@
   cursor: default;
 }
 .headCell[data-sorted] { color: var(--c-accent); }
+.headCell[data-dragging] { opacity: .45; }
+.headCell { display: flex; align-items: center; }
+
+/* The resize grip: a few pixels at the right edge of every heading, wider than
+   it looks so it can actually be grabbed. */
+.grip {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+}
+.grip:hover { background: var(--c-accent); }
 /* Sized to the column-header cap height so the arrow sits on the text baseline. */
 .sortArrow {
   margin-left: 4px;

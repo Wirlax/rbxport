@@ -17,43 +17,41 @@ import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { SortDownIcon, SortUpIcon } from "@/components/icons";
 import { artworkUrl } from "@/ipc/artwork";
+import type { ColumnKey, ColumnSpec } from "@/lib/columns";
+import { ColumnMenu } from "./ColumnMenu";
 
 const ROW_H = 25; // --s-row-height
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
 const COL_HEADER_H = 23;
 
-export interface Column {
-  key: SortColumn | "preview" | "artwork" | "attr" | "comment";
-  label: string;
-  width: number;
-  align?: "right";
-  sortable: boolean;
+export type Column = ColumnSpec;
+
+/**
+ * The grid track list, with a trailing `1fr` that absorbs whatever the window
+ * has spare so the table fills the width instead of stopping at the sum of its
+ * columns. Below that sum the row's `min-width` takes over and the scroller
+ * does its job.
+ */
+function gridOf(columns: readonly ColumnSpec[]): string {
+  return `${columns.map((c) => `${c.width}px`).join(" ")} 1fr`;
 }
 
-/** Widths are rekordbox's own, from TableHeader-PlaylistTracks. */
-export const PLAYLIST_COLUMNS: Column[] = [
-  { key: "attr", label: "", width: 67, sortable: false },
-  { key: "trackNo", label: "#", width: 57, align: "right", sortable: true },
-  { key: "preview", label: "Preview", width: 128, sortable: false },
-  { key: "artwork", label: "Artwork", width: 80, sortable: false },
-  { key: "title", label: "Track Title", width: 387, sortable: true },
-  { key: "key", label: "Key", width: 73, sortable: true },
-  { key: "bpm", label: "BPM", width: 80, align: "right", sortable: true },
-  { key: "duration", label: "Time", width: 80, align: "right", sortable: true },
-  { key: "rating", label: "Rating", width: 101, sortable: true },
-  { key: "artist", label: "Artist", width: 301, sortable: true },
-  { key: "comment", label: "Comments", width: 210, sortable: false },
-  { key: "label", label: "Label", width: 128, sortable: true },
-  { key: "dateAdded", label: "Date Added", width: 128, align: "right", sortable: true },
-  { key: "releaseDate", label: "Release Date", width: 128, align: "right", sortable: true },
-];
+function totalWidthOf(columns: readonly ColumnSpec[]): number {
+  return columns.reduce((a, c) => a + c.width, 0);
+}
 
-// A trailing `1fr` absorbs whatever the window has spare, so the table fills
-// the width instead of stopping at the sum of its columns. Below that sum the
-// row's `min-width` takes over and the scroller does its job.
-const GRID = `${PLAYLIST_COLUMNS.map((c) => `${c.width}px`).join(" ")} 1fr`;
-const TOTAL_WIDTH = PLAYLIST_COLUMNS.reduce((a, c) => a + c.width, 0);
+/** Which heading sits under an x position, by hit-testing the header row. */
+function columnAt(head: HTMLElement | null, x: number): number | null {
+  if (!head) return null;
+  const cells = [...head.children];
+  for (const [at, cell] of cells.entries()) {
+    const box = cell.getBoundingClientRect();
+    if (x >= box.left && x <= box.right) return at;
+  }
+  // Past the last heading: the far right.
+  return cells.length > 0 ? cells.length - 1 : null;
+}
 
 function cellText(row: RowDto, key: Column["key"]): string {
   switch (key) {
@@ -84,12 +82,13 @@ const Stars = memo(function Stars({ rating }: { rating: number }) {
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, index,
+  row, top, selected, onSelect, index, columns,
 }: {
   row: RowDto | undefined;
   top: number;
   selected: boolean;
   index: number;
+  columns: readonly ColumnSpec[];
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
 }) {
   if (!row) {
@@ -106,10 +105,10 @@ const TrackRow = memo(function TrackRow({
       role="row"
       aria-selected={selected}
     >
-      {PLAYLIST_COLUMNS.map((col) => {
+      {columns.map((col) => {
         if (col.key === "attr") {
           return (
-            <div key={col.key} className={styles.attr} role="gridcell">
+            <div key={col.key} className={styles.attr} data-col={col.key} role="gridcell">
               {row.analysed ? <span className={styles.analysed} title="Analyzed" /> : null}
               <span className={styles.cue}>{row.cues ? "CUE" : ""}</span>
             </div>
@@ -117,7 +116,7 @@ const TrackRow = memo(function TrackRow({
         }
         if (col.key === "artwork") {
           return (
-            <div key={col.key} className={styles.artwork} role="gridcell">
+            <div key={col.key} className={styles.artwork} data-col={col.key} role="gridcell">
               {/*
                 The tint sits underneath as the fallback: a little under half
                 the reference library has no artwork, and it also covers the
@@ -144,14 +143,14 @@ const TrackRow = memo(function TrackRow({
         }
         if (col.key === "preview") {
           return (
-            <div key={col.key} className={styles.preview} role="gridcell">
+            <div key={col.key} className={styles.preview} data-col={col.key} role="gridcell">
               {row.analysed ? <WaveformPreview trackId={row.id} width={col.width - 6} height={19} /> : null}
             </div>
           );
         }
         if (col.key === "rating") {
           return (
-            <div key={col.key} className={styles.cell} role="gridcell">
+            <div key={col.key} className={styles.cell} data-col={col.key} role="gridcell">
               <Stars rating={row.rating} />
             </div>
           );
@@ -160,6 +159,7 @@ const TrackRow = memo(function TrackRow({
           <div
             key={col.key}
             className={col.align === "right" ? `${styles.cell} ${styles.right}` : styles.cell}
+            data-col={col.key}
             role="gridcell"
           >
             {cellText(row, col.key)}
@@ -178,16 +178,67 @@ export interface TrackTableProps {
   /** The live search text. Rust does the filtering; this is only the box. */
   query: string;
   onQueryChange: (query: string) => void;
+  /** Visible columns, in order, at their current widths. */
+  columns: readonly ColumnSpec[];
+  onColumnMove: (key: ColumnKey, to: number) => void;
+  onColumnResize: (key: ColumnKey, width: number) => void;
+  onColumnToggle: (key: ColumnKey) => void;
+  onColumnAutoSize: (key: ColumnKey) => void;
+  onColumnAutoSizeAll: () => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
+  columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
+  onColumnAutoSizeAll,
 }: TrackTableProps) {
   const view = useTrackView(spec);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
+  const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; target: ColumnKey } | null>(null);
+  // Live during a header-edge drag. A ref, not state: this updates per
+  // mousemove and re-rendering the table on each would be a frame's work.
+  const resizing = useRef<{ key: ColumnKey; x: number; width: number } | null>(null);
+  // A heading drag in progress, and whether it passed the threshold.
+  const reorder = useRef<{ key: ColumnKey; from: number; x: number; moved: boolean } | null>(null);
+  // Set when a drag finishes, so the click that follows does not also sort.
+  const draggedRef = useRef(false);
+  const headRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = resizing.current;
+      if (drag) {
+        onColumnResize(drag.key, drag.width + (e.clientX - drag.x));
+        return;
+      }
+      const move = reorder.current;
+      if (!move) return;
+      // A few pixels of slop, so a slightly imprecise click still sorts.
+      if (!move.moved && Math.abs(e.clientX - move.x) < 5) return;
+      move.moved = true;
+      setDragKey(move.key);
+    };
+    const onUp = (e: MouseEvent) => {
+      resizing.current = null;
+      const move = reorder.current;
+      reorder.current = null;
+      setDragKey(null);
+      if (!move?.moved) return;
+      draggedRef.current = true;
+      const to = columnAt(headRef.current, e.clientX);
+      if (to !== null && to !== move.from) onColumnMove(move.key, to);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [onColumnResize, onColumnMove]);
 
   const virtualizer = useVirtualizer({
     count: view.count,
@@ -247,23 +298,69 @@ export function TrackTable({
 
   const header = useMemo(
     () =>
-      PLAYLIST_COLUMNS.map((col) => (
+      columns.map((col, at) => (
         <div
           key={col.key}
           className={col.align === "right" ? `${styles.headCell} ${styles.right}` : styles.headCell}
           data-sorted={col.key === spec.sort || undefined}
-          onClick={col.sortable ? () => onSortChange(col.key as SortColumn) : undefined}
+          data-dragging={dragKey === col.key || undefined}
+          onMouseDown={(e) => {
+            // Reordering is a pointer drag with a threshold, not HTML5
+            // drag-and-drop: marking the heading `draggable` makes the browser
+            // treat a plain click as the start of a drag and swallow it, which
+            // stopped the heading sorting at all.
+            if (e.button !== 0) return;
+            reorder.current = { key: col.key, from: at, x: e.clientX, moved: false };
+          }}
+          onClick={
+            col.sortable
+              ? () => {
+                  // A drag ends in a click too; that one must not also sort.
+                  if (draggedRef.current) {
+                    draggedRef.current = false;
+                    return;
+                  }
+                  onSortChange(col.key as SortColumn);
+                }
+              : undefined
+          }
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY, target: col.key });
+          }}
           role="columnheader"
         >
           {col.label}
           {sortIndicator(col)}
+          {/*
+            The resize grip. Its own mousedown stops the header's click, so
+            dragging an edge never also re-sorts the table.
+          */}
+          <span
+            className={styles.grip}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              resizing.current = { key: col.key, x: e.clientX, width: col.width };
+            }}
+            onClick={(e) => e.stopPropagation()}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={`Resize ${col.label}`}
+          />
         </div>
       )),
-    [spec.sort, onSortChange, sortIndicator],
+    [columns, spec.sort, onSortChange, sortIndicator, dragKey],
   );
 
   return (
-    <div className={styles.browser} style={{ ["--cols" as string]: GRID, ["--table-w" as string]: `${TOTAL_WIDTH}px` }}>
+    <div
+      className={styles.browser}
+      style={{
+        ["--cols" as string]: gridOf(columns),
+        ["--table-w" as string]: `${totalWidthOf(columns)}px`,
+      }}
+    >
       <div className={styles.browserHead}>
         <span className={styles.title} data-testid="browser-title">
           {/*
@@ -299,7 +396,7 @@ export function TrackTable({
           heading; sticky keeps it pinned vertically while it scrolls
           horizontally with them.
         */}
-        <div className={styles.colHead} role="row">
+        <div className={styles.colHead} role="row" ref={headRef}>
           {header}
         </div>
 
@@ -311,7 +408,8 @@ export function TrackTable({
                 key={row?.id ?? `slot-${item.key}`}
                 row={row}
                 index={item.index}
-                top={item.start}
+                columns={columns}
+                top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}
               />
@@ -319,6 +417,19 @@ export function TrackTable({
           })}
         </div>
       </div>
+
+      {menu ? (
+        <ColumnMenu
+          x={menu.x}
+          y={menu.y}
+          target={menu.target}
+          visible={columns.map((c) => c.key)}
+          onToggle={onColumnToggle}
+          onAutoSize={onColumnAutoSize}
+          onAutoSizeAll={onColumnAutoSizeAll}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -42,9 +42,11 @@ test("sorting a column orders the rows and toggles direction", async ({ page }) 
   // Read the visible titles rather than just the first row: the unsorted order
   // can coincidentally start with the same track, which made an earlier version
   // of this test pass and fail for the wrong reasons.
+  // By column key, not by position: columns can be reordered and hidden, so an
+  // index into the row was only ever right for one particular layout.
   const titles = async () =>
-    page.getByRole("row").filter({ has: page.getByRole("gridcell") })
-        .evaluateAll((rows) => rows.slice(0, 12).map((r) => r.children[4]?.textContent ?? ""));
+    page.locator('[role="gridcell"][data-col="title"]')
+        .evaluateAll((cells) => cells.slice(0, 12).map((c) => c.textContent ?? ""));
 
   await header.click();
   await expect(header).toHaveAttribute("data-sorted", "true");
@@ -71,7 +73,7 @@ test("scrolling loads further rows without leaving gaps", async ({ page }) => {
   await scroller.evaluate((el) => { el.scrollTop = 10_000; });
   await expect
     .poll(async () =>
-      scroller.locator('[role="row"] [role="gridcell"]').first().innerText().catch(() => ""),
+      scroller.locator('[role="gridcell"][data-col="title"]').first().innerText().catch(() => ""),
     )
     .not.toBe("");
 });
@@ -263,4 +265,85 @@ test("the tree cannot be dragged wide enough to squeeze out the track list", asy
   expect(width).toBeLessThanOrEqual(viewport * 0.5 + 1);
   // And the table is still there and usable.
   await expect(page.getByTestId("track-scroll")).toBeVisible();
+});
+
+test("the header menu lists every column and toggles one on", async ({ page }) => {
+  await page.goto("/");
+  const header = page.getByRole("columnheader", { name: /BPM/ });
+  await header.click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: "Columns" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Auto-size all columns" })).toBeVisible();
+  // Transcribed from rekordbox's own menu.
+  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(39);
+
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
+  await menu.getByRole("menuitemcheckbox", { name: "Genre" }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+});
+
+test("a column can be dragged wider", async ({ page }) => {
+  await page.goto("/");
+  const header = page.getByRole("columnheader", { name: /BPM/ });
+  const before = (await header.boundingBox())?.width ?? 0;
+
+  const grip = header.getByRole("separator", { name: /resize bpm/i });
+  const box = await grip.boundingBox();
+  await page.mouse.move((box?.x ?? 0) + 2, (box?.y ?? 0) + 5);
+  await page.mouse.down();
+  await page.mouse.move((box?.x ?? 0) + 82, (box?.y ?? 0) + 5, { steps: 6 });
+  await page.mouse.up();
+
+  await expect.poll(async () => (await header.boundingBox())?.width ?? 0).toBeGreaterThan(before + 50);
+});
+
+test("resizing a column does not also re-sort the table", async ({ page }) => {
+  // The grip lives inside the heading, whose click sorts.
+  await page.goto("/");
+  const first = page.getByRole("row").nth(1);
+  await expect(first).toBeVisible();
+  const beforeText = await first.textContent();
+
+  const grip = page.getByRole("columnheader", { name: /BPM/ }).getByRole("separator");
+  const box = await grip.boundingBox();
+  await page.mouse.move((box?.x ?? 0) + 2, (box?.y ?? 0) + 5);
+  await page.mouse.down();
+  await page.mouse.move((box?.x ?? 0) + 60, (box?.y ?? 0) + 5, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page.getByRole("row").nth(1)).toHaveText(beforeText ?? "");
+});
+
+test("a column can be dragged to a new position", async ({ page }) => {
+  await page.goto("/");
+  const order = async () =>
+    page.getByRole("columnheader").evaluateAll((h) => h.map((c) => c.textContent ?? ""));
+
+  const before = await order();
+  const bpm = page.getByRole("columnheader", { name: /BPM/ });
+  const key = page.getByRole("columnheader", { name: /^Key/ });
+  const from = await bpm.boundingBox();
+  const to = await key.boundingBox();
+
+  // Past the threshold, so this is a reorder and not a sort click.
+  await page.mouse.move((from?.x ?? 0) + 20, (from?.y ?? 0) + 8);
+  await page.mouse.down();
+  await page.mouse.move((to?.x ?? 0) + 10, (to?.y ?? 0) + 8, { steps: 8 });
+  await page.mouse.up();
+
+  await expect.poll(order).not.toEqual(before);
+  // Nothing lost, only moved.
+  expect((await order()).sort()).toEqual([...before].sort());
+});
+
+test("the column layout survives a reload", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("columnheader", { name: /BPM/ }).click({ button: "right" });
+  await page.getByRole("menu", { name: "Columns" })
+    .getByRole("menuitemcheckbox", { name: "Genre" }).click();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 });
