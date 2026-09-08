@@ -3,19 +3,31 @@
 //! Spectral energy is folded onto the twelve pitch classes, then correlated
 //! against major and minor profiles. The best of the 24 rotations is the key.
 //!
-//! # Provisional
+//! # Measured, and validated on tracks that did not choose it
 //!
-//! Every choice below was picked by measurement against rekordbox's own key
-//! stamps, using `cargo run --release -p rbl-analysis --example keytune`. On
-//! 150 real tracks it took agreement from **25% to 49% exact**, and from 52%
-//! to 84% once a relative key or a neighbour on the Camelot wheel counts —
-//! which for mixing purposes it does.
+//! Every choice below was picked against rekordbox's own key stamps with
+//! `cargo run --release -p rbl-analysis --example keytune`. The figures that
+//! matter are from 75 tracks held out of the search entirely:
 //!
-//! Those numbers are **not yet validated on held-out tracks**: 192 variants
-//! were scored against the same 150, so some of the gain is fitting. The
-//! harness now splits train and test for exactly that reason, and the constants
-//! here should be re-picked once a larger cache exists. Treat them as the best
-//! current guess, not a settled answer.
+//! | on 75 held-out tracks | exact | compatible |
+//! |---|---|---|
+//! | before any tuning | 25% | 52% |
+//! | **this** | **47%** | **83%** |
+//!
+//! "Compatible" counts a relative key or a neighbour on the Camelot wheel,
+//! which for mixing purposes is a usable answer.
+//!
+//! An earlier round of this could not rule out fitting, because 192 variants
+//! were scored against the same 150 tracks that chose them. Re-running the
+//! search with a train/test split settled it: the held-out 47% matches the
+//! training figure, and no variant among the 192 beat what is here — the best
+//! differed only by normalising each frame, which cost two points of
+//! compatible agreement.
+//!
+//! Where the remaining error sits, on those 75: 35 exact, 6 a relative
+//! major/minor, **20 a fifth away**, 1 the right root in the wrong mode, 13
+//! unrelated. The fifths are the interesting group — a fifth is a usable mix
+//! but a different key, and 20 of 75 is where the next improvement is.
 
 use realfft::RealFftPlanner;
 
