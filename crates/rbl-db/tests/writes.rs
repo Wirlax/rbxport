@@ -546,7 +546,6 @@ fn the_unsupported_edits_are_refused_with_a_reason() {
     for action in [
         Unsupported::AnalysisRegistration,
         Unsupported::CueColour,
-        Unsupported::LoopCue,
         Unsupported::ContentCueOrFile,
     ] {
         let error = Writer::refuse(action);
@@ -789,10 +788,9 @@ fn every_hot_cue_slot_rekordbox_uses_can_be_written() {
 }
 
 #[test]
-fn a_custom_colour_and_a_loop_are_still_refused() {
-    // What RGB an index past the default means is unknown, and BeatLoopSize's
-    // encoding is unexplained: 2097153, 1048577, 65537 and the like.
-    for action in [Unsupported::CueColour, Unsupported::LoopCue] {
+fn a_custom_cue_colour_is_still_refused() {
+    // What RGB an index past the default means is unknown.
+    for action in [Unsupported::CueColour] {
         let DbError::WriteRefused(reason) = Writer::refuse(action) else {
             panic!("{action:?} should be a refusal");
         };
@@ -940,4 +938,55 @@ fn an_imported_track_can_go_straight_into_a_playlist() {
     let list = f.writer.create_playlist("New", ROOT).unwrap();
     f.writer.add_tracks(&list, std::slice::from_ref(&id)).unwrap();
     assert_eq!(f.order(&list), vec![id]);
+}
+
+#[test]
+fn a_loop_records_its_length_in_beats() {
+    // BeatLoopSize is (beats << 16) | 1. Every value in the reference library
+    // fits — 65537, 524289, 1048577, 2097153, 4194305 are 1, 8, 16, 32, 64 —
+    // and the one loop whose track is still live carries 262145, four beats,
+    // over an In/Out span measuring exactly four beats at its own BPM.
+    let mut f = fixture();
+    let id = f.writer.add_loop(&track_id(0), 1, 10_000, 11_739, 4).unwrap();
+
+    let (out, size): (i64, i64) = f
+        .conn()
+        .query_row(
+            "SELECT OutMsec, BeatLoopSize FROM djmdCue WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(out, 11_739);
+    assert_eq!(size, 262_145, "four beats");
+    assert_eq!(size >> 16, 4);
+    assert_eq!(size & 0xFFFF, 1, "the low half is 1 on every value observed");
+}
+
+#[test]
+fn every_loop_length_the_library_uses_round_trips() {
+    let mut f = fixture();
+    for (beats, expected) in [(1_u16, 65_537_i64), (8, 524_289), (16, 1_048_577),
+                              (32, 2_097_153), (64, 4_194_305)] {
+        let id = f.writer.add_loop(&track_id(1), 0, 0, 1000, beats).unwrap();
+        let size: i64 = f.one("SELECT BeatLoopSize FROM djmdCue WHERE ID = ?1", &[&id]);
+        assert_eq!(size, expected, "{beats} beats");
+    }
+}
+
+#[test]
+fn a_loop_with_no_stated_length_leaves_the_field_zero() {
+    // Most of the library's loops do this: the length is implied by In and Out.
+    let mut f = fixture();
+    let id = f.writer.add_loop(&track_id(0), 0, 1000, 2000, 0).unwrap();
+    let size: i64 = f.one("SELECT BeatLoopSize FROM djmdCue WHERE ID = ?1", &[&id]);
+    assert_eq!(size, 0);
+}
+
+#[test]
+fn a_loop_that_ends_before_it_starts_is_refused() {
+    let mut f = fixture();
+    assert!(matches!(f.writer.add_loop(&track_id(0), 1, 5000, 5000, 4), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.add_loop(&track_id(0), 1, 5000, 1000, 4), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
 }

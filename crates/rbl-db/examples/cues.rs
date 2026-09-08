@@ -41,6 +41,12 @@ fn main() {
         ("Color by Kind",
          "SELECT Kind, Color, COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0 \
           GROUP BY 1,2 ORDER BY 1, COUNT(*) DESC LIMIT 8"),
+        ("loops: does BeatLoopSize>>16 equal the loop's length in beats?",
+         "SELECT c.BeatLoopSize, c.OutMsec - c.InMsec AS ms, t.BPM, \
+                 ROUND((c.OutMsec - c.InMsec) * (t.BPM / 100.0) / 60000.0, 2) AS beats \
+          FROM djmdCue c JOIN djmdContent t ON t.ID = c.ContentID \
+          WHERE c.rb_local_deleted = 0 AND c.OutMsec > 0 AND t.BPM > 0 \
+          AND c.BeatLoopSize > 0 ORDER BY c.BeatLoopSize DESC LIMIT 14"),
         ("a sample track's cues",
          "SELECT Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment FROM djmdCue \
           WHERE rb_local_deleted = 0 AND ContentID = (

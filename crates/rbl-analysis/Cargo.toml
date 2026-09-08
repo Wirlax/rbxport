@@ -17,5 +17,6 @@ realfft = "3"
 [dev-dependencies]
 tempfile = "3"
 rbl-audio = { path = "../rbl-audio" }
+rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }
 rbl-index = { path = "../rbl-index" }

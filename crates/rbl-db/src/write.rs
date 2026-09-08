@@ -32,9 +32,16 @@
 //! - **`BeatLoopSize`** is NULL or 0 on every one of the 1,040,176 cues that
 //!   is not a loop; only the 422 loops set it.
 //!
-//! So a plain cue at a default colour is fully determined. Setting a *custom*
-//! colour still is not — what RGB an index past 21 means is unknown — and
-//! neither are loops, so both are refused.
+//! **`BeatLoopSize` encodes the loop's length in beats** as
+//! `(beats << 16) | 1`. Every value in the library fits: 65537, 524289,
+//! 1048577, 2097153 and 4194305 are 1, 8, 16, 32 and 64 beats. The one loop
+//! whose track is still live carries 262145 — four beats — and its In/Out span
+//! measures exactly four beats at the track's own BPM. Zero means the length
+//! is implied by In/Out rather than stated.
+//!
+//! So a plain cue and a loop are both determined. Setting a *custom* colour
+//! still is not — what RGB an index past the default means is unknown — so
+//! that alone is refused.
 //!
 //! # What this deliberately will not do
 //!
@@ -84,9 +91,9 @@ pub enum Unsupported {
     AnalysisRegistration,
     /// What RGB a `ColorTableIndex` past the default means is unknown.
     CueColour,
-    /// `BeatLoopSize` is only set on loops and its encoding is unexplained —
-    /// the observed values are 2097153, 1048577, 65537 and the like.
-    LoopCue,
+    /// Nothing left here; kept so the enum can grow without a version bump.
+    #[doc(hidden)]
+    Reserved,
     /// Nothing is known about what rekordbox does with these.
     ContentCueOrFile,
 }
@@ -99,8 +106,7 @@ impl Unsupported {
                 "registering analysis needs the Analysed bitfield explained by a diff recording",
             Self::CueColour =>
                 "setting a cue's colour needs the ColorTableIndex palette explained by a diff recording",
-            Self::LoopCue =>
-                "loop cues need BeatLoopSize explained by a diff recording",
+            Self::Reserved => "not supported",
             Self::ContentCueOrFile =>
                 "contentCue and contentFile are not understood and must not be touched",
         }
@@ -585,6 +591,42 @@ impl Writer {
                 usn,
                 stamp
             ],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Adds a loop: a cue with an end as well as a start.
+    ///
+    /// `beats` is the loop's length in beats, which `BeatLoopSize` carries as
+    /// `(beats << 16) | 1`. Passing 0 leaves the length implied by the In and
+    /// Out points, which is what most of the library's loops do.
+    pub fn add_loop(
+        &mut self,
+        content: &str,
+        kind: u8,
+        start_ms: u32,
+        end_ms: u32,
+        beats: u16,
+    ) -> Result<String> {
+        if end_ms <= start_ms {
+            return Err(DbError::WriteRefused(
+                "a loop has to end after it starts".to_owned(),
+            ));
+        }
+        let id = self.add_cue(content, kind, start_ms)?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx);
+        // The low half is always 1 across every value in the reference
+        // library; it reads as the denominator of a beats-per-loop fraction.
+        let size = if beats == 0 { 0_i64 } else { (i64::from(beats) << 16) | 1 };
+        tx.execute(
+            "UPDATE djmdCue SET OutMsec = ?1, BeatLoopSize = ?2, rb_local_usn = ?3,
+                updated_at = ?4 WHERE ID = ?5",
+            params![i64::from(end_ms), size, usn, stamp, id],
         )?;
         set_counter(&tx, usn)?;
         tx.commit()?;
