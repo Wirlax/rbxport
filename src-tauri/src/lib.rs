@@ -164,16 +164,7 @@ pub fn run() {
             // main-thread base64 decode per row.
             let state = Arc::clone(ctx.app_handle().state::<Arc<AppState>>().inner());
             tauri::async_runtime::spawn_blocking(move || {
-                // A panic in here must not take the webview with it: the
-                // responder is consumed either way, so a failed read answers
-                // 500 rather than leaving the request hanging for ever.
-                let response = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    crate::protocol::handle(&state, &request)
-                }));
-                responder.respond(response.unwrap_or_else(|_| {
-                    tracing::error!("the rbl:// handler panicked");
-                    crate::protocol::internal_error()
-                }));
+                crate::protocol::serve(&state, &request, |response| responder.respond(response));
             });
         })
         .invoke_handler(tauri::generate_handler![

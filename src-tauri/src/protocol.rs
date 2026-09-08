@@ -224,10 +224,31 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
-/// The answer when the handler itself failed, for the caller that catches a
-/// panic around it. A hung request would leave the webview waiting for ever.
-pub fn internal_error() -> Response<Vec<u8>> {
-    status(StatusCode::INTERNAL_SERVER_ERROR)
+/// Answers one request and hands the response to `respond`, whatever happens.
+///
+/// The responder is the whole reason this is a function rather than a closure
+/// in `lib.rs`: `wry` gives the asynchronous scheme handler one, and a request
+/// that never gets a response is a webview waiting for ever — an image that
+/// never appears, a track that never starts. So a panic inside `handle`
+/// answers 500 rather than escaping, and the panic is logged rather than lost.
+pub fn serve<R>(state: &Arc<AppState>, request: &Request<Vec<u8>>, respond: R)
+where
+    R: FnOnce(Response<Vec<u8>>),
+{
+    serve_with(|| handle(state, request), respond);
+}
+
+/// The guard itself, with the answer as a closure so a test can make it panic.
+fn serve_with<A, R>(answer: A, respond: R)
+where
+    A: FnOnce() -> Response<Vec<u8>>,
+    R: FnOnce(Response<Vec<u8>>),
+{
+    let answered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(answer));
+    respond(answered.unwrap_or_else(|_| {
+        tracing::error!("the rbl:// handler panicked");
+        status(StatusCode::INTERNAL_SERVER_ERROR)
+    }));
 }
 
 fn status(code: StatusCode) -> Response<Vec<u8>> {
@@ -241,6 +262,59 @@ fn status(code: StatusCode) -> Response<Vec<u8>> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// Counts how often the responder was called, which is the thing `wry`
+    /// cares about: twice is a panic inside the webview, never is a request
+    /// that hangs for ever.
+    fn responses_of<A>(answer: A) -> Vec<Response<Vec<u8>>>
+    where
+        A: FnOnce() -> Response<Vec<u8>>,
+    {
+        let mut out = Vec::new();
+        serve_with(answer, |response| out.push(response));
+        out
+    }
+
+    #[test]
+    fn an_answer_reaches_the_responder_once() {
+        let out = responses_of(|| status(StatusCode::OK));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn a_panicking_answer_becomes_a_500_rather_than_a_request_that_never_returns() {
+        // The whole point of the guard: `wry` hands the asynchronous handler a
+        // responder, and an image whose request is never answered is a webview
+        // waiting for ever.
+        let out = responses_of(|| panic!("the analysis file was truncated"));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn a_request_before_the_library_is_loaded_is_answered_too() {
+        // `serve` on the real handler, off the main thread in production: a
+        // request that arrives during the load must come back, not hang.
+        let state = Arc::new(AppState::new());
+        let request = Request::builder()
+            .uri("rbl://artwork/12345")
+            .body(Vec::new())
+            .unwrap();
+        let mut out = Vec::new();
+        serve(&state, &request, |response| out.push(response));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn a_host_that_is_not_ours_is_refused(){
+        let state = Arc::new(AppState::new());
+        let request = Request::builder().uri("rbl://etc/passwd").body(Vec::new()).unwrap();
+        let mut out = Vec::new();
+        serve(&state, &request, |response| out.push(response));
+        assert_eq!(out[0].status(), StatusCode::NOT_FOUND);
+    }
 
     #[test]
     fn a_relative_path_resolves_under_the_root() {
