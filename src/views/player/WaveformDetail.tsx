@@ -1,6 +1,8 @@
 /**
- * The player's detail waveform: a window around the playhead, not the whole
- * track.
+ * The player's waveform: a window around the playhead.
+ *
+ * A `span` of 1 is the whole track, which is what the overview strip above the
+ * detail wants — same component, same bytes, one fetch.
  *
  * Deliberately not the row preview's component. That one renders once per
  * track and caches a bitmap, which is right for a row that never changes and
@@ -12,6 +14,7 @@ import { memo, useEffect, useRef, useState } from "react";
 
 import { drawPreview } from "@/canvas";
 import { getBackend } from "@/ipc/client";
+import { backingSize } from "@/lib/canvasSize";
 
 /** Raw waveform bytes per track. Small — a few hundred bytes each. */
 const bytesByTrack = new Map<string, Uint8Array>();
@@ -45,8 +48,9 @@ export interface WaveformDetailProps {
   trackId: string;
   /** How far through the track playback is, 0 to 1. */
   progress: number;
-  /** How much of the track the window spans, as a fraction. */
+  /** How much of the track the window spans, as a fraction. 1 is all of it. */
   span?: number;
+  /** The space the canvas occupies, in CSS pixels. */
   width: number;
   height: number;
 }
@@ -71,9 +75,8 @@ export const WaveformDetail = memo(function WaveformDetail({
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || !data) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.round(width * dpr));
-    const h = Math.max(1, Math.round(height * dpr));
+    const { width: w, height: h } = backingSize(width, height);
+    // Assigning either clears the canvas, so only when it actually changed.
     if (canvas.width !== w) canvas.width = w;
     if (canvas.height !== h) canvas.height = h;
     const ctx = canvas.getContext("2d");

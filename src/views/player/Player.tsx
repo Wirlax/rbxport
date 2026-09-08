@@ -15,10 +15,10 @@ import { memo, useEffect, useState } from "react";
 
 import type { Beat, Cue, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
+import { useElementSize } from "@/store/useElementSize";
 import { artworkUrl } from "@/ipc/artwork";
 import { formatBpm, formatDuration } from "@/lib/format";
 import { usePlayback } from "@/store/usePlayback";
-import { WaveformPreview } from "@/views/browser/WaveformPreview";
 import { WaveformDetail } from "./WaveformDetail";
 import styles from "./Player.module.css";
 
@@ -115,6 +115,11 @@ const TRANSPORT = [
 
 export const Player = memo(function Player({ track }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null);
+  // The waveforms follow their containers, which change with the window and
+  // with the tree splitter — a fixed-width canvas stretched by CSS is blurry
+  // on a wide window and wasted resolution on a narrow one.
+  const [overviewRef, overview] = useElementSize<HTMLDivElement>();
+  const [detailRef, detail] = useElementSize<HTMLDivElement>();
   const [cues, setCues] = useState<Cue[]>([]);
   const [beats, setBeats] = useState<Beat[]>([]);
 
@@ -152,6 +157,12 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   // whole track's beats would blow the IPC cap on a long mix.
   const windowFrom = detailWindow(progress).from;
   const windowTo = detailWindow(progress).to;
+  // The window quantised to hundredths, so the grid is refetched as the window
+  // moves on rather than on every `timeupdate` — of which a four-minute track
+  // fires several hundred.
+  const fromStep = Math.round(windowFrom * 100);
+  const toStep = Math.round(windowTo * 100);
+
   useEffect(() => {
     if (!track || !track.analysed || total <= 0) {
       setBeats([]);
@@ -170,9 +181,10 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     return () => {
       live = false;
     };
-    // Quantised, so the grid is refetched as the window moves on rather than
-    // on every timeupdate.
-  }, [track, total, Math.round(windowFrom * 100), Math.round(windowTo * 100)]);
+    // The unquantised bounds are read inside but are deliberately not
+    // dependencies; the steps above are what decides when to refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track, total, fromStep, toStep]);
 
   // Where the playhead sits within the detail window. Centred, except at the
   // ends where the window stops moving and the head crosses it instead.
@@ -255,6 +267,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
 
         {/* Clicking either waveform seeks, which is what they are for. */}
         <div
+          ref={overviewRef}
           className={styles.overview}
           data-testid="player-overview"
           onMouseDown={scrub}
@@ -266,7 +279,13 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           tabIndex={0}
         >
           {track && track.analysed ? (
-            <WaveformPreview trackId={track.id} width={1200} height={14} />
+            <WaveformDetail
+              trackId={track.id}
+              progress={0.5}
+              span={1}
+              width={overview.width}
+              height={overview.height}
+            />
           ) : null}
           <CueMarkers cues={cues} totalMs={total * 1000} />
           <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
@@ -280,14 +299,14 @@ export const Player = memo(function Player({ track }: PlayerProps) {
         */}
         <div className={styles.phrase} aria-label="Phrase" data-testid="player-phrase" />
 
-        <div className={styles.detail} data-testid="player-detail" onMouseDown={scrub}>
+        <div ref={detailRef} className={styles.detail} data-testid="player-detail" onMouseDown={scrub}>
           {track && track.analysed ? (
             <WaveformDetail
               trackId={track.id}
               progress={progress}
               span={DETAIL_SPAN}
-              width={1200}
-              height={68}
+              width={detail.width}
+              height={detail.height}
             />
           ) : null}
           <BeatGrid beats={beats} totalMs={total * 1000} window={detailWindow(progress)} />

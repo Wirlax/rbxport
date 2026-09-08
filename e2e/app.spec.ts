@@ -159,7 +159,7 @@ test("the column headers stay aligned with the rows when scrolled sideways", asy
     el.scrollLeft = 300;
   });
   await expect
-    .poll(async () => Math.round((await scroll.evaluate((el) => el.scrollLeft)) as number))
+    .poll(async () => Math.round(await scroll.evaluate((el) => el.scrollLeft)))
     .toBeGreaterThan(0);
 
   const after = await columnLeft();
@@ -719,6 +719,25 @@ test("the detail waveform draws a beat grid with heavier downbeats", async ({ pa
     [...new Set(els.map((e) => getComputedStyle(e).backgroundColor))],
   );
   expect(weights.length).toBeGreaterThan(1);
+});
+
+test("the waveforms follow the window rather than stretching a fixed canvas", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+
+  const canvas = page.getByTestId("player-detail").locator("canvas");
+  await expect(canvas).toBeVisible();
+  const narrow = await canvas.evaluate((el: HTMLCanvasElement) => el.width);
+  expect(narrow).toBeGreaterThan(0);
+
+  // A canvas whose backing store does not grow is simply upscaled by CSS, and
+  // the waveform goes soft on a wide window.
+  await page.setViewportSize({ width: 1800, height: 1130 });
+  await expect
+    .poll(async () => canvas.evaluate((el: HTMLCanvasElement) => el.width))
+    .toBeGreaterThan(narrow);
 });
 
 test("a playlist offers export, and a folder does not", async ({ page }) => {
