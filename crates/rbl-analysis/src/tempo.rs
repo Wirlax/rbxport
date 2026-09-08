@@ -12,6 +12,13 @@ use crate::onset::OnsetEnvelope;
 pub const MIN_BPM: f64 = 70.0;
 pub const MAX_BPM: f64 = 200.0;
 
+/// How much correlation the midpoint between two beats must show, relative to
+/// the beats themselves, before the faster grid is taken as the real one.
+///
+/// Measured against rekordbox's own stamps rather than chosen: see
+/// `cargo run --release -p rbl-analysis --example golden`.
+const SUBDIVISION_RATIO: f64 = 0.30;
+
 /// One beat of the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Beat {
@@ -53,9 +60,12 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
     }
 
     let values = &onsets.values;
-    let mut best = (0.0_f64, min_lag);
     let mut scores = vec![0.0_f64; max_lag + 1];
 
+    // Every lag is scored before any is chosen. Scoring and choosing in one
+    // pass looks equivalent and is not: the harmonic term below reads longer
+    // lags than the one being scored, which in a single ascending pass are
+    // always still zero, so the term silently did nothing.
     for lag in min_lag..=max_lag {
         let mut sum = 0.0_f64;
         let mut count = 0_usize;
@@ -65,29 +75,38 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
             sum += a * b;
             count += 1;
         }
-        let score = if count == 0 { 0.0 } else { sum / count as f64 };
-        // A steady pulse also correlates at 2x and 3x the beat; adding those in
-        // favours the true beat over a half-time reading.
-        let harmonic = [2, 3]
-            .iter()
-            .filter_map(|m| scores.get(lag * m).copied())
-            .sum::<f64>();
+        if let Some(slot) = scores.get_mut(lag) {
+            *slot = if count == 0 { 0.0 } else { sum / count as f64 };
+        }
+    }
+
+    let mut best = (0.0_f64, min_lag);
+    for lag in min_lag..=max_lag {
+        let score = scores.get(lag).copied().unwrap_or(0.0);
         // Autocorrelation cannot tell 64 from 128 from 256 BPM: every multiple
         // of the true beat correlates. A listener resolves that by preference,
         // so weight candidates by how tempo-like they are. Without this, a fifth
         // of tracks locked onto a wrong multiple even though the period itself
         // was right to a hundredth of a BPM.
         let candidate_bpm = onsets.rate * 60.0 / lag as f64;
-        let combined = (score + 0.5 * harmonic) * tempo_prior(candidate_bpm);
-        if let Some(slot) = scores.get_mut(lag) {
-            *slot = score;
-        }
+        let combined = score * tempo_prior(candidate_bpm);
         if combined > best.0 {
             best = (combined, lag);
         }
     }
 
-    let lag = best.1;
+    // Half-time correction.
+    //
+    // A track whose off-beats are quieter than its beats correlates *better*
+    // at twice the beat period, because that lag pairs loud with loud. The
+    // preference above cannot fix it: at 160 BPM the half-time reading of 80
+    // is well inside the range and barely less tempo-like.
+    //
+    // What separates them is the midpoint. If the lag half as long also shows
+    // real correlation, there are onsets between the chosen beats, and the
+    // faster grid is the one that explains the music.
+    let lag = halve_while_supported(&scores, best.1, min_lag);
+
     if lag == 0 {
         return TempoResult::empty();
     }
@@ -145,6 +164,29 @@ pub fn detect_tempo(onsets: &OnsetEnvelope, _sample_rate: u32) -> TempoResult {
         .collect();
 
     TempoResult { bpm, confidence, first_beat_secs, beats }
+}
+
+/// Halves the lag for as long as the midpoints between its beats hold real
+/// correlation of their own.
+///
+/// Halving twice is allowed — quarter-time happens on tracks with a sparse
+/// kick — but no further: below a quarter of a plausible tempo the correlation
+/// is not evidence of anything.
+fn halve_while_supported(scores: &[f64], mut lag: usize, min_lag: usize) -> usize {
+    for _ in 0..2 {
+        let half = lag / 2;
+        if half < min_lag {
+            break;
+        }
+        let (Some(here), Some(there)) = (scores.get(lag), scores.get(half)) else {
+            break;
+        };
+        if *here <= 0.0 || *there < SUBDIVISION_RATIO * *here {
+            break;
+        }
+        lag = half;
+    }
+    lag
 }
 
 /// How readily a tempo is heard *as* the tempo.

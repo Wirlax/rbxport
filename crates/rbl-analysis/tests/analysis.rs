@@ -26,6 +26,33 @@ fn click_track(bpm: f64, secs: f64) -> Vec<f32> {
     out
 }
 
+/// A click track whose off-beats are quieter, so half-time correlates too.
+///
+/// This is the shape that makes a detector read half-time: the loud clicks
+/// alone are a perfectly good pulse, and on their own score higher than the
+/// full one.
+fn accented_click_track(bpm: f64, secs: f64, off_beat: f32) -> Vec<f32> {
+    let total = (secs * f64::from(SR)) as usize;
+    let period = (60.0 / bpm * f64::from(SR)) as usize;
+    let mut out = vec![0.0_f32; total];
+    let mut at = 0;
+    let mut beat = 0;
+    while at < total {
+        let level = if beat % 2 == 0 { 0.8 } else { 0.8 * off_beat };
+        for i in 0..(SR as usize / 200) {
+            if at + i >= total {
+                break;
+            }
+            let decay = 1.0 - i as f32 / (SR as f32 / 200.0);
+            let phase = i as f32 * 0.7;
+            out[at + i] += phase.sin() * decay * level;
+        }
+        at += period;
+        beat += 1;
+    }
+    out
+}
+
 /// A sine at a given frequency.
 fn tone(freq: f64, secs: f64) -> Vec<f32> {
     let total = (secs * f64::from(SR)) as usize;
@@ -63,6 +90,24 @@ fn finds_the_tempo_of_a_click_track() {
             (folded - bpm).abs() < 1.0,
             "expected ~{bpm}, got {} (folded {folded})",
             result.bpm
+        );
+    }
+}
+
+#[test]
+fn an_accented_pulse_is_not_read_as_half_time() {
+    // The candidate's support at twice and three times its lag is what tells
+    // the true beat from its slower relatives. That term once read scores that
+    // had not been computed yet, so it did nothing; this is what it is for.
+    for (bpm, off_beat) in [(160.0, 0.35), (150.0, 0.3), (128.0, 0.4)] {
+        let audio = accented_click_track(bpm, 24.0, off_beat);
+        let onsets = onset_envelope(&audio, SR);
+        let result = detect_tempo(&onsets, SR);
+        assert!(
+            (result.bpm - bpm).abs() < 1.0,
+            "expected {bpm}, got {} — half-time would be {}",
+            result.bpm,
+            bpm / 2.0
         );
     }
 }
