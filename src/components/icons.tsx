@@ -15,6 +15,12 @@ export const CollectionIcon = (props: IconProps) => (
   </svg>
 );
 
+export const CutIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path d="M4.2 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M11.8 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M13.4 3.4L2.6 12.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+  </svg>
+);
+
 export const DeviceIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <rect x="4.2" y="1.6" width="7.6" height="9.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.4 11v2.2h3.2V11" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.6 4.2h2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -54,6 +60,18 @@ export const InfoIcon = (props: IconProps) => (
 export const ListIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M1 7.5h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/>
+  </svg>
+);
+
+export const LockIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path d="M5.1 7.4V5.4a2.9 2.9 0 0 1 5.8 0v2.0" fill="none" stroke="currentColor" strokeWidth="1.5"/> <rect x="3.2" y="7.2" width="9.6" height="7.0" rx="1.1" fill="currentColor"/>
+  </svg>
+);
+
+export const MetronomeIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="2.6" y="8.4" width="2.4" height="5.4" fill="currentColor"/> <rect x="6.8" y="4.6" width="2.4" height="9.2" fill="currentColor"/> <rect x="11.0" y="6.8" width="2.4" height="7.0" fill="currentColor"/>
   </svg>
 );
 

@@ -41,6 +41,8 @@
   --c-pad-set: #77E866; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
   --c-pad-well: #0F0F0F; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad's own background */
   --c-pad-label: #646464; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the text on an inactive button, e.g. MA */
+  --c-tab-active: #457FE5; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the selected MEMORY/HOT CUE/INFO tab — a lighter blue than the pad buttons' #3571E3 */
+  --c-outline: #646464; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the border on an unselected panel tab */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -72,6 +74,11 @@
   --s-pad-cue-h: 28px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad, y 297..325pt */
   --s-pad-cue-gap: 5.5px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: between pads, giving a 33pt pitch */
   --s-pad-cue-inner: 15px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the green square inside a set pad, y 303..318pt */
+  --s-pad-edit-w: 23.5px; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): a grid-edit button, x 89..112.5pt */
+  --s-pad-edit-h: 26px; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): grid-edit buttons sit below the section label */
+  --s-pad-edit-gap: 5px; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): between buttons in a group; 10pt between groups */
+  --s-pad-field-w: 50px; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the BPM field, x 123..173pt */
+  --s-pad-section-h: 13px; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the GRID EDIT / PHRASE EDIT label above the buttons */
   --s-player-artwork-size: 45px; /* measured from a 2x capture of rekordbox 7.2.11 running; artwork square in the overview band */
   --s-player-btn-w: 26px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport buttons, two per 56pt row */
   --s-player-btn-h: 22px; /* measured from a 2x capture of rekordbox 7.2.11 running */
