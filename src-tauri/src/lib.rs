@@ -73,6 +73,10 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Puts the window back where it was: size, position, and whether it
+        // was maximised. Restored before the window is shown, so it does not
+        // appear at the default size and jump.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Arc::new(AppState::new()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());

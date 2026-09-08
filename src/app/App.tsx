@@ -18,7 +18,8 @@ import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
-import { nextSort, specForNode, DEFAULT_SORT, type SortState } from "@/lib/viewSpec";
+import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
+import { loadSession, saveSession } from "@/lib/session";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -45,6 +46,10 @@ function useClock(): string {
 }
 
 export function App() {
+  // Read once, synchronously, so the first render is already the layout the
+  // window closed with rather than the default that then jumps.
+  const [restored] = useState(loadSession);
+
   const [tree, setTree] = useState<readonly TreeNode[]>([]);
   // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
   // point is exactly the kind of idle work the budgets forbid.
@@ -52,9 +57,10 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   // Closed by default, which is what browseSetting.xml records for the user's
   // own rekordbox (`ListInfo open="0"`).
-  const [infoOpen, setInfoOpen] = useState(false);
-  // Also closed by default: browseSetting.xml records `SubBrowse open="0"`.
-  const [subOpen, setSubOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(restored.infoOpen);
+  // Closed unless it was open at exit; browseSetting.xml records
+  // `SubBrowse open="0"` for a first run.
+  const [subOpen, setSubOpen] = useState(restored.subOpen);
   // Why the library is not there, when it is not. Shown instead of "Loading…",
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -65,7 +71,7 @@ export function App() {
   // cancelled it out.
   // Opens in the view's own order: a playlist's is the order somebody put it
   // in, and the collection has no more meaningful default.
-  const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT);
+  const [sortState, setSortState] = useState<SortState>(restored.sort);
   const [selectedCount, setSelectedCount] = useState(0);
   // The rows behind the selection, so they can be queued for analysis.
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
@@ -75,7 +81,7 @@ export function App() {
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
-  const [treeWidth, setTreeWidth] = useState(305);
+  const [treeWidth, setTreeWidth] = useState(restored.treeWidth);
   const bodyRef = useRef<HTMLDivElement>(null);
   const dragFrom = useRef<{ x: number; width: number } | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -132,7 +138,10 @@ export function App() {
         setTree(nodes);
         setSummary(info);
         setLoadError(null);
-        setSelectedNode(nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
+        // The playlist that was open at exit, when it is still there — it can
+        // have been deleted between runs, so this is a lookup, not a promise.
+        const remembered = nodes.find((n) => n.id === restored.selectedNodeId);
+        setSelectedNode(remembered ?? nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
         void backend
           .listDevices()
           .then((volumes) => {
@@ -169,7 +178,9 @@ export function App() {
       stopReady?.();
       stopError?.();
     };
-  }, []);
+    // `restored` is read once and never changes, but the rule cannot know that
+    // and the id is genuinely read here.
+  }, [restored.selectedNodeId]);
 
   const spec: ViewSpec = useMemo(
     () => specForNode(selectedNode, query, sortState),
@@ -454,6 +465,19 @@ export function App() {
       }
     })();
   }, []);
+
+  // Written on every change rather than on exit: a window that is force-quit,
+  // or a machine that loses power, still comes back where it was. It is a few
+  // hundred bytes to localStorage, not something worth batching.
+  useEffect(() => {
+    saveSession({
+      treeWidth,
+      selectedNodeId: selectedNode?.id ?? null,
+      sort: sortState,
+      infoOpen,
+      subOpen,
+    });
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen]);
 
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";

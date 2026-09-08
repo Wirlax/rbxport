@@ -885,3 +885,37 @@ test("a library that is still loading arrives when it is ready", async ({ page }
   await expect(page.locator('[role="row"]').first()).toBeVisible();
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 });
+
+test("the interface comes back the way it was left", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Change three things: the playlist, the sort, and a panel.
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await page.getByRole("columnheader", { name: /BPM/ }).click();
+  await page.waitForFunction(() => "__menu" in window);
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
+  await expect(page.getByRole("complementary", { name: "Information" })).toBeVisible();
+
+  await page.reload();
+
+  // The window's own size and position are the shell's job; this is what is
+  // inside it.
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+  await expect(page.getByRole("columnheader", { name: /BPM/ })).toHaveAttribute("data-sorted", "true");
+  await expect(page.getByRole("complementary", { name: "Information" })).toBeVisible();
+});
+
+test("a playlist that has gone since last time does not leave an empty window", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  // As if the remembered playlist had been deleted between runs.
+  await page.evaluate(() =>
+    localStorage.setItem("rbl.session", JSON.stringify({ selectedNodeId: "pl-gone-forever" })),
+  );
+  await page.reload();
+
+  // Falls back to a real playlist rather than showing nothing.
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.locator('[role="row"]').first()).toBeVisible();
+});
