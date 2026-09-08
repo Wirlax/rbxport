@@ -191,7 +191,29 @@
   align-items: center;
 }
 
-.stars { letter-spacing: 1px; color: var(--c-text); }
+.stars { letter-spacing: 1px; color: var(--c-text); display: flex; }
+.star {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+.star:hover { color: var(--c-accent); }
+
+/* An inline editor sits flush in the cell: a bordered box would make the row
+   jump by a pixel as it opens. */
+.editor {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: var(--c-field);
+  color: var(--c-text);
+  font: inherit;
+  outline: 1px solid var(--c-accent);
+  outline-offset: -1px;
+}
 
 /* The search field reads as part of the chrome, not as a form control: no
    border of its own, and the surrounding .search block draws the well. */

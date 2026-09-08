@@ -72,7 +72,37 @@ function cellText(row: RowDto, key: Column["key"]): string {
   }
 }
 
-const Stars = memo(function Stars({ rating }: { rating: number }) {
+const Stars = memo(function Stars({
+  rating, onRate,
+}: {
+  rating: number;
+  onRate?: (stars: number) => void;
+}) {
+  if (onRate) {
+    return (
+      <span className={styles.stars} role="radiogroup" aria-label="Rating">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            className={styles.star}
+            role="radio"
+            aria-checked={rating === star}
+            aria-label={`${star} of 5`}
+            // Clicking the star already set clears the rating, which is how
+            // rekordbox behaves and the only way to get back to none.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRate(rating === star ? 0 : star);
+            }}
+          >
+            {star <= rating ? "★" : "☆"}
+          </button>
+        ))}
+      </span>
+    );
+  }
   return (
     <span className={styles.stars} aria-label={`${rating} of 5`}>
       {"★".repeat(rating)}
@@ -81,8 +111,70 @@ const Stars = memo(function Stars({ rating }: { rating: number }) {
   );
 });
 
+/**
+ * A cell that turns into a text box on a double click.
+ *
+ * Committing on blur as well as Enter matters: clicking away is how people
+ * leave a field, and losing the edit then is the behaviour everyone hates.
+ * Escape abandons it, which is the escape hatch that makes committing on blur
+ * safe.
+ */
+const EditableCell = memo(function EditableCell({
+  value, label, onCommit,
+}: {
+  value: string;
+  label: string;
+  onCommit: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  if (!editing) {
+    return (
+      <div
+        className={styles.cell}
+        data-col="comment"
+        role="gridcell"
+        onDoubleClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        title={`${label} — double-click to edit`}
+      >
+        {value}
+      </div>
+    );
+  }
+  return (
+    <div className={styles.cell} data-col="comment" role="gridcell">
+      <input
+        className={styles.editor}
+        value={draft}
+        aria-label={label}
+        autoFocus
+        onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          if (draft !== value) onCommit(draft);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            // Abandon: set the draft back first so the blur commits nothing.
+            setDraft(value);
+            setEditing(false);
+          }
+          e.stopPropagation();
+        }}
+      />
+    </div>
+  );
+});
+
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, onDragStart, index, columns,
+  row, top, selected, onSelect, onDragStart, index, columns, onRate, onComment,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -91,6 +183,10 @@ const TrackRow = memo(function TrackRow({
   columns: readonly ColumnSpec[];
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   onDragStart: (id: string) => void;
+  /** Set the track's rating. Absent in a build that cannot write. */
+  onRate: ((id: string, stars: number) => void) | undefined;
+  /** Set the track's comment. */
+  onComment: ((id: string, comment: string) => void) | undefined;
 }) {
   if (!row) {
     // Placeholder keeps the row box the exact height so nothing shifts on arrival.
@@ -149,6 +245,16 @@ const TrackRow = memo(function TrackRow({
             </div>
           );
         }
+        if (col.key === "comment" && onComment) {
+          return (
+            <EditableCell
+              key={col.key}
+              value={row.comment}
+              label="Comment"
+              onCommit={(next) => onComment(row.id, next)}
+            />
+          );
+        }
         if (col.key === "preview") {
           return (
             <div key={col.key} className={styles.preview} data-col={col.key} role="gridcell">
@@ -159,7 +265,7 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "rating") {
           return (
             <div key={col.key} className={styles.cell} data-col={col.key} role="gridcell">
-              <Stars rating={row.rating} />
+              <Stars rating={row.rating} onRate={(stars) => onRate?.(row.id, stars)} />
             </div>
           );
         }
@@ -197,6 +303,11 @@ export interface TrackTableProps {
   onFocusedRow?: (row: RowDto | null) => void;
   /** Track ids being dragged, so the tree knows what a drop would add. */
   onDragTracks?: (ids: readonly string[] | null) => void;
+  /** Edit a track's rating or comment. Absent where writes are impossible. */
+  onRate?: (id: string, stars: number) => void;
+  onComment?: (id: string, comment: string) => void;
+  /** Bumped when the library changes, so cached pages are dropped. */
+  libraryGeneration?: number;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -204,9 +315,10 @@ export interface TrackTableProps {
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment,
+  libraryGeneration,
 }: TrackTableProps) {
-  const view = useTrackView(spec);
+  const view = useTrackView(spec, libraryGeneration);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
@@ -436,6 +548,8 @@ export function TrackTable({
                 index={item.index}
                 columns={columns}
                 onDragStart={startDraggingTracks}
+                onRate={onRate}
+                onComment={onComment}
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}

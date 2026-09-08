@@ -471,3 +471,58 @@ test("only playlists offer themselves as a drop target", async ({ page }) => {
   await expect(folders.first()).not.toHaveAttribute("data-droppable", "true");
   await page.mouse.up();
 });
+
+test("a track can be rated by clicking its stars", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Not the first row: it sits under the sticky column header.
+  const stars = page.locator('[data-col="rating"] [role="radiogroup"]').nth(3);
+  await stars.getByRole("radio", { name: "4 of 5" }).click();
+
+  await expect(page.getByRole("contentinfo")).toContainText("Rated 4 of 5");
+});
+
+test("clicking the star already set clears the rating", async ({ page }) => {
+  // The only way back to no rating, and how rekordbox behaves.
+  await page.goto("/");
+  const stars = page.locator('[data-col="rating"] [role="radiogroup"]').nth(3);
+  // The mock's ratings are deterministic but not zero, so pick a star the row
+  // is not already on: clicking the current one clears rather than sets.
+  const checked = await stars.locator('[aria-checked="true"]').count();
+  const current = checked === 0
+    ? 0
+    : Number((await stars.locator('[aria-checked="true"]').getAttribute("aria-label"))?.[0] ?? 0);
+  const target = current === 2 ? 4 : 2;
+
+  await stars.getByRole("radio", { name: `${target} of 5` }).click();
+  await expect(page.getByRole("contentinfo")).toContainText(`Rated ${target} of 5`);
+
+  await stars.getByRole("radio", { name: `${target} of 5` }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Rating cleared");
+});
+
+test("a comment is edited in place, and Escape abandons the edit", async ({ page }) => {
+  await page.goto("/");
+  const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
+  const before = await cell.innerText();
+
+  await cell.dblclick();
+  const field = page.getByRole("textbox", { name: "Comment" });
+  await field.fill("changed my mind");
+  await field.press("Escape");
+
+  await expect(page.locator('[role="gridcell"][data-col="comment"]').nth(3)).toHaveText(before);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Comment saved");
+});
+
+test("a comment commits on Enter", async ({ page }) => {
+  await page.goto("/");
+  const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
+  await cell.dblclick();
+  const field = page.getByRole("textbox", { name: "Comment" });
+  await field.fill("5A - Am - 128");
+  await field.press("Enter");
+
+  await expect(page.getByRole("contentinfo")).toContainText("Comment saved");
+});
