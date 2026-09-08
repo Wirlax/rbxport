@@ -800,11 +800,14 @@ test("the detail waveform draws a beat grid with heavier downbeats", async ({ pa
   // beats: enough to be a grid, few enough to be readable.
   await expect.poll(async () => detail.locator("span").count()).toBeGreaterThan(10);
 
-  // Downbeats are a distinct, heavier mark rather than every line the same.
-  const weights = await detail.locator("span").evaluateAll((els) =>
-    [...new Set(els.map((e) => getComputedStyle(e).backgroundColor))],
+  // Downbeats are red and every fourth, beats grey — measured off the capture
+  // by spacing: the red lines sit at exactly four times the grey pitch.
+  const marks = await detail.locator("span").evaluateAll((els) =>
+    els.map((e) => getComputedStyle(e).backgroundColor),
   );
-  expect(weights.length).toBeGreaterThan(1);
+  expect(new Set(marks).size).toBeGreaterThan(1);
+  expect(marks).toContain("rgb(234, 51, 35)");
+  expect(marks).toContain("rgb(114, 114, 114)");
 });
 
 test("the waveforms follow the window rather than stretching a fixed canvas", async ({ page }) => {

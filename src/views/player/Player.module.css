@@ -325,8 +325,8 @@
   line-height: 1;
 }
 .hotCue { background: var(--c-accent); color: var(--c-accent); }
-/* Red, measured: it is how rekordbox marks a memory cue, and the one marker
-   that has to be findable at a glance mid-mix. */
+/* Grey, and unmeasured: the memory-cue marker has not been isolated from the
+   detail waveform. Red was tried and is wrong — that is the downbeat. */
 .memoryCue { background: var(--c-cue-memory); }
 
 .beat,
@@ -337,95 +337,145 @@
   width: 1px;
   pointer-events: none;
 }
+/* Beats grey at a 54pt pitch, downbeats red every fourth — measured off the
+   capture by spacing, which is what settles which is which. */
 .beat { background: var(--c-beat); }
-.downbeat { background: var(--c-downbeat); }
+.downbeat { background: var(--c-downbeat); width: 2px; }
 
 /* -------------------------------------------------------------- the pads */
 
 .pads {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px;
+  align-items: stretch;
   background: var(--c-panel);
   min-width: 0;
   overflow: hidden;
 }
 
-.modes,
-.auto,
-.page,
-.memory,
-.hotCues { display: flex; align-items: center; gap: 4px; flex: none; }
-
-.modes { flex-direction: column; gap: 2px; align-items: stretch; }
+/* Two stacked tabs filling the row's height, 80x24pt each. The selected one
+   takes the row's own colour and the other is cut out in black — the opposite
+   of the usual convention, and what the capture shows. */
+.modes {
+  display: flex;
+  flex-direction: column;
+  width: var(--s-pad-tab-w);
+  flex: none;
+}
 
 .mode {
+  height: var(--s-pad-tab-h);
   border: 0;
-  border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-text-dim);
+  background: var(--c-black);
+  color: var(--c-text);
   font-size: var(--f-size-xs);
-  font-weight: 700;
-  padding: 3px 8px;
-  cursor: default;
-}
-.mode[data-on] { background: var(--c-accent); color: var(--c-icon-on); }
-
-.pad {
-  width: 26px;
-  height: 22px;
-  border: 0;
-  border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-text-dim);
-  font-size: var(--f-size-ui);
   font-weight: 700;
   cursor: default;
   padding: 0;
 }
-.pad[data-set] { background: var(--c-phrase-chorus); color: var(--c-black); }
+.mode[data-on] { background: var(--c-panel); }
 
-.memory button,
-.page button {
-  border: 0;
-  background: none;
-  color: var(--c-icon-off);
-  font-size: var(--f-size-sm);
-  cursor: default;
-  padding: 0 3px;
-}
-.memoryLabel,
-.pageNumber {
-  font-size: var(--f-size-xs);
-  font-weight: 700;
-  color: var(--c-text-dim);
-}
-.pageNumber {
-  min-width: 42px;
-  text-align: center;
-  background: var(--c-button);
-  border-radius: 2px;
-  padding: 3px 0;
+/* Pads, memory, cue mode and page travel together as one cluster. In the
+   capture they sit left of centre rather than at either edge. */
+.padCluster {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
 }
 
-.padSpacer { flex: 1; min-width: 0; }
+.hotCues { display: flex; gap: var(--s-pad-cue-gap); flex: none; }
 
-.quantise,
-.padMenu {
+/* A pad is a dark well; a cue is a small bright square inside it, not a
+   filled button. */
+.pad {
+  width: var(--s-pad-cue-w);
+  height: var(--s-pad-cue-h);
   border: 0;
   border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-text-dim);
-  font-size: var(--f-size-ui);
-  font-weight: 700;
-  width: 26px;
-  height: 22px;
+  background: var(--c-pad-well);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: default;
   padding: 0;
   flex: none;
 }
-.quantise[data-on] { background: var(--c-accent); color: var(--c-icon-on); }
+
+.padInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s-pad-cue-inner);
+  height: var(--s-pad-cue-inner);
+  border-radius: 1px;
+  font-size: var(--f-size-ui);
+  font-weight: 700;
+  color: var(--c-pad-label);
+}
+.pad[data-set] .padInner { background: var(--c-pad-set); color: var(--c-black); }
+
+.memory,
+.auto,
+.page { display: flex; align-items: center; gap: 4px; flex: none; }
+
+.memoryLabel {
+  background: var(--c-button);
+  color: var(--c-text);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  border-radius: 2px;
+  padding: 5px 9px;
+}
+
+.step {
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-size: var(--f-size-sm);
+  cursor: default;
+  padding: 0 5px;
+}
+.step:disabled { color: var(--c-icon-off); }
+
+/* AU / MA and Q share a shape: on is the pad blue, off is the row colour with
+   dim text. */
+.chip {
+  border: 0;
+  border-radius: 2px;
+  background: var(--c-panel);
+  color: var(--c-pad-label);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: default;
+  flex: none;
+  align-self: center;
+}
+.chip[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
+
+.pageNumber {
+  min-width: 68px;
+  text-align: center;
+  background: var(--c-button);
+  color: var(--c-text);
+  border-radius: 2px;
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  padding: 5px 0;
+}
+
+.padMenu {
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font-size: var(--f-size-ui);
+  cursor: default;
+  padding: 0 10px 0 8px;
+  flex: none;
+  align-self: center;
+}
 
 /* --------------------------------------------------------- the cue panel */
 
