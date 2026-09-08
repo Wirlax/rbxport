@@ -33,9 +33,21 @@ export const GearIcon = (props: IconProps) => (
   </svg>
 );
 
+export const HeadphonesIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path d="M2.4 10.4V8.4a5.6 5.6 0 0 1 11.2 0v2.0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <rect x="1.3" y="9.7" width="2.9" height="4.4" rx="1.35" fill="currentColor"/> <rect x="11.8" y="9.7" width="2.9" height="4.4" rx="1.35" fill="currentColor"/>
+  </svg>
+);
+
 export const HistoryIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M8 4.6V8l2.6 1.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+export const InfoIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <circle cx="8" cy="8" r="6.4" fill="currentColor"/> <rect x="7.1" y="6.6" width="1.8" height="5.0" rx="0.6" fill="#000"/> <circle cx="8" cy="4.6" r="1.05" fill="#000"/>
   </svg>
 );
 

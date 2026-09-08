@@ -200,11 +200,19 @@ pub async fn view_ids_in_range(
 /// Returns an empty vector when the track has no analysis, which the UI draws
 /// as a blank preview rather than an error.
 #[tauri::command]
+/// Waveform bytes for a track, as raw bytes rather than a JSON number array.
+///
+/// `from` and `len` window the tag, counted in entries. Absent means the whole
+/// thing, which is only safe for the small tags: `PWV7` is 158 KB on a
+/// five-minute track, far past the 64 KB response cap, so the detail view asks
+/// for the span it is about to draw.
 pub async fn track_waveform(
     state: State<'_, Arc<AppState>>,
     track_id: String,
     kind: String,
-) -> AppResult<Vec<u8>> {
+    from: Option<u32>,
+    len: Option<u32>,
+) -> AppResult<tauri::ipc::Response> {
     let library = state.library()?;
     let share = state.share_root();
     let Ok(numeric) = track_id.parse::<u64>() else {
@@ -224,19 +232,40 @@ pub async fn track_waveform(
         // The stored path names the .DAT; the colour waveforms live in the
         // .EXT sibling and the three-band ones in .2EX.
         let dat = rbl_anlz::resolve(&share, analysis_path);
-        let (file, tag): (std::path::PathBuf, [u8; 4]) = match kind.as_str() {
-            "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5"),
-            "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4"),
-            // The overview strip above the browser.
-            _ => (dat, *b"PWAV"),
+        // rekordbox 7 draws the three-band waveforms, and every one of the
+        // first 300 tracks checked in the reference library has them. `PWV6`
+        // is the 1,200-column overview and `PWV7` the full-resolution detail,
+        // both three bytes per column: low, mid, high.
+        let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind.as_str() {
+            "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
+            "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
+            // Kept for a library analysed before the three-band tags existed.
+            "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
+            "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4", 6),
+            _ => (dat, *b"PWAV", 1),
         };
 
         let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
-            return Ok(Vec::new()); // analysis missing on disk: draw nothing
+            // Analysis missing on disk: draw nothing rather than fail the view.
+            return Ok(Vec::new());
         };
-        Ok(anlz.waveform(&tag).map(|(_, data)| data.to_vec()).unwrap_or_default())
+        let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
+        Ok(window_of(whole, stride, from, len))
     })
     .await
+    .map(tauri::ipc::Response::new)
+}
+
+/// The requested span of a waveform tag, clamped to what is there.
+///
+/// Entries rather than bytes, so a caller never has to know a tag's stride,
+/// and so a window can never land mid-entry and shear the bands apart.
+fn window_of(data: &[u8], stride: usize, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    let stride = stride.max(1);
+    let entries = data.len() / stride;
+    let first = from.map_or(0, |f| f as usize).min(entries);
+    let count = len.map_or(entries - first, |l| (l as usize).min(entries - first));
+    data.get(first * stride..(first + count) * stride).unwrap_or(&[]).to_vec()
 }
 
 /// What analysing one track produced.

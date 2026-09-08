@@ -8,7 +8,6 @@ import type {
   AnalysisResult, Backend, Beat, Cue, Device, ExportReport, ImportReport, LibrarySummary, LinkPeer,
   LinkStatus, MissingTracks, RowDto,
   TreeNode, ViewHandle,
-  WaveformKind,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -42,10 +41,16 @@ async function realBackend(): Promise<Backend> {
     openView: (spec) => invoke<ViewHandle>("open_view", { spec }),
     fetchRows: (viewId, offset, len) => invoke<RowDto[]>("fetch_rows", { viewId, offset, len }),
     viewIdsInRange: (viewId, from, to) => invoke<string[]>("view_ids_in_range", { viewId, from, to }),
-    trackWaveform: async (trackId: string, kind: WaveformKind) => {
-      // Tauri hands a Rust Vec<u8> back as a number array; normalise here so
-      // views only ever see a typed array.
-      const bytes = await invoke<number[] | Uint8Array>("track_waveform", { trackId, kind });
+    trackWaveform: async (trackId, kind, window) => {
+      // Raw bytes rather than a JSON number array: the three-band detail tag
+      // is 158 KB on a five-minute track and JSON would multiply that.
+      const bytes = await invoke<ArrayBuffer | number[] | Uint8Array>("track_waveform", {
+        trackId,
+        kind,
+        from: window?.from,
+        len: window?.len,
+      });
+      if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     analyseTrack: (trackId) => invoke<AnalysisResult>("analyse_track", { trackId }),

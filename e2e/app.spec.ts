@@ -225,17 +225,44 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
   await expect(title).toHaveText(before);
 });
 
-test("the top bar offers settings on the right, and not rekordbox's export controls", async ({ page }) => {
-  // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
+test("the top bar carries what rekordbox's does, in its order", async ({ page }) => {
+  // Read off a capture of 7.2.11 running: information, the plan badge,
+  // settings, headphone monitoring, the master level, then the clock.
   await page.goto("/");
-  const settings = page.getByRole("button", { name: "Settings" });
-  await expect(settings).toBeVisible();
+  const bar = page.getByRole("banner");
+  await expect(bar.getByRole("button", { name: "Information" })).toBeVisible();
+  await expect(bar.getByText("Professional")).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Settings" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Headphone monitoring" })).toBeVisible();
+  await expect(bar.getByRole("meter", { name: "Master level" })).toBeVisible();
+
+  // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
   await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
 
-  // At the right-hand end, past the clock.
-  const bar = await page.getByRole("banner").boundingBox();
-  const gear = await settings.boundingBox();
-  expect((gear?.x ?? 0) - (bar?.x ?? 0)).toBeGreaterThan((bar?.width ?? 0) / 2);
+  // Left to right in that order, with the clock last.
+  const xs: number[] = [];
+  for (const item of [
+    bar.getByRole("button", { name: "Information" }),
+    bar.getByText("Professional"),
+    bar.getByRole("button", { name: "Settings" }),
+    bar.getByRole("button", { name: "Headphone monitoring" }),
+    bar.getByRole("meter", { name: "Master level" }),
+    page.getByTestId("clock"),
+  ]) {
+    xs.push((await item.boundingBox())?.x ?? 0);
+  }
+  expect(xs).toEqual([...xs].sort((a, b) => a - b));
+});
+
+test("the tree and the browser are separated by the measured gutter", async ({ page }) => {
+  // Seven points of black: the capture has the tree ending at 282pt, its
+  // scrollbar to 292, and the track list starting at 299. Painted the tree's
+  // own colour, as it was, there was no visible gap at all.
+  await page.goto("/");
+  const splitter = page.getByRole("separator", { name: "Resize the library tree" });
+  const box = await splitter.boundingBox();
+  expect(box?.width).toBe(7);
+  await expect(splitter).toHaveCSS("background-color", "rgb(0, 0, 0)");
 });
 
 test("the player's cue and play sit at the foot of the transport", async ({ page }) => {

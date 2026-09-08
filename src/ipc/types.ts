@@ -85,7 +85,14 @@ export interface AppErrorDto {
 }
 
 /** Which waveform to fetch for a track. */
-export type WaveformKind = "preview" | "detail" | "colour";
+/**
+ * Which waveform tag to read.
+ *
+ * `bands` and `bandsDetail` are the three-band ones rekordbox 7 draws — every
+ * track checked in the reference library has them. The others are what a
+ * library analysed before those existed would carry.
+ */
+export type WaveformKind = "bands" | "bandsDetail" | "preview" | "detail" | "colour";
 
 export interface Backend {
   librarySummary(): Promise<LibrarySummary>;
@@ -99,7 +106,12 @@ export interface Backend {
    * Sent as bytes rather than JSON: a colour waveform is several kilobytes of
    * numbers and JSON would multiply that and cost a parse on the UI thread.
    */
-  trackWaveform(trackId: string, kind: WaveformKind): Promise<Uint8Array>;
+  trackWaveform(
+    trackId: string,
+    kind: WaveformKind,
+    /** Window into the tag, in entries. The detail tag is far past the cap. */
+    window?: { from: number; len: number },
+  ): Promise<Uint8Array>;
 
   /**
    * Editing. Each returns the library's new generation, which invalidates every

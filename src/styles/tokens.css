@@ -41,6 +41,7 @@
   --s-status-bar-h: 30px;
   --s-bottom-bar-h: 72px;
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
+  --s-tree-gutter-w: 7px; /* capture: tree ends 282pt, scrollbar to 292, browser starts 299 */
   --s-rail-w: 36px;
   --s-right-rail-w: 24px;
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */

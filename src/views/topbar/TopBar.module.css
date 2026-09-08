@@ -14,8 +14,24 @@
 }
 .clock { font-size: var(--f-size-sm); font-weight: 700; color: var(--c-icon-on); font-variant-numeric: tabular-nums; }
 
-/* The settings gear sits at the right-hand end of the bar, after the clock. */
-.settings {
+/* The level meter: a thin horizontal track with a filled left portion, which
+   is how rekordbox draws the master level beside the headphone button. */
+.meter {
+  width: 132px;
+  height: 3px;
+  background: var(--c-raised);
+  border-radius: 2px;
+  overflow: hidden;
+  flex: none;
+}
+.meterFill {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+
+/* The icon buttons, all the same box so they sit on one baseline. */
+.icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -27,6 +43,7 @@
   color: var(--c-icon-off);
   cursor: default;
 }
-.settings:hover { color: var(--c-icon-on); }
-.settings:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
-.gear { width: 14px; height: 14px; }
+.icon:hover { color: var(--c-icon-on); }
+.icon[data-on] { color: var(--c-accent); }
+.icon:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+.glyph { width: 14px; height: 14px; }

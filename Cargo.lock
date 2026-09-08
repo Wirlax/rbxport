@@ -3030,6 +3030,8 @@ version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
  "rbl-core",
+ "rbl-db",
+ "rbl-index",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",

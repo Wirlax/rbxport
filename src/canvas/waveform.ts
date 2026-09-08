@@ -60,6 +60,70 @@ export function ramp(stops: readonly (readonly number[])[], t: number): string {
 }
 
 /**
+ * How tall a band's value can be, per tag.
+ *
+ * Measured off the reference library: `PWV6` tops out around 63 and `PWV7`
+ * around 127, so they are six- and seven-bit. Dividing by the wrong one draws
+ * a waveform at half height or clipped flat.
+ */
+export const BAND_FULL_SCALE = { overview: 63, detail: 127 } as const;
+
+/**
+ * Draws a three-band waveform: `PWV6` or `PWV7`, three bytes a column.
+ *
+ * This is what rekordbox 7 actually shows, and what a CDJ-3000 shows. The
+ * bytes are the energy in the low, mid and high thirds of the spectrum, and
+ * each is drawn from the centre line in its own colour: blue underneath, amber
+ * over it, near-white on top. Highs carry the least energy — a mean of 3
+ * against 30 for the other two on a real track — so drawing them last is what
+ * puts the bright core in the middle rather than burying it.
+ */
+export function drawBands(
+  ctx: CanvasRenderingContext2D,
+  data: Uint8Array,
+  width: number,
+  height: number,
+  band: WaveBand = "overview",
+): void {
+  ctx.clearRect(0, 0, width, height);
+  const columns = Math.floor(data.length / 3);
+  if (columns === 0 || width <= 0 || height <= 0) return;
+
+  const stops = bandStops(band);
+  const full = BAND_FULL_SCALE[band];
+  const centre = height / 2;
+  const step = columns / width;
+
+  for (let x = 0; x < width; x++) {
+    // The loudest column in this pixel's span, per band, so a transient is not
+    // swallowed when many columns share a pixel.
+    let low = 0;
+    let mid = 0;
+    let high = 0;
+    const first = Math.floor(x * step);
+    const last = Math.max(first + 1, Math.floor((x + 1) * step));
+    for (let i = first; i < last && i < columns; i++) {
+      const at = i * 3;
+      low = Math.max(low, data[at] ?? 0);
+      mid = Math.max(mid, data[at + 1] ?? 0);
+      high = Math.max(high, data[at + 2] ?? 0);
+    }
+    // Low first so the blue is the outer envelope, high last so the bright
+    // core sits on top of both.
+    for (const [value, colour] of [
+      [low, stops[0]],
+      [mid, stops[1]],
+      [high, stops[2]],
+    ] as const) {
+      if (value === 0) continue;
+      const half = Math.max(0.5, (Math.min(value, full) / full) * centre);
+      ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
+      ctx.fillRect(x, centre - half, 1, half * 2);
+    }
+  }
+}
+
+/**
  * Draws a `PWAV` preview into a context.
  *
  * `data` is one byte per column. The canvas is scaled to fit however many
@@ -130,7 +194,7 @@ export async function renderPreview(
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  drawPreview(ctx, data, w, h);
+  drawBands(ctx, data, w, h, "overview");
 
   // An ImageBitmap blits faster than a canvas element; fall back where the
   // browser lacks it rather than failing to draw at all.

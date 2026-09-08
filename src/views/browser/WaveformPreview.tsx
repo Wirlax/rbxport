@@ -35,7 +35,7 @@ async function load(
   const pending = (async () => {
     try {
       const backend = await getBackend();
-      const data = await backend.trackWaveform(trackId, "preview");
+      const data = await backend.trackWaveform(trackId, "bands");
       if (data.length === 0) return null;
       const rendered = await renderPreview(data, width, height, dpr);
       if (rendered) cache.set(key, rendered);

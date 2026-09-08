@@ -12,7 +12,7 @@
  */
 import { memo, useEffect, useRef, useState } from "react";
 
-import { drawPreview } from "@/canvas";
+import { drawBands } from "@/canvas";
 import { getBackend } from "@/ipc/client";
 import { backingSize } from "@/lib/canvasSize";
 
@@ -30,7 +30,7 @@ async function load(trackId: string): Promise<Uint8Array> {
   const pending = (async () => {
     try {
       const backend = await getBackend();
-      const data = await backend.trackWaveform(trackId, "preview");
+      const data = await backend.trackWaveform(trackId, "bands");
       bytesByTrack.set(trackId, data);
       return data;
     } catch {
@@ -88,10 +88,12 @@ export const WaveformDetail = memo(function WaveformDetail({
     const centre = Math.min(Math.max(progress, half), 1 - half);
     // The detail's amber is the darker of the two; the overview strip above it
     // uses the brighter one.
-    drawPreview(ctx, data, w, h, {
-      window: { from: centre - half, to: centre + half },
-      band: span >= 1 ? "overview" : "detail",
-    });
+    // `PWV6` is 1,200 columns for the whole track, so a window into it is a
+    // slice of those columns rather than a second fetch.
+    const columns = Math.floor(data.length / 3);
+    const first = Math.max(0, Math.floor((centre - half) * columns)) * 3;
+    const last = Math.min(data.length, Math.ceil((centre + half) * columns) * 3);
+    drawBands(ctx, data.subarray(first, last), w, h, "overview");
   }, [data, progress, span, width, height]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;

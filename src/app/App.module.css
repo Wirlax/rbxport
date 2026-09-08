@@ -15,37 +15,38 @@
    one still leaves a usable track list. */
 .body[data-sub] {
   grid-template-columns:
-    var(--tree-w, var(--s-tree-w)) 4px 1fr
+    var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
     min(var(--s-sub-browse-w), 45%);
 }
 
 .body[data-sub][data-info] {
   grid-template-columns:
-    var(--tree-w, var(--s-tree-w)) 4px 1fr
+    var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
     min(var(--s-sub-browse-w), 35%)
     min(var(--s-info-w), 25%);
 }
 
 .body[data-info] {
   grid-template-columns:
-    var(--tree-w, var(--s-tree-w)) 4px 1fr
+    var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
     min(var(--s-info-w), 33%);
 }
 
 .body {
   display: grid;
   /* --tree-w is set by the splitter drag; the token is the starting width. */
-  grid-template-columns: var(--tree-w, var(--s-tree-w)) 4px 1fr;
+  grid-template-columns: var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr;
   min-width: 0;
   min-height: 0; /* let the browser scroll instead of the page */
 }
 
-/* The drag handle between the tree and the browser. Four pixels wide with a
-   wider hit area, which is how a splitter stays grabbable without drawing
-   attention to itself. */
+/* The gutter between the tree and the browser, which is also the drag handle.
+   Black and seven points wide, measured off the capture: the tree ends at
+   282pt, its scrollbar runs to 292, and the track list starts at 299. Painting
+   it the tree's own colour, as it was, left no visible gap at all. */
 .splitter {
   position: relative;
-  background: var(--c-panel);
+  background: var(--c-black);
   cursor: col-resize;
   touch-action: none;
 }
