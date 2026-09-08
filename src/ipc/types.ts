@@ -109,6 +109,15 @@ export interface Backend {
    * database — and the refusal arrives as an `AppError` of kind `readOnly`.
    */
   edits: Edits;
+
+  /**
+   * Called when the library changes underneath us — after an edit, or when
+   * Rekordbox itself writes. The argument is the new generation, which
+   * invalidates every cached page.
+   *
+   * Returns an unsubscribe function.
+   */
+  onLibraryChanged(listener: (generation: number) => void): () => void;
 }
 
 export interface Edits {

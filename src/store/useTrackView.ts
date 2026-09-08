@@ -25,7 +25,7 @@ export interface TrackView {
   idsInRange: (from: number, to: number) => Promise<string[]>;
 }
 
-export function useTrackView(spec: ViewSpec): TrackView {
+export function useTrackView(spec: ViewSpec, libraryGeneration = 0): TrackView {
   // `specKey` records which spec this state describes. Loading is derived from
   // comparing it against the current spec rather than set by an effect: an
   // effect runs *after* the render that changed the spec, so for one frame the
@@ -42,9 +42,12 @@ export function useTrackView(spec: ViewSpec): TrackView {
   // Bumped when a page lands, to re-render the rows it filled.
   const [pagesLoaded, setPagesLoaded] = useState(0);
 
+  // The library generation is part of the key: an edit changes the rows under
+  // a spec that has not itself changed, and without this the view would keep
+  // serving the pages it cached before the edit.
   const specKey = useMemo(
-    () => JSON.stringify([spec.source, spec.sort, spec.descending, spec.query]),
-    [spec.source, spec.sort, spec.descending, spec.query],
+    () => JSON.stringify([spec.source, spec.sort, spec.descending, spec.query, libraryGeneration]),
+    [spec.source, spec.sort, spec.descending, spec.query, libraryGeneration],
   );
 
   // View identity for the cache: a new view id, or a library change, invalidates pages.

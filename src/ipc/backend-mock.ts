@@ -147,8 +147,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const membership = new Map<string, string[]>();
   let nextId = 1;
 
-  /** Every edit bumps the generation, exactly as a real write does. */
-  const bump = (): Promise<number> => wait(++generation);
+  const listeners = new Set<(generation: number) => void>();
+
+  /**
+   * Every edit bumps the generation and tells anyone listening, exactly as a
+   * real write does — the backend reloads and emits `library:changed`.
+   */
+  const bump = (): Promise<number> => {
+    generation += 1;
+    for (const listener of listeners) listener(generation);
+    return wait(generation);
+  };
 
   const findNode = (id: string) => tree.find((n) => n.id === id);
 
@@ -306,6 +315,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
 
     edits,
+
+    onLibraryChanged: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   };
 }
 

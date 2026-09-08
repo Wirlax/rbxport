@@ -22,6 +22,21 @@ async function realBackend(): Promise<Backend> {
       const bytes = await invoke<number[] | Uint8Array>("track_waveform", { trackId, kind });
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
+    onLibraryChanged: (listener) => {
+      // Tauri's listen resolves asynchronously; unsubscribing before it does
+      // has to still work, so the flag is checked when it lands.
+      let live = true;
+      let stop: (() => void) | undefined;
+      void import("@tauri-apps/api/event").then(async ({ listen }) => {
+        const unlisten = await listen<number>("library:changed", (e) => listener(e.payload));
+        if (live) stop = unlisten;
+        else unlisten();
+      });
+      return () => {
+        live = false;
+        stop?.();
+      };
+    },
     edits: {
       createPlaylist: (name, parent) => invoke<number>("create_playlist", { name, parent }),
       createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),

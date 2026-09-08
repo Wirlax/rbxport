@@ -64,6 +64,9 @@ export function App() {
   // Track ids in flight from the browser to the tree.
   const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);
   const [dropNote, setDropNote] = useState<string | null>(null);
+  // Bumped whenever the library changes underneath us, which drops cached
+  // pages. Without it an edit's effect never reached the table.
+  const [libraryGeneration, setLibraryGeneration] = useState(0);
   // Read once: the platform cannot change while the window is open, and
   // deciding it per key press would run a regex on every stroke.
   const platform = useMemo(detectPlatform, []);
@@ -134,6 +137,25 @@ export function App() {
     };
   }, [platform, query]);
 
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onLibraryChanged((generation) => {
+        setLibraryGeneration(generation);
+        // The tree can change too — a playlist gained tracks, or one was
+        // deleted — so it is re-read rather than assumed still right.
+        void backend.playlistTree().then(setTree);
+      });
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+
   const bounds = useCallback(
     () => ({ ...TREE_BOUNDS, available: bodyRef.current?.clientWidth ?? 0 }),
     [],
@@ -177,6 +199,36 @@ export function App() {
     event.currentTarget.releasePointerCapture(event.pointerId);
   }, []);
 
+  /** Runs one edit and reports what happened, refusals included. */
+  const runEdit = useCallback(
+    async (what: string, edit: (b: Awaited<ReturnType<typeof getBackend>>) => Promise<unknown>) => {
+      const backend = await getBackend();
+      try {
+        await edit(backend);
+        setDropNote(what);
+      } catch (e) {
+        setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+      }
+    },
+    [],
+  );
+
+  const rateTrack = useCallback(
+    (id: string, stars: number) => {
+      void runEdit(stars === 0 ? "Rating cleared." : `Rated ${stars} of 5.`, (b) =>
+        b.edits.setTrackRating(id, stars),
+      );
+    },
+    [runEdit],
+  );
+
+  const commentTrack = useCallback(
+    (id: string, comment: string) => {
+      void runEdit("Comment saved.", (b) => b.edits.setTrackComment(id, comment));
+    },
+    [runEdit],
+  );
+
   const addDraggedTo = useCallback(
     (playlistId: string) => {
       const ids = draggedTracks;
@@ -188,7 +240,6 @@ export function App() {
           await backend.edits.addTracksToPlaylist(playlistId, [...ids]);
           const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
           setDropNote(`Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`);
-          setTree(await backend.playlistTree());
         } catch (e) {
           // The refusal that matters is Rekordbox holding the database; say so
           // rather than letting the drop look as if it worked.
@@ -243,6 +294,9 @@ export function App() {
           onSelectionChange={setSelectedCount}
           onFocusedRow={setPlayerTrack}
           onDragTracks={setDraggedTracks}
+          onRate={rateTrack}
+          onComment={commentTrack}
+          libraryGeneration={libraryGeneration}
           title={selectedNode?.name ?? "Collection"}
           query={query}
           onQueryChange={setQuery}
