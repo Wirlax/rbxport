@@ -25,7 +25,21 @@ export interface TrackView {
   idsInRange: (from: number, to: number) => Promise<string[]>;
 }
 
-export function useTrackView(spec: ViewSpec, libraryGeneration = 0): TrackView {
+/**
+ * Edits applied to rows before the backend has caught up.
+ *
+ * A write makes the backend re-read the library, which on the reference
+ * collection is 243 ms. Waiting for that before a star fills in makes the
+ * interface feel broken, so the edit is shown at once and dropped when the
+ * reload lands with the same value in it.
+ */
+export type PendingEdits = ReadonlyMap<string, Partial<RowDto>>;
+
+export function useTrackView(
+  spec: ViewSpec,
+  libraryGeneration = 0,
+  pending?: PendingEdits,
+): TrackView {
   // `specKey` records which spec this state describes. Loading is derived from
   // comparing it against the current spec rather than set by an effect: an
   // effect runs *after* the render that changed the spec, so for one frame the
@@ -118,7 +132,17 @@ export function useTrackView(spec: ViewSpec, libraryGeneration = 0): TrackView {
     [state, token],
   );
 
-  const rowAt = useCallback((index: number) => cache.current.get(index, token), [token, pagesLoaded]);
+  const rowAt = useCallback(
+    (index: number) => {
+      const row = cache.current.get(index, token);
+      if (!row || !pending) return row;
+      // The cached row is what the backend last said; the overlay is what the
+      // user just did. Merging rather than mutating keeps the cache honest.
+      const edit = pending.get(row.id);
+      return edit ? { ...row, ...edit } : row;
+    },
+    [token, pagesLoaded, pending],
+  );
 
   const idsInRange = useCallback(
     async (from: number, to: number) => {

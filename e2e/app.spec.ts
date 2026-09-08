@@ -563,3 +563,26 @@ test("settings offers adding music, and says what it will not do", async ({ page
   // Honest about not running analysis, rather than leaving it a surprise.
   await expect(section).toContainText("Analysis is not run");
 });
+
+test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
+  // A write makes the backend re-read the library; waiting for that before the
+  // star fills in feels broken.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  const stars = page.locator('[data-col="rating"] [role="radiogroup"]').nth(3);
+  await stars.getByRole("radio", { name: "5 of 5" }).click();
+  await expect(stars.getByRole("radio", { name: "5 of 5" })).toHaveAttribute("aria-checked", "true");
+});
+
+test("an edited comment shows before the backend catches up", async ({ page }) => {
+  await page.goto("/");
+  const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
+  await cell.dblclick();
+  const field = page.getByRole("textbox", { name: "Comment" });
+  await field.fill("shown at once");
+  await field.press("Enter");
+
+  await expect(page.locator('[role="gridcell"][data-col="comment"]').nth(3))
+    .toHaveText("shown at once");
+});

@@ -9,7 +9,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { RowDto, SortColumn, ViewSpec } from "@/ipc/types";
-import { useTrackView } from "@/store/useTrackView";
+import { useTrackView, type PendingEdits } from "@/store/useTrackView";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
 import { visibleWindow } from "@/lib/virtual";
@@ -308,6 +308,8 @@ export interface TrackTableProps {
   onComment?: (id: string, comment: string) => void;
   /** Bumped when the library changes, so cached pages are dropped. */
   libraryGeneration?: number;
+  /** Edits shown before the backend has caught up. */
+  pendingEdits?: PendingEdits;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -316,9 +318,9 @@ export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment,
-  libraryGeneration,
+  libraryGeneration, pendingEdits,
 }: TrackTableProps) {
-  const view = useTrackView(spec, libraryGeneration);
+  const view = useTrackView(spec, libraryGeneration, pendingEdits);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);

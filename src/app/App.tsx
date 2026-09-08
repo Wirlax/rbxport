@@ -67,6 +67,12 @@ export function App() {
   // Bumped whenever the library changes underneath us, which drops cached
   // pages. Without it an edit's effect never reached the table.
   const [libraryGeneration, setLibraryGeneration] = useState(0);
+  // Edits shown at once, dropped when the backend's reload lands. A write
+  // makes the backend re-read the library — 243 ms on the real collection —
+  // and waiting for that before a star fills in feels broken.
+  const [pendingEdits, setPendingEdits] = useState<Map<string, Partial<RowDto>>>(
+    () => new Map(),
+  );
   // Read once: the platform cannot change while the window is open, and
   // deciding it per key press would run a regex on every stroke.
   const platform = useMemo(detectPlatform, []);
@@ -145,6 +151,8 @@ export function App() {
       if (!live) return;
       stop = backend.onLibraryChanged((generation) => {
         setLibraryGeneration(generation);
+        // The reload carries the edits, so the overlay has done its job.
+        setPendingEdits(new Map());
         // The tree can change too — a playlist gained tracks, or one was
         // deleted — so it is re-read rather than assumed still right.
         void backend.playlistTree().then(setTree);
@@ -213,20 +221,27 @@ export function App() {
     [],
   );
 
+  /** Shows an edit at once, so the interface does not wait on the reload. */
+  const showPending = useCallback((id: string, patch: Partial<RowDto>) => {
+    setPendingEdits((edits) => new Map(edits).set(id, { ...edits.get(id), ...patch }));
+  }, []);
+
   const rateTrack = useCallback(
     (id: string, stars: number) => {
+      showPending(id, { rating: stars });
       void runEdit(stars === 0 ? "Rating cleared." : `Rated ${stars} of 5.`, (b) =>
         b.edits.setTrackRating(id, stars),
       );
     },
-    [runEdit],
+    [runEdit, showPending],
   );
 
   const commentTrack = useCallback(
     (id: string, comment: string) => {
+      showPending(id, { comment });
       void runEdit("Comment saved.", (b) => b.edits.setTrackComment(id, comment));
     },
-    [runEdit],
+    [runEdit, showPending],
   );
 
   const addDraggedTo = useCallback(
@@ -297,6 +312,7 @@ export function App() {
           onRate={rateTrack}
           onComment={commentTrack}
           libraryGeneration={libraryGeneration}
+          pendingEdits={pendingEdits}
           title={selectedNode?.name ?? "Collection"}
           query={query}
           onQueryChange={setQuery}
