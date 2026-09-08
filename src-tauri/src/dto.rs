@@ -126,3 +126,12 @@ pub struct ImportReportDto {
     /// One line per file that was not imported, saying why.
     pub skipped: Vec<String>,
 }
+
+/// One beat of the grid.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatDto {
+    pub time_ms: u32,
+    /// The first beat of a bar, drawn heavier than the rest.
+    pub downbeat: bool,
+}

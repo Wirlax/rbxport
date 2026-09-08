@@ -674,3 +674,20 @@ test("the detail waveform shows a window, not the whole track again", async ({ p
     .poll(async () => detail.locator('[title^="Hot cue"], [title="Memory cue"]').count())
     .toBeLessThan(5);
 });
+
+test("the detail waveform draws a beat grid with heavier downbeats", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click();
+
+  const detail = page.getByTestId("player-detail");
+  // A window of 8% of a ~5 minute track at ~128 BPM is on the order of 50
+  // beats: enough to be a grid, few enough to be readable.
+  await expect.poll(async () => detail.locator("span").count()).toBeGreaterThan(10);
+
+  // Downbeats are a distinct, heavier mark rather than every line the same.
+  const weights = await detail.locator("span").evaluateAll((els) =>
+    [...new Set(els.map((e) => getComputedStyle(e).backgroundColor))],
+  );
+  expect(weights.length).toBeGreaterThan(1);
+});

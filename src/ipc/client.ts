@@ -5,7 +5,7 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Cue, ImportReport, LibrarySummary, LinkPeer,
+  AnalysisResult, Backend, Beat, Cue, ImportReport, LibrarySummary, LinkPeer,
   LinkStatus, MissingTracks, RowDto,
   TreeNode, ViewHandle,
   WaveformKind,
@@ -28,6 +28,8 @@ async function realBackend(): Promise<Backend> {
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
     analyseTrack: (trackId) => invoke<AnalysisResult>("analyse_track", { trackId }),
+    trackBeats: (trackId, fromMs, toMs) =>
+      invoke<Beat[]>("track_beats", { track: trackId, fromMs, toMs }),
     trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
     importFiles: async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");

@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    CueDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
+    BeatDto, CueDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -21,6 +21,10 @@ use crate::state::{rows_to_dto, spec_from_wire, AppState};
 /// Rows per request. The frontend asks a page at a time; this bound is what
 /// keeps a response inside the 64 KB cap.
 const MAX_ROWS: u32 = 128;
+
+/// Beats returned for one window. A four-minute track at 128 BPM has about
+/// 500; this is generous for any window worth drawing and bounds the response.
+const MAX_BEATS: usize = 2_000;
 
 /// Runs `f` on a blocking thread and converts a panic there into an `AppError`.
 async fn blocking<T, F>(name: &'static str, f: F) -> AppResult<T>
@@ -433,6 +437,54 @@ pub async fn stop_link_listening(state: State<'_, Arc<AppState>>) -> AppResult<(
     // Dropped outside the lock: the listener's Drop stops its thread.
     drop(state.set_link(None));
     Ok(())
+}
+
+/// A track's beat grid, as milliseconds and downbeat flags.
+///
+/// Read from the `PQTZ` tag of the track's analysis file. Bounded: a long mix
+/// has tens of thousands of beats and the whole grid would blow the IPC cap,
+/// so only the window asked for is returned.
+#[tauri::command]
+pub async fn track_beats(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    from_ms: u32,
+    to_ms: u32,
+) -> AppResult<Vec<BeatDto>> {
+    let library = state.library()?;
+    let share = state.share_root();
+    blocking("track_beats", move || {
+        let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let relative = library.analysis_path.get(row as usize);
+        if relative.is_empty() {
+            return Ok(Vec::new());
+        }
+        let path = share.join(relative.trim_start_matches(['/', '\\']));
+        let Ok(bytes) = std::fs::read(&path) else { return Ok(Vec::new()) };
+        let Ok(file) = rbl_anlz::parse(&bytes) else { return Ok(Vec::new()) };
+
+        let mut out = Vec::new();
+        for section in &file.sections {
+            let Some(beats) = section.as_beat_grid() else { continue };
+            for beat in beats {
+                if beat.time_ms < from_ms || beat.time_ms > to_ms {
+                    continue;
+                }
+                out.push(BeatDto {
+                    time_ms: beat.time_ms,
+                    // 1 is the downbeat; the rest are ordinary beats.
+                    downbeat: beat.beat_number == 1,
+                });
+                // A window this dense is a drawing problem, not a data one.
+                if out.len() >= MAX_BEATS {
+                    return Ok(out);
+                }
+            }
+            break;
+        }
+        Ok(out)
+    })
+    .await
 }
 
 /// A track's cue points.

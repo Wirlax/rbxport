@@ -13,7 +13,7 @@
  */
 import { memo, useEffect, useState } from "react";
 
-import type { Cue, RowDto } from "@/ipc/types";
+import type { Beat, Cue, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { artworkUrl } from "@/ipc/artwork";
 import { formatBpm, formatDuration } from "@/lib/format";
@@ -71,6 +71,39 @@ const CueMarkers = memo(function CueMarkers({
   );
 });
 
+/**
+ * The beat grid over the detail waveform.
+ *
+ * Downbeats are drawn heavier than the beats between them, which is what makes
+ * a grid readable at a glance rather than a picket fence.
+ */
+const BeatGrid = memo(function BeatGrid({
+  beats, totalMs, window,
+}: {
+  beats: readonly Beat[];
+  totalMs: number;
+  window: { from: number; to: number };
+}) {
+  if (totalMs <= 0 || beats.length === 0) return null;
+  const span = Math.max(window.to - window.from, 1e-6);
+  return (
+    <>
+      {beats.map((beat) => {
+        const at = beat.timeMs / totalMs;
+        if (at < window.from || at > window.to) return null;
+        return (
+          <span
+            key={beat.timeMs}
+            className={beat.downbeat ? styles.downbeat : styles.beat}
+            style={{ left: `${((at - window.from) / span) * 100}%` }}
+            aria-hidden
+          />
+        );
+      })}
+    </>
+  );
+});
+
 /** How much of a track the detail waveform shows at once. */
 const DETAIL_SPAN = 0.08;
 
@@ -83,6 +116,7 @@ const TRANSPORT = [
 export const Player = memo(function Player({ track }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null);
   const [cues, setCues] = useState<Cue[]>([]);
+  const [beats, setBeats] = useState<Beat[]>([]);
 
   useEffect(() => {
     if (!track) {
@@ -100,6 +134,8 @@ export const Player = memo(function Player({ track }: PlayerProps) {
       live = false;
     };
   }, [track]);
+
+
   // The fraction played, for the playhead. Falls back to the track's own
   // length before the file's metadata has loaded, so the head does not jump.
   const total = playback.duration || track?.durationSec || 0;
@@ -111,6 +147,32 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     const centre = Math.min(Math.max(fraction, half), 1 - half);
     return { from: centre - half, to: centre + half };
   };
+
+  // The grid for the detail window only, refetched as the window moves. A
+  // whole track's beats would blow the IPC cap on a long mix.
+  const windowFrom = detailWindow(progress).from;
+  const windowTo = detailWindow(progress).to;
+  useEffect(() => {
+    if (!track || !track.analysed || total <= 0) {
+      setBeats([]);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      const found = await backend.trackBeats(
+        track.id,
+        Math.floor(windowFrom * total * 1000),
+        Math.ceil(windowTo * total * 1000),
+      );
+      if (live) setBeats(found);
+    })();
+    return () => {
+      live = false;
+    };
+    // Quantised, so the grid is refetched as the window moves on rather than
+    // on every timeupdate.
+  }, [track, total, Math.round(windowFrom * 100), Math.round(windowTo * 100)]);
 
   // Where the playhead sits within the detail window. Centred, except at the
   // ends where the window stops moving and the head crosses it instead.
@@ -228,6 +290,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               height={68}
             />
           ) : null}
+          <BeatGrid beats={beats} totalMs={total * 1000} window={detailWindow(progress)} />
           <CueMarkers cues={cues} totalMs={total * 1000} labelled window={detailWindow(progress)} />
           {/*
             The detail window is centred on the playhead, so the head is drawn

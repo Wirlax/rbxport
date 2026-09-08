@@ -324,6 +324,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     edits,
 
+    // A steady grid at the track's own BPM, so the detail waveform has beats
+    // to draw without an analysis file behind it.
+    trackBeats: (trackId, fromMs, toMs) => {
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      if (!row || row.analysed === 0 || row.bpmX100 === 0) return wait([]);
+      const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
+      const beats: { timeMs: number; downbeat: boolean }[] = [];
+      const first = Math.max(0, Math.floor(fromMs / beatMs));
+      for (let n = first; n * beatMs <= toMs && beats.length < 2000; n++) {
+        beats.push({ timeMs: Math.round(n * beatMs), downbeat: n % 4 === 0 });
+      }
+      return wait(beats);
+    },
+
     // A memory cue and four hot cues, so the player's markers and list have
     // something to draw without a database behind them.
     trackCues: (trackId) => {

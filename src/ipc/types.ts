@@ -131,6 +131,14 @@ export interface Backend {
    */
   analyseTrack(trackId: string): Promise<AnalysisResult>;
 
+  /**
+   * A track's beats within a window, from its analysis file.
+   *
+   * Windowed because a long mix has tens of thousands and the whole grid
+   * would blow the IPC cap.
+   */
+  trackBeats(trackId: string, fromMs: number, toMs: number): Promise<Beat[]>;
+
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string): Promise<Cue[]>;
 
@@ -176,6 +184,13 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+}
+
+/** One beat of the grid. */
+export interface Beat {
+  timeMs: number;
+  /** The first beat of a bar, drawn heavier than the rest. */
+  downbeat: boolean;
 }
 
 /** A device heard on the Pro DJ Link network. */

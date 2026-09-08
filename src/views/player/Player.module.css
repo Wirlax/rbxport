@@ -130,6 +130,19 @@
 }
 .overview, .detail { cursor: pointer; }
 
+/* The beat grid. Downbeats are heavier, which is what makes a grid readable
+   rather than a picket fence. Behind the cues and the playhead. */
+.beat,
+.downbeat {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+}
+.beat { background: rgb(255 255 255 / 12%); }
+.downbeat { background: rgb(255 255 255 / 34%); }
+
 /* Cue points. No colour is taken from the database: ColorTableIndex decides
    what rekordbox draws and is not understood, so hot cues take the accent and
    memory cues the dim text colour. */
