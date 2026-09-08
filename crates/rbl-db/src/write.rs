@@ -20,12 +20,28 @@
 //!   `MAX(Seq) + 1` rather than assuming a base.
 //! - **Timestamps are UTC with an explicit `+00:00`**, 1,575 of 1,602.
 //!
+//! # Cues
+//!
+//! Cue writing was blocked on three unexplained fields. Counting the
+//! reference library's 1,040,598 cues settled all three:
+//!
+//! - **`ColorTableIndex` is not a per-slot palette.** Index 21 dominates every
+//!   hot-cue kind alike — 169,389 of kind 1, 171,149 of kind 2 — so it is the
+//!   default colour, not a slot's own. Memory cues carry 0 or NULL.
+//! - **`Color`** is 255 on memory cues and -1 on hot ones.
+//! - **`BeatLoopSize`** is NULL or 0 on every one of the 1,040,176 cues that
+//!   is not a loop; only the 422 loops set it.
+//!
+//! So a plain cue at a default colour is fully determined. Setting a *custom*
+//! colour still is not — what RGB an index past 21 means is unknown — and
+//! neither are loops, so both are refused.
+//!
 //! # What this deliberately will not do
 //!
-//! Analysis registration (`Analysed`, `AnalysisUpdated`), cue writes
-//! (`BeatLoopSize`, the hot-cue palette), and `contentCue`/`contentFile` are
-//! **not implemented**. Their values are still unexplained, and a wrong one in
-//! a 38,681-track collection is not recoverable by undo. See [`Unsupported`].
+//! Analysis registration (`Analysed`, `AnalysisUpdated`), loop cues, custom
+//! cue colours, and `contentCue`/`contentFile` are **not implemented**. Their
+//! values are still unexplained, and a wrong one in a 38,681-track collection
+//! is not recoverable by undo. See [`Unsupported`].
 
 use std::path::{Path, PathBuf};
 
@@ -66,8 +82,11 @@ pub enum Unsupported {
     /// `Analysed` is a bitfield with 105/104/16/17/1 observed and no known
     /// meaning; `AnalysisUpdated` is unexplained.
     AnalysisRegistration,
-    /// `BeatLoopSize` and the hot-cue colour palette are unresolved.
-    CueEditing,
+    /// What RGB a `ColorTableIndex` past the default means is unknown.
+    CueColour,
+    /// `BeatLoopSize` is only set on loops and its encoding is unexplained —
+    /// the observed values are 2097153, 1048577, 65537 and the like.
+    LoopCue,
     /// Nothing is known about what rekordbox does with these.
     ContentCueOrFile,
 }
@@ -78,8 +97,10 @@ impl Unsupported {
         match self {
             Self::AnalysisRegistration =>
                 "registering analysis needs the Analysed bitfield explained by a diff recording",
-            Self::CueEditing =>
-                "cue editing needs BeatLoopSize and the hot-cue palette explained by a diff recording",
+            Self::CueColour =>
+                "setting a cue's colour needs the ColorTableIndex palette explained by a diff recording",
+            Self::LoopCue =>
+                "loop cues need BeatLoopSize explained by a diff recording",
             Self::ContentCueOrFile =>
                 "contentCue and contentFile are not understood and must not be touched",
         }
@@ -394,6 +415,110 @@ impl Writer {
         if rows > 0 {
             set_counter(&tx, usn)?;
         }
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    // ------------------------------------------------------------------ cues
+
+    /// Adds a cue to a track.
+    ///
+    /// `kind` is rekordbox's own: 0 for a memory cue, 1-3 and 5 for hot cues
+    /// A to D, 6-9 for E to H, and 10-17 for I to P. Kind 4 is unused.
+    ///
+    /// Every column is set to what the reference library shows for a plain,
+    /// default-coloured cue — see the module docs. Loops are refused.
+    pub fn add_cue(&mut self, content: &str, kind: u8, position_ms: u32) -> Result<String> {
+        if kind == 4 || kind > 17 {
+            return Err(DbError::WriteRefused(format!(
+                "{kind} is not a cue kind rekordbox uses"
+            )));
+        }
+        self.prepare()?;
+        let id = self.rng.uuid4();
+        let uuid = self.rng.uuid4();
+        let stamp = time::now();
+        let memory = kind == 0;
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        // A cue points at a track by id *and* by UUID; both have to match or
+        // rekordbox's sync sees a cue with no owner.
+        let content_uuid: Option<String> = tx
+            .query_row(
+                "SELECT UUID FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )
+            .ok();
+        if content_uuid.is_none() {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        }
+
+        let usn = next_usn(&tx);
+        tx.execute(
+            "INSERT INTO djmdCue
+                (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs,
+                 OutMsec, OutFrame, OutMpegFrame, OutMpegAbs,
+                 Kind, Color, ColorTableIndex, ActiveLoop, Comment, BeatLoopSize,
+                 CueMicrosec, ContentUUID, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, 0, 0, NULL, NULL, NULL, NULL,
+                     ?4, ?5, ?6, 0, '', NULL,
+                     NULL, ?7, ?8, 0, 0, 0, 0, NULL, ?9, ?10, ?10)",
+            params![
+                id,
+                content,
+                i64::from(position_ms),
+                i64::from(kind),
+                // 255 on a memory cue, -1 on a hot one.
+                if memory { 255 } else { -1 },
+                // 0 is "no colour"; 21 is the default rekordbox writes when
+                // the user has not chosen one.
+                if memory { 0 } else { 21 },
+                content_uuid,
+                uuid,
+                usn,
+                stamp
+            ],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Moves a cue to a new position.
+    pub fn move_cue(&mut self, cue: &str, position_ms: u32) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdCue SET InMsec = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND rb_local_deleted = 0",
+            params![i64::from(position_ms), usn, stamp, cue],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Soft-deletes a cue.
+    pub fn delete_cue(&mut self, cue: &str) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdCue SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, cue],
+        )?;
+        set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
     }

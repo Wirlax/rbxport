@@ -545,7 +545,8 @@ fn a_refused_action_leaves_nothing_behind() {
 fn the_unsupported_edits_are_refused_with_a_reason() {
     for action in [
         Unsupported::AnalysisRegistration,
-        Unsupported::CueEditing,
+        Unsupported::CueColour,
+        Unsupported::LoopCue,
         Unsupported::ContentCueOrFile,
     ] {
         let error = Writer::refuse(action);
@@ -662,4 +663,139 @@ fn relocating_leaves_the_analysis_and_memberships_alone() {
     let deleted: i64 =
         f.one("SELECT rb_local_deleted FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
     assert_eq!(deleted, 0);
+}
+
+// ------------------------------------------------------------------- cues
+
+#[test]
+fn a_cue_is_written_in_the_shape_the_reference_library_shows() {
+    // Every column here was settled by counting the reference library's
+    // 1,040,598 cues rather than guessed. See the write module's docs.
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(0), 1, 45_000).unwrap();
+
+    let (kind, in_ms, color, index, loop_size, active, out_ms): (
+        i64, i64, i64, i64, Option<i64>, i64, Option<i64>,
+    ) = f
+        .conn()
+        .query_row(
+            "SELECT Kind, InMsec, Color, ColorTableIndex, BeatLoopSize, ActiveLoop, OutMsec
+             FROM djmdCue WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .unwrap();
+    assert_eq!(kind, 1, "hot cue A");
+    assert_eq!(in_ms, 45_000);
+    assert_eq!(color, -1, "hot cues carry -1");
+    assert_eq!(index, 21, "the default colour rekordbox writes");
+    assert_eq!(loop_size, None, "not a loop");
+    assert_eq!(active, 0);
+    assert_eq!(out_ms, None);
+}
+
+#[test]
+fn a_memory_cue_differs_from_a_hot_one_in_its_colour_columns() {
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(0), 0, 1_000).unwrap();
+    let (color, index): (i64, i64) = f
+        .conn()
+        .query_row(
+            "SELECT Color, ColorTableIndex FROM djmdCue WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    // 255 and 0, against -1 and 21 for a hot cue.
+    assert_eq!(color, 255);
+    assert_eq!(index, 0);
+}
+
+#[test]
+fn a_cue_points_at_its_track_by_id_and_by_uuid() {
+    // Both, or rekordbox's sync sees a cue with no owner.
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(2), 5, 10_000).unwrap();
+    let (content, content_uuid): (String, String) = f
+        .conn()
+        .query_row(
+            "SELECT ContentID, ContentUUID FROM djmdCue WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(content, track_id(2));
+    let expected: String =
+        f.one("SELECT UUID FROM djmdContent WHERE ID = ?1", &[&track_id(2)]);
+    assert_eq!(content_uuid, expected);
+}
+
+#[test]
+fn a_cue_carries_a_uuid_of_its_own_and_a_local_usn() {
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(0), 2, 5_000).unwrap();
+    let (uuid, usn, sync_usn): (String, i64, Option<i64>) = f
+        .conn()
+        .query_row(
+            "SELECT UUID, rb_local_usn, usn FROM djmdCue WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(uuid.len(), 36);
+    assert!(usn > 1000);
+    assert_eq!(sync_usn, None, "usn is the sync's to assign");
+}
+
+#[test]
+fn kind_four_is_refused_because_rekordbox_does_not_use_it() {
+    let mut f = fixture();
+    assert!(matches!(f.writer.add_cue(&track_id(0), 4, 0), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.add_cue(&track_id(0), 18, 0), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
+}
+
+#[test]
+fn a_cue_on_a_track_that_is_not_there_is_refused() {
+    let mut f = fixture();
+    assert!(matches!(f.writer.add_cue("no-such-track", 1, 0), Err(DbError::WriteRefused(_))));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
+}
+
+#[test]
+fn a_cue_moves_and_soft_deletes() {
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(0), 1, 1_000).unwrap();
+
+    f.writer.move_cue(&id, 90_000).unwrap();
+    let at: i64 = f.one("SELECT InMsec FROM djmdCue WHERE ID = ?1", &[&id]);
+    assert_eq!(at, 90_000);
+
+    f.writer.delete_cue(&id).unwrap();
+    let deleted: i64 = f.one("SELECT rb_local_deleted FROM djmdCue WHERE ID = ?1", &[&id]);
+    assert_eq!(deleted, 1);
+    // Soft, as everywhere else: the row stays for the sync's sake.
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 1);
+}
+
+#[test]
+fn every_hot_cue_slot_rekordbox_uses_can_be_written() {
+    // 1-3 and 5-17: sixteen slots, A to P, with 4 unused.
+    let mut f = fixture();
+    for kind in [1_u8, 2, 3, 5, 6, 7, 8, 9, 10, 17] {
+        f.writer.add_cue(&track_id(0), kind, u32::from(kind) * 1000).unwrap();
+    }
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0"), 10);
+}
+
+#[test]
+fn a_custom_colour_and_a_loop_are_still_refused() {
+    // What RGB an index past the default means is unknown, and BeatLoopSize's
+    // encoding is unexplained: 2097153, 1048577, 65537 and the like.
+    for action in [Unsupported::CueColour, Unsupported::LoopCue] {
+        let DbError::WriteRefused(reason) = Writer::refuse(action) else {
+            panic!("{action:?} should be a refusal");
+        };
+        assert!(reason.contains("recording"), "{reason}");
+    }
 }

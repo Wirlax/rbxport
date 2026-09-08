@@ -26,6 +26,21 @@ fn main() {
          "SELECT COUNT(DISTINCT ContentID) FROM djmdCue WHERE rb_local_deleted = 0"),
         ("most cues on one track",
          "SELECT COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0 GROUP BY ContentID ORDER BY COUNT(*) DESC LIMIT 1"),
+        ("ColorTableIndex by Kind — is it a palette, or a per-slot default?",
+         "SELECT Kind, ColorTableIndex, COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0 \
+          GROUP BY Kind, ColorTableIndex ORDER BY Kind, COUNT(*) DESC"),
+        ("distinct ColorTableIndex per Kind",
+         "SELECT Kind, COUNT(DISTINCT ColorTableIndex) FROM djmdCue WHERE rb_local_deleted = 0 GROUP BY Kind"),
+        ("BeatLoopSize — set on what?",
+         "SELECT (OutMsec IS NOT NULL AND OutMsec > 0) AS is_loop, BeatLoopSize, COUNT(*) \
+          FROM djmdCue WHERE rb_local_deleted = 0 GROUP BY 1,2 ORDER BY 1, COUNT(*) DESC LIMIT 10"),
+        ("what else a plain hot cue carries",
+         "SELECT InFrame, InMpegFrame, InMpegAbs, ActiveLoop, CueMicrosec, COUNT(*) \
+          FROM djmdCue WHERE rb_local_deleted = 0 AND Kind = 1 GROUP BY 1,2,3,4,5 \
+          ORDER BY COUNT(*) DESC LIMIT 4"),
+        ("Color by Kind",
+         "SELECT Kind, Color, COUNT(*) FROM djmdCue WHERE rb_local_deleted = 0 \
+          GROUP BY 1,2 ORDER BY 1, COUNT(*) DESC LIMIT 8"),
         ("a sample track's cues",
          "SELECT Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment FROM djmdCue \
           WHERE rb_local_deleted = 0 AND ContentID = (
