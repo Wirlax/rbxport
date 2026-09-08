@@ -15,6 +15,8 @@
 //! for byte, including tags we cannot author ourselves.
 
 pub mod grid;
+pub mod phrase;
+pub mod vocal;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -35,6 +37,8 @@ pub enum AnlzError {
 
 pub type Result<T> = std::result::Result<T, AnlzError>;
 
+pub use phrase::{Mood, Phrase, SongStructure};
+pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
 pub use write::AnlzBuilder;
 
 /// Bytes of section framing before the tag-specific header fields.
