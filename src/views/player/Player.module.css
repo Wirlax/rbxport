@@ -121,9 +121,36 @@
 .overview,
 .detail,
 .phrase {
+  position: relative;
   min-width: 0;
   background: var(--c-panel);
   overflow: hidden;
+}
+.overview, .detail { cursor: pointer; }
+
+/* Where playback has reached. One pixel wide and in the cue colour, as
+   rekordbox draws it. */
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--c-cue-ring);
+  pointer-events: none;
+}
+
+/* A pause bar pair, when something is playing. */
+.pauseGlyph {
+  width: 12px;
+  height: 14px;
+  border-left: 4px solid var(--c-icon-off);
+  border-right: 4px solid var(--c-icon-off);
+}
+
+.error {
+  margin: 0;
+  color: var(--c-text-dim);
+  font-size: var(--f-size-sm);
 }
 .overview canvas,
 .detail canvas { width: 100%; height: 100%; display: block; }

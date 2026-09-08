@@ -126,6 +126,16 @@ impl Library {
         Some(self.artwork_path.get(row as usize))
     }
 
+    /// The absolute path of a track's audio, by its display id.
+    ///
+    /// `folder_path` is already absolute in the reference library — it is the
+    /// file's own location, not a share-relative one like the artwork.
+    pub fn audio_path_of(&self, display_id: &str) -> Option<&str> {
+        let wanted: u64 = display_id.parse().ok()?;
+        let row = *self.row_by_id().get(&wanted)?;
+        Some(self.folder_path.get(row as usize))
+    }
+
     /// Row index by track id, built once.
     fn row_by_id(&self) -> &HashMap<u64, Row> {
         self.by_id.get_or_init(|| {

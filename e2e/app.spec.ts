@@ -387,15 +387,33 @@ test("the player shows the track that was clicked", async ({ page }) => {
   await expect(title).toHaveText(text);
 });
 
-test("the player draws the transport even though there is no audio yet", async ({ page }) => {
-  // Drawn and inert reads as a player waiting for playback; absent reads as an
-  // unfinished panel.
+test("the player draws the transport, disabled where there is no backend", async ({ page }) => {
+  // In a browser there is no rbl:// scheme to stream from, so the transport is
+  // drawn and inert: a player waiting for a backend, not an unfinished panel.
   await page.goto("/");
   const player = page.getByRole("region", { name: "Preview player" });
   await expect(player.getByRole("button", { name: "Play" })).toBeDisabled();
   await expect(player.getByRole("button", { name: "Cue" })).toBeDisabled();
   await expect(page.getByTestId("player-overview")).toBeVisible();
   await expect(page.getByTestId("player-detail")).toBeVisible();
+});
+
+test("the player shows a position and a total once a track is chosen", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().click();
+  // Position over total, from the track's own length before any file loads.
+  await expect(page.getByTestId("player-time")).toHaveText(/^\d?\d:\d\d \/ \d?\d:\d\d$/);
+});
+
+test("the waveform is a seek target", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().click();
+  const overview = page.getByTestId("player-overview");
+  await expect(overview).toHaveAttribute("role", "slider");
+  await expect(overview).toHaveAttribute("aria-valuenow", "0");
+  // The maximum is the track's length, so the head has a scale to sit on.
+  const max = await overview.getAttribute("aria-valuemax");
+  expect(Number(max)).toBeGreaterThan(0);
 });
 
 test("the gear opens settings, and Escape closes them", async ({ page }) => {

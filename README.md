@@ -37,8 +37,8 @@ Link protocols are implemented and tested end to end over loopback — a stand-i
 player mounts our NFS export and pulls a track back byte-identically — but the
 database server's *menus* wait on a capture of what Rekordbox actually answers.
 
-Not yet: writing to the library (see below), the preview player, and browsing
-from a real deck.
+Not yet: writing to the library from the interface beyond playlists and track
+metadata (see below), and browsing from a real deck.
 
 Known weak: key detection agrees with Rekordbox on 49% of tracks exactly, and
 84% once a relative key or a neighbour on the Camelot wheel counts — up from
