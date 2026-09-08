@@ -36,19 +36,32 @@ export function drawPreview(
   data: Uint8Array,
   width: number,
   height: number,
+  /**
+   * The slice of the track to draw, as fractions of its length. Defaults to
+   * all of it; the detail waveform passes a window around the playhead, which
+   * is what makes it a *detail* rather than a second copy of the overview.
+   */
+  window?: { from: number; to: number },
 ): void {
   ctx.clearRect(0, 0, width, height);
   if (data.length === 0) return;
 
-  const step = data.length / width;
+  // Clamped and ordered, so a playhead at either end still draws something.
+  const from = Math.max(0, Math.min(window?.from ?? 0, 1));
+  const to = Math.max(from + 1e-6, Math.min(window?.to ?? 1, 1));
+  const first = Math.floor(from * data.length);
+  const last = Math.max(first + 1, Math.ceil(to * data.length));
+  const span = last - first;
+
+  const step = span / width;
   for (let x = 0; x < width; x++) {
     // Take the loudest column in this pixel's span so quiet gaps do not
     // swallow transients when many columns share a pixel.
     let peak = 0;
     let whiteness = 0;
-    const from = Math.floor(x * step);
-    const to = Math.max(from + 1, Math.floor((x + 1) * step));
-    for (let i = from; i < to && i < data.length; i++) {
+    const columnFrom = first + Math.floor(x * step);
+    const columnTo = Math.max(columnFrom + 1, first + Math.floor((x + 1) * step));
+    for (let i = columnFrom; i < columnTo && i < data.length; i++) {
       const byte = data[i] ?? 0;
       const h = byte & HEIGHT_MASK;
       if (h > peak) {

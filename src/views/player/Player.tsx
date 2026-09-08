@@ -19,6 +19,7 @@ import { artworkUrl } from "@/ipc/artwork";
 import { formatBpm, formatDuration } from "@/lib/format";
 import { usePlayback } from "@/store/usePlayback";
 import { WaveformPreview } from "@/views/browser/WaveformPreview";
+import { WaveformDetail } from "./WaveformDetail";
 import styles from "./Player.module.css";
 
 export interface PlayerProps {
@@ -35,29 +36,43 @@ export interface PlayerProps {
  * room for it.
  */
 const CueMarkers = memo(function CueMarkers({
-  cues, totalMs, labelled,
+  cues, totalMs, labelled, window,
 }: {
   cues: readonly Cue[];
   totalMs: number;
   labelled?: boolean;
+  /** The slice of the track being shown, for the zoomed detail waveform. */
+  window?: { from: number; to: number };
 }) {
   if (totalMs <= 0) return null;
+  const from = window?.from ?? 0;
+  const to = window?.to ?? 1;
+  const span = Math.max(to - from, 1e-6);
   return (
     <>
-      {cues.map((cue) => (
-        <span
-          key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
-          className={cue.memory ? styles.memoryCue : styles.hotCue}
-          style={{ left: `${Math.min((cue.positionMs / totalMs) * 100, 100)}%` }}
-          title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
-          aria-hidden
-        >
-          {labelled && !cue.memory ? cue.letter : null}
-        </span>
-      ))}
+      {cues.map((cue) => {
+        const at = cue.positionMs / totalMs;
+        // A cue outside the window is not drawn at the edge — a marker pinned
+        // to the edge reads as a cue that is there.
+        if (at < from || at > to) return null;
+        return (
+          <span
+            key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
+            className={cue.memory ? styles.memoryCue : styles.hotCue}
+            style={{ left: `${((at - from) / span) * 100}%` }}
+            title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
+            aria-hidden
+          >
+            {labelled && !cue.memory ? cue.letter : null}
+          </span>
+        );
+      })}
     </>
   );
 });
+
+/** How much of a track the detail waveform shows at once. */
+const DETAIL_SPAN = 0.08;
 
 /** Transport buttons, drawn in the order rekordbox has them. */
 const TRANSPORT = [
@@ -89,6 +104,22 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   // length before the file's metadata has loaded, so the head does not jump.
   const total = playback.duration || track?.durationSec || 0;
   const progress = total > 0 ? Math.min(playback.position / total, 1) : 0;
+
+  /** The slice of the track the detail waveform is showing. */
+  const detailWindow = (fraction: number) => {
+    const half = DETAIL_SPAN / 2;
+    const centre = Math.min(Math.max(fraction, half), 1 - half);
+    return { from: centre - half, to: centre + half };
+  };
+
+  // Where the playhead sits within the detail window. Centred, except at the
+  // ends where the window stops moving and the head crosses it instead.
+  const detailHeadPercent = (fraction: number) => {
+    const half = DETAIL_SPAN / 2;
+    if (fraction <= half) return (fraction / DETAIL_SPAN) * 100;
+    if (fraction >= 1 - half) return ((fraction - (1 - DETAIL_SPAN)) / DETAIL_SPAN) * 100;
+    return 50;
+  };
 
   const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -189,10 +220,25 @@ export const Player = memo(function Player({ track }: PlayerProps) {
 
         <div className={styles.detail} data-testid="player-detail" onMouseDown={scrub}>
           {track && track.analysed ? (
-            <WaveformPreview trackId={track.id} width={1200} height={68} />
+            <WaveformDetail
+              trackId={track.id}
+              progress={progress}
+              span={DETAIL_SPAN}
+              width={1200}
+              height={68}
+            />
           ) : null}
-          <CueMarkers cues={cues} totalMs={total * 1000} labelled />
-          <span className={styles.playhead} style={{ left: `${progress * 100}%` }} aria-hidden />
+          <CueMarkers cues={cues} totalMs={total * 1000} labelled window={detailWindow(progress)} />
+          {/*
+            The detail window is centred on the playhead, so the head is drawn
+            at the centre rather than at the progress fraction — except near
+            the ends, where the window is pinned and the head moves instead.
+          */}
+          <span
+            className={styles.playhead}
+            style={{ left: `${detailHeadPercent(progress)}%` }}
+            aria-hidden
+          />
         </div>
         {playback.error ? (
           <p className={styles.error} role="alert">{playback.error}</p>
