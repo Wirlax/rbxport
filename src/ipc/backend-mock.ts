@@ -10,8 +10,9 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  Backend, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec, WaveformKind,
+  Backend, Edits, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
+import { TREE_ROOT } from "./types";
 
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
@@ -138,6 +139,80 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const views = new Map<number, { order: Uint32Array; gen: number }>();
   let nextViewId = 1;
 
+  // The mock owns the tree the same way Rust does, so the edit flows can be
+  // driven end to end in `pnpm dev:mock` and in Playwright without a database.
+  let generation = 1;
+  const membership = new Map<string, string[]>();
+  let nextId = 1;
+
+  /** Every edit bumps the generation, exactly as a real write does. */
+  const bump = (): Promise<number> => wait(++generation);
+
+  const findNode = (id: string) => tree.find((n) => n.id === id);
+
+  const edits: Edits = {
+    createPlaylist: (name, parent) => {
+      const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+      tree.push({ id: `made-${nextId++}`, name, kind: "playlist", depth });
+      return bump();
+    },
+    createFolder: (name, parent) => {
+      const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+      tree.push({ id: `made-${nextId++}`, name, kind: "folder", depth, expanded: true });
+      return bump();
+    },
+    renamePlaylist: (id, name) => {
+      const node = findNode(id);
+      if (node) node.name = name;
+      return bump();
+    },
+    movePlaylist: (id, parent) => {
+      const node = findNode(id);
+      if (node) node.depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+      return bump();
+    },
+    deletePlaylist: (id) => {
+      const at = tree.findIndex((n) => n.id === id);
+      if (at >= 0) tree.splice(at, 1);
+      membership.delete(id);
+      return bump();
+    },
+    addTracksToPlaylist: (playlist, tracks) => {
+      const current = membership.get(playlist) ?? [];
+      for (const track of tracks) if (!current.includes(track)) current.push(track);
+      membership.set(playlist, current);
+      return bump();
+    },
+    removeTracksFromPlaylist: (playlist, tracks) => {
+      const current = (membership.get(playlist) ?? []).filter((t) => !tracks.includes(t));
+      membership.set(playlist, current);
+      return bump();
+    },
+    reorderPlaylist: (playlist, tracks) => {
+      const current = membership.get(playlist) ?? [];
+      // Mirrors the backend: tracks not named keep their place after the rest,
+      // so a partial order cannot silently drop any.
+      const named = tracks.filter((t) => current.includes(t));
+      membership.set(playlist, [...named, ...current.filter((t) => !named.includes(t))]);
+      return bump();
+    },
+    setTrackRating: (track, stars) => {
+      const row = all.find((r) => r.id === track);
+      if (row) row.rating = Math.max(0, Math.min(5, stars));
+      return bump();
+    },
+    setTrackComment: (track, comment) => {
+      const row = all.find((r) => r.id === track);
+      if (row) row.comment = comment;
+      return bump();
+    },
+    setTrackColor: (track, color) => {
+      const row = all.find((r) => r.id === track);
+      if (row) row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
+      return bump();
+    },
+  };
+
   const wait = <T>(value: T): Promise<T> =>
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
@@ -150,7 +225,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         dbVersion: null,
       }),
 
-    playlistTree: () => wait(tree),
+    // A copy, like the real backend: handing out the internal array lets a
+    // caller mutate the backend's own state, and makes a list captured before
+    // an edit appear to have changed by itself.
+    playlistTree: () => wait(tree.map((node) => ({ ...node }))),
 
     openView: (spec: ViewSpec) => {
       // Playlists show a deterministic slice so the mock stays stable across runs.
@@ -222,6 +300,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return wait(out);
     },
+
+    edits,
   };
 }
 
