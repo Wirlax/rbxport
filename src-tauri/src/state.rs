@@ -189,6 +189,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 release_date: library.release_date.get(index).to_owned(),
                 cues: String::new(),
                 // Stable per track so the placeholder tint does not flicker on scroll.
+                has_artwork: !library.artwork_path.get(index).is_empty(),
                 artwork_hue: u16::try_from(
                     library.ids.get(index).copied().unwrap_or(0) % 360,
                 )

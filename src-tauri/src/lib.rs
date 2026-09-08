@@ -2,6 +2,7 @@
 //! a thin adapter so the backend stays testable without a webview.
 
 mod commands;
+mod protocol;
 mod dto;
 mod error;
 mod state;
@@ -74,6 +75,13 @@ pub fn run() {
         .setup(|app| {
             spawn_library_load(app.handle().clone());
             Ok(())
+        })
+        .register_uri_scheme_protocol("rbl", move |ctx, request| {
+            // Artwork goes to the webview as an <img> rather than through
+            // invoke: a JPEG blows the 64 KB IPC cap and would cost a
+            // main-thread base64 decode per row.
+            let state = ctx.app_handle().state::<Arc<AppState>>();
+            crate::protocol::handle(&state, &request)
         })
         .invoke_handler(tauri::generate_handler![
             commands::library_summary,

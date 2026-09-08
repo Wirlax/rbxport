@@ -69,6 +69,8 @@ function makeRows(count: number): RowDto[] {
       releaseDate: rnd() > 0.3 ? `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "",
       cues: analysed ? (rnd() > 0.5 ? "EFGH" : "ABCD") : "",
       artworkHue: Math.floor(rnd() * 360),
+      // The mock has no files to serve, so every row falls back to the tint.
+      hasArtwork: false,
     };
   }
   return rows;

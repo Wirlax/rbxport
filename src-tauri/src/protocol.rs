@@ -1,0 +1,156 @@
+//! The `rbl://` scheme, which serves artwork straight to the webview.
+//!
+//! Artwork does not go through `invoke`: a JPEG is tens of kilobytes, the IPC
+//! cap is 64 KB, and base64 in a JSON response would cost a main-thread decode
+//! per row. An `<img src>` lets the webview fetch, decode and cache it off the
+//! UI thread, which is the whole point.
+//!
+//! # Why it takes a track id and not a path
+//!
+//! The webview names a **track**, and the path is looked up in the index. A
+//! scheme that accepted a path would hand anything running in the webview a
+//! read of any file the app can reach. The id is resolved against the loaded
+//! library, and the resulting path is checked to still sit under the share
+//! root — belt and braces, because `ImagePath` comes from the database rather
+//! than from us.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tauri::http::{Request, Response, StatusCode};
+
+use crate::state::AppState;
+
+/// Everything this scheme will serve.
+const ARTWORK_HOST: &str = "artwork";
+
+/// Refuses anything larger. Real artwork is tens of kilobytes; a file this big
+/// is not album art and should not be read into memory to find out.
+const MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Answers one `rbl://` request.
+pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    let uri = request.uri();
+    if uri.host() != Some(ARTWORK_HOST) {
+        return status(StatusCode::NOT_FOUND);
+    }
+    // rbl://artwork/<track id>
+    let Some(track_id) = uri.path().trim_start_matches('/').split('/').next() else {
+        return status(StatusCode::BAD_REQUEST);
+    };
+    if track_id.is_empty() {
+        return status(StatusCode::BAD_REQUEST);
+    }
+
+    let Ok(library) = state.library() else {
+        return status(StatusCode::SERVICE_UNAVAILABLE);
+    };
+    let Some(relative) = library.artwork_path_of(track_id) else {
+        return status(StatusCode::NOT_FOUND);
+    };
+    if relative.is_empty() {
+        return status(StatusCode::NOT_FOUND);
+    }
+
+    let share = state.share_root();
+    let Some(path) = resolve_under(&share, relative) else {
+        tracing::warn!(%relative, "artwork path escapes the share root; refused");
+        return status(StatusCode::FORBIDDEN);
+    };
+
+    match std::fs::metadata(&path) {
+        Ok(meta) if meta.len() > MAX_BYTES => return status(StatusCode::PAYLOAD_TOO_LARGE),
+        Ok(_) => {}
+        Err(_) => return status(StatusCode::NOT_FOUND),
+    }
+    let Ok(bytes) = std::fs::read(&path) else {
+        return status(StatusCode::NOT_FOUND);
+    };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", content_type(&path))
+        .header("Access-Control-Allow-Origin", "*")
+        // Artwork for a given track never changes without the library
+        // reloading, and the frontend re-requests with a new generation then.
+        .header("Cache-Control", "max-age=31536000, immutable")
+        .body(bytes)
+        .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR))
+}
+
+/// Joins a share-relative path onto the root, refusing anything that climbs out.
+///
+/// `ImagePath` comes from the database, so it is not ours to trust: a value
+/// with `..` in it would otherwise read outside the library.
+fn resolve_under(root: &Path, relative: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for part in relative.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => return None,
+            _ => out.push(part),
+        }
+    }
+    // Resolving symlinks too: a link inside the share tree could still point
+    // out of it.
+    let canonical = out.canonicalize().ok()?;
+    let root = root.canonicalize().ok()?;
+    canonical.starts_with(&root).then_some(canonical)
+}
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        // rekordbox writes .jpg for everything else it caches.
+        _ => "image/jpeg",
+    }
+}
+
+fn status(code: StatusCode) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(code)
+        .body(Vec::new())
+        .unwrap_or_else(|_| Response::new(Vec::new()))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_relative_path_resolves_under_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("PIONEER/Artwork/abc");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("artwork.jpg"), b"x").unwrap();
+
+        let got = resolve_under(dir.path(), "/PIONEER/Artwork/abc/artwork.jpg");
+        assert!(got.is_some());
+        assert!(got.unwrap().ends_with("artwork.jpg"));
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("share")).unwrap();
+        for attempt in [
+            "../../../etc/passwd",
+            "/PIONEER/../../etc/passwd",
+            "..\\..\\Windows\\System32",
+        ] {
+            assert!(resolve_under(&dir.path().join("share"), attempt).is_none(), "{attempt}");
+        }
+    }
+
+    #[test]
+    fn content_type_follows_the_extension() {
+        assert_eq!(content_type(Path::new("a/b.png")), "image/png");
+        assert_eq!(content_type(Path::new("a/b.PNG")), "image/png");
+        assert_eq!(content_type(Path::new("a/b.jpg")), "image/jpeg");
+        // rekordbox writes .jpg for everything else it caches.
+        assert_eq!(content_type(Path::new("a/b")), "image/jpeg");
+    }
+}

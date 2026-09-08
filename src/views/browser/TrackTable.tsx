@@ -16,6 +16,7 @@ import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { SortDownIcon, SortUpIcon } from "@/components/icons";
+import { artworkUrl } from "@/ipc/artwork";
 
 const ROW_H = 25; // --s-row-height
 /// --s-col-header-h. The column header sits inside the scroller so it moves
@@ -117,7 +118,27 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "artwork") {
           return (
             <div key={col.key} className={styles.artwork} role="gridcell">
-              <span style={{ background: `linear-gradient(135deg, hsl(${row.artworkHue} 40% 26%), hsl(${(row.artworkHue + 70) % 360} 55% 12%))` }} />
+              {/*
+                The tint sits underneath as the fallback: a little under half
+                the reference library has no artwork, and it also covers the
+                gap while the image decodes. `loading="lazy"` keeps a fast
+                scroll from queueing a fetch for every row it passes.
+              */}
+              <span
+                style={{
+                  background: `linear-gradient(135deg, hsl(${row.artworkHue} 40% 26%), hsl(${(row.artworkHue + 70) % 360} 55% 12%))`,
+                }}
+              />
+              {row.hasArtwork ? (
+                <img
+                  className={styles.artworkImage}
+                  src={artworkUrl(row.id)}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                />
+              ) : null}
             </div>
           );
         }

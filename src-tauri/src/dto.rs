@@ -26,8 +26,11 @@ pub struct RowDto {
     pub release_date: String,
     /// Hot-cue letters present on the track. Populated once `rbl-anlz` lands.
     pub cues: String,
-    /// Deterministic placeholder tint until artwork is served over `rbl://`.
+    /// Deterministic tint, drawn when a track has no artwork — a little under
+    /// half the reference library.
     pub artwork_hue: u16,
+    /// Whether `rbl://artwork/<id>` will serve anything for this track.
+    pub has_artwork: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

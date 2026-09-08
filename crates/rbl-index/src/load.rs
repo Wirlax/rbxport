@@ -111,7 +111,8 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     let mut stmt = conn.prepare(
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,
                 BPM, Length, Rating, ColorID, FolderPath, FileNameL,
-                AnalysisDataPath, DJPlayCount, StockDate, ReleaseDate, Commnt, Analysed
+                AnalysisDataPath, DJPlayCount, StockDate, ReleaseDate, Commnt, Analysed,
+                ImagePath
          FROM djmdContent
          WHERE rb_local_deleted = 0",
     )?;
@@ -125,6 +126,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     lib.folder_path = StrColumn::with_capacity(expected, expected * 90);
     lib.file_name = StrColumn::with_capacity(expected, expected * 40);
     lib.analysis_path = StrColumn::with_capacity(expected, expected * 60);
+    lib.artwork_path = StrColumn::with_capacity(expected, expected * 60);
     lib.date_added = StrColumn::with_capacity(expected, expected * 11);
     lib.release_date = StrColumn::with_capacity(expected, expected * 11);
 
@@ -158,6 +160,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         lib.folder_path.push(&r.get::<_, Option<String>>(11)?.unwrap_or_default());
         lib.file_name.push(&r.get::<_, Option<String>>(12)?.unwrap_or_default());
         lib.analysis_path.push(&r.get::<_, Option<String>>(13)?.unwrap_or_default());
+        lib.artwork_path.push(&r.get::<_, Option<String>>(19)?.unwrap_or_default());
         lib.play_count.push(clamp_u16(num(r, 14)?));
         lib.date_added.push(&r.get::<_, Option<String>>(15)?.unwrap_or_default());
         lib.release_date.push(&r.get::<_, Option<String>>(16)?.unwrap_or_default());

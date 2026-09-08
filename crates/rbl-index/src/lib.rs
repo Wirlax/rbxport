@@ -22,6 +22,8 @@ pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};
 use parking_lot::RwLock;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Row index within a snapshot. Not stable across reloads.
 pub type Row = u32;
@@ -42,6 +44,9 @@ pub struct Library {
     pub folder_path: StrColumn,
     pub file_name: StrColumn,
     pub analysis_path: StrColumn,
+    /// `djmdContent.ImagePath`, share-relative. Empty for the roughly half of
+    /// the library with no artwork.
+    pub artwork_path: StrColumn,
     pub date_added: StrColumn,
     pub release_date: StrColumn,
 
@@ -71,6 +76,9 @@ pub struct Library {
     /// against 233 ms for a full reload, and a playlist edit is by far the
     /// most common one.
     playlists: RwLock<Playlists>,
+
+    /// Row index by track id. Built on first lookup, not at load.
+    by_id: OnceLock<HashMap<u64, Row>>,
 
     /// Per-column collation ranks; `ranks[col][row]` orders rows without
     /// touching strings during a sort.
@@ -107,6 +115,28 @@ impl Playlists {
 }
 
 impl Library {
+    /// The share-relative artwork path for a track's display id, if it has one.
+    ///
+    /// Backed by a map built on first use. Scanning `ids` instead would be
+    /// 38,681 comparisons per row, and a screenful of rows each ask once.
+    /// Built lazily so a session that never shows artwork never pays for it.
+    pub fn artwork_path_of(&self, display_id: &str) -> Option<&str> {
+        let wanted: u64 = display_id.parse().ok()?;
+        let row = *self.row_by_id().get(&wanted)?;
+        Some(self.artwork_path.get(row as usize))
+    }
+
+    /// Row index by track id, built once.
+    fn row_by_id(&self) -> &HashMap<u64, Row> {
+        self.by_id.get_or_init(|| {
+            let mut map = HashMap::with_capacity(self.ids.len());
+            for (row, id) in self.ids.iter().enumerate() {
+                map.insert(*id, u32::try_from(row).unwrap_or(u32::MAX));
+            }
+            map
+        })
+    }
+
     /// Reads the playlist tree. The guard is held only for the read.
     pub fn playlists(&self) -> parking_lot::RwLockReadGuard<'_, Playlists> {
         self.playlists.read()
@@ -157,6 +187,7 @@ impl Library {
         let strings = self.title.heap_bytes() + self.title_folded.heap_bytes()
             + self.comment.heap_bytes() + self.folder_path.heap_bytes()
             + self.file_name.heap_bytes() + self.analysis_path.heap_bytes()
+            + self.artwork_path.heap_bytes()
             + self.date_added.heap_bytes() + self.release_date.heap_bytes()
             + self.search.heap_bytes();
         let interners = self.artists.heap_bytes() + self.albums.heap_bytes()

@@ -29,6 +29,8 @@ export interface RowDto {
   /** Hot cue letters present on the track, e.g. "ABCD". */
   cues: string;
   artworkHue: number;
+  /** Whether the backend can serve artwork for this track. */
+  hasArtwork: boolean;
 }
 
 export type TrackSource =

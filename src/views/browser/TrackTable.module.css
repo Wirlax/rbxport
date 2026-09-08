@@ -157,6 +157,17 @@
 
 .artwork { padding: 0; position: relative; }
 .artwork > span { position: absolute; inset: 0; }
+/* Over the tint, so a track without artwork still shows something and a track
+   with it shows nothing else while the image decodes. */
+.artworkImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* A broken or missing file must leave the tint showing, not an icon. */
+  color: transparent;
+}
 
 .preview {
   padding: 0 3px;
