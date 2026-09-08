@@ -11,7 +11,9 @@
 //!   database path is refused outright, so a test can never write to the
 //!   user's library even by mistake.
 
+pub mod fixture;
 pub mod key;
+pub mod write;
 mod schema;
 
 use std::path::{Path, PathBuf};
@@ -145,7 +147,14 @@ pub fn write_refusal_reason(
     test_mode: bool,
     rekordbox_running: bool,
 ) -> Option<&'static str> {
-    if is_real_install && test_mode {
+    // Both rules protect the *installed* library. A fixture in a temp directory
+    // is a different file that rekordbox has never heard of, so refusing to
+    // write it while rekordbox runs protects nothing and makes the write tests
+    // impossible to run on a machine where rekordbox is open.
+    if !is_real_install {
+        return None;
+    }
+    if test_mode {
         return Some("RB_LITE_TEST is set and this is the real library; tests must copy a fixture first");
     }
     if rekordbox_running {
@@ -219,6 +228,11 @@ impl Library {
         &self.conn
     }
 
+    /// Mutable access, for the transaction the writer runs each action in.
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     /// Live (not soft-deleted) track count.
     pub fn live_track_count(&self) -> Result<u32> {
         let n: i64 = self.conn.query_row(
@@ -264,9 +278,16 @@ mod tests {
         // Guards the rule that a test can never write to the user's library.
         // Expressed against the pure predicate so the test needs no global env
         // mutation (which is `unsafe` in edition 2024 and racy across threads).
+        // The real library, protected by both rules.
         assert!(write_refusal_reason(true, true, false).is_some());
         assert!(write_refusal_reason(true, false, true).is_some());
-        assert!(write_refusal_reason(false, true, false).is_none());
+        assert!(write_refusal_reason(true, true, true).is_some());
         assert!(write_refusal_reason(true, false, false).is_none());
+        // A fixture is a different file: neither rule applies to it, including
+        // while rekordbox is running, which is how the write tests can run at
+        // all on a machine with rekordbox open.
+        assert!(write_refusal_reason(false, true, false).is_none());
+        assert!(write_refusal_reason(false, false, true).is_none());
+        assert!(write_refusal_reason(false, true, true).is_none());
     }
 }
