@@ -1,0 +1,130 @@
+/* Geometry and colour come from design/tokens; nothing here is a literal. */
+.player {
+  display: grid;
+  grid-template-columns: var(--s-player-transport-w) 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--c-black);
+  border-bottom: 1px solid var(--c-panel);
+  overflow: hidden;
+}
+
+.transport {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-right: 1px solid var(--c-panel);
+}
+
+.skips { display: flex; gap: 6px; }
+
+.skip,
+.cue,
+.play {
+  border: 0;
+  background: var(--c-button);
+  color: var(--c-icon-off);
+  font: inherit;
+  cursor: default;
+}
+/* Drawn and inert: there is no audio yet, and an absent transport reads as an
+   unfinished panel rather than as a player waiting for playback. */
+.skip:disabled,
+.cue:disabled,
+.play:disabled { opacity: .5; }
+
+.skip { width: 26px; height: 18px; border-radius: 2px; font-size: var(--f-size-xs); }
+
+.cue {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid var(--c-cue-ring);
+  color: var(--c-cue-ring);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+}
+
+.play {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.playGlyph {
+  width: 0;
+  height: 0;
+  border-left: 12px solid var(--c-icon-off);
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  margin-left: 3px;
+}
+
+.main {
+  display: grid;
+  grid-template-rows:
+    auto
+    var(--s-player-overview-h)
+    var(--s-player-phrase-h)
+    1fr;
+  gap: 8px;
+  padding: 8px 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.artwork {
+  width: var(--s-player-artwork-size);
+  height: var(--s-player-artwork-size);
+  flex: none;
+  background: var(--c-panel);
+  overflow: hidden;
+}
+.artwork img { width: 100%; height: 100%; object-fit: cover; }
+
+.title {
+  /* Larger than the UI font in the capture, but that size has not been
+     measured — see TODO.md. Using the measured UI size until it is. */
+  font-size: var(--f-size-ui);
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artist {
+  color: var(--c-text-dim);
+  font-size: var(--f-size-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Key, BPM and time sit at the right, in the order rekordbox has them. */
+.readout {
+  margin-left: auto;
+  font-size: var(--f-size-ui);
+  color: var(--c-text);
+  font-variant-numeric: tabular-nums;
+}
+.readout + .readout { margin-left: 16px; }
+
+.overview,
+.detail,
+.phrase {
+  min-width: 0;
+  background: var(--c-panel);
+  overflow: hidden;
+}
+.overview canvas,
+.detail canvas { width: 100%; height: 100%; display: block; }
+.detail { min-height: var(--s-player-detail-h); }

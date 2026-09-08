@@ -30,19 +30,25 @@
   --c-phrase-chorus: #13AA02;
   --c-phrase-down: #9B732D;
   --c-phrase-outro: #5087C3;
+  --c-cue-ring: #EDB751; /* CUE button ring, modal colour over the stroke in playlist-player@2x.png */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
   --s-browser-head-h: 23px;
   --s-top-bar-h: 30px;
   --s-title-bar-h: 28px;
-  --s-player-h: 275px;
+  --s-player-h: 231px; /* player spans y 55..286 in the capture, between the top bar and the tree */
   --s-status-bar-h: 30px;
   --s-bottom-bar-h: 72px;
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
   --s-rail-w: 36px;
   --s-right-rail-w: 24px;
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
+  --s-player-transport-w: 80px; /* left transport column; gutter at x 80..86 */
+  --s-player-overview-h: 14px; /* measured from playlist-player@2x.png by saturation banding */
+  --s-player-phrase-h: 14px; /* measured from playlist-player@2x.png by saturation banding */
+  --s-player-detail-h: 68px; /* measured from playlist-player@2x.png by saturation banding */
+  --s-player-artwork-size: 44px; /* artwork thumbnail beside the title */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

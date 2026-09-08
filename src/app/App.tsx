@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { LibrarySummary, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import type { LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { TrackTable } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
@@ -16,6 +16,7 @@ import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { useColumns } from "@/store/useColumns";
+import { Player } from "@/views/player/Player";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -46,6 +47,9 @@ export function App() {
     descending: false,
   });
   const [selectedCount, setSelectedCount] = useState(0);
+  // The row the player is showing. Set by the browser as the selection moves,
+  // so the player reflects what is highlighted rather than nothing.
+  const [playerTrack, setPlayerTrack] = useState<RowDto | null>(null);
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -174,7 +178,7 @@ export function App() {
   return (
     <div className={styles.window}>
       <TopBar clock={clock} />
-      <section className={styles.player} aria-label="Preview player" />
+      <Player track={playerTrack} />
       <div
         className={styles.body}
         ref={bodyRef}
@@ -195,6 +199,7 @@ export function App() {
           spec={spec}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
+          onFocusedRow={setPlayerTrack}
           title={selectedNode?.name ?? "Collection"}
           query={query}
           onQueryChange={setQuery}

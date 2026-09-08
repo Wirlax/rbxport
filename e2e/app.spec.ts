@@ -374,3 +374,26 @@ test("a source with nothing in it is dimmed rather than hidden", async ({ page }
   await expect(devices).toBeVisible();
   await expect(devices).toHaveAttribute("data-empty", "true");
 });
+
+test("the player shows the track that was clicked", async ({ page }) => {
+  await page.goto("/");
+  const title = page.getByTestId("player-title");
+  await expect(title).toHaveText("No track loaded");
+
+  const firstTitle = page.locator('[role="gridcell"][data-col="title"]').first();
+  const text = await firstTitle.innerText();
+  await firstTitle.click();
+
+  await expect(title).toHaveText(text);
+});
+
+test("the player draws the transport even though there is no audio yet", async ({ page }) => {
+  // Drawn and inert reads as a player waiting for playback; absent reads as an
+  // unfinished panel.
+  await page.goto("/");
+  const player = page.getByRole("region", { name: "Preview player" });
+  await expect(player.getByRole("button", { name: "Play" })).toBeDisabled();
+  await expect(player.getByRole("button", { name: "Cue" })).toBeDisabled();
+  await expect(page.getByTestId("player-overview")).toBeVisible();
+  await expect(page.getByTestId("player-detail")).toBeVisible();
+});

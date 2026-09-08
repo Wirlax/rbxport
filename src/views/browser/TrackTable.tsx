@@ -185,6 +185,8 @@ export interface TrackTableProps {
   onColumnToggle: (key: ColumnKey) => void;
   onColumnAutoSize: (key: ColumnKey) => void;
   onColumnAutoSizeAll: () => void;
+  /** The row the player should show, as the selection moves. */
+  onFocusedRow?: (row: RowDto | null) => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
 }
@@ -192,7 +194,7 @@ export interface TrackTableProps {
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll,
+  onColumnAutoSizeAll, onFocusedRow,
 }: TrackTableProps) {
   const view = useTrackView(spec);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -265,6 +267,9 @@ export function TrackTable({
 
   const handleSelect = useCallback(
     (index: number, id: string, e: React.MouseEvent) => {
+      // The player follows the row just clicked, whatever the modifier does to
+      // the rest of the selection.
+      onFocusedRow?.(view.rowAt(index) ?? null);
       const modifier = modifierFor(e);
       if (modifier === "range" && selection.anchorIndex !== null) {
         const anchor = selection.anchorIndex;
@@ -275,7 +280,7 @@ export function TrackTable({
       }
       setSelection((s) => applyClick(s, { id, index }, modifier));
     },
-    [selection.anchorIndex, view],
+    [selection.anchorIndex, view, onFocusedRow],
   );
 
   useEffect(() => {
