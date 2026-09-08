@@ -150,6 +150,26 @@ test("each transport control sits where the capture measures it", async ({ page 
   }
 });
 
+test("the pad row is built to the sizes the capture measures", async ({ page }) => {
+  const player = page.getByRole("region", { name: "Preview player" });
+  // Two stacked tabs, 80x24pt, filling the 48pt row between them.
+  for (const name of ["CUE/LOOP", "GRID"]) {
+    const box = await player.getByRole("tab", { name }).boundingBox();
+    expect(box?.width, name).toBe(await token(page, "--s-pad-tab-w"));
+    expect(box?.height, name).toBe(await token(page, "--s-pad-tab-h"));
+  }
+
+  // A pad is a dark well with a small bright square inside it when a cue is
+  // set — not a filled button, which is what it was.
+  const pad = player.getByRole("button", { name: "Hot cue A", exact: true });
+  const padBox = await pad.boundingBox();
+  expect(padBox?.width).toBe(await token(page, "--s-pad-cue-w"));
+  expect(padBox?.height).toBe(await token(page, "--s-pad-cue-h"));
+  const inner = await pad.locator("span").boundingBox();
+  expect(inner?.height).toBe(await token(page, "--s-pad-cue-inner"));
+  expect(inner?.height).toBeLessThan(padBox?.height ?? 0);
+});
+
 test("the player carries the controls a deck has", async ({ page }) => {
   const player = page.getByRole("region", { name: "Preview player" });
   for (const name of [
@@ -161,9 +181,9 @@ test("the player carries the controls a deck has", async ({ page }) => {
   ]) {
     await expect(player.getByRole("button", { name, exact: true })).toBeVisible();
   }
-  // The pad modes, the memory transport and the cue-list tabs.
-  await expect(player.getByRole("button", { name: "CUE/LOOP" })).toBeVisible();
-  await expect(player.getByRole("button", { name: "GRID" })).toBeVisible();
+  // The pad modes are stacked tabs, and the cue-list has its own three.
+  await expect(player.getByRole("tab", { name: "CUE/LOOP" })).toBeVisible();
+  await expect(player.getByRole("tab", { name: "GRID" })).toBeVisible();
   await expect(player.getByRole("group", { name: "Cue mode" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "MEMORY" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "HOT CUE" })).toBeVisible();

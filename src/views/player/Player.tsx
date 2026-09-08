@@ -416,48 +416,63 @@ export const Player = memo(function Player({ track }: PlayerProps) {
         </div>
 
         <div className={styles.pads}>
-          <div className={styles.modes}>
-            <button type="button" className={styles.mode} data-on aria-pressed>CUE/LOOP</button>
-            <button type="button" className={styles.mode} aria-pressed={false}>GRID</button>
+          {/*
+            Two stacked tabs, not a pair of pills. The selected one takes the
+            row's own colour and the other is cut out in black, which is what
+            the capture shows and the opposite of the usual convention.
+          */}
+          <div className={styles.modes} role="tablist" aria-label="Pad mode">
+            <button type="button" role="tab" aria-selected className={styles.mode} data-on>
+              CUE/LOOP
+            </button>
+            <button type="button" role="tab" aria-selected={false} className={styles.mode}>
+              GRID
+            </button>
           </div>
-          <div className={styles.hotCues} aria-label="Hot cues">
-            {PADS.map((letter) => {
-              const set = cues.some((cue) => !cue.memory && cue.letter === letter);
-              return (
-                <button
-                  key={letter}
-                  type="button"
-                  className={styles.pad}
-                  data-set={set || undefined}
-                  aria-label={`Hot cue ${letter}`}
-                  aria-pressed={set}
-                  onClick={() => {
-                    const cue = cues.find((c) => !c.memory && c.letter === letter);
-                    if (cue) playback.seek(cue.positionMs / 1000);
-                  }}
-                >
-                  {letter}
-                </button>
-              );
-            })}
+
+          <div className={styles.padCluster}>
+            <div className={styles.hotCues} aria-label="Hot cues">
+              {PADS.map((letter) => {
+                const set = cues.some((cue) => !cue.memory && cue.letter === letter);
+                return (
+                  <button
+                    key={letter}
+                    type="button"
+                    className={styles.pad}
+                    data-set={set || undefined}
+                    aria-label={`Hot cue ${letter}`}
+                    aria-pressed={set}
+                    onClick={() => {
+                      const cue = cues.find((c) => !c.memory && c.letter === letter);
+                      if (cue) playback.seek(cue.positionMs / 1000);
+                    }}
+                  >
+                    <span className={styles.padInner}>{letter}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className={styles.memory} aria-label="Memory cues">
+              <span className={styles.memoryLabel}>MEMORY</span>
+              <button type="button" className={styles.step} aria-label="Previous memory cue" disabled>◀</button>
+              <button type="button" className={styles.step} aria-label="Next memory cue" disabled>▶</button>
+              <button type="button" className={styles.step} aria-label="Delete memory cue" disabled>✕</button>
+            </div>
+
+            <div className={styles.auto} role="group" aria-label="Cue mode">
+              <button type="button" className={styles.chip} data-on aria-pressed>AU</button>
+              <button type="button" className={styles.chip} aria-pressed={false}>MA</button>
+            </div>
+
+            <div className={styles.page} aria-label="Pad page">
+              <button type="button" className={styles.step} aria-label="Previous page" disabled>‹</button>
+              <span className={styles.pageNumber}>2</span>
+              <button type="button" className={styles.step} aria-label="Next page" disabled>›</button>
+            </div>
           </div>
-          <div className={styles.memory} aria-label="Memory cues">
-            <span className={styles.memoryLabel}>MEMORY</span>
-            <button type="button" aria-label="Previous memory cue" disabled>◀</button>
-            <button type="button" aria-label="Next memory cue" disabled>▶</button>
-            <button type="button" aria-label="Delete memory cue" disabled>✕</button>
-          </div>
-          <div className={styles.auto} role="group" aria-label="Cue mode">
-            <button type="button" className={styles.mode} data-on aria-pressed>AU</button>
-            <button type="button" className={styles.mode} aria-pressed={false}>MA</button>
-          </div>
-          <div className={styles.page} aria-label="Pad page">
-            <button type="button" aria-label="Previous page" disabled>‹</button>
-            <span className={styles.pageNumber}>2</span>
-            <button type="button" aria-label="Next page" disabled>›</button>
-          </div>
-          <span className={styles.padSpacer} />
-          <button type="button" className={styles.quantise} aria-label="Quantize" data-on>Q</button>
+
+          <button type="button" className={styles.chip} aria-label="Quantize" data-on>Q</button>
           <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
         </div>
 
