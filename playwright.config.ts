@@ -21,10 +21,21 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
-  webServer: {
-    command: "pnpm exec vite --port 1420 --strictPort",
-    url: "http://localhost:1420",
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: "pnpm exec vite --port 1420 --strictPort",
+      url: "http://localhost:1420",
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+    {
+      // The built assets, which is what the shell actually ships. The dev
+      // server injects inline scripts of its own, so a policy tested against
+      // it would be testing Vite rather than the app.
+      command: "pnpm exec vite preview --port 1421 --strictPort --outDir dist",
+      url: "http://localhost:1421",
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+  ],
 });
