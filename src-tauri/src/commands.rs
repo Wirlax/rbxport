@@ -478,6 +478,9 @@ pub async fn export_playlist(
             let i = row as usize;
             let analysis = read_analysis(&share, library.analysis_path.get(i));
             tracks.push(rbl_export::SourceTrack {
+                // The content id is how a second export to the same stick
+                // recognises a track it has already written.
+                id: library.ids.get(i).copied().unwrap_or(0),
                 source_path: std::path::PathBuf::from(library.folder_path.get(i)),
                 title: library.title.get(i).to_owned(),
                 artist: library.artist_name(row).to_owned(),
@@ -518,6 +521,8 @@ pub async fn export_playlist(
             playlists: u32::try_from(report.playlists).unwrap_or(0),
             bytes_copied: report.bytes_copied,
             analysis_files: u32::try_from(report.analysis_files).unwrap_or(0),
+            reused: u32::try_from(report.reused).unwrap_or(0),
+            removed: u32::try_from(report.removed).unwrap_or(0),
             skipped: report.skipped,
             verified: check.parsed && check.tracks == report.tracks,
         })

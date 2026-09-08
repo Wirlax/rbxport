@@ -14,6 +14,8 @@ rbl-core = { path = "../rbl-core" }
 rbl-pdb = { path = "../rbl-pdb" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }
 rbl-anlz = { path = "../rbl-anlz" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

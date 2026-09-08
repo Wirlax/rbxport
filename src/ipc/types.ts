@@ -199,6 +199,10 @@ export interface ExportReport {
   playlists: number;
   bytesCopied: number;
   analysisFiles: number;
+  /** Tracks already on the stick, unchanged, that did not need copying again. */
+  reused: number;
+  /** Tracks taken off the stick because the playlist no longer holds them. */
+  removed: number;
   /** Tracks left out because their audio was missing or unreadable. */
   skipped: string[];
   /** Whether the export read back correctly with the independent parser. */

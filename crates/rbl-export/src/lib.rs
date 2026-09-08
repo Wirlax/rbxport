@@ -11,8 +11,12 @@
 //! Nothing here touches the user's library: it reads from an already-loaded
 //! index and writes only under the destination directory.
 
-use std::collections::BTreeMap;
+pub mod manifest;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+pub use manifest::{track_key, Manifest, ManifestTrack};
 
 use rbl_pdb::build::FileBuilder;
 use rbl_pdb::rows::{
@@ -42,6 +46,9 @@ const PAGE_SIZE: usize = 4096;
 /// One track to export.
 #[derive(Debug, Clone, Default)]
 pub struct SourceTrack {
+    /// `djmdContent.ID`, or 0 for a file that is not in the library. This is
+    /// how a sync recognises a track it has already written.
+    pub id: u64,
     /// Where the audio currently lives.
     pub source_path: PathBuf,
     pub title: String,
@@ -81,6 +88,12 @@ pub struct ExportReport {
     pub pdb_bytes: usize,
     /// Tracks skipped because their audio was missing or unreadable.
     pub skipped: Vec<String>,
+    /// Tracks whose audio was already on the stick, unchanged, and left alone.
+    pub reused: usize,
+    /// What not copying them saved.
+    pub bytes_reused: u64,
+    /// Tracks taken off the stick because the selection no longer holds them.
+    pub removed: usize,
     /// Whether `exportLibrary.db` was written.
     pub one_library: bool,
 }
@@ -148,7 +161,135 @@ impl Intern {
     }
 }
 
+/// Where one track's files land on the stick.
+///
+/// Derived from the track and its export id alone, so the same track lands in
+/// the same place on every sync and a second export can tell "already there"
+/// from "moved".
+struct Layout {
+    /// Relative to the stick root, with the leading slash a pdb row carries.
+    audio: String,
+    /// The analysis directory, relative to the stick root.
+    anlz_dir: String,
+    file_name: String,
+}
+
+fn layout(track: &SourceTrack, export_id: u32) -> Layout {
+    let on_disk = track
+        .source_path
+        .file_name()
+        .map_or_else(|| format!("track-{export_id}.mp3"), |n| n.to_string_lossy().into_owned());
+    let file_name = fat_safe(&on_disk);
+    let artist_dir = fat_safe(if track.artist.is_empty() { "UnknownArtist" } else { &track.artist });
+    let album_dir = fat_safe(if track.album.is_empty() { "UnknownAlbum" } else { &track.album });
+    Layout {
+        audio: format!("/Contents/{artist_dir}/{album_dir}/{file_name}"),
+        // The two levels are how rekordbox spreads analysis across the tree
+        // rather than putting a quarter of a million files in one directory.
+        anlz_dir: format!("/PIONEER/USBANLZ/P{:03}/{export_id:08X}", export_id / 1000),
+        file_name,
+    }
+}
+
+/// Gives every track the id it had on this stick last time, and a fresh one
+/// otherwise.
+///
+/// Ids must not shift between syncs: a deck caches artwork and waveforms
+/// against them, and every playlist entry names one. Reassigning by position
+/// would silently repoint half the stick after a single track was removed.
+fn assign_ids(tracks: &[SourceTrack], previous: Option<&Manifest>) -> Vec<u32> {
+    let mut known: BTreeMap<String, u32> = BTreeMap::new();
+    let mut used: BTreeSet<u32> = BTreeSet::new();
+    if let Some(manifest) = previous {
+        for entry in &manifest.tracks {
+            known.insert(entry.key(), entry.export_id);
+            used.insert(entry.export_id);
+        }
+    }
+
+    let mut ids = Vec::with_capacity(tracks.len());
+    let mut next: u32 = 1;
+    for track in tracks {
+        let key = track_key(track.id, &track.source_path.to_string_lossy());
+        let id = known.get(&key).copied().unwrap_or_else(|| {
+            while used.contains(&next) {
+                next = next.saturating_add(1);
+            }
+            next
+        });
+        used.insert(id);
+        // The same track listed twice keeps one id rather than taking two.
+        known.insert(key, id);
+        ids.push(id);
+    }
+    ids
+}
+
+/// Resolves a stick-relative path against the destination.
+fn under(destination: &Path, relative: &str) -> PathBuf {
+    destination.join(relative.trim_start_matches('/'))
+}
+
+/// The source's size and modification time, which together decide whether a
+/// copy can be skipped.
+fn source_stamp(meta: &std::fs::Metadata) -> (u64, i64) {
+    // Nanoseconds, not seconds: a re-encode that happens to land on the same
+    // byte count within the same second would otherwise read as unchanged.
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| i64::try_from(d.as_nanos()).ok())
+        .unwrap_or(0);
+    (meta.len(), modified)
+}
+
+/// Whether two paths name the same file on disk.
+///
+/// A stick is FAT32 and a Mac's disk is case-insensitive by default, so
+/// renaming an artist from TRIODE to Triode changes the path we write without
+/// changing the file. Deleting "the old path" afterwards would delete the copy
+/// just made, and the stick would name audio that is no longer there.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Removes something the export no longer references, and any directory it
+/// leaves empty behind it.
+///
+/// Failures are ignored on purpose: a file that would not delete leaves the
+/// stick untidy, and failing the whole export over it would be worse.
+fn remove_under(destination: &Path, relative: &str, directory: bool) {
+    if relative.is_empty() {
+        return;
+    }
+    let path = under(destination, relative);
+    if directory {
+        let _ = std::fs::remove_dir_all(&path);
+    } else {
+        let _ = std::fs::remove_file(&path);
+    }
+    let mut current = path.parent().map(Path::to_path_buf);
+    while let Some(dir) = current {
+        // Stop at the stick root, and stop as soon as a directory still holds
+        // something — `remove_dir` refuses a non-empty one, which is the test.
+        if dir == destination || !dir.starts_with(destination) || std::fs::remove_dir(&dir).is_err() {
+            break;
+        }
+        current = dir.parent().map(Path::to_path_buf);
+    }
+}
+
 /// Writes an export into `destination`.
+///
+/// Exporting to a stick that already holds one of ours is a sync, not a
+/// rewrite: the manifest left by the previous run says what is already there,
+/// and only what changed is copied. Tracks that have left the selection are
+/// removed. Without a manifest — a fresh stick, or one rekordbox wrote —
+/// everything is written.
 #[allow(clippy::too_many_lines, reason = "one linear pipeline; splitting it would hide the order writes happen in")]
 pub fn export(
     destination: &Path,
@@ -169,6 +310,15 @@ pub fn export(
     std::fs::create_dir_all(&anlz_root)?;
     std::fs::create_dir_all(&db_dir)?;
 
+    let previous = Manifest::load(destination);
+    let ids = assign_ids(tracks, previous.as_ref());
+    // Entries are taken out as they are matched; whatever is left at the end
+    // is what the selection no longer holds.
+    let mut stale: BTreeMap<String, &ManifestTrack> = previous
+        .as_ref()
+        .map(|m| m.tracks.iter().map(|entry| (entry.key(), entry)).collect())
+        .unwrap_or_default();
+
     let mut report = ExportReport::default();
     let mut artists = Intern::default();
     let mut albums = Intern::default();
@@ -178,8 +328,10 @@ pub fn export(
 
     let mut track_rows: Vec<Vec<u8>> = Vec::with_capacity(tracks.len());
     let mut one_library_tracks: Vec<OneLibraryTrack> = Vec::with_capacity(tracks.len());
-    // Export ids are assigned here and are what playlists reference.
-    let mut export_ids: Vec<u32> = Vec::with_capacity(tracks.len());
+    // Indexed by position in `tracks`, so a skipped track does not shift the
+    // ones after it out from under the playlists.
+    let mut export_ids: Vec<Option<u32>> = vec![None; tracks.len()];
+    let mut recorded: Vec<ManifestTrack> = Vec::with_capacity(tracks.len());
     let interns = Interns {
         artists: &mut artists,
         albums: &mut albums,
@@ -189,51 +341,99 @@ pub fn export(
     };
 
     for (index, track) in tracks.iter().enumerate() {
-        let export_id = u32::try_from(index).unwrap_or(0) + 1;
+        let export_id = ids.get(index).copied().unwrap_or(0);
+        let place = layout(track, export_id);
+        let source = track.source_path.to_string_lossy().into_owned();
+        let key = track_key(track.id, &source);
 
-        let filename = track
-            .source_path
-            .file_name()
-            .map_or_else(|| format!("track-{export_id}.mp3"), |n| n.to_string_lossy().into_owned());
-        let safe_name = fat_safe(&filename);
-        let artist_dir = fat_safe(if track.artist.is_empty() { "UnknownArtist" } else { &track.artist });
-        let album_dir = fat_safe(if track.album.is_empty() { "UnknownAlbum" } else { &track.album });
-
-        let relative_audio = format!("/Contents/{artist_dir}/{album_dir}/{safe_name}");
-        let audio_dest = destination.join(relative_audio.trim_start_matches('/'));
-
-        // Copy the audio. A missing file skips the track rather than aborting
-        // an export that is otherwise fine.
-        if let Some(parent) = audio_dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        match std::fs::copy(&track.source_path, &audio_dest) {
-            Ok(bytes) => report.bytes_copied += bytes,
+        // Read the source before claiming the previous entry: a track whose
+        // audio has gone leaves its entry in `stale`, so the copy on the stick
+        // is removed rather than orphaned by databases that no longer name it.
+        let (size, modified) = match std::fs::metadata(&track.source_path) {
+            Ok(meta) => source_stamp(&meta),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 report.skipped.push(track.title.clone());
                 continue;
             }
             Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
             Err(e) => return Err(e.into()),
-        }
+        };
 
-        // Analysis lives in a directory pair derived from the export id, which
-        // is how rekordbox spreads files across the tree.
-        let bucket = format!("P{:03}", export_id / 1000);
-        let leaf = format!("{export_id:08X}");
-        let anlz_dir = anlz_root.join(&bucket).join(&leaf);
-        let mut analyze_path = String::new();
-        if !track.analysis.is_empty() {
-            std::fs::create_dir_all(&anlz_dir)?;
-            for (extension, bytes) in &track.analysis {
-                let name = format!("ANLZ0000.{extension}");
-                std::fs::write(anlz_dir.join(&name), bytes)?;
-                report.analysis_files += 1;
-                if extension.eq_ignore_ascii_case("DAT") {
-                    analyze_path = format!("/PIONEER/USBANLZ/{bucket}/{leaf}/{name}");
+        let carried = stale.remove(&key);
+        let audio_dest = under(destination, &place.audio);
+        // Unchanged means: same source bytes by size and time, same place on
+        // the stick, and still actually there.
+        let unchanged = carried.is_some_and(|c| {
+            c.audio == place.audio && c.size == size && c.modified == modified
+        }) && audio_dest.exists();
+
+        if unchanged {
+            report.reused += 1;
+            report.bytes_reused += size;
+        } else {
+            if let Some(parent) = audio_dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            match std::fs::copy(&track.source_path, &audio_dest) {
+                Ok(bytes) => report.bytes_copied += bytes,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    report.skipped.push(track.title.clone());
+                    continue;
                 }
+                Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
+                Err(e) => return Err(e.into()),
             }
         }
+
+        // Renaming an artist moves the file; the copy under the old name would
+        // otherwise sit on the stick forever, unreferenced.
+        if let Some(c) = carried {
+            if c.audio != place.audio && !same_file(&under(destination, &c.audio), &audio_dest) {
+                remove_under(destination, &c.audio, false);
+            }
+            if c.anlz_dir != place.anlz_dir {
+                remove_under(destination, &c.anlz_dir, true);
+            }
+        }
+
+        let mut analysis_hash: u64 = 0;
+        for (extension, bytes) in &track.analysis {
+            analysis_hash = analysis_hash.rotate_left(7)
+                ^ manifest::hash(extension.as_bytes())
+                ^ manifest::hash(bytes);
+        }
+        let anlz_dir = under(destination, &place.anlz_dir);
+        let analysis_current = carried
+            .is_some_and(|c| c.anlz_dir == place.anlz_dir && c.analysis == analysis_hash)
+            && track
+                .analysis
+                .iter()
+                .all(|(extension, _)| anlz_dir.join(format!("ANLZ0000.{extension}")).exists());
+        if !track.analysis.is_empty() && !analysis_current {
+            std::fs::create_dir_all(&anlz_dir)?;
+            for (extension, bytes) in &track.analysis {
+                std::fs::write(anlz_dir.join(format!("ANLZ0000.{extension}")), bytes)?;
+                report.analysis_files += 1;
+            }
+        }
+        // The path the databases carry, whether or not the file was written
+        // this run.
+        let analyze_path = if track.analysis.iter().any(|(e, _)| e.eq_ignore_ascii_case("DAT")) {
+            format!("{}/ANLZ0000.DAT", place.anlz_dir)
+        } else {
+            String::new()
+        };
+
+        recorded.push(ManifestTrack {
+            export_id,
+            library_id: track.id,
+            source,
+            audio: place.audio.clone(),
+            anlz_dir: if track.analysis.is_empty() { String::new() } else { place.anlz_dir.clone() },
+            size,
+            modified,
+            analysis: analysis_hash,
+        });
 
         // The same facts the pdb row carries, kept for exportLibrary.db.
         // Gathered here rather than re-derived later, so the two databases
@@ -252,8 +452,8 @@ pub fn export(
             rating: track.rating,
             comment: track.comment.clone(),
             date_added: track.date_added.clone(),
-            audio_path: relative_audio.clone(),
-            file_name: safe_name.clone(),
+            audio_path: place.audio.clone(),
+            file_name: place.file_name.clone(),
             analysis_path: analyze_path.clone(),
         });
 
@@ -271,19 +471,28 @@ pub fn export(
             year: track.year,
             bitrate: track.bitrate,
             sample_rate: track.sample_rate,
-            file_size: u32::try_from(report.bytes_copied.min(u64::from(u32::MAX))).unwrap_or(0),
+            file_size: u32::try_from(size.min(u64::from(u32::MAX))).unwrap_or(0),
             track_number: export_id,
             title: track.title.clone(),
-            filename: safe_name,
-            file_path: relative_audio,
+            filename: place.file_name,
+            file_path: place.audio,
             analyze_path,
             comment: track.comment.clone(),
             date_added: track.date_added.clone(),
             release_date: track.release_date.clone(),
             ..TrackInput::default()
         }));
-        export_ids.push(export_id);
+        if let Some(slot) = export_ids.get_mut(index) {
+            *slot = Some(export_id);
+        }
         report.tracks += 1;
+    }
+
+    // Whatever the previous export left that this one does not name.
+    for entry in stale.values() {
+        remove_under(destination, &entry.audio, false);
+        remove_under(destination, &entry.anlz_dir, true);
+        report.removed += 1;
     }
 
     // Playlists reference export ids, so they are built after the tracks.
@@ -298,13 +507,11 @@ pub fn export(
             false,
             &playlist.name,
         ));
-        for (position, &track_index) in playlist.track_indices.iter().enumerate() {
-            let Some(&export_id) = export_ids.get(track_index) else { continue };
-            entry_rows.push(playlist_entry_row(
-                u32::try_from(position).unwrap_or(0) + 1,
-                export_id,
-                playlist_id,
-            ));
+        let mut position: u32 = 0;
+        for &track_index in &playlist.track_indices {
+            let Some(Some(export_id)) = export_ids.get(track_index).copied() else { continue };
+            position += 1;
+            entry_rows.push(playlist_entry_row(position, export_id, playlist_id));
         }
         report.playlists += 1;
     }
@@ -335,6 +542,15 @@ pub fn export(
     write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids)?;
     report.one_library = true;
 
+    // Last, so a run that fails part way leaves the older record standing and
+    // the next attempt re-copies rather than trusting a half-written stick.
+    Manifest {
+        version: manifest::MANIFEST_VERSION,
+        written: rbl_core::time::now(),
+        tracks: recorded,
+    }
+    .save(destination)?;
+
     Ok(report)
 }
 
@@ -363,7 +579,7 @@ fn write_one_library(
     db_dir: &Path,
     tracks: &[OneLibraryTrack],
     playlists: &[SourcePlaylist],
-    export_ids: &[u32],
+    export_ids: &[Option<u32>],
 ) -> Result<()> {
     use rbl_onelibrary::build::{Builder, LookupTable, Track};
 
@@ -411,14 +627,12 @@ fn write_one_library(
         builder
             .add_playlist(playlist_id, &playlist.name, 0, i64::try_from(i).unwrap_or(0))
             .map_err(|e| one_library_error(&e))?;
-        for (position, &track_index) in playlist.track_indices.iter().enumerate() {
-            let Some(&export_id) = export_ids.get(track_index) else { continue };
+        let mut position: i64 = 0;
+        for &track_index in &playlist.track_indices {
+            let Some(Some(export_id)) = export_ids.get(track_index).copied() else { continue };
+            position += 1;
             builder
-                .add_to_playlist(
-                    playlist_id,
-                    i64::from(export_id),
-                    i64::try_from(position).unwrap_or(0) + 1,
-                )
+                .add_to_playlist(playlist_id, i64::from(export_id), position)
                 .map_err(|e| one_library_error(&e))?;
         }
     }

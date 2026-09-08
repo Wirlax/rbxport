@@ -15,6 +15,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
+import { exportSummary } from "@/lib/exportSummary";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
 import { Settings } from "@/views/settings/Settings";
@@ -307,11 +308,7 @@ export function App() {
           setDropNote(null);
           return;
         }
-        setDropNote(
-          report.verified
-            ? `Exported ${report.tracks} tracks to the stick, and read them back.`
-            : `Exported ${report.tracks} tracks, but the result did not read back.`,
-        );
+        setDropNote(exportSummary(node.name, report));
       } catch (e) {
         setDropNote(e instanceof Error ? e.message : "That export could not be written.");
       }

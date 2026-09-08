@@ -144,6 +144,10 @@ pub struct ExportReportDto {
     pub playlists: u32,
     pub bytes_copied: u64,
     pub analysis_files: u32,
+    /// Tracks already on the stick, unchanged, that did not need copying again.
+    pub reused: u32,
+    /// Tracks taken off the stick because the playlist no longer holds them.
+    pub removed: u32,
     /// Tracks left out because their audio was missing or unreadable.
     pub skipped: Vec<String>,
     /// Whether the export read back correctly with the independent parser.
