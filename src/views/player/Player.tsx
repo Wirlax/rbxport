@@ -771,14 +771,12 @@ export const Player = memo(function Player({
         <button
           type="button"
           className={styles.play}
+          data-on={playback.playing ? "" : undefined}
           aria-label={playback.playing ? "Pause" : "Play"}
           onClick={playback.toggle}
           disabled={playback.idle}
         >
-          <span
-            className={playback.playing ? styles.pauseGlyph : styles.playGlyph}
-            aria-hidden
-          />
+          <span className={styles.playGlyph} aria-hidden />
         </button>
       </div>
 

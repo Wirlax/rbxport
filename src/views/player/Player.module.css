@@ -108,10 +108,17 @@
   font-weight: 700;
 }
 
+/* The triangle stays a triangle and the colour carries the state: grey on a
+   resting ring, white on a lit one. Both sampled from a capture of the button
+   running rather than picked to look right. */
 .play {
   margin-top: 10.5px;
   border: 2px solid var(--c-play-ring);
-  color: var(--c-play-ring);
+  color: var(--c-icon-off);
+}
+.play[data-on] {
+  border-color: var(--c-play-ring-on);
+  color: var(--c-play-glyph-on);
 }
 
 .cue:disabled,
@@ -124,12 +131,6 @@
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   margin-left: 3px;
-}
-.pauseGlyph {
-  width: 10px;
-  height: 13px;
-  border-left: 3.5px solid currentColor;
-  border-right: 3.5px solid currentColor;
 }
 
 /* ------------------------------------------------------------------ deck */

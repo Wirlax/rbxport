@@ -1338,6 +1338,41 @@ test("the zoom controls float over the detail waveform rather than beside it", a
   expect(await page.getByTestId("player-bars").textContent()).toBe(before);
 });
 
+test("the play triangle is grey at rest and white on a lit ring", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const colours = async (name: string) => {
+    const button = page.getByRole("button", { name, exact: true });
+    return button.evaluate((el) => {
+      const glyph = el.querySelector("span") as HTMLElement;
+      return {
+        ring: getComputedStyle(el).borderTopColor,
+        // The triangle is a border on a zero-sized box, so it takes the
+        // button's colour through `currentColor`.
+        triangle: getComputedStyle(glyph).borderLeftColor,
+      };
+    });
+  };
+
+  // Stopped: the resting ring the capture measures, and a grey triangle.
+  expect(await colours("Play")).toEqual({
+    ring: "rgb(54, 100, 42)",
+    triangle: "rgb(160, 160, 160)",
+  });
+
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+
+  // Running: the ring lights and the triangle goes white. It stays a triangle
+  // — the colour is what says the deck is running.
+  expect(await colours("Pause")).toEqual({
+    ring: "rgb(96, 211, 48)",
+    triangle: "rgb(255, 255, 255)",
+  });
+});
+
 test("the wheel over a waveform zooms it", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

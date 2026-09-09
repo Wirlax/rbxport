@@ -52,7 +52,9 @@
   --c-phrase-verse: #2F6FBF; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: VERSE — not present in the captured track, unmeasured */
   --c-phrase-bridge: #7A4FA8; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: BRIDGE — not present in the captured track, unmeasured */
   --c-vocal: #3FA9F5; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: the vocal strip above the overview */
-  --c-play-ring: #36642A; /* sampled from the PLAY circle's stroke in a 2x capture of rekordbox 7.2.11 */
+  --c-play-ring: #36642A; /* sampled from the PLAY circle's stroke in a 2x capture of rekordbox 7.2.11, deck stopped */
+  --c-play-ring-on: #60D330; /* sampled from a capture of the PLAY button with the deck running: the ring lights from the resting green */
+  --c-play-glyph-on: #FFFFFF; /* sampled from the same capture: the triangle is a flat 255,255,255 while the deck runs, against #A0A0A0 at rest */
   --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
   --c-cue-memory: #9AA0A6; /* UNMEASURED — the line down the detail waveform. The head above it is measured; only the line is not */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
