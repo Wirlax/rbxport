@@ -5,7 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Cue, DeckEvent, Device, ExportReport, Phrase, ImportReport, LibrarySummary, LinkPeer,
+  AnalysisResult, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport, Phrase, ImportReport,
+  LibrarySummary, LinkPeer,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
 } from "./types";
@@ -117,6 +118,7 @@ async function realBackend(): Promise<Backend> {
     deckScrubBegin: (deck) => invoke<void>("deck_scrub_begin", { deck }),
     deckScrubTo: (deck, positionMs) => invoke<void>("deck_scrub_to", { deck, positionMs }),
     deckScrubEnd: (deck) => invoke<void>("deck_scrub_end", { deck }),
+    appDiagnostics: () => invoke<Diagnostics>("app_diagnostics"),
     deckState: () => invoke<Tick>("deck_state"),
     onDeckTick: (listener) => subscribe<Tick>("deck:tick", listener),
     onDeckEvent: (listener) => {

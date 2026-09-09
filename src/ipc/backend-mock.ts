@@ -599,6 +599,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    // A browser cannot see its own process. Zeroes would read as an app that
+    // costs nothing, so every figure the platform will not give is null.
+    appDiagnostics: () =>
+      wait({ cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
+
     deckState: () => wait(tick()),
     onDeckTick: (listener) => {
       deckTickListeners.add(listener);

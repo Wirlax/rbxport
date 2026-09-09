@@ -37,6 +37,8 @@ rbl-deck = { path = "../crates/rbl-deck" }
 rbl-prolink = { path = "../crates/rbl-prolink" }
 rbl-export = { path = "../crates/rbl-export" }
 rbl-devices = { path = "../crates/rbl-devices" }
+# The diagnostics readout in the title bar: this process's CPU and memory.
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"
 dirs = "5"
 

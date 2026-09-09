@@ -21,6 +21,12 @@ import { resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
+import {
+  formatCount,
+  formatMemory,
+  formatPercent,
+  useDiagnostics,
+} from "@/store/useDiagnostics";
 import { deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
@@ -100,6 +106,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
+  const cost = useDiagnostics(true);
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {
@@ -521,7 +528,23 @@ export function App() {
         onMouseDown={startWindowDrag}
         onDoubleClick={toggleWindowMaximise}
       >
-        rekordbox-lite
+        {/* What the app is costing, in the corner. A dash is a figure the
+            platform will not give rather than a zero, which would be a claim. */}
+        <div className={styles.cost} data-testid="app-cost">
+          <span title="Processor, as a percentage of one core">
+            CPU {formatPercent(cost.cpu)}
+          </span>
+          <span title="macOS accounts GPU per process only to root, so this cannot be read">
+            GPU {formatPercent(cost.gpu)}
+          </span>
+          <span title="Resident memory">MEM {formatMemory(cost.memoryMb)}</span>
+          <span title="Threads in the process">THR {formatCount(cost.threads)}</span>
+          <span title="Open file descriptors">FD {formatCount(cost.openFiles)}</span>
+          <span title="Frames a second, timed in the window">
+            FPS {formatCount(cost.fps)}
+          </span>
+        </div>
+        <span className={styles.appName}>rekordbox-lite</span>
       </div>
       <TopBar
         clock={clock}

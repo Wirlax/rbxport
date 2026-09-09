@@ -2,6 +2,7 @@
 //! a thin adapter so the backend stays testable without a webview.
 
 mod commands;
+mod diagnostics;
 mod link;
 pub mod menu;
 mod player;
@@ -195,6 +196,7 @@ pub fn run() {
             commands::deck_scrub_begin,
             commands::deck_scrub_to,
             commands::deck_scrub_end,
+            commands::app_diagnostics,
             commands::deck_state,
             commands::track_cues,
             commands::track_phrases,

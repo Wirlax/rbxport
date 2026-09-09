@@ -1237,16 +1237,27 @@ test("the title bar carries the name in the middle of the window", async ({ page
   // window uses an overlay title bar so this one can sit in the middle.
   await page.goto("/");
   const bar = page.getByTestId("title-bar");
-  await expect(bar).toHaveText("rekordbox-lite");
+  const name = bar.locator('[class*="appName"]');
+  await expect(name).toHaveText("rekordbox-lite");
   const strip = await bar.boundingBox();
-  const text = await bar.evaluate((el) => {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const box = range.getBoundingClientRect();
-    return { x: box.x, width: box.width };
-  });
+  const text = await name.boundingBox();
   const centre = (strip?.x ?? 0) + (strip?.width ?? 0) / 2;
-  expect(text.x + text.width / 2).toBeCloseTo(centre, 0);
+  expect((text?.x ?? 0) + (text?.width ?? 0) / 2).toBeCloseTo(centre, 0);
+});
+
+test("the title bar reads out what the app is costing", async ({ page }) => {
+  // A browser cannot see its own process, so what this pins is that every
+  // figure is labelled and that an unavailable one is a dash rather than a
+  // zero — a zero would claim the app uses no memory and no GPU.
+  await page.goto("/");
+  const cost = page.getByTestId("app-cost");
+  for (const label of ["CPU", "GPU", "MEM", "THR", "FD", "FPS"]) {
+    await expect(cost).toContainText(label);
+  }
+  await expect(cost).toContainText("GPU —");
+  await expect(cost).toContainText("MEM —");
+  // FPS is measured in the window itself, so it arrives even here.
+  await expect(cost).not.toContainText("FPS —");
 });
 
 test("clicking the artwork ejects the track from the deck", async ({ page }) => {

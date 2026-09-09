@@ -77,6 +77,22 @@ export interface LibrarySummary {
   dbVersion: number | null;
 }
 
+/** What the app is costing, for the title bar's readout. */
+export interface Diagnostics {
+  /** Percent of one core, as the OS accounts it. Over 100 on several cores. */
+  cpu: number;
+  memoryMb: number;
+  /** `null` where the platform will not say. */
+  threads: number | null;
+  openFiles: number | null;
+  /**
+   * Always `null` on macOS: per-process GPU is behind `powermetrics`, which
+   * needs root. Reported rather than dropped, so the readout can say it is
+   * unavailable instead of implying the app uses none.
+   */
+  gpu: number | null;
+}
+
 /** Every command returns this shape on failure. */
 export interface AppErrorDto {
   kind: "readOnly" | "notFound" | "malformed" | "cancelled" | "internal";
@@ -253,6 +269,9 @@ export interface Backend {
   onDeckTick(listener: (tick: Tick) => void): () => void;
   /** A deck has finished loading a track, or could not. */
   onDeckEvent(listener: (event: DeckEvent) => void): () => void;
+
+  /** A reading of this process, sampled on demand. */
+  appDiagnostics(): Promise<Diagnostics>;
 
   missingTracks(limit: number): Promise<MissingTracks>;
 

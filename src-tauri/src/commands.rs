@@ -742,6 +742,17 @@ pub async fn deck_seek(
     Ok(())
 }
 
+/// What the app is costing right now, for the title bar's readout.
+///
+/// Sampled on demand: nothing keeps this up to date in the background, so a
+/// window with the readout hidden pays nothing for it.
+#[tauri::command]
+pub async fn app_diagnostics() -> AppResult<crate::diagnostics::Diagnostics> {
+    // The sampler is kept between calls: CPU is a difference between two
+    // readings, and a fresh `System` every second would always report zero.
+    blocking("app_diagnostics", || Ok(crate::diagnostics::sample_shared())).await
+}
+
 /// Starts a drag on a deck.
 ///
 /// Audio follows the pointer from here until `deck_scrub_end`: the deck reads

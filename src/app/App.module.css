@@ -22,6 +22,21 @@
   user-select: none;
 }
 
+/* The cost readout, in the corner past the traffic lights. Absolute, so the
+   name stays on the window's own centre rather than the centre of whatever is
+   left of the strip. */
+.cost {
+  position: absolute;
+  left: 82px;
+  display: flex;
+  gap: 12px;
+  color: var(--c-text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.appName { color: var(--c-text-dim); }
+
 .window {
   display: grid;
   /* One row for the decks, sized to what is in it: the layout switch draws one
