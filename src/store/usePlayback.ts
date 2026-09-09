@@ -396,7 +396,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         void (async () => {
           try {
             const backend = await getBackend();
-            if (scrubbing.current) await backend.deckScrubTo(DECK, Math.round(target * 1000));
+            // Not rounded: the engine works the head's speed out from how far
+            // this moved since the last one, and a whole millisecond is 44
+            // frames — enough to quantise a slow drag's speed into a stall and
+            // a lurch.
+            if (scrubbing.current) await backend.deckScrubTo(DECK, target * 1000);
             else await backend.deckSeek(DECK, Math.round(target * 1000));
           } catch (failure) {
             setError(reasonFrom(failure));

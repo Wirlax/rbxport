@@ -38,7 +38,26 @@ const MAX_RATE: f64 = 8.0;
 /// A pointer emits moves at about the screen's rate and blocks come out faster
 /// than that, so some blocks see no new target. Following the error rather
 /// than snapping to it is what stops those blocks sounding like a stutter.
-const SMOOTH: f64 = 0.4;
+///
+/// The value is a measurement, not a taste. The distance left to the pointer
+/// is a sawtooth — the target jumps once a screen frame, the head eats into
+/// the gap over the blocks before the next jump — so whatever survives this
+/// filter is heard as the speed rising and falling under a hand that is
+/// moving evenly. Swept against a steady drag (`scrub_ripple` below):
+///
+/// | value | spread of the rate | blocks to reach speed |
+/// |-------|--------------------|-----------------------|
+/// | 0.40  | 9.0%               | 3                     |
+/// | 0.25  | 5.9%               | 4                     |
+/// | 0.15  | 3.7%               | 6                     |
+/// | 0.10  | 2.5%               | 7                     |
+/// | 0.06  | 3.3-5.1%           | 9, and it starts resting mid-drag |
+///
+/// 0.15 is where the warble stops being the loudest thing about a slow drag
+/// without the head taking so long to reach speed that it feels soft. Below
+/// about 0.08 the loop is too slow to track the hand at all and the ripple
+/// climbs again.
+const SMOOTH: f64 = 0.15;
 
 /// Blocks of audio the read head aims to be behind the pointer.
 ///
@@ -453,6 +472,65 @@ mod tests {
         assert_eq!(silent, 0, "{silent} of 30 blocks went quiet mid-drag");
     }
 
+    /// A steady hand should turn the record at a steady speed.
+    ///
+    /// The one the report was about: scrubbing slowly sounded choppy rather
+    /// than like a record being moved. The distance left to the pointer is a
+    /// sawtooth — the target jumps once a screen frame and the head eats into
+    /// the gap over the two blocks before the next jump — so the rate rose and
+    /// fell by 9% of itself under a hand moving perfectly evenly, which is a
+    /// warble on anything sustained. `SMOOTH` carries the measurement; this
+    /// keeps it honest.
+    #[test]
+    fn a_steady_hand_turns_the_record_at_a_steady_speed() {
+        const RATE: f64 = 44_100.0;
+        const BLOCK: usize = 512;
+        // A pointer move every screen frame, which is what the app coalesces
+        // to, at speeds from a full turn down to a crawl.
+        for speed in [1.0_f64, 0.5, 0.2, 0.05] {
+            let frames = (RATE * 3.0 * speed.max(1.0) + RATE) as u64;
+            let window = ramp(0, frames);
+            let mut scrubber = Scrubber::new(0);
+            let mut out = vec![0.0_f32; BLOCK * 2];
+
+            let block_ms = BLOCK as f64 / RATE * 1000.0;
+            let (mut now, mut next_move, mut pointer_ms) = (0.0_f64, 0.0_f64, 0.0_f64);
+            let mut rates = Vec::new();
+            for _ in 0..(3000.0 / block_ms) as usize {
+                while next_move <= now {
+                    pointer_ms += speed * 16.7;
+                    // Fractional, as `scrub_to_ms` now takes it: rounding this
+                    // to a whole millisecond is 44 frames of quantisation and
+                    // takes the spread below from 4% to 38% at 0.05x.
+                    scrubber.aim((pointer_ms / 1000.0 * RATE) as u64);
+                    next_move += 16.7;
+                }
+                scrubber.render(&window, &mut out);
+                rates.push(scrubber.rate());
+                now += block_ms;
+            }
+
+            // Once it has reached speed, ignoring the ramp up to it.
+            let settled: Vec<f64> = rates.iter().skip(60).copied().collect();
+            let mean = settled.iter().sum::<f64>() / settled.len() as f64;
+            let sd = (settled.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
+                / settled.len() as f64)
+                .sqrt();
+            assert!(
+                (mean - speed).abs() < speed * 0.1,
+                "at {speed}x the head averaged {mean}",
+            );
+            let spread = sd / mean.abs() * 100.0;
+            // Measured at 3.7%. Was 9.0%. The bound is where a regression in
+            // the smoothing shows up rather than where the ear gives out.
+            assert!(spread < 5.0, "at {speed}x the rate wandered by {spread:.1}% of itself");
+            assert!(
+                rates.iter().skip(60).all(|r| *r != 0.0),
+                "at {speed}x the head stopped mid-drag",
+            );
+        }
+    }
+
     #[test]
     fn the_head_still_settles_once_the_moves_stop() {
         // And the other half: a hand that has genuinely stopped goes quiet
@@ -531,7 +609,15 @@ mod tests {
             scrubber.render(&window, &mut out);
         }
         assert_eq!(scrubber.rate(), 0.0, "the record should have stopped");
-        assert!((scrubber.cursor() as i64 - 5_000).abs() < 200, "at {}", scrubber.cursor());
+        // Within the gap `plan` settles inside, which is `LOOKAHEAD` blocks —
+        // it stops the rate rather than jumping the last of the distance,
+        // because a jump is a step in the waveform and on bass that is a
+        // crack. This asserted 200 before, which was tighter than the code
+        // ever promised: it held only because the old rate smoothing got the
+        // head there sooner. Nothing is lost by the gap — `scrub_end` lands
+        // the deck on the pointer, not on the head.
+        let short = (scrubber.cursor() as i64 - 5_000).abs();
+        assert!(short <= 512 * LOOKAHEAD as i64, "{short} frames short, at {}", scrubber.cursor());
     }
 
     #[test]

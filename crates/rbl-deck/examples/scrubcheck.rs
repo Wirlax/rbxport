@@ -118,7 +118,7 @@ fn main() {
         passes += 1;
         if passes % 12 < 8 {
             slow_at += 30;
-            engine.scrub_to_ms(rbl_deck::Deck::A, slow_at);
+            engine.scrub_to_ms(rbl_deck::Deck::A, slow_at as f64);
         }
         stream.extend_from_slice(&sink.pull(BUFFER));
         std::thread::sleep(period);
@@ -133,7 +133,7 @@ fn main() {
     let mut sounding_while_dragging = 0_u32;
     while start.elapsed() < Duration::from_millis(200) {
         at += 1_500;
-        engine.scrub_to_ms(rbl_deck::Deck::A, at);
+        engine.scrub_to_ms(rbl_deck::Deck::A, at as f64);
         if sink.pull(BUFFER).iter().any(|s| *s != 0.0) {
             sounding_while_dragging += 1;
         }

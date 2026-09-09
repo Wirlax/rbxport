@@ -1017,7 +1017,9 @@ pub async fn deck_scrub_begin(
 pub async fn deck_scrub_to(
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
-    position_ms: u64,
+    // Fractional: the head's speed comes from how far this moved since the
+    // last one, so rounding it to a millisecond quantises the speed.
+    position_ms: f64,
 ) -> AppResult<()> {
     if let Some(engine) = player.opened() {
         engine.scrub_to_ms(crate::player::deck_of(&deck), position_ms);
