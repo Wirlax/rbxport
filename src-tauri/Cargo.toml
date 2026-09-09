@@ -33,6 +33,7 @@ rbl-index = { path = "../crates/rbl-index" }
 rbl-anlz = { path = "../crates/rbl-anlz" }
 rbl-analysis = { path = "../crates/rbl-analysis" }
 rbl-audio = { path = "../crates/rbl-audio" }
+rbl-deck = { path = "../crates/rbl-deck" }
 rbl-prolink = { path = "../crates/rbl-prolink" }
 rbl-export = { path = "../crates/rbl-export" }
 rbl-devices = { path = "../crates/rbl-devices" }

@@ -665,6 +665,94 @@ pub async fn track_beats(
 /// Bytes one beat takes in that encoding: `u32` milliseconds, then its number.
 const BEAT_BYTES: usize = 5;
 
+/// Points a deck at a track and starts loading it.
+///
+/// Returns as soon as the engine has been told; the deck reports itself ready
+/// with a `deck:loaded` event, because opening a file means reading from a
+/// disk that may be asleep.
+#[tauri::command]
+pub async fn deck_load(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    track: String,
+) -> AppResult<()> {
+    let library = state.library()?;
+    let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
+        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+            .with_detail(format!("track {track}")));
+    };
+    let engine = player.engine(&app)?;
+    let which = crate::player::deck_of(&deck);
+    // The engine's own thread does the opening; this only hands it the path.
+    engine.load(which, &path);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn deck_unload(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.unload(crate::player::deck_of(&deck));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn deck_play(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.play(crate::player::deck_of(&deck));
+    // The tick only runs while something is playing, so play is what starts it.
+    crate::player::start_ticker(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn deck_pause(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.pause(crate::player::deck_of(&deck));
+    }
+    Ok(())
+}
+
+/// Moves a deck's playhead. Frame-exact, whatever the file's packet size.
+#[tauri::command]
+pub async fn deck_seek(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    position_ms: u64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.seek_ms(crate::player::deck_of(&deck), position_ms);
+        // So the interface sees where it landed even while paused, when no
+        // tick is running.
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
+/// Both decks now, for the interface to anchor itself when it starts up or
+/// comes back from a reload.
+#[tauri::command]
+pub async fn deck_state(
+    player: State<'_, Arc<crate::player::Player>>,
+) -> AppResult<crate::player::TickDto> {
+    Ok(player.opened().map_or_else(crate::player::TickDto::silent, |engine| {
+        crate::player::tick_of(&engine.snapshot())
+    }))
+}
+
 /// A track's cue points.
 ///
 /// Positions and kinds only. What colour rekordbox draws a cue is decided by

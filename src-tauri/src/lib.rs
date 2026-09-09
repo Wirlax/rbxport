@@ -4,6 +4,7 @@
 mod commands;
 mod link;
 pub mod menu;
+mod player;
 mod protocol;
 mod dto;
 mod error;
@@ -146,6 +147,7 @@ pub fn run() {
         // appear at the default size and jump.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Arc::new(AppState::new()))
+        .manage(Arc::new(crate::player::Player::default()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());
             app.set_menu(crate::menu::build(app.handle())?)?;
@@ -182,6 +184,15 @@ pub fn run() {
             commands::export_playlist,
             commands::list_devices,
             commands::track_beats,
+            // The decks. The audio device is not opened until one of these
+            // is called, so a window nobody has played anything in holds no
+            // device at all.
+            commands::deck_load,
+            commands::deck_unload,
+            commands::deck_play,
+            commands::deck_pause,
+            commands::deck_seek,
+            commands::deck_state,
             commands::track_cues,
             commands::track_phrases,
             commands::track_vocals,
