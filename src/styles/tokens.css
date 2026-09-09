@@ -78,7 +78,7 @@
   --s-player-gutter-h: 3px; /* capture: the pad bar ends at 335pt and the browser starts at 338pt */
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
   --s-player-right-w: 209px; /* measured from a 2x capture of rekordbox 7.2.11 running; memory/hotcue panel x 1711..1920pt */
-  --s-player-margin: 4px; /* black around the deck column, so it reads as a panel rather than as the whole strip */
+  --s-player-margin: 2px; /* black around the deck column, so it reads as a panel rather than as the whole strip */
   --s-player-inset: 12px; /* one inset for every row of the deck; the rows had 16 on the left, 12 on the right, and the detail none at all */
   --s-player-artwork-gap: 10px; /* between the sleeve and the overview strip beside it */
   --s-player-title-h: 21px; /* docs/screenshots at 2x: the player spans y 190..746 and the title row y 190..232 */
