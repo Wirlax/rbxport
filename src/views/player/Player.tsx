@@ -18,7 +18,7 @@ import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { artworkUrl } from "@/ipc/artwork";
-import { CutIcon, DiscIcon, LockIcon, MetronomeIcon } from "@/components/icons";
+import { CutIcon, DiscIcon, EjectIcon, LockIcon, MetronomeIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
@@ -737,6 +737,9 @@ export const Player = memo(function Player({
             ) : (
               <DiscIcon className={styles.disc} />
             )}
+            {/* Shown on hover, over a scrim: what the sleeve does when clicked
+                is not otherwise guessable from a sleeve. */}
+            <EjectIcon className={styles.eject} />
           </button>
           <div className={styles.overviewStack}>
             {/* Where the vocals are, from the analysis. */}

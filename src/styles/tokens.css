@@ -24,6 +24,8 @@
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-menu: #1A1A1A; /* the layout menu's panel in a capture of rekordbox 7.2.11 */
   --c-menu-border: #8C8C8C; /* the light hairline around that panel */
+  --c-eject: #CDCDCD; /* sampled from a capture of the sleeve hovered: the eject glyph is a flat (205,205,205) */
+  --c-eject-scrim: #000000; /* INFERRED — the sampled sleeve is uniform there, so the darkening cannot be separated from the artwork; without it the glyph is unreadable over bright art */
   --c-disc-placeholder: #2E2E2E; /* the record drawn where a sleeve is missing; a shade above the raised square it sits on */
   --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
@@ -60,6 +62,7 @@
   --s-col-header-h: 23px;
   --s-browser-head-h: 23px;
   --s-top-bar-h: 30px;
+  --s-eject-glyph-w: 15px; /* the glyph is 26px of a 79px sleeve in the capture, and the sleeve is 45pt */
   --s-scrollbar-w: 10px; /* UNMEASURED — no capture has the list overflowing; sized to the 7pt gutter the tree leaves beside it */
   --s-title-bar-h: 28px; /* the macOS title bar the window's traffic lights sit in */
   --s-status-bar-h: 30px;

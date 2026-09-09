@@ -1301,3 +1301,26 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await expect(page.getByRole("region", { name: /^Preview player/ })).toHaveCount(0);
 });
+
+test("hovering the sleeve shows what clicking it does", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // A sleeve does not look like a button, so the eject glyph is what says it
+  // is one. Opacity rather than visibility: it fades rather than appearing.
+  const sleeve = page.getByRole("button", { name: "Eject" });
+  const glyph = sleeve.locator("svg").last();
+  const shown = async () => Number(await glyph.evaluate((el) => getComputedStyle(el).opacity));
+  expect(await shown()).toBe(0);
+  await sleeve.hover();
+  await expect.poll(shown).toBe(1);
+
+  // And nothing to eject means nothing offered: the sleeve is disabled.
+  await sleeve.click();
+  await expect(sleeve).toBeDisabled();
+  await page.mouse.move(0, 0);
+  await sleeve.hover({ force: true });
+  // Polled, because it fades rather than switching off.
+  await expect.poll(shown).toBe(0);
+});

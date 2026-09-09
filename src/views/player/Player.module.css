@@ -224,6 +224,39 @@
   cursor: pointer;
 }
 .artwork:disabled { cursor: default; }
+
+/* Hovered, the sleeve dims and shows what clicking it does. The glyph is
+   measured — a triangle over a bar, both 26px wide on a 79px sleeve, in a flat
+   #CDCDCD; the darkening under it is inferred, because the capture's sleeve is
+   uniform there and a glyph over bright artwork is unreadable without it. */
+.artwork { position: relative; }
+.artwork::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--c-eject-scrim);
+  opacity: 0;
+  transition: opacity 90ms linear;
+}
+.eject {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: var(--s-eject-glyph-w);
+  color: var(--c-eject);
+  opacity: 0;
+  transition: opacity 90ms linear;
+}
+.artwork:hover:not(:disabled)::after { opacity: 0.45; }
+.artwork:hover:not(:disabled) .eject { opacity: 1; }
+/* The glyph sits over the scrim, not under it. */
+.eject { z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .artwork::after,
+  .eject { transition: none; }
+}
 .artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* A record, drawn where the sleeve would be: no artwork, and no track at all,

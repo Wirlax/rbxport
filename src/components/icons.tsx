@@ -33,6 +33,12 @@ export const DiscIcon = (props: IconProps) => (
   </svg>
 );
 
+export const EjectIcon = (props: IconProps) => (
+  <svg viewBox="0 0 26 29" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" d="M13 0 26 18H0z"/> <rect fill="currentColor" x="0" y="23" width="26" height="6"/>
+  </svg>
+);
+
 export const FolderIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <path d="M0 2h5l1.5 1.5H14V11H0z" fill="currentColor"/>
