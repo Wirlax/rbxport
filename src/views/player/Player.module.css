@@ -144,6 +144,10 @@
     var(--s-player-pad-h);
   min-width: 0;
   min-height: 0;
+  /* A few pixels of black all round, so the deck reads as a panel sitting on
+     the player rather than as the whole strip. The player behind it is black,
+     which is what the margin shows. */
+  margin: var(--s-player-margin);
   background: var(--c-black);
 }
 

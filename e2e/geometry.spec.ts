@@ -186,12 +186,14 @@ test("every strip of the deck shares one inset", async ({ page }) => {
     expect(edge.right).toBe(edges[0]?.right);
   }
 
-  // And that inset is the token's, measured from the deck's own right edge.
+  // And that inset is the token's, plus the black margin the deck column sits
+  // in, measured from where the cue panel beside it starts.
   const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
   const inset = await token(page, "--s-player-inset");
+  const margin = await token(page, "--s-player-margin");
   const panel = await token(page, "--s-player-right-w");
   const right = (player?.x ?? 0) + (player?.width ?? 0) - panel;
-  expect(right - (edges[0]?.right ?? 0)).toBeCloseTo(inset, 0);
+  expect(right - (edges[0]?.right ?? 0)).toBeCloseTo(inset + margin, 0);
 });
 
 test("a measured gap separates the player from the browser", async ({ page }) => {
