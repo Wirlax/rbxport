@@ -71,3 +71,31 @@ test("the repeats a held key sends are ignored", async ({ page }) => {
   await page.keyboard.up("c");
   await expect(clock).toHaveText(atCue ?? "");
 });
+
+test("a preview ends even if the key is let go somewhere else", async ({ page }) => {
+  // The press is guarded against firing while something is being typed into,
+  // and the release deliberately is not: hold C, click into the search box,
+  // let go there, and the deck still has to stop. Otherwise the preview runs
+  // on with the key that started it already up.
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const play = page.getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+
+  const clock = page.getByTestId("player-time");
+  await play.click();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.keyboard.press("c");
+  const atCue = await clock.textContent();
+
+  await page.keyboard.down("c");
+  await expect(clock).not.toHaveText(atCue ?? "");
+
+  // The focus moves while the key is still down.
+  await page.getByRole("searchbox", { name: /search within/i }).focus();
+  await page.keyboard.up("c");
+
+  await expect(clock).toHaveText(atCue ?? "");
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+});
