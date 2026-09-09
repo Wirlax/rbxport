@@ -127,8 +127,14 @@ test("the search shortcut puts the caret in the box from anywhere", async ({ pag
   await page.goto("/");
   await page.getByTestId("track-scroll").click();
 
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await page.keyboard.press(`${modifier}+f`);
+  // Asked of the page, not of `process.platform`. `detectPlatform` reads the
+  // *browser's* navigator, and Playwright's WebKit says "Macintosh" wherever it
+  // runs — so on a Linux runner the app wanted Command while the runner's
+  // platform said Control, and only the webkit project failed.
+  const mac = await page.evaluate(() =>
+    /Mac|iPhone|iPad/.test(`${navigator.platform ?? ""} ${navigator.userAgent}`),
+  );
+  await page.keyboard.press(`${mac ? "Meta" : "Control"}+f`);
 
   const search = page.getByRole("searchbox", { name: /search within/i });
   await expect(search).toBeFocused();
