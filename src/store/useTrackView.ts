@@ -177,13 +177,22 @@ export function useTrackView(
   const unopened = state.viewId === 0;
   const seeded = unopened && seed !== undefined && seed.rows.length > 0;
 
-  return {
-    count: seeded ? seed.count : state.count,
-    token,
-    loading: state.specKey !== specKey,
-    error: state.error,
-    rowAt: seeded ? (index: number) => seed.rows[index] : rowAt,
-    ensureRange,
-    idsInRange,
-  };
+  const seedCount = seeded ? seed.count : 0;
+  const rows = seeded ? seed.rows : null;
+  // Memoised as a whole. A fresh object every render is a changed dependency
+  // for every effect that takes the view rather than a field of it, and one of
+  // those handed a new array back up to the app on each pass, which re-rendered
+  // the window and made the view new again.
+  return useMemo(
+    () => ({
+      count: rows ? seedCount : state.count,
+      token,
+      loading: state.specKey !== specKey,
+      error: state.error,
+      rowAt: rows ? (index: number) => rows[index] : rowAt,
+      ensureRange,
+      idsInRange,
+    }),
+    [rows, seedCount, state.count, state.specKey, state.error, token, specKey, rowAt, ensureRange, idsInRange],
+  );
 }

@@ -91,14 +91,22 @@ export function useColumns(context: ColumnContext): Columns {
 
   const columns = useMemo(() => resolve(layout), [layout]);
 
-  return {
-    layout,
-    columns,
-    toggle: useCallback((key) => setLayout((l) => toggleColumn(l, key)), []),
-    move: useCallback((key, to) => setLayout((l) => moveColumn(l, key, to)), []),
-    resize: useCallback((key, width) => setLayout((l) => resizeColumn(l, key, width)), []),
-    autoSize: useCallback((key) => setLayout((l) => autoSizeColumn(l, key)), []),
-    autoSizeEvery: useCallback(() => setLayout(autoSizeAll), []),
-    reset: useCallback(() => setLayout(defaultLayout()), []),
-  };
+  const toggle = useCallback((key: ColumnKey) => setLayout((l) => toggleColumn(l, key)), []);
+  const move = useCallback((key: ColumnKey, to: number) => setLayout((l) => moveColumn(l, key, to)), []);
+  const resize = useCallback(
+    (key: ColumnKey, width: number) => setLayout((l) => resizeColumn(l, key, width)),
+    [],
+  );
+  const autoSize = useCallback((key: ColumnKey) => setLayout((l) => autoSizeColumn(l, key)), []);
+  const autoSizeEvery = useCallback(() => setLayout(autoSizeAll), []);
+  const reset = useCallback(() => setLayout(defaultLayout()), []);
+
+  // Memoised as a whole, not just its callbacks. A fresh object on every
+  // render is a changed dependency for everything that takes the hook's value
+  // rather than its parts, and one such effect calling back into the app was
+  // re-rendering the whole window several hundred times a second.
+  return useMemo(
+    () => ({ layout, columns, toggle, move, resize, autoSize, autoSizeEvery, reset }),
+    [layout, columns, toggle, move, resize, autoSize, autoSizeEvery, reset],
+  );
 }

@@ -5,7 +5,7 @@
  * once would fight for the same cores and finish no sooner, while making the
  * progress meaningless.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import {
@@ -61,12 +61,13 @@ export function useAnalysis(onAnalysed?: (trackId: string) => void): Analysis {
     })();
   }, [state, onAnalysed]);
 
-  return {
-    state,
-    running: isRunning(state),
-    total: total(state),
-    add: useCallback((items) => setState((s) => enqueue(s, items)), []),
-    cancel: useCallback(() => setState(cancelQueue), []),
-    clear: useCallback(() => setState(reset), []),
-  };
+  const add = useCallback((items: readonly QueueItem[]) => setState((s) => enqueue(s, items)), []);
+  const cancel = useCallback(() => setState(cancelQueue), []);
+  const clear = useCallback(() => setState(reset), []);
+
+  // Memoised as a whole: see the note in `useColumns`.
+  return useMemo(
+    () => ({ state, running: isRunning(state), total: total(state), add, cancel, clear }),
+    [state, add, cancel, clear],
+  );
 }

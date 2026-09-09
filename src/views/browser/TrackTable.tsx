@@ -495,6 +495,7 @@ export function TrackTable({
   // The rows behind the selection, resolved from what is cached. A selection
   // spanning unfetched rows contributes only what is on hand, which is what
   // the user can see anyway.
+  const reportedSelection = useRef("");
   useEffect(() => {
     if (!onSelectedTracks) return;
     const tracks: { id: string; title: string }[] = [];
@@ -502,6 +503,12 @@ export function TrackTable({
       const row = view.rowAt(i);
       if (row && selection.ids.has(row.id)) tracks.push({ id: row.id, title: row.title });
     }
+    // Only when it has actually changed. This hands a new array upwards, and
+    // the app holds it in state: sending an equal one re-renders the window,
+    // which renders this table, which runs this effect again.
+    const stamp = tracks.map((t) => t.id).join(",");
+    if (stamp === reportedSelection.current) return;
+    reportedSelection.current = stamp;
     onSelectedTracks(tracks);
   }, [selection.ids, view, onSelectedTracks]);
 
