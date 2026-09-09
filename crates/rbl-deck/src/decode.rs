@@ -15,7 +15,7 @@ use rubato::{
 };
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -25,6 +25,15 @@ use crate::{DeckError, Result};
 
 /// Frames handed to the resampler at a time.
 const RESAMPLE_CHUNK: usize = 1024;
+
+/// How far a coarse seek that overshot is asked to step back, in seconds.
+///
+/// Two first, because a coarse seek that misses at all misses by about a
+/// packet; ten as the second try, because a format whose estimate is that far
+/// out will not be fixed by another two. Decoding ten seconds forward and
+/// throwing it away costs a few tens of milliseconds, which is still two
+/// orders below the scan this exists to avoid.
+const BACKOFF_SECONDS: [f64; 2] = [2.0, 10.0];
 
 /// A quality that is inaudible on a monitoring path and cheap enough to run on
 /// two decks at once. `[ASSUME]` — 128 taps at a 0.95 cutoff; revisit only if
@@ -163,10 +172,30 @@ impl Streamer {
     /// is a cue point in the wrong place.
     pub fn seek(&mut self, frame: u64) -> Result<u64> {
         let seconds = frame as f64 / f64::from(self.device_rate.max(1));
-        let landed = self
-            .format
-            .seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(seconds), track_id: Some(self.track_id) })
-            .map_err(|e| DeckError::Decode(e.to_string()))?;
+        // Coarse, and then decoded forward to the exact frame below.
+        //
+        // Symphonia's accurate seek walks the file from a point it knows,
+        // which on a three-hour MP3 is 12 seconds of scanning for an hour in
+        // and 23 for three, and 95-142 ms on an ordinary FLAC. Coarse costs
+        // 0.0-0.1 ms, and across every format in this library it landed on the
+        // same packet as accurate did — the exactness came from the decoding
+        // afterwards, not from the mode. Measured by
+        // `cargo run --release -p rbl-deck --example seekwhere`.
+        //
+        // What accurate does guarantee is landing at or before the target, and
+        // the discard below only moves forward. So an overshoot is stepped
+        // back from, and a format that still overshoots after that pays for
+        // the accurate seek rather than being played from the wrong place.
+        let mut landed = self.seek_to(seconds, SeekMode::Coarse)?;
+        for back in BACKOFF_SECONDS {
+            if self.landed_frame(&landed) <= frame {
+                break;
+            }
+            landed = self.seek_to((seconds - back).max(0.0), SeekMode::Coarse)?;
+        }
+        if self.landed_frame(&landed) > frame {
+            landed = self.seek_to(seconds, SeekMode::Accurate)?;
+        }
 
         self.decoder.reset();
         for channel in &mut self.pending {
@@ -187,6 +216,18 @@ impl Streamer {
         // The position it reports is where it will actually resume, which is
         // where it was asked to go once the overshoot has been discarded.
         Ok(frame.max(self.position))
+    }
+
+    /// One demuxer seek, in seconds.
+    fn seek_to(&mut self, seconds: f64, mode: SeekMode) -> Result<SeekedTo> {
+        self.format
+            .seek(mode, SeekTo::Time { time: Time::from(seconds), track_id: Some(self.track_id) })
+            .map_err(|e| DeckError::Decode(e.to_string()))
+    }
+
+    /// Where a seek landed, in the device-rate frames the playhead counts.
+    fn landed_frame(&self, landed: &SeekedTo) -> u64 {
+        scale_frames(landed.actual_ts, self.source_rate, self.device_rate)
     }
 
     /// Fills `out` with interleaved stereo, returning the frames written.

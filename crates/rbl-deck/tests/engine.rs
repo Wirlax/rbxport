@@ -274,6 +274,59 @@ fn a_seek_lands_exactly_rather_than_playing_what_was_already_decoded() {
 }
 
 #[test]
+fn every_jump_lands_on_the_frame_it_asked_for_wherever_it_came_from() {
+    // The seek is coarse and then decoded forward, because the demuxer's
+    // accurate mode reads the file from a point it knows — seconds, on a long
+    // track. What that must not cost is exactness, in either direction: a
+    // coarse seek that overshoots is stepped back from, and a format that
+    // overshoots anyway pays for the accurate seek instead. The ramp says
+    // where audio came from, so a landing that is out reads as a wrong value.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    let frames = RATE as usize * 20;
+    ramp(&path, frames);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    h.play_until(Deck::A, 2_048);
+
+    // Forwards to the far end, back to the start, and about the middle.
+    for seconds in [19_u64, 1, 10, 2] {
+        let target = u64::from(RATE) * seconds;
+        h.engine.seek_frames(Deck::A, target);
+        assert_eq!(h.position(Deck::A), target, "the clock did not take the seek");
+
+        // Pulled with the decode thread given room to refill, because a null
+        // sink drained flat out outruns any decoder.
+        let mut out = Vec::new();
+        for _ in 0..40 {
+            out.extend(h.sink.pull(512));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let left: Vec<f32> = out.chunks_exact(2).map(|frame| frame[0]).collect();
+
+        // The join is a fade to silence and a fade back up: what the ring still
+        // held plays out, and the new position starts from the first zero. The
+        // playhead follows the old audio while that happens, so it cannot say
+        // where the new audio begins — the silence can.
+        let join = left.iter().position(|s| *s == 0.0).expect("the seek did not fade out");
+        let past = join + usize::from(FADE_FRAMES);
+        let heard = left
+            .get(past..past + 256)
+            .expect("nothing was played after the seek")
+            .iter()
+            .fold(0.0_f32, |a, s| a.max(*s));
+        let want = 0.5 + 0.5 * (target as f32 / frames as f32);
+        assert!(
+            (heard - want).abs() < 0.01,
+            "after seeking to {seconds} s the audio was {heard}, not {want}",
+        );
+    }
+}
+
+#[test]
 fn a_seek_while_paused_moves_the_playhead_without_starting_the_device() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ramp.wav");
