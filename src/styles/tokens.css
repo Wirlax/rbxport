@@ -68,7 +68,7 @@
   --s-status-bar-h: 30px;
   --s-bottom-bar-h: 72px;
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
-  --s-tree-gutter-w: 7px; /* capture: tree ends 282pt, scrollbar to 292, browser starts 299 */
+  --s-tree-gutter-w: 5px; /* narrowed by request from the 7pt the capture measures — the tree ends at 282pt, its scrollbar runs to 292 and the track list starts at 299 */
   --s-rail-w: 36px;
   --s-right-rail-w: 24px;
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */

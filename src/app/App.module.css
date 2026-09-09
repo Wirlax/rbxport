@@ -98,9 +98,10 @@
 }
 
 /* The gutter between the tree and the browser, which is also the drag handle.
-   Black and seven points wide, measured off the capture: the tree ends at
-   282pt, its scrollbar runs to 292, and the track list starts at 299. Painting
-   it the tree's own colour, as it was, left no visible gap at all. */
+   Black, and narrower than the capture's seven points by request. Painting it
+   the tree's own colour, as it was, left no visible gap at all; the `::after`
+   below keeps the grab target three points wider on each side than the gutter
+   is drawn, so narrowing it does not make it harder to catch. */
 .splitter {
   position: relative;
   background: var(--c-black);

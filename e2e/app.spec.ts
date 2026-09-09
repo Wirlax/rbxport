@@ -257,14 +257,20 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
   expect(xs).toEqual([...xs].sort((a, b) => a - b));
 });
 
-test("the tree and the browser are separated by the measured gutter", async ({ page }) => {
-  // Seven points of black: the capture has the tree ending at 282pt, its
-  // scrollbar to 292, and the track list starting at 299. Painted the tree's
-  // own colour, as it was, there was no visible gap at all.
+test("the tree and the browser are separated by a black gutter", async ({ page }) => {
+  // Black, and the token's width: the capture measures seven points — the tree
+  // ends at 282pt, its scrollbar runs to 292 and the track list starts at 299 —
+  // and it is drawn narrower than that by request. Painted the tree's own
+  // colour, as it was, there was no visible gap at all.
   await page.goto("/");
   const splitter = page.getByRole("separator", { name: "Resize the library tree" });
   const box = await splitter.boundingBox();
-  expect(box?.width).toBe(7);
+  const width = await page.evaluate(() =>
+    Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--s-tree-gutter-w"),
+    ),
+  );
+  expect(box?.width).toBeCloseTo(width, 1);
   await expect(splitter).toHaveCSS("background-color", "rgb(0, 0, 0)");
 });
 
