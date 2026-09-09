@@ -1,12 +1,17 @@
 //! Playing a track faster or slower without moving its pitch.
 //!
-//! Behind a trait, deliberately. The plan defers which library does this until
-//! distribution, because the good ones disagree about licensing — Rubber Band
-//! R3 is GPL-or-commercial, signalsmith-stretch is MIT, Bungee is MPL-2.0 —
-//! and a choice made behind `Stretcher` costs a file to change rather than a
-//! rewrite. What is here is a WSOLA backend written for this crate: enough to
-//! measure the CPU cost of two decks stretching at once, which the plan wants
-//! settled before the licence question is even asked, and enough to hear.
+//! Behind a trait, deliberately, because the good ones disagree about
+//! licensing — Rubber Band R3 is GPL-or-commercial, signalsmith-stretch is
+//! MIT, Bungee is MPL-2.0 — and a choice made behind `Stretcher` costs a file
+//! to change rather than a rewrite.
+//!
+//! **The choice was Rubber Band, and with it the GPL**; see `LICENSING.md` and
+//! [`crate::rubberband`]. What is here is still the default in an
+//! MIT build (`--no-default-features`) and is what MASTER TEMPO falls back to
+//! if Rubber Band will not allocate: a WSOLA backend written for this crate,
+//! enough to measure the CPU cost of two decks stretching at once and enough
+//! to hear. It costs about a fortieth of what Rubber Band does
+//! (`--example stretchcost`), which is the trade in the other direction.
 //!
 //! WSOLA is overlap-add with the overlap put where the waveform agrees with
 //! itself. Cutting a segment out at a fixed hop and crossfading it against the
@@ -21,9 +26,11 @@
 //! few percent: asked for two semitones down, the tone came back a quarter of
 //! a semitone out, and at one semitone half of one. The arrangement is right
 //! and the accuracy is not, so nothing in the interface offers a key shift.
-//! It is the clearest argument for the trait: a real stretcher goes behind it
-//! and key shifting becomes possible, and that is a licensing decision rather
-//! than a coding one.
+//! It was the clearest argument for the trait, and the argument was accepted:
+//! Rubber Band went behind it and lands the same intervals inside 1.4 cents,
+//! so the semitone controls have something accurate to sit on. This backend
+//! still declines to offer them — `shifts_pitch` is false — because a key
+//! shift a quarter of a semitone out is worse than none.
 //!
 //! The reason is the search's tolerance, which has to stay under the
 //! difference between the two hops — a search that reaches the point where the
@@ -97,6 +104,24 @@ pub trait Stretcher: Send {
 
     /// Drops everything held. A seek is not a continuation.
     fn reset(&mut self);
+
+    /// Whether this backend can move the pitch without moving the tempo.
+    ///
+    /// False by default, because most cannot: the WSOLA backend here holds a
+    /// pitch to a few percent, and a key shift a quarter of a semitone out is
+    /// worse than no key shift. The interface offers the semitone buttons and
+    /// KEY SYNC only where this is true.
+    fn shifts_pitch(&self) -> bool {
+        false
+    }
+
+    /// The frequency multiplier: 1.0 is the file's own pitch, and a semitone
+    /// up is `2f32.powf(1.0 / 12.0)`. Ignored where `shifts_pitch` is false.
+    fn set_pitch_scale(&mut self, _scale: f32) {}
+
+    fn pitch_scale(&self) -> f32 {
+        1.0
+    }
 }
 
 /// Overlap-add with a similarity search: see the module comment.

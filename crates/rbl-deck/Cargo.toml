@@ -3,11 +3,27 @@ name = "rbl-deck"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# Not the workspace's MIT: a default build links the vendored Rubber Band
+# Library, and the combined work is distributable only under the GPL. See
+# LICENSING.md; `--no-default-features` is the MIT build.
+license = "GPL-2.0-or-later"
 description = "The playback engine: decks, the audio device, and the clock the interface reads."
 
 [lints]
 workspace = true
+
+[features]
+# The Rubber Band backend, and with it the licence: Rubber Band R3 is
+# GPL-or-commercial, so a build with this on is distributable under the GPL and
+# nothing else. On by default because that is the decision that was taken; a
+# build that must not carry the GPL turns it off and falls back to the WSOLA
+# backend written for this crate, which stretches tempo well enough and cannot
+# shift a key accurately.
+default = ["rubberband"]
+rubberband = ["dep:cc"]
+
+[build-dependencies]
+cc = { version = "1", optional = true }
 
 [dependencies]
 thiserror = { workspace = true }

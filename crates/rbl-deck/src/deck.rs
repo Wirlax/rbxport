@@ -102,7 +102,7 @@ pub fn spawn(
                 generation: 0,
                 scrubber: None,
                 window: PcmWindow::empty(),
-                keylock: Wsola::new(device_rate),
+                keylock: key_lock(device_rate),
                 varispeed: Varispeed::new(device_rate),
                 tempo: 1.0,
                 master_tempo: false,
@@ -133,7 +133,11 @@ struct Worker {
     /// the pitch moving as a record's does. Both are built at load, because
     /// building one takes an allocation and the switch between them is a
     /// button somebody presses mid-track.
-    keylock: Wsola,
+    ///
+    /// Boxed because which one holds the pitch is a build-time decision — see
+    /// [`key_lock`] — and the hot path already went through `&mut dyn
+    /// Stretcher`, so this costs one allocation at load and nothing per block.
+    keylock: Box<dyn Stretcher>,
     varispeed: Varispeed,
     tempo: f32,
     master_tempo: bool,
@@ -282,7 +286,7 @@ impl Worker {
 
     /// Whichever of the two is in the path.
     fn stretcher(&mut self) -> &mut dyn Stretcher {
-        if self.master_tempo { &mut self.keylock } else { &mut self.varispeed }
+        if self.master_tempo { &mut *self.keylock } else { &mut self.varispeed }
     }
 
     /// Empties both, so nothing of the last position or the last mode is
@@ -452,8 +456,40 @@ impl Worker {
     /// consumed at the speed it was played at.
     fn produce_stretched(&mut self, generation: u32) -> bool {
         let tempo = f64::from(self.tempo);
-        // Top the stretcher up first: it needs a segment and its search window
-        // before it can produce anything at all.
+        let mut block = Block::empty(generation, self.head as u64);
+        let mut frames = 0;
+
+        // Feed, take what came of it, feed again — until the block is full or
+        // there is nothing left to feed it with. One pass is not enough for
+        // every backend: Rubber Band takes the block it asked for, hands back
+        // what that block made, and wants nothing more until it has been
+        // drained, so a single feed-then-pull filled exactly half of every
+        // block. WSOLA fills one in a pass and leaves this loop after it.
+        while frames < BLOCK_FRAMES {
+            if !self.top_up_stretcher() {
+                break;
+            }
+            let Some(rest) = block.samples.get_mut(frames * 2..) else { break };
+            let got = self.stretcher().pull(rest);
+            if got == 0 {
+                break;
+            }
+            frames += got;
+        }
+
+        if frames == 0 {
+            return false;
+        }
+        self.head += frames as f64 * tempo;
+        block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
+        self.producer.push(block).is_ok()
+    }
+
+    /// Gives the stretcher everything it asks for that there is input for.
+    ///
+    /// False when the stream is over and there is nothing more to give, which
+    /// is what stops the loop above rather than a short pull.
+    fn top_up_stretcher(&mut self) -> bool {
         loop {
             let wanted = self.stretcher().wants();
             if wanted == 0 || self.stretcher().ready(BLOCK_FRAMES) {
@@ -486,21 +522,27 @@ impl Worker {
             // one method borrowing all of `self` would have meant a fresh
             // allocation for every block a stretched deck plays.
             let stretcher: &mut dyn Stretcher =
-                if self.master_tempo { &mut self.keylock } else { &mut self.varispeed };
+                if self.master_tempo { &mut *self.keylock } else { &mut self.varispeed };
             let Some(from) = self.feed.get(..take * 2) else { break };
             let taken = stretcher.feed(from);
             // What was not taken stays at the front for the next pass.
             self.feed.copy_within(taken * 2..self.fed * 2, 0);
             self.fed -= taken;
         }
-
-        let mut block = Block::empty(generation, self.head as u64);
-        let frames = self.stretcher().pull(&mut block.samples);
-        if frames == 0 {
-            return false;
-        }
-        self.head += frames as f64 * tempo;
-        block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
-        self.producer.push(block).is_ok()
+        true
     }
+}
+
+/// The stretcher behind MASTER TEMPO.
+///
+/// Rubber Band R3 where the `rubberband` feature is on, which is the default
+/// and the GPL build; the WSOLA backend written for this crate otherwise, and
+/// also if Rubber Band will not allocate, because a deck that plays with the
+/// pitch drifting is better than a deck that does not play.
+fn key_lock(device_rate: u32) -> Box<dyn Stretcher> {
+    #[cfg(feature = "rubberband")]
+    if let Some(stretcher) = crate::rubberband::RubberBand::new(device_rate) {
+        return Box::new(stretcher);
+    }
+    Box::new(Wsola::new(device_rate))
 }

@@ -33,6 +33,8 @@ mod deck;
 mod decode;
 mod fade;
 mod mixer;
+#[cfg(feature = "rubberband")]
+mod rubberband;
 mod scrub;
 mod sink;
 mod smooth;
@@ -55,6 +57,8 @@ use fade::Ramp;
 use smooth::Smoothed;
 
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
+#[cfg(feature = "rubberband")]
+pub use rubberband::RubberBand;
 pub use stretch::{Stretcher, Varispeed, Wsola, MAX_RATIO, MIN_RATIO};
 
 /// Frames the mixer works on at a time.
