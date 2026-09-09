@@ -69,8 +69,14 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
   return next;
 }
 
-/** Which part of the library the tree is showing. */
-export type Source = "collection" | "playlists" | "histories" | "devices";
+/**
+ * Which part of the library the tree is showing.
+ *
+ * No Collection: the tree opens with All Tracks at the top and always in
+ * sight, so a button whose whole job is to scroll to the first row is a
+ * shortcut to where you already are.
+ */
+export type Source = "playlists" | "histories" | "devices";
 
 /**
  * The nodes belonging to one source.
@@ -81,8 +87,6 @@ export type Source = "collection" | "playlists" | "histories" | "devices";
  */
 export function nodesForSource(nodes: readonly TreeNode[], source: Source): TreeNode[] {
   switch (source) {
-    case "collection":
-      return nodes.filter((n) => n.kind === "allTracks");
     case "histories":
       return nodes.filter((n) => n.kind === "history");
     case "devices":
@@ -95,7 +99,7 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
 /** Sources with nothing under them, so the rail can dim rather than hide them. */
 export function emptySources(nodes: readonly TreeNode[]): Set<Source> {
   const empty = new Set<Source>();
-  for (const source of ["collection", "playlists", "histories", "devices"] as const) {
+  for (const source of ["playlists", "histories", "devices"] as const) {
     if (nodesForSource(nodes, source).length === 0) empty.add(source);
   }
   return empty;
@@ -105,13 +109,12 @@ export function emptySources(nodes: readonly TreeNode[]): Set<Source> {
  * Which section a selected node belongs to, so the rail can show where you are.
  *
  * Defaults to playlists when nothing is selected, because that is what the
- * tree opens on.
+ * tree opens on — and All Tracks belongs to it too, since it sits at the top
+ * of the same tree and the rail no longer has a button of its own for it.
  */
 export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null): Source {
   const node = nodes.find((n) => n.id === selectedId);
   switch (node?.kind) {
-    case "allTracks":
-      return "collection";
     case "history":
       return "histories";
     case "device":

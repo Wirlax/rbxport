@@ -137,10 +137,6 @@ describe("nodesForSource", () => {
     { id: "h", name: "2026-09-07", kind: "history", depth: 1 },
   ];
 
-  it("gives the collection only the all-tracks node", () => {
-    expect(nodesForSource(mixed, "collection").map((n) => n.id)).toEqual(["all"]);
-  });
-
   it("gives playlists the folders and lists", () => {
     expect(nodesForSource(mixed, "playlists").map((n) => n.id)).toEqual(["pl", "f", "p"]);
   });
@@ -154,7 +150,7 @@ describe("nodesForSource", () => {
   });
 
   it("never invents a node", () => {
-    const every = (["collection", "playlists", "histories", "devices"] as const)
+    const every = (["playlists", "histories", "devices"] as const)
       .flatMap((s) => nodesForSource(mixed, s));
     for (const node of every) expect(mixed).toContain(node);
   });
@@ -164,14 +160,13 @@ describe("emptySources", () => {
   it("names the sections with nothing in them", () => {
     const only = [{ id: "all", name: "All Tracks", kind: "allTracks" as const, depth: 0 }];
     const empty = emptySources(only);
-    expect(empty.has("collection")).toBe(false);
     expect(empty.has("playlists")).toBe(true);
     expect(empty.has("histories")).toBe(true);
     expect(empty.has("devices")).toBe(true);
   });
 
   it("calls everything empty for an empty tree", () => {
-    expect(emptySources([]).size).toBe(4);
+    expect(emptySources([]).size).toBe(3);
   });
 });
 
@@ -183,12 +178,14 @@ describe("sourceOf", () => {
   ];
 
   it("reports the section the selection is in", () => {
-    expect(sourceOf(mixed, "all")).toBe("collection");
     expect(sourceOf(mixed, "p")).toBe("playlists");
     expect(sourceOf(mixed, "h")).toBe("histories");
   });
 
   it("falls back to playlists, which is where the tree opens", () => {
+    // All Tracks included: it sits at the top of the same tree and the rail
+    // has no button of its own for it.
+    expect(sourceOf(mixed, "all")).toBe("playlists");
     expect(sourceOf(mixed, null)).toBe("playlists");
     expect(sourceOf(mixed, "gone")).toBe("playlists");
   });

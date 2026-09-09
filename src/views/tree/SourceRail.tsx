@@ -2,22 +2,24 @@
  * The rail beside the tree: which part of the library the tree is showing.
  *
  * rekordbox calls this the tree shortcut column (`browseSetting.xml`,
- * `TreeShortcut`, width 57). Selecting one narrows the tree to that section
- * rather than opening a different window.
+ * `TreeShortcut`, width 57). Selecting one jumps the tree to that section; it
+ * is a shortcut rather than a filter, so nothing is hidden.
+ *
+ * No Collection button: All Tracks is the first row of the tree and never out
+ * of sight, so jumping to it is jumping to where you already are.
  */
 import type { SVGProps } from "react";
 
-import { CollectionIcon, DeviceIcon, FolderIcon, HistoryIcon } from "@/components/icons";
-import styles from "./SourceRail.module.css";
+import type { Source } from "@/lib/tree";
 
-export type Source = "collection" | "playlists" | "histories" | "devices";
+import { DeviceIcon, FolderIcon, HistoryIcon } from "@/components/icons";
+import styles from "./SourceRail.module.css";
 
 const SOURCES: ReadonlyArray<{
   id: Source;
   label: string;
   Icon: (props: SVGProps<SVGSVGElement>) => React.ReactElement;
 }> = [
-  { id: "collection", label: "Collection", Icon: CollectionIcon },
   { id: "playlists", label: "Playlists", Icon: FolderIcon },
   { id: "histories", label: "Histories", Icon: HistoryIcon },
   { id: "devices", label: "Devices", Icon: DeviceIcon },

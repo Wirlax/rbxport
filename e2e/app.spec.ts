@@ -455,17 +455,21 @@ test("the column layout survives a reload", async ({ page }) => {
 test("the source rail switches which part of the library the tree shows", async ({ page }) => {
   await page.goto("/");
   const rail = page.getByRole("tablist", { name: "Library sources" });
-  await expect(rail.getByRole("tab")).toHaveCount(4);
+  // Three: Playlists, Histories, Devices. No Collection — All Tracks is at the
+  // top of the tree and always in sight, so a button that scrolls to it is a
+  // shortcut to where you already are.
+  await expect(rail.getByRole("tab")).toHaveCount(3);
+  await expect(rail.getByRole("tab", { name: "Collection" })).toHaveCount(0);
 
   // A shortcut, not a filter: the tree keeps showing everything and the rail
   // jumps the selection to that section. browseSetting.xml calls it
   // TreeShortcut, and rekordbox does the same.
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 
-  await rail.getByRole("tab", { name: "Collection" }).click();
-  await expect(rail.getByRole("tab", { name: "Collection" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toHaveAttribute("aria-selected", "true");
+  await rail.getByRole("tab", { name: "Devices" }).click();
+  await expect(rail.getByRole("tab", { name: "Devices" })).toHaveAttribute("aria-selected", "true");
   // Still there, not filtered away.
+  await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toBeVisible();
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 });
 

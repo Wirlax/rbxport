@@ -129,7 +129,7 @@ export function TreeView({
 
   // The rail is a shortcut, not a filter — `browseSetting.xml` calls it
   // TreeShortcut. rekordbox keeps one tree and jumps to a section; filtering
-  // instead would hide Collection whenever Playlists was picked.
+  // instead would hide All Tracks whenever Playlists was picked.
   const source = useMemo(() => sourceOf(nodes, selectedId), [nodes, selectedId]);
   const jumpTo = useCallback(
     (wanted: Source) => {
