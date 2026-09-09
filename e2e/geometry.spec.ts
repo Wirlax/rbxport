@@ -171,6 +171,29 @@ test("hot cues are badges on the overview and red triangles at the top of the gr
   expect(Number(layer)).toBeGreaterThan(0);
 });
 
+test("every strip of the deck shares one inset", async ({ page }) => {
+  // They disagreed: 16 on the left and 12 on the right for the title row and
+  // the overview, 71 and 12 for the phrase, and nothing at all for the detail,
+  // which therefore ran wider than everything above it.
+  const edges = await Promise.all(
+    ["player-overview", "player-phrase", "player-detail"].map(async (id) => {
+      const box = await page.getByTestId(id).boundingBox();
+      return { left: Math.round(box?.x ?? 0), right: Math.round((box?.x ?? 0) + (box?.width ?? 0)) };
+    }),
+  );
+  for (const edge of edges) {
+    expect(edge.left).toBe(edges[0]?.left);
+    expect(edge.right).toBe(edges[0]?.right);
+  }
+
+  // And that inset is the token's, measured from the deck's own right edge.
+  const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
+  const inset = await token(page, "--s-player-inset");
+  const panel = await token(page, "--s-player-right-w");
+  const right = (player?.x ?? 0) + (player?.width ?? 0) - panel;
+  expect(right - (edges[0]?.right ?? 0)).toBeCloseTo(inset, 0);
+});
+
 test("a measured gap separates the player from the browser", async ({ page }) => {
   // The capture has the pad bar ending at 335pt and the track list starting at
   // 338pt, so three points of black sit between them. With the player and the

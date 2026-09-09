@@ -153,7 +153,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 12px 0 16px;
+  padding: 0 var(--s-player-inset);
   min-width: 0;
 }
 
@@ -205,8 +205,8 @@
      centred flex line it collapses to its content height and the overview
      waveform gets no height at all. */
   align-items: stretch;
-  gap: 10px;
-  padding: 0 12px 0 16px;
+  gap: var(--s-player-artwork-gap);
+  padding: 0 var(--s-player-inset);
   min-width: 0;
 }
 
@@ -328,9 +328,13 @@
 
 /* ------------------------------------------------------------ the phrase */
 
+/* Aligned with the overview strip above it, which starts past the sleeve. */
 .phrase {
   position: relative;
-  margin: 0 12px 0 71px; /* aligned with the overview, past the artwork */
+  margin-right: var(--s-player-inset);
+  margin-left: calc(
+    var(--s-player-inset) + var(--s-player-artwork-size) + var(--s-player-artwork-gap)
+  );
   overflow: hidden;
 }
 
@@ -361,15 +365,21 @@
 
 /* ------------------------------------------------------------ the detail */
 
+/* The same inset as every row above it, and the same gap below as beside: the
+   detail used to run edge to edge while the strips above it stopped short. The
+   zoom column then puts the waveform on the overview's own left edge. */
 .detailRow {
   display: flex;
   min-width: 0;
   min-height: 0;
+  padding: 0 var(--s-player-inset) var(--s-player-inset);
 }
 
-/* The zoom column, on the black beside the transport rather than inside it. */
+/* The zoom column, on the black beside the transport rather than inside it.
+   Exactly as wide as the sleeve and its gap, so the detail waveform starts on
+   the same left edge as the overview strip above it rather than near it. */
 .zoom {
-  width: 55px;
+  width: calc(var(--s-player-artwork-size) + var(--s-player-artwork-gap));
   flex: none;
   display: flex;
   flex-direction: column;
