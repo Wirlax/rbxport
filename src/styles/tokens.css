@@ -23,6 +23,7 @@
   --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
+  --c-error: #E23B2E; /* UNMEASURED — failures in the status bar; the same red the meter's clip band uses, so the app has one alarm colour */
   --c-meter-green: #2FBF4E; /* UNMEASURED — the capture's meters are silent, so a level meter's own convention: green below -6 dB */
   --c-meter-yellow: #E8C020; /* UNMEASURED — the same convention: yellow from -6 dB to -3 */
   --c-meter-red: #E23B2E; /* UNMEASURED — the same convention: red in the last 3 dB before clipping */
@@ -31,7 +32,7 @@
   --c-menu-border: #8C8C8C; /* the light hairline around that panel */
   --c-eject: #CDCDCD; /* sampled from a capture of the sleeve hovered: the eject glyph is a flat (205,205,205) */
   --c-eject-scrim: #000000; /* INFERRED — the sampled sleeve is uniform there, so the darkening cannot be separated from the artwork; without it the glyph is unreadable over bright art */
-  --c-zoom-scrim: rgb(0 0 0 / 55%); /* INFERRED — the zoom cluster sits over the detail waveform, so it needs a ground the waveform still reads through; 55% is the least that keeps the rings legible over a bright transient */
+  --c-zoom-scrim: rgb(0 0 0 / 80%); /* INFERRED — the zoom cluster sits over the detail waveform, so it needs a ground the waveform still reads through; 55% left the rings competing with a bright transient behind them */
   --c-disc-placeholder: #2E2E2E; /* the record drawn where a sleeve is missing; a shade above the raised square it sits on */
   --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */

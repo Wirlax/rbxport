@@ -73,6 +73,14 @@ export interface PlayerProps {
    * sleeve is how you get a track out without loading another over it.
    */
   onEject?: () => void;
+  /**
+   * Something the deck could not do.
+   *
+   * Reported rather than drawn: the message used to print across the pad row
+   * and the tree underneath it. It belongs in the status bar, with everything
+   * else the app has to say.
+   */
+  onError?: (message: string | null) => void;
 }
 
 /**
@@ -312,7 +320,7 @@ const PANELS = [
 ] as const;
 
 export const Player = memo(function Player({
-  track, onEject, deck = "a", simple = false,
+  track, onEject, onError, deck = "a", simple = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -357,6 +365,13 @@ export const Player = memo(function Player({
    */
   const [armed, setArmed] = useState(false);
   const platform = useMemo(detectPlatform, []);
+
+  // Handed up as it changes, so the status bar owns the only place the app
+  // says something went wrong.
+  const { error: deckError } = playback;
+  useEffect(() => {
+    onError?.(deckError);
+  }, [deckError, onError]);
   /**
    * Where the scrolling layer is drawn from. Not the playhead: the layer is
    * drawn once across `OVERDRAW` spans and slid by a transform, and it is
@@ -1036,9 +1051,6 @@ export const Player = memo(function Player({
           <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
         </div>
 
-        {playback.error ? (
-          <p className={styles.error} role="alert">{playback.error}</p>
-        ) : null}
       </div>
 
       <aside className={styles.side} aria-label="Cue list">

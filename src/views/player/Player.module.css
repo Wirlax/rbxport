@@ -916,10 +916,3 @@
   color: var(--c-icon-on);
 }
 
-.error {
-  grid-column: 1 / -1;
-  margin: 0;
-  padding: 0 16px;
-  font-size: var(--f-size-sm);
-  color: var(--c-text-dim);
-}

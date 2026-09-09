@@ -17,6 +17,9 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-xs);
 }
+/* Failures, in the one place the eye already goes for what the app is doing. */
+.error { color: var(--c-error); }
+
 .selection { margin-left: auto; }
 
 /* Shown only while analysis runs. The track already being analysed finishes:

@@ -3,6 +3,13 @@ import styles from "./StatusBar.module.css";
 export interface StatusBarProps {
   /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
   activity?: string;
+  /**
+   * Something went wrong, said in red.
+   *
+   * Errors belong here rather than over the thing that raised them: the
+   * player used to print its own across the pad row and the tree beneath it.
+   */
+  error?: string | null;
   /** e.g. "Selected: 4 Tracks, 18 minutes, 58.4 MB"; empty when nothing is selected. */
   selection?: string;
   readOnly?: boolean;
@@ -14,6 +21,7 @@ export interface StatusBarProps {
 
 export function StatusBar({
   activity = "",
+  error = null,
   selection = "",
   readOnly = false,
   onCancelAnalysis,
@@ -37,6 +45,11 @@ export function StatusBar({
           Stop
         </button>
       ) : null}
+      {error === null || error === "" ? null : (
+        <span className={styles.error} role="alert">
+          {error}
+        </span>
+      )}
       <span className={styles.activity}>{activity}</span>
       {analysisFailures > 0 ? (
         <span

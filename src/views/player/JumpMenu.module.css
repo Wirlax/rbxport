@@ -9,7 +9,9 @@
   background: var(--c-raised);
   border: 1px solid var(--c-panel);
   border-radius: 4px;
-  box-shadow: 0 8px 24px var(--c-zoom-scrim);
+  /* The same drop as the header's menu; not the zoom scrim, which is a
+     ground for the waveform behind it and is tuned separately. */
+  box-shadow: 0 8px 24px rgb(0 0 0 / 55%);
   font-size: var(--f-size-ui);
   color: var(--c-text);
 }

@@ -1536,3 +1536,36 @@ test("right-clicking the tree opens the folder menu", async ({ page }) => {
   await expect(menu.getByRole("menuitem", { name: "Sort Items" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeDisabled();
 });
+
+test("errors go to the status bar in red, not over the deck", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // The player used to print its own failures across the pad row and the tree
+  // beneath it. Nothing in the deck says anything now.
+  await expect(page.getByRole("region", { name: "Preview player" }).getByRole("alert"))
+    .toHaveCount(0);
+
+  // A refusal lands in the footer, in red. A browser has no Finder, so the
+  // menu item that asks for one is a real failure rather than a staged one.
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Show in Finder" }).click();
+
+  const footer = page.getByRole("contentinfo");
+  const alert = footer.getByRole("alert");
+  await expect(alert).toBeVisible();
+  const colour = await alert.evaluate((el) => getComputedStyle(el).color);
+  const red = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue("--c-error").trim(),
+  );
+  // The token, as a colour the browser has resolved.
+  const expected = await page.evaluate((hex) => {
+    const probe = document.createElement("span");
+    probe.style.color = hex;
+    document.body.append(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  }, red);
+  expect(colour).toBe(expected);
+});

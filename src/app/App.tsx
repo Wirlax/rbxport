@@ -115,7 +115,17 @@ export function App() {
   );
   // Track ids in flight from the browser to the tree.
   const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);
-  const [dropNote, setDropNote] = useState<string | null>(null);
+  /**
+   * The last thing the app has to say, and whether it went wrong.
+   *
+   * One channel, two colours: "Added 3 tracks" and "rekordbox is running, so
+   * the library is open read-only" arrive the same way and are not the same
+   * kind of news.
+   */
+  const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const report = useCallback((text: string) => setNote({ text, failed: false }), []);
+  const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
   // Bumped whenever the library changes underneath us, which drops cached
   // pages. Without it an edit's effect never reached the table.
   const [libraryGeneration, setLibraryGeneration] = useState(0);
@@ -304,12 +314,12 @@ export function App() {
       const backend = await getBackend();
       try {
         await edit(backend);
-        setDropNote(what);
+        report(what);
       } catch (e) {
-        setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+        refuse(e instanceof Error ? e.message : "That could not be saved.");
       }
     },
-    [],
+    [report, refuse],
   );
 
   /** Shows an edit at once, so the interface does not wait on the reload. */
@@ -345,15 +355,15 @@ export function App() {
         try {
           await backend.edits.addTracksToPlaylist(playlistId, [...ids]);
           const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
-          setDropNote(`Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`);
+          report(`Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`);
         } catch (e) {
           // The refusal that matters is Rekordbox holding the database; say so
           // rather than letting the drop look as if it worked.
-          setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+          refuse(e instanceof Error ? e.message : "That could not be saved.");
         }
       })();
     },
-    [draggedTracks, tree],
+    [draggedTracks, tree, report, refuse],
   );
 
   /**
@@ -362,12 +372,15 @@ export function App() {
    * Every one of these writes, so each says why it could not rather than
    * looking as if it worked — the same rule the drop handler above follows.
    */
-  const afterWrite = useCallback(async (note: string) => {
-    const backend = await getBackend();
-    setTree(await backend.playlistTree());
-    setLibraryGeneration((generation) => generation + 1);
-    setDropNote(note);
-  }, []);
+  const afterWrite = useCallback(
+    async (said: string) => {
+      const backend = await getBackend();
+      setTree(await backend.playlistTree());
+      setLibraryGeneration((generation) => generation + 1);
+      report(said);
+    },
+    [report],
+  );
 
   const write = useCallback(
     (run: (backend: Backend) => Promise<string>) => {
@@ -376,11 +389,11 @@ export function App() {
         try {
           await afterWrite(await run(backend));
         } catch (e) {
-          setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+          refuse(e instanceof Error ? e.message : "That could not be saved.");
         }
       })();
     },
-    [afterWrite],
+    [afterWrite, refuse],
   );
 
   const createPlaylistIn = useCallback(
@@ -435,19 +448,19 @@ export function App() {
       try {
         await backend.revealTrack(row.id);
       } catch (e) {
-        setDropNote(e instanceof Error ? e.message : "That file could not be shown.");
+        refuse(e instanceof Error ? e.message : "That file could not be shown.");
       }
     })();
-  }, []);
+  }, [refuse]);
 
   // Clear the note after a moment: it reports an action, not a state.
   useEffect(() => {
-    if (dropNote === null) return;
-    const timer = setTimeout(() => setDropNote(null), 4000);
+    if (note === null) return;
+    const timer = setTimeout(() => setNote(null), 4000);
     return () => {
       clearTimeout(timer);
     };
-  }, [dropNote]);
+  }, [note]);
 
   /** Queues whatever is selected in the browser. */
   const analyseSelection = useCallback(() => {
@@ -456,25 +469,25 @@ export function App() {
   }, [analysis, selectedTracks]);
 
   const importFromMenu = useCallback(async () => {
-    setDropNote("Choosing files to import…");
+    report("Choosing files to import…");
     try {
       const backend = await getBackend();
-      const report = await backend.importFiles();
-      if (report === null) {
-        setDropNote(null);
+      const imported = await backend.importFiles();
+      if (imported === null) {
+        setNote(null);
         return;
       }
-      const total = report.imported + report.skipped.length;
-      setDropNote(
-        report.skipped.length === 0
-          ? `Imported ${report.imported} of ${total} files.`
-          : `Imported ${report.imported} of ${total} files; ${report.skipped.length} skipped.`,
+      const total = imported.imported + imported.skipped.length;
+      report(
+        imported.skipped.length === 0
+          ? `Imported ${imported.imported} of ${total} files.`
+          : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
       );
       setTree(await backend.playlistTree());
     } catch (e) {
-      setDropNote(e instanceof Error ? e.message : "Those files could not be imported.");
+      refuse(e instanceof Error ? e.message : "Those files could not be imported.");
     }
-  }, []);
+  }, [report, refuse]);
 
   // Native menu clicks. The shell sends the item's id and nothing else; what
   // it means, and whether it is allowed right now, is decided in one place.
@@ -486,7 +499,7 @@ export function App() {
         const outcome = resolveMenu(id, summary?.readOnly ?? false);
         if (!outcome) return;
         if ("refused" in outcome) {
-          setDropNote(outcome.refused);
+          refuse(outcome.refused);
           return;
         }
         if (outcome.action === "import") {
@@ -511,7 +524,7 @@ export function App() {
       });
     })();
     return () => stop?.();
-  }, [summary?.readOnly, importFromMenu]);
+  }, [summary?.readOnly, importFromMenu, refuse]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {
@@ -533,37 +546,37 @@ export function App() {
       if (!selectedDevice) return;
       const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
       setSyncing(true);
-      setDropNote(`Writing ${name} to ${selectedDevice.name}…`);
+      report(`Writing ${name} to ${selectedDevice.name}…`);
       try {
         const backend = await getBackend();
-        const report = await backend.exportPlaylist(playlistId, selectedDevice.path);
-        setDropNote(report === null ? null : exportSummary(selectedDevice.name, report));
+        const written = await backend.exportPlaylist(playlistId, selectedDevice.path);
+        if (written !== null) report(exportSummary(selectedDevice.name, written));
         setDevices(await backend.listDevices());
       } catch (e) {
-        setDropNote(e instanceof Error ? e.message : "That export could not be written.");
+        refuse(e instanceof Error ? e.message : "That export could not be written.");
       } finally {
         setSyncing(false);
       }
     },
-    [selectedDevice, tree],
+    [selectedDevice, tree, report, refuse],
   );
 
   const exportPlaylist = useCallback((node: TreeNode) => {
     void (async () => {
       const backend = await getBackend();
-      setDropNote(`Exporting ${node.name}…`);
+      report(`Exporting ${node.name}…`);
       try {
-        const report = await backend.exportPlaylist(node.id);
-        if (report === null) {
-          setDropNote(null);
+        const written = await backend.exportPlaylist(node.id);
+        if (written === null) {
+          setNote(null);
           return;
         }
-        setDropNote(exportSummary(node.name, report));
+        report(exportSummary(node.name, written));
       } catch (e) {
-        setDropNote(e instanceof Error ? e.message : "That export could not be written.");
+        refuse(e instanceof Error ? e.message : "That export could not be written.");
       }
     })();
-  }, []);
+  }, [report, refuse]);
 
   // The top of the current view, kept only to write the next start's opening
   // screen. The library itself still lives entirely in Rust.
@@ -646,6 +659,7 @@ export function App() {
           <Player
             track={playerTrack}
             onEject={() => setPlayerTrack(null)}
+            onError={setPlayerError}
             simple={!isFullDeck(layout)}
           />
           {deckCount(layout) > 1 ? <Player deck="b" track={null} /> : null}
@@ -747,10 +761,14 @@ export function App() {
           analysis.running
             ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
               (analysis.state.current ? ` — ${analysis.state.current.title}` : "")
-            : (dropNote ??
-              loadError ??
-              (summary ? `${summary.trackCount} Tracks` : "Loading the library…"))
+            : (note !== null && !note.failed
+                ? note.text
+                : (summary ? `${summary.trackCount} Tracks` : "Loading the library…"))
         }
+        // Everything that went wrong, in one place and in red: the deck's
+        // refusals, a library that would not open, and a write the library
+        // turned down.
+        error={playerError ?? loadError ?? (note?.failed === true ? note.text : null)}
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
         analysisFailures={analysis.state.failed.length}
         selection={selectionText}

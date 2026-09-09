@@ -620,8 +620,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // costs nothing, so every figure the platform will not give is null.
     appDiagnostics: () =>
       wait({ cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
-    // A browser has no Finder to open, and nothing to open it on.
-    revealTrack: () => wait(undefined),
+    // A browser has no Finder to open. Refusing is the truth; succeeding
+    // silently made the menu item look as if it had done something.
+    revealTrack: () =>
+      wait(undefined).then(() => {
+        throw new Error("A browser cannot show a file in the Finder.");
+      }),
 
     deckState: () => wait(tick()),
     onDeckTick: (listener) => {
