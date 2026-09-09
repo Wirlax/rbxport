@@ -776,7 +776,11 @@ export const Player = memo(function Player({
           onClick={playback.toggle}
           disabled={playback.idle}
         >
+          {/* Both are here so hover swaps them in CSS: a state change for a
+              pointer moving over a button is a re-render the frame loop does
+              not need to share the frame with. */}
           <span className={styles.playGlyph} aria-hidden />
+          <span className={styles.pauseGlyph} aria-hidden />
         </button>
       </div>
 

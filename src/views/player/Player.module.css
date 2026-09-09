@@ -133,6 +133,19 @@
   margin-left: 3px;
 }
 
+/* Hovering a running deck shows what the press will do. Only then: on a
+   stopped deck the triangle already is what the press will do, and swapping
+   it for something else would be a button that lies about itself. */
+.pauseGlyph {
+  display: none;
+  width: 10px;
+  height: 13px;
+  border-left: 3.5px solid currentColor;
+  border-right: 3.5px solid currentColor;
+}
+.play[data-on]:hover:not(:disabled) .playGlyph { display: none; }
+.play[data-on]:hover:not(:disabled) .pauseGlyph { display: block; }
+
 /* ------------------------------------------------------------------ deck */
 
 .main {

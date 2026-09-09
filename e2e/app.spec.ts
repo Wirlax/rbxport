@@ -1373,6 +1373,35 @@ test("the play triangle is grey at rest and white on a lit ring", async ({ page 
   });
 });
 
+test("hovering a running deck shows the pause it is about to do", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // Which of the two glyphs the button is actually drawing.
+  const shown = async (name: string) =>
+    page.getByRole("button", { name, exact: true }).evaluate((el) =>
+      [...el.querySelectorAll("span")]
+        .map((g) => (getComputedStyle(g).display === "none" ? null : g.clientWidth === 0 ? "triangle" : "bars"))
+        .filter(Boolean),
+    );
+
+  // Stopped, hovered: the triangle stays. It already says what a press does.
+  await page.getByRole("button", { name: "Play", exact: true }).hover();
+  expect(await shown("Play")).toEqual(["triangle"]);
+
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  const pause = page.getByRole("button", { name: "Pause", exact: true });
+  await expect(pause).toBeVisible();
+
+  // Running and hovered — the pointer is still on it after the click.
+  expect(await shown("Pause")).toEqual(["bars"]);
+
+  // Off the button, the triangle comes back.
+  await page.getByTestId("player-title").hover();
+  expect(await shown("Pause")).toEqual(["triangle"]);
+});
+
 test("the wheel over a waveform zooms it", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
