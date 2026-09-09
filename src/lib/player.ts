@@ -14,6 +14,17 @@ export const DETAIL_BARS = 12;
 /** Beats in a bar. Everything here assumes 4/4, as rekordbox's grid does. */
 export const BEATS_PER_BAR = 4;
 
+/**
+ * How much wider than the strip the scrolling layer is drawn.
+ *
+ * The detail waveform scrolls under a fixed playhead, and redrawing it on
+ * every tick is what made it step ten times a second instead of moving. So it
+ * is drawn once across twice the visible span and slid by a transform, which
+ * the compositor does every frame for nothing; a redraw happens only when the
+ * playhead has travelled far enough to see the end of what was drawn.
+ */
+export const OVERDRAW = 2;
+
 /** Zoom levels, in bars across, that the +/- buttons step through. */
 export const ZOOM_STEPS = [2, 4, 8, 12, 16, 32, 64] as const;
 
@@ -364,4 +375,34 @@ export function pressCue(
 export function releaseCue(previewing: boolean, cuePoint: number): CueAction | null {
   if (!previewing) return null;
   return { seekTo: cuePoint, playing: false, cuePoint };
+}
+
+/**
+ * How far the drawn layer must slide, in pixels, to keep the head centred.
+ *
+ * The layer covers `OVERDRAW` spans centred on `anchor`, laid out so that with
+ * no transform its middle is the middle of the strip. Sliding it by this puts
+ * `progress` there instead.
+ */
+export function scrollOffset(
+  progress: number,
+  anchor: number,
+  span: number,
+  width: number,
+): number {
+  if (span <= 0 || width <= 0) return 0;
+  return -((progress - anchor) / span) * width;
+}
+
+/**
+ * Whether the playhead has run far enough that the layer must be redrawn.
+ *
+ * The layer reaches half its width either side of the anchor, and the strip
+ * shows half a span either side of the head, so the hard limit is half a span.
+ * Redrawing at half of that leaves a margin: a redraw that lands exactly as
+ * the edge arrives is a redraw that sometimes arrives late.
+ */
+export function needsRedraw(progress: number, anchor: number, span: number): boolean {
+  if (span <= 0) return false;
+  return Math.abs(progress - anchor) > (span * (OVERDRAW - 1)) / 4;
 }

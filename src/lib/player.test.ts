@@ -13,7 +13,9 @@ import {
   memoryTime,
   cuesFor,
   nearestBeatMs,
+  needsRedraw,
   NO_BEATS,
+  scrollOffset,
   pressCue,
   releaseCue,
   parseBeatGrid,
@@ -403,5 +405,40 @@ describe("pressCue with quantize on", () => {
   it("still previews and still rewinds, quantized or not", () => {
     expect(pressCue(0.5, 0.5, false, grid).playing).toBe(true);
     expect(pressCue(90, 30, true, grid)).toEqual({ seekTo: 30, playing: false, cuePoint: 30 });
+  });
+});
+
+describe("scrollOffset", () => {
+  it("does not move the layer when the head is on the anchor", () => {
+    expect(scrollOffset(0.5, 0.5, 0.1, 800)).toBeCloseTo(0, 6);
+  });
+
+  it("slides the layer against the playhead, a strip width per span", () => {
+    // Half a span past the anchor is half a strip of travel.
+    expect(scrollOffset(0.55, 0.5, 0.1, 800)).toBeCloseTo(-400, 6);
+    expect(scrollOffset(0.45, 0.5, 0.1, 800)).toBeCloseTo(400, 6);
+  });
+
+  it("stays at rest rather than dividing by zero", () => {
+    expect(scrollOffset(0.5, 0.2, 0, 800)).toBe(0);
+    expect(scrollOffset(0.5, 0.2, 0.1, 0)).toBe(0);
+  });
+});
+
+describe("needsRedraw", () => {
+  it("holds while the drawn layer still covers the strip", () => {
+    expect(needsRedraw(0.5, 0.5, 0.1)).toBe(false);
+    expect(needsRedraw(0.52, 0.5, 0.1)).toBe(false);
+  });
+
+  it("asks for one before the edge of what was drawn arrives", () => {
+    // The layer reaches half a span past the anchor; this fires at a quarter,
+    // so the redraw has time to land.
+    expect(needsRedraw(0.53, 0.5, 0.1)).toBe(true);
+    expect(needsRedraw(0.47, 0.5, 0.1)).toBe(true);
+  });
+
+  it("never asks when there is no span to cover", () => {
+    expect(needsRedraw(0.9, 0.1, 0)).toBe(false);
   });
 });

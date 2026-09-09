@@ -12,7 +12,7 @@
  * than an unfinished panel. Controls with nothing behind them yet are drawn
  * the same way, for the same reason.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Cue, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -28,6 +28,9 @@ import {
   cuesFor,
   detailSpan,
   dragSeconds,
+  needsRedraw,
+  OVERDRAW,
+  scrollOffset,
   pressCue,
   releaseCue,
   headPercent,
@@ -313,6 +316,15 @@ export const Player = memo(function Player({ track }: PlayerProps) {
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
+  /**
+   * Where the scrolling layer is drawn from. Not the playhead: the layer is
+   * drawn once across `OVERDRAW` spans and slid by a transform, and it is
+   * redrawn only when the head has travelled far enough to see its edge.
+   */
+  const [anchor, setAnchor] = useState(0);
+  /** The anchor the layer is actually showing, so the slide never leads it. */
+  const drawn = useRef(0);
+  const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!track) {
@@ -339,10 +351,9 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     };
   }, [track]);
 
-  // The fraction played, for the playhead. Falls back to the track's own
-  // length before the file's metadata has loaded, so the head does not jump.
+  // Falls back to the track's own length before the file's metadata has
+  // loaded, so nothing jumps when it arrives.
   const total = playback.duration || track?.durationSec || 0;
-  const progress = total > 0 ? Math.min(playback.position / total, 1) : 0;
 
   // Bars rather than a fraction: twelve bars is twelve bars whether the track
   // is three minutes or ninety.
@@ -350,7 +361,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   // Memoised, not rebuilt each render: `BeatGrid` and `CueMarkers` are
   // `memo()` components taking this object, and a fresh one every render means
   // neither ever hits its memo.
-  const window = useMemo(() => windowAround(progress, span), [progress, span]);
+  const window = useMemo(() => windowAround(anchor, span * OVERDRAW), [anchor, span]);
 
   // The whole grid, once per track, as raw bytes. Fetching a window at a time
   // still re-read and re-parsed the entire analysis file on every fetch —
@@ -399,8 +410,15 @@ export const Player = memo(function Player({ track }: PlayerProps) {
         overviewHead.current.style.transform = `translateX(${at * overview.width}px)`;
       }
       if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${at})`;
-      // The detail head does not move at all: the window is centred on it and
-      // the waveform scrolls underneath.
+      // The detail head does not move at all: the layer under it does, by a
+      // transform on the compositor rather than a redraw. Redrawing the canvas
+      // from React state stepped it at the tick rate — ten times a second,
+      // which is what made a scrolling waveform look like a slideshow.
+      if (scroller.current) {
+        const dx = scrollOffset(at, drawn.current, span, detail.width);
+        scroller.current.style.transform = `translateX(${dx}px)`;
+      }
+      if (needsRedraw(at, drawn.current, span)) setAnchor(at);
       const x = (headPercent() / 100) * detail.width;
       if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
       if (barsLabel.current) {
@@ -412,7 +430,23 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     // and the head would otherwise sit where the last track left it.
     apply(positionRef.current);
     return subscribe(apply);
-  }, [total, bpm, overview.width, detail.width, positionRef, subscribe]);
+  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe]);
+
+  /*
+   * The layer's new anchor, taken only once it is on screen.
+   *
+   * A layout effect, and after the canvas's own: children run first, so by the
+   * time this slides the layer back the redraw it is sliding for has already
+   * happened. Updating the anchor in the frame loop instead moved the layer a
+   * frame before its contents caught up, which showed as a jump.
+   */
+  useLayoutEffect(() => {
+    drawn.current = anchor;
+    if (scroller.current) {
+      const at = total > 0 ? Math.min(positionRef.current / total, 1) : 0;
+      scroller.current.style.transform = `translateX(${scrollOffset(at, anchor, span, detail.width)}px)`;
+    }
+  }, [anchor, span, total, detail.width, positionRef]);
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {
@@ -462,14 +496,15 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     const box = element.getBoundingClientRect();
     if (box.width <= 0) return;
     element.setPointerCapture(event.pointerId);
-    playback.seekFraction((event.clientX - box.left) / box.width);
+    playback.scrubBegin();
+    playback.scrubTo(((event.clientX - box.left) / box.width) * total);
   };
 
   const dragOverview = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
     const box = event.currentTarget.getBoundingClientRect();
     if (box.width <= 0) return;
-    playback.seekFraction((event.clientX - box.left) / box.width);
+    playback.scrubTo(((event.clientX - box.left) / box.width) * total);
   };
 
   /**
@@ -483,17 +518,19 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     grab.current = { x: event.clientX, at: playback.positionRef.current };
+    playback.scrubBegin();
   };
 
   const dragDetail = (event: React.PointerEvent<HTMLDivElement>) => {
     const held = grab.current;
     if (!held || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
     const box = event.currentTarget.getBoundingClientRect();
-    playback.seek(held.at + dragSeconds(event.clientX - held.x, box.width, span, total));
+    playback.scrubTo(held.at + dragSeconds(event.clientX - held.x, box.width, span, total));
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     grab.current = null;
+    playback.scrubEnd();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -663,30 +700,28 @@ export const Player = memo(function Player({ track }: PlayerProps) {
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
           >
-            {track && track.analysed ? (
-              <WaveformDetail
-                trackId={track.id}
-                progress={progress}
-                span={span}
-                width={detail.width}
-                height={detail.height}
-                detail
-                inset={WAVE_INSET}
-              />
-            ) : null}
-            <BeatGrid beats={beats} totalMs={total * 1000} window={window} />
+            <div ref={scroller} className={styles.scroller}>
+              {track && track.analysed ? (
+                <WaveformDetail
+                  trackId={track.id}
+                  progress={anchor}
+                  span={span * OVERDRAW}
+                  width={detail.width * OVERDRAW}
+                  height={detail.height}
+                  detail
+                  inset={WAVE_INSET}
+                />
+              ) : null}
+              <BeatGrid beats={beats} totalMs={total * 1000} window={window} />
+              <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} />
+            </div>
             {/* Bars elapsed, printed to the left of the playhead. Its text and
                 its position are both the frame loop's, so React renders it
                 empty and never touches it again. */}
             {track && track.bpmX100 > 0 ? (
               <span ref={barsLabel} className={styles.bars} data-testid="player-bars" />
             ) : null}
-            <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} />
-            {/*
-              The detail window is centred on the playhead, so the head is
-              drawn at the centre rather than at the progress fraction — except
-              near the ends, where the window is pinned and the head moves.
-            */}
+            {/* Fixed in the middle; the layer above scrolls under it. */}
             <span
               ref={detailHead}
               className={styles.playhead}

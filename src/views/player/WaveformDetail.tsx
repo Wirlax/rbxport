@@ -10,7 +10,7 @@
  * stale on the next frame. This draws straight from the bytes instead, which
  * are a few hundred of them and cost nothing to redraw.
  */
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { drawBands } from "@/canvas";
 import { getBackend } from "@/ipc/client";
@@ -80,7 +80,11 @@ export const WaveformDetail = memo(function WaveformDetail({
     };
   }, [trackId, detail]);
 
-  useEffect(() => {
+  // A layout effect, so the redraw lands before the frame that shows it. The
+  // strip that holds this is slid by a transform written in the parent's own
+  // layout effect, and children run first: the two stay in step only because
+  // the canvas is already new by the time the slide is written.
+  useLayoutEffect(() => {
     const canvas = ref.current;
     if (!canvas || !data) return;
     const { width: w, height: h } = backingSize(width, height);
