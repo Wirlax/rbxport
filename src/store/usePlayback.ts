@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { DeckId, Tick } from "@/ipc/types";
+import type { AppErrorDto, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
 import { extrapolate, follow, NO_ANCHOR, type Anchor } from "@/lib/clock";
 
@@ -54,6 +54,27 @@ export interface Playback {
 
 /** The preview player is deck A. The second deck arrives with the mixer. */
 const DECK: DeckId = "a";
+
+/** What went wrong, in the words of whoever knows. */
+const FALLBACK = "This track could not be played.";
+
+/**
+ * The reason, not a shrug.
+ *
+ * Every one of these failures arrives carrying why: a command rejects with an
+ * `AppError` whose message says whether the file is missing or the audio
+ * device would not open, and the deck's own error event carries what the
+ * decoder said. Roughly one track in thirty of the reference library sits on a
+ * volume that is not mounted, and "This track could not be played" leaves the
+ * only useful fact — plug the drive in — on the floor.
+ */
+export function reasonFrom(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as Partial<AppErrorDto>).message;
+    if (typeof message === "string" && message.trim() !== "") return message;
+  }
+  return FALLBACK;
+}
 
 export function usePlayback(trackId: string | null): Playback {
   const [playing, setPlaying] = useState(false);
@@ -123,7 +144,7 @@ export function usePlayback(trackId: string | null): Playback {
       const unlistenEvent = backend.onDeckEvent((event) => {
         if (!live || event.deck !== DECK) return;
         if (event.message !== null) {
-          setError("This track could not be played.");
+          setError(event.message.trim() === "" ? FALLBACK : event.message);
           return;
         }
         setError(null);
@@ -164,10 +185,11 @@ export function usePlayback(trackId: string | null): Playback {
         if (loading.current !== trackId) return;
         if (trackId === null) await backend.deckUnload(DECK);
         else await backend.deckLoad(DECK, trackId);
-      } catch {
+      } catch (failure) {
         // A missing file, or no audio device at all. Either way the deck has
-        // nothing, and saying so is better than a transport that does nothing.
-        if (loading.current === trackId) setError("This track could not be played.");
+        // nothing, and which of the two it was is the whole of what the person
+        // looking at it needs.
+        if (loading.current === trackId) setError(reasonFrom(failure));
       }
     })();
   }, [trackId, emit]);
@@ -204,9 +226,9 @@ export function usePlayback(trackId: string | null): Playback {
         const backend = await getBackend();
         if (wanted) await backend.deckPlay(DECK);
         else await backend.deckPause(DECK);
-      } catch {
+      } catch (failure) {
         setPlaying(false);
-        setError("This track could not be played.");
+        setError(reasonFrom(failure));
       }
     })();
   }, [idle, playing]);
@@ -227,8 +249,8 @@ export function usePlayback(trackId: string | null): Playback {
         try {
           const backend = await getBackend();
           await backend.deckSeek(DECK, Math.round(at * 1000));
-        } catch {
-          setError("This track could not be played.");
+        } catch (failure) {
+          setError(reasonFrom(failure));
         }
       })();
     },
