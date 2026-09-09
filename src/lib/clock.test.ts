@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extrapolate, follow, NO_ANCHOR, SNAP_SECONDS, type Anchor } from "./clock";
+import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } from "./clock";
 
 const anchor = (over: Partial<Anchor> = {}): Anchor => ({
   ...NO_ANCHOR,
@@ -64,5 +64,28 @@ describe("follow", () => {
 
   it("treats exactly the threshold as drift, not a seek", () => {
     expect(follow(1.0, 1.0 + SNAP_SECONDS, 16)).toBeLessThan(1.0 + SNAP_SECONDS);
+  });
+});
+
+describe("pinned", () => {
+  it("stands still, however much time passes", () => {
+    // The one that bit: a drag on a playing deck kept extrapolating at
+    // playback speed, so the waveform crept forward under a hand holding it
+    // still and snapped back on the next tick.
+    const held = pinned(anchor({ playing: true, sampleRate: 44_100 }), 2, 5_000);
+    expect(extrapolate(held, 5_000)).toBeCloseTo(2, 6);
+    expect(extrapolate(held, 5_500)).toBeCloseTo(2, 6);
+  });
+
+  it("takes the seconds it is given, not the frames it had", () => {
+    const held = pinned(anchor({ sampleRate: 44_100 }), 30, 0);
+    expect(held.frames).toBe(30 * 44_100);
+  });
+
+  it("keeps what it had when the rate is not known yet", () => {
+    // Before the first tick there is no sample rate, and converting against
+    // zero would pin the head to the start of the track.
+    const before = anchor({ sampleRate: 0, frames: 44_100 });
+    expect(pinned(before, 30, 0).frames).toBe(44_100);
   });
 });

@@ -71,3 +71,23 @@ export function follow(shown: number, target: number, sinceMs: number): number {
   if (Math.abs(gap) > SNAP_SECONDS || sinceMs <= 0) return target;
   return shown + gap * (1 - Math.exp(-sinceMs / EASE_MS));
 }
+
+/**
+ * An anchor that stands still at `seconds`.
+ *
+ * A drag owns the playhead, and neither the deck's ticks nor the frame loop
+ * may move it. The deck's own read head is not where the pointer is: it is
+ * rate-limited so a drag stays audible, so it trails a fast hand and comes to
+ * rest about a block past a still one. Anchoring on it and then extrapolating
+ * at playback speed drew the head creeping forward between ticks and snapping
+ * back on each one — a waveform jittering under a hand that was holding it
+ * still.
+ */
+export function pinned(anchor: Anchor, seconds: number, now: number): Anchor {
+  return {
+    ...anchor,
+    frames: anchor.sampleRate > 0 ? seconds * anchor.sampleRate : anchor.frames,
+    at: now,
+    playing: false,
+  };
+}

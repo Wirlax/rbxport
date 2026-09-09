@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { AppErrorDto, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
-import { extrapolate, follow, NO_ANCHOR, type Anchor } from "@/lib/clock";
+import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } from "@/lib/clock";
 
 export interface Playback {
   /** True while audio is actually running. */
@@ -67,6 +67,18 @@ export interface Playback {
 /** The preview player is deck A; the 2-player layout adds B. */
 const DEFAULT_DECK: DeckId = "a";
 
+/**
+ * How long letting go waits for the seek it asked for before trusting ticks
+ * again.
+ *
+ * Ticks arrive every 100 ms and the seek is one command behind them, so the
+ * first tick or two after a drag still carries where the read head was
+ * mid-drag. The wait normally ends on the tick that agrees with where the drag
+ * ended; this is the bound, so a deck that never seeks — unloaded while being
+ * dragged — cannot leave the playhead frozen.
+ */
+const LANDING_MS = 500;
+
 /** What went wrong, in the words of whoever knows. */
 const FALLBACK = "This track could not be played.";
 
@@ -105,6 +117,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const loading = useRef<string | null>(null);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
+  /** When a drag let go, until the seek that ends it comes back. */
+  const landing = useRef<number | null>(null);
   /** The seek a drag is waiting to send, coalesced to one a frame. */
   const pending = useRef<number | null>(null);
   const flushing = useRef(0);
@@ -126,16 +140,51 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     (tick: Tick) => {
       const deck = DECK === "b" ? tick.b : tick.a;
       const rate = tick.sampleRate;
+      const now = performance.now();
+      setPlaying(deck.playing);
+      setDuration(rate > 0 ? deck.totalFrames / rate : 0);
+      // A drag owns the playhead, and the deck's head is not under the
+      // pointer: it is rate-limited so the drag stays audible, so it trails a
+      // fast hand and rests a block past a still one. Taking it as the anchor
+      // jerked the waveform back ten times a second while the hand held
+      // steady, and the frame loop then ran it forward again at playback
+      // speed. Pinned instead, at whatever the pointer last said.
+      const hold = () => {
+        anchor.current = pinned({ ...anchor.current, sampleRate: rate }, positionRef.current, now);
+        // The drag bumps a generation at each end. Swallowed here, or the
+        // playhead would later snap to a head it was deliberately pinned off.
+        shownGeneration.current = deck.generation;
+      };
+      if (scrubbing.current) {
+        hold();
+        return;
+      }
+      if (landing.current !== null) {
+        // Let go, but the seek that ends the drag is a command behind the
+        // ticks, so the next one or two still carry the mid-drag head. What
+        // says the seek has landed is the tick agreeing with where the drag
+        // ended — not a generation, because the drag bumps one of those at
+        // each end and a drag shorter than a tick has both still in flight.
+        // A tick that already agrees is taken, because taking it moves
+        // nothing.
+        const reported = rate > 0 ? deck.frames / rate : 0;
+        const waiting =
+          Math.abs(reported - positionRef.current) > SNAP_SECONDS &&
+          now - landing.current < LANDING_MS;
+        if (waiting) {
+          hold();
+          return;
+        }
+        landing.current = null;
+      }
       anchor.current = {
         frames: deck.frames,
-        at: performance.now(),
+        at: now,
         sampleRate: rate,
         playing: deck.playing,
         generation: deck.generation,
         rate: 1,
       };
-      setPlaying(deck.playing);
-      setDuration(rate > 0 ? deck.totalFrames / rate : 0);
       const at = extrapolate(anchor.current, performance.now());
       setPosition(at);
       // A load or a seek moves the playhead deliberately; anything else is
@@ -286,6 +335,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const scrubBegin = useCallback(() => {
     if (idle || scrubbing.current) return;
     scrubbing.current = true;
+    landing.current = null;
+    // The head stops running the moment it is grabbed. A playing deck keeps
+    // its transport — the drag is not a pause — but what is drawn is the hand,
+    // and the hand has not moved yet.
+    anchor.current = pinned(anchor.current, positionRef.current, performance.now());
     void (async () => {
       try {
         const backend = await getBackend();
@@ -307,11 +361,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     (seconds: number) => {
       if (idle || !Number.isFinite(seconds)) return;
       const at = Math.max(seconds, 0);
-      anchor.current = {
-        ...anchor.current,
-        frames: anchor.current.sampleRate > 0 ? at * anchor.current.sampleRate : 0,
-        at: performance.now(),
-      };
+      // Pinned, not merely moved: a drag on a playing deck must not carry on
+      // running forward between pointer moves, which is what made a steady
+      // hand look like a shaking one.
+      anchor.current = pinned(anchor.current, at, performance.now());
       setPosition(at);
       emit(at);
       pending.current = at;
@@ -339,6 +392,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const scrubEnd = useCallback(() => {
     if (!scrubbing.current) return;
     scrubbing.current = false;
+    // Still pinned: the seek is a command behind the ticks, so the next one or
+    // two still carry where the head was mid-drag. See `LANDING_MS`.
+    landing.current = performance.now();
     // Where the drag last aimed has to reach the deck before the drag ends,
     // because that is what the deck lands on. A click is over well inside one
     // frame, so the rAF that coalesces moves would still be holding the only
