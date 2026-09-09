@@ -13,7 +13,9 @@ export type TrackAction =
   | "analyse"
   | "removeFromPlaylist"
   | "showInformation"
-  | "showInFinder";
+  | "showInFinder"
+  | "loadPlayer1"
+  | "loadPlayer2";
 
 export type TreeAction =
   | "export"
@@ -28,6 +30,14 @@ export interface MenuEntry<A> {
   action: A | null;
   /** Opens a submenu, drawn with rekordbox's arrow. */
   submenu?: boolean;
+  /**
+   * The submenu's own rows, when there is one behind the arrow.
+   *
+   * Absent with `submenu` set is rekordbox's arrow over nothing: the entry is
+   * drawn and greyed, because a menu missing half its rows is a menu people
+   * have to relearn later.
+   */
+  items?: readonly MenuRow<A>[];
   /** A rule beyond "we have it": no playlist to remove from, and so on. */
   needs?: "playlist" | "file";
 }
@@ -40,10 +50,11 @@ export type MenuRow<A> = MenuEntry<A> | typeof SEPARATOR;
 /**
  * Right-clicking a track, top to bottom as the capture has it.
  *
- * The greyed entries are not oversights. `Load` needs a deck to load *into*,
- * which is the 2-player view; the tag list, iTunes, the cloud and the play
- * count are features this does not have; `Remove from Collection` is a write
- * to the shared library that no recording has pinned down yet.
+ * The greyed entries are not oversights: the tag list, iTunes, the cloud and
+ * the play count are features this does not have, and `Remove from
+ * Collection` is a write to the shared library that no recording has pinned
+ * down yet. `Load` is greyed here and filled in by `trackMenu` below, which
+ * knows how many players the layout is drawing.
  */
 export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Load", action: null, submenu: true },
@@ -128,11 +139,36 @@ export function enabled<A extends string>(
   entry: MenuEntry<A>,
   context: MenuContext,
 ): boolean {
+  // An entry that opens a submenu does nothing itself; what makes it live is
+  // having something under it that is.
+  if (entry.items) return entriesOf(entry.items).some((row) => enabled(row, context));
   if (entry.action === null) return false;
   if (context.readOnly && WRITES.has(entry.action)) return false;
   if (entry.needs === "playlist") return context.inPlaylist;
   if (entry.needs === "file") return context.hasFile;
   return true;
+}
+
+/**
+ * The track menu for a layout drawing `players` decks.
+ *
+ * rekordbox lists players 1 to 4 under `Load` whether or not they are on
+ * screen; this lists the ones there are, because a player that is not drawn
+ * has nowhere to put a track. With none — the Full Browser layout — `Load` is
+ * the greyed arrow it is in `TRACK_MENU`.
+ *
+ * The labels are `german.lang`'s own keys: "Load track to player 1".
+ */
+export function trackMenuFor(players: number): readonly MenuRow<TrackAction>[] {
+  const every: MenuRow<TrackAction>[] = [
+    { label: "Load track to player 1", action: "loadPlayer1" },
+    { label: "Load track to player 2", action: "loadPlayer2" },
+  ];
+  const decks = every.slice(0, Math.max(0, players));
+  if (decks.length === 0) return TRACK_MENU;
+  return TRACK_MENU.map((row) =>
+    row !== SEPARATOR && row.label === "Load" ? { ...row, items: decks } : row,
+  );
 }
 
 /** The entries of a menu, without its separators. */

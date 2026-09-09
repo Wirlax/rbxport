@@ -5,6 +5,7 @@ import {
   entriesOf,
   SEPARATOR,
   TRACK_MENU,
+  trackMenuFor,
   treeMenu,
   type MenuContext,
 } from "./contextMenus";
@@ -55,6 +56,37 @@ describe("TRACK_MENU", () => {
       "Auto Load Hot Cue",
       "Track information",
     ]);
+  });
+});
+
+describe("trackMenuFor", () => {
+  const load = (players: number) =>
+    entriesOf(trackMenuFor(players)).find((e) => e.label === "Load");
+
+  it("offers the players the layout is drawing and no others", () => {
+    expect(load(0)?.items).toBeUndefined();
+    expect(entriesOf(load(1)?.items ?? []).map((e) => e.label)).toEqual([
+      "Load track to player 1",
+    ]);
+    expect(entriesOf(load(2)?.items ?? []).map((e) => e.label)).toEqual([
+      "Load track to player 1",
+      "Load track to player 2",
+    ]);
+  });
+
+  it("leaves the rest of rekordbox's list exactly as it was", () => {
+    expect(entriesOf(trackMenuFor(2)).map((e) => e.label)).toEqual(
+      entriesOf(TRACK_MENU).map((e) => e.label),
+    );
+    expect(trackMenuFor(2).filter((row) => row === SEPARATOR)).toHaveLength(7);
+  });
+
+  it("keeps Load greyed with no player to load into, and live with one", () => {
+    // The arrow is drawn either way, which is what rekordbox does with an
+    // entry a given selection cannot use.
+    expect(load(0)?.submenu).toBe(true);
+    expect(enabled(load(0) ?? { label: "Load", action: null }, OPEN)).toBe(false);
+    expect(enabled(load(2) ?? { label: "Load", action: null }, OPEN)).toBe(true);
   });
 });
 

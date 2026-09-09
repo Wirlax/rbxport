@@ -95,6 +95,14 @@ export interface PlayerProps {
   onDropTrack?: () => void;
   /** A track is being dragged, so the deck can offer itself as a target. */
   dragging?: boolean;
+  /**
+   * Load whatever the browser has selected.
+   *
+   * The third load gesture, and the sleeve is where it lives: loaded, the
+   * sleeve ejects, and empty it takes the selection. Absent — nothing
+   * selected, or several things — the empty deck is inert.
+   */
+  onLoadSelected?: (() => void) | undefined;
 }
 
 /**
@@ -334,7 +342,8 @@ const PANELS = [
 ] as const;
 
 export const Player = memo(function Player({
-  track, onEject, onError, onDropTrack, dragging = false, deck = "a", simple = false,
+  track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
+  simple = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -839,10 +848,13 @@ export const Player = memo(function Player({
           <button
             type="button"
             className={styles.artwork}
-            aria-label="Eject"
-            title="Eject"
-            onClick={onEject}
-            disabled={!track || !onEject}
+            // Loaded, the sleeve ejects — as it does on a CDJ's screen. Empty,
+            // it takes whatever the browser has selected, which is the third
+            // way a track reaches a deck alongside the drop and the menu.
+            aria-label={track ? "Eject" : "Load the selected track"}
+            title={track ? "Eject" : "Load the selected track"}
+            onClick={track ? onEject : onLoadSelected}
+            disabled={track ? !onEject : !onLoadSelected}
           >
             {track?.hasArtwork ? (
               <Artwork trackId={track.id} className={styles.sleeve} />
@@ -851,7 +863,7 @@ export const Player = memo(function Player({
             )}
             {/* Shown on hover, over a scrim: what the sleeve does when clicked
                 is not otherwise guessable from a sleeve. */}
-            <EjectIcon className={styles.eject} />
+            {track ? <EjectIcon className={styles.eject} /> : null}
           </button>
           <div className={styles.overviewStack}>
             {/* Where the vocals are, from the analysis. */}

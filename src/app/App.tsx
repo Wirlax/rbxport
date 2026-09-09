@@ -7,7 +7,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { Backend, Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import type {
+  Backend, DeckId, Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec,
+} from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
@@ -89,6 +91,9 @@ export function App() {
   // track on it: the browser's selection drives deck A alone, or picking
   // through a playlist would keep replacing whatever B was cued to.
   const [playerTrackB, setPlayerTrackB] = useState<RowDto | null>(null);
+  // The one row the browser has selected, so an empty deck can be clicked to
+  // take it. Selecting still loads nothing by itself.
+  const [selectedRow, setSelectedRow] = useState<RowDto | null>(null);
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -389,6 +394,23 @@ export function App() {
     return { a: into(setPlayerTrack), b: into(setPlayerTrackB) };
   }, [draggedTracks]);
 
+  /** The same three decks, loaded from the track menu or from a click. */
+  const loadInto = useMemo(
+    () => ({ a: setPlayerTrack, b: setPlayerTrackB }),
+    [],
+  );
+  const loadTrack = useCallback(
+    (deck: DeckId, row: RowDto) => loadInto[deck === "b" ? "b" : "a"](row),
+    [loadInto],
+  );
+  const loadSelectedInto = useMemo(() => {
+    if (!selectedRow) return { a: undefined, b: undefined };
+    return {
+      a: () => setPlayerTrack(selectedRow),
+      b: () => setPlayerTrackB(selectedRow),
+    };
+  }, [selectedRow]);
+
   /**
    * The tree's context menu, and the track's.
    *
@@ -686,6 +708,7 @@ export function App() {
             simple={!isFullDeck(layout)}
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
+            onLoadSelected={loadSelectedInto.a}
           />
           {deckCount(layout) > 1 ? (
             <Player
@@ -696,6 +719,7 @@ export function App() {
               simple={!isFullDeck(layout)}
               dragging={draggedTracks !== null}
               onDropTrack={loadDroppedInto.b}
+              onLoadSelected={loadSelectedInto.b}
             />
           ) : null}
           <div className={styles.playerGutter} aria-hidden />
@@ -754,7 +778,10 @@ export function App() {
           onRemoveFromPlaylist={removeFromPlaylist}
           readOnly={summary?.readOnly ?? false}
           onFocusedRow={setPlayerTrack}
+          onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
+          players={deckCount(layout)}
+          onLoadTrack={loadTrack}
           onRate={rateTrack}
           onComment={commentTrack}
           libraryGeneration={libraryGeneration}

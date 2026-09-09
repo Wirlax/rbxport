@@ -676,6 +676,50 @@ test("a track dragged onto a deck loads there", async ({ page }) => {
   ).toHaveText(title);
 });
 
+test("the track menu loads a track into either player", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+
+  const cell = page.locator('[role="gridcell"][data-col="title"]').first();
+  const title = (await cell.innerText()).trim();
+  await cell.click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: "Track" });
+  await expect(menu).toBeVisible();
+  // rekordbox's own list, with Load live because there are players to load
+  // into — it is greyed when the layout draws none.
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+
+  await expect(
+    page.getByRole("region", { name: "Preview player B" }).getByTestId("player-title"),
+  ).toHaveText(title);
+});
+
+test("clicking an empty deck loads the selected track, and selecting alone does not", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+
+  const deckB = page.getByRole("region", { name: "Preview player B" });
+  const row = page.getByRole("row").filter({ has: page.getByRole("gridcell") }).nth(3);
+  const title = (await row.locator('[data-col="title"]').innerText()).trim();
+
+  await row.click();
+  // Arrowing through a playlist must not load forty tracks on the way past.
+  await expect(deckB.getByTestId("player-title")).toHaveText("");
+
+  await deckB.getByRole("button", { name: "Load the selected track" }).click();
+  await expect(deckB.getByTestId("player-title")).toHaveText(title);
+  // Loaded, the same sleeve is the eject button again.
+  await expect(deckB.getByRole("button", { name: "Eject" })).toBeVisible();
+});
+
 test("only playlists offer themselves as a drop target", async ({ page }) => {
   // A folder holds playlists, so dropping tracks into one would have to invent
   // which playlist was meant.
@@ -1621,7 +1665,9 @@ test("right-clicking a track opens rekordbox's own menu", async ({ page }) => {
   // half the length of the real one is a menu people have to relearn later.
   await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "Get Info from iTunes" })).toBeDisabled();
-  await expect(menu.getByRole("menuitem", { name: "Load", exact: true })).toBeDisabled();
+  // Live, because the default layout draws a player to load into. With none
+  // — Full Browser — it is the greyed arrow rekordbox draws.
+  await expect(menu.getByRole("menuitem", { name: "Load", exact: true })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "Show information" })).toBeEnabled();
   // Not in a playlist, so there is nothing to remove it from.
   await expect(menu.getByRole("menuitem", { name: "Remove from Playlist" })).toBeDisabled();

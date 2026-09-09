@@ -45,6 +45,29 @@
   border-left: 5px solid currentColor;
 }
 
+/* The row is what a submenu hangs off, so the submenu can sit beside its own
+   entry rather than being positioned from the menu's top. */
+.row {
+  position: relative;
+  display: flex;
+}
+
+/* Beside the entry, overlapping the menu's border by a pixel so the two
+   panels read as one surface — which is how rekordbox draws them. */
+.submenu {
+  position: absolute;
+  left: calc(100% - 1px);
+  top: -5px;
+  z-index: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  background: var(--c-menu);
+  border: 1px solid var(--c-menu-border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 55%);
+}
+
 .separator {
   height: 1px;
   margin: 4px 0;

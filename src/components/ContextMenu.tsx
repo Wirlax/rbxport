@@ -5,7 +5,7 @@
  * rekordbox's lists — so this only decides where the menu goes, what closes
  * it, and how a greyed row differs from a live one.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { enabled, SEPARATOR, type MenuContext, type MenuRow } from "@/lib/contextMenus";
 import styles from "./ContextMenu.module.css";
@@ -28,6 +28,8 @@ export function ContextMenu<A extends string>({
   x, y, rows, context, label, onChoose, onClose,
 }: ContextMenuProps<A>) {
   const box = useRef<HTMLDivElement>(null);
+  /** Which entry's submenu is open, by label. One at a time, as menus are. */
+  const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => {
     // Anything outside, any scroll, any resize, or Escape closes it: a menu
@@ -77,20 +79,59 @@ export function ContextMenu<A extends string>({
           // the rows are a constant: they never reorder under it.
           <div key={`sep-${index}`} className={styles.separator} role="separator" />
         ) : (
-          <button
+          <div
             key={row.label}
-            type="button"
-            role="menuitem"
-            className={styles.item}
-            disabled={!enabled(row, context)}
-            onClick={() => {
-              if (row.action !== null) onChoose(row.action);
-              onClose();
-            }}
+            className={styles.row}
+            // Hover opens it and moving to another entry closes it, which is
+            // what a menu does; the click is for a pointer that arrives
+            // without hovering, and for the keyboard.
+            onMouseEnter={() => setOpen(row.items ? row.label : null)}
           >
-            <span className={styles.label}>{row.label}</span>
-            {row.submenu === true ? <span className={styles.arrow} aria-hidden /> : null}
-          </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.item}
+              disabled={!enabled(row, context)}
+              aria-haspopup={row.items ? "menu" : undefined}
+              aria-expanded={row.items ? open === row.label : undefined}
+              onClick={() => {
+                if (row.items) {
+                  setOpen((was) => (was === row.label ? null : row.label));
+                  return;
+                }
+                if (row.action !== null) onChoose(row.action);
+                onClose();
+              }}
+            >
+              <span className={styles.label}>{row.label}</span>
+              {row.submenu === true || row.items ? (
+                <span className={styles.arrow} aria-hidden />
+              ) : null}
+            </button>
+            {row.items && open === row.label ? (
+              <div className={styles.submenu} role="menu" aria-label={row.label}>
+                {row.items.map((child, at) =>
+                  child === SEPARATOR ? (
+                    <div key={`sub-${at}`} className={styles.separator} role="separator" />
+                  ) : (
+                    <button
+                      key={child.label}
+                      type="button"
+                      role="menuitem"
+                      className={styles.item}
+                      disabled={!enabled(child, context)}
+                      onClick={() => {
+                        if (child.action !== null) onChoose(child.action);
+                        onClose();
+                      }}
+                    >
+                      <span className={styles.label}>{child.label}</span>
+                    </button>
+                  ),
+                )}
+              </div>
+            ) : null}
+          </div>
         ),
       )}
     </div>

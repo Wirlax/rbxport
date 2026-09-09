@@ -8,13 +8,13 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { RowDto, SortColumn, ViewSpec } from "@/ipc/types";
+import type { DeckId, RowDto, SortColumn, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
-import { TRACK_MENU } from "@/lib/contextMenus";
+import { trackMenuFor } from "@/lib/contextMenus";
 import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
@@ -328,6 +328,14 @@ export interface TrackTableProps {
   onColumnAutoSizeAll: () => void;
   /** The row the player should show, as the selection moves. */
   onFocusedRow?: (row: RowDto | null) => void;
+  /**
+   * The single selected row, or `null` when the selection is not one row.
+   *
+   * Selecting a track does not load it — arrowing down a playlist would load
+   * every track on the way past — but an empty deck can be clicked to take
+   * whatever is selected, and this is what it takes.
+   */
+  onSelectedRow?: (row: RowDto | null) => void;
   /** What is being dragged, so a drop target knows what it would get. */
   onDragTracks?: (drag: TrackDrag | null) => void;
   /** Edit a track's rating or comment. Absent where writes are impossible. */
@@ -347,6 +355,13 @@ export interface TrackTableProps {
   onRemoveFromPlaylist?: (ids: readonly string[]) => void;
   /** rekordbox is running, so every write is refused rather than raced. */
   readOnly?: boolean;
+  /**
+   * How many players the layout is drawing, so the menu offers those and no
+   * others: a player that is not on screen has nowhere to put a track.
+   */
+  players?: number;
+  /** Load a track into a deck, from the menu. */
+  onLoadTrack?: (deck: DeckId, row: RowDto) => void;
   /** The last run's rows, drawn until the backend answers. */
   seed?: Seed | undefined;
   /**
@@ -366,6 +381,7 @@ export function TrackTable({
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, readOnly = false,
+  players = 0, onLoadTrack, onSelectedRow,
 }: TrackTableProps) {
   // Analysis is reachable from the keyboard rather than only a menu, since a
   // row context menu does not exist yet.
@@ -519,6 +535,29 @@ export function TrackTable({
   useEffect(() => {
     onSelectionChange?.(selection.ids.size);
   }, [selection.ids, onSelectionChange]);
+
+  const reportedRow = useRef<string | null>(null);
+  useEffect(() => {
+    if (!onSelectedRow) return;
+    // One row, or nothing: a deck holds one track, so a selection of four has
+    // no answer to which of them clicking a deck would load.
+    const only = selection.ids.size === 1 ? [...selection.ids][0] : undefined;
+    if (only === reportedRow.current) return;
+    reportedRow.current = only ?? null;
+    if (only === undefined) {
+      onSelectedRow(null);
+      return;
+    }
+    for (let i = 0; i < view.count; i++) {
+      const row = view.rowAt(i);
+      if (row?.id === only) {
+        onSelectedRow(row);
+        return;
+      }
+    }
+    // Selected but not fetched — off screen, which a click cannot reach.
+    onSelectedRow(null);
+  }, [selection.ids, view, view.token, onSelectedRow]);
 
   // The rows behind the selection, resolved from what is cached. A selection
   // spanning unfetched rows contributes only what is on hand, which is what
@@ -703,7 +742,7 @@ export function TrackTable({
         <ContextMenu
           x={trackMenu.x}
           y={trackMenu.y}
-          rows={TRACK_MENU}
+          rows={trackMenuFor(players)}
           label="Track"
           context={{
             inPlaylist: spec.source.kind === "playlist",
@@ -724,6 +763,12 @@ export function TrackTable({
                 break;
               case "removeFromPlaylist":
                 onRemoveFromPlaylist?.(ids);
+                break;
+              case "loadPlayer1":
+                onLoadTrack?.("a", trackMenu.row);
+                break;
+              case "loadPlayer2":
+                onLoadTrack?.("b", trackMenu.row);
                 break;
               default:
                 break;
