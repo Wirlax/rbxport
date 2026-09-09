@@ -183,7 +183,8 @@ const EditableCell = memo(function EditableCell({
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, onOpen, onDragStart, index, columns, onRate, onComment, onMenu,
+  row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
+  onComment, onMenu,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -193,12 +194,13 @@ const TrackRow = memo(function TrackRow({
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   /** Load the track into the player. A double-click, as in rekordbox. */
   onOpen: (index: number) => void;
-  onDragStart: (id: string) => void;
+  onDragStart: (row: RowDto) => void;
   /** Set the track's rating. Absent in a build that cannot write. */
   onRate: ((id: string, stars: number) => void) | undefined;
   /** Set the track's comment. */
   onComment: ((id: string, comment: string) => void) | undefined;
   onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
+  onDragEnd: () => void;
 }) {
   if (!row) {
     // Placeholder keeps the row box the exact height so nothing shifts on arrival.
@@ -218,11 +220,14 @@ const TrackRow = memo(function TrackRow({
       }}
       draggable
       onDragStart={(e) => {
-        onDragStart(row.id);
+        onDragStart(row);
         e.dataTransfer.effectAllowed = "copy";
         // Firefox will not start a drag without payload.
         e.dataTransfer.setData("text/plain", row.id);
       }}
+      // A drag that is let go over nothing still ends. Without this the tree
+      // kept offering its playlists as targets afterwards.
+      onDragEnd={() => onDragEnd()}
       role="row"
       aria-selected={selected}
     >
@@ -294,6 +299,18 @@ const TrackRow = memo(function TrackRow({
   );
 });
 
+/**
+ * A drag out of the track list.
+ *
+ * `ids` is what a playlist would take — the selection, or the one row grabbed
+ * from outside it. `row` is the row under the hand, which is what a deck
+ * takes: a deck holds one track, and dropping four onto it has no meaning.
+ */
+export interface TrackDrag {
+  ids: readonly string[];
+  row: RowDto;
+}
+
 export interface TrackTableProps {
   spec: ViewSpec;
   onSortChange: (column: SortColumn) => void;
@@ -311,8 +328,8 @@ export interface TrackTableProps {
   onColumnAutoSizeAll: () => void;
   /** The row the player should show, as the selection moves. */
   onFocusedRow?: (row: RowDto | null) => void;
-  /** Track ids being dragged, so the tree knows what a drop would add. */
-  onDragTracks?: (ids: readonly string[] | null) => void;
+  /** What is being dragged, so a drop target knows what it would get. */
+  onDragTracks?: (drag: TrackDrag | null) => void;
   /** Edit a track's rating or comment. Absent where writes are impossible. */
   onRate?: (id: string, stars: number) => void;
   onComment?: (id: string, comment: string) => void;
@@ -456,15 +473,19 @@ export function TrackTable({
   }, [items.length, view, view.count, view.token]);
 
   const startDraggingTracks = useCallback(
-    (id: string) => {
+    (row: RowDto) => {
       // Whatever is selected, plus the row grabbed if it was not part of it —
       // dragging an unselected row should move that row, not the selection
       // somewhere else on screen.
-      const ids = selection.ids.has(id) ? [...selection.ids] : [id];
-      onDragTracks?.(ids);
+      const ids = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
+      // The grabbed row travels with them, because a deck takes one track and
+      // that is the one the hand is on. A playlist takes all of them.
+      onDragTracks?.({ ids, row });
     },
     [selection.ids, onDragTracks],
   );
+
+  const endDraggingTracks = useCallback(() => onDragTracks?.(null), [onDragTracks]);
 
   const handleSelect = useCallback(
     (index: number, id: string, e: React.MouseEvent) => {
@@ -664,6 +685,7 @@ export function TrackTable({
                 index={item.index}
                 columns={columns}
                 onDragStart={startDraggingTracks}
+                onDragEnd={endDraggingTracks}
                 onRate={onRate}
                 onComment={onComment}
                 top={item.start - COL_HEADER_H}

@@ -627,6 +627,27 @@ test("tracks can be dragged from the browser onto a playlist", async ({ page }) 
   await expect(page.getByRole("contentinfo")).toContainText(/Added \d+ track/);
 });
 
+test("a track dragged onto a deck loads there", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Two decks, so the second one can be loaded without touching the first.
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const decks = page.getByRole("region", { name: /^Preview player/ });
+  await expect(decks).toHaveCount(2);
+
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const second = rows.nth(1);
+  const title = (await second.locator('[data-col="title"]').innerText()).trim();
+
+  // Onto deck B, which the browser selection never loads: only a drop does.
+  await second.dragTo(page.getByRole("region", { name: "Preview player B" }));
+  await expect(
+    page.getByRole("region", { name: "Preview player B" }).getByTestId("player-title"),
+  ).toHaveText(title);
+});
+
 test("only playlists offer themselves as a drop target", async ({ page }) => {
   // A folder holds playlists, so dropping tracks into one would have to invent
   // which playlist was meant.

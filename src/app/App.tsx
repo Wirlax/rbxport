@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { Backend, Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
-import { TrackTable } from "@/views/browser/TrackTable";
+import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
@@ -85,6 +85,10 @@ export function App() {
   // before the library is read, which fails, and the deck would open on an
   // error over something nobody asked to hear.
   const [playerTrack, setPlayerTrack] = useState<RowDto | null>(null);
+  // Deck B, which only exists in the two-player layouts. Loaded by dropping a
+  // track on it: the browser's selection drives deck A alone, or picking
+  // through a playlist would keep replacing whatever B was cued to.
+  const [playerTrackB, setPlayerTrackB] = useState<RowDto | null>(null);
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -113,8 +117,9 @@ export function App() {
       setPendingEdits((edits) => new Map(edits).set(id, { analysed: 1 }));
     }, []),
   );
-  // Track ids in flight from the browser to the tree.
-  const [draggedTracks, setDraggedTracks] = useState<readonly string[] | null>(null);
+  // What is in flight out of the browser: a playlist takes the ids, a deck
+  // takes the one row under the hand.
+  const [draggedTracks, setDraggedTracks] = useState<TrackDrag | null>(null);
   /**
    * The last thing the app has to say, and whether it went wrong.
    *
@@ -347,7 +352,7 @@ export function App() {
 
   const addDraggedTo = useCallback(
     (playlistId: string) => {
-      const ids = draggedTracks;
+      const ids = draggedTracks?.ids;
       setDraggedTracks(null);
       if (!ids || ids.length === 0) return;
       void (async () => {
@@ -365,6 +370,24 @@ export function App() {
     },
     [draggedTracks, tree, report, refuse],
   );
+
+  /**
+   * Loading a dragged track into a deck.
+   *
+   * A pair of stable callbacks rather than one taking a deck id: `Player` is
+   * memoized, and a closure built during render would give it a new prop every
+   * frame the app draws.
+   */
+  const loadDroppedInto = useMemo(() => {
+    const into = (put: (row: RowDto) => void) => () => {
+      const row = draggedTracks?.row;
+      setDraggedTracks(null);
+      // Nothing is written: which track a deck is holding is not part of the
+      // library, so this is the one drop that cannot be refused.
+      if (row) put(row);
+    };
+    return { a: into(setPlayerTrack), b: into(setPlayerTrackB) };
+  }, [draggedTracks]);
 
   /**
    * The tree's context menu, and the track's.
@@ -661,8 +684,20 @@ export function App() {
             onEject={() => setPlayerTrack(null)}
             onError={setPlayerError}
             simple={!isFullDeck(layout)}
+            dragging={draggedTracks !== null}
+            onDropTrack={loadDroppedInto.a}
           />
-          {deckCount(layout) > 1 ? <Player deck="b" track={null} /> : null}
+          {deckCount(layout) > 1 ? (
+            <Player
+              deck="b"
+              track={playerTrackB}
+              onEject={() => setPlayerTrackB(null)}
+              onError={setPlayerError}
+              simple={!isFullDeck(layout)}
+              dragging={draggedTracks !== null}
+              onDropTrack={loadDroppedInto.b}
+            />
+          ) : null}
           <div className={styles.playerGutter} aria-hidden />
         </div>
       ) : null}

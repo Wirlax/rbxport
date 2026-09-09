@@ -81,6 +81,20 @@ export interface PlayerProps {
    * else the app has to say.
    */
   onError?: (message: string | null) => void;
+  /**
+   * A track dropped onto the deck.
+   *
+   * The whole deck takes the drop, not only the sleeve: rekordbox loads a
+   * track dropped anywhere on a player, and a 79-pixel square is a small
+   * target for a hand that is already carrying something. The sleeve is what
+   * lights up, because that is where the track lands.
+   *
+   * What was dropped is not passed back: the shell started the drag and knows
+   * what is in it, and a deck takes one track whoever is holding it.
+   */
+  onDropTrack?: () => void;
+  /** A track is being dragged, so the deck can offer itself as a target. */
+  dragging?: boolean;
 }
 
 /**
@@ -320,7 +334,7 @@ const PANELS = [
 ] as const;
 
 export const Player = memo(function Player({
-  track, onEject, onError, deck = "a", simple = false,
+  track, onEject, onError, onDropTrack, dragging = false, deck = "a", simple = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -695,6 +709,8 @@ export const Player = memo(function Player({
   const remaining = splitTime(Math.max(total - playback.position, 0));
   const elapsed = splitTime(playback.position);
 
+  const takesDrop = dragging && Boolean(onDropTrack);
+
   return (
     <section
       ref={shell}
@@ -703,6 +719,19 @@ export const Player = memo(function Player({
       data-armed={armed ? "" : undefined}
       data-simple={simple ? "" : undefined}
       data-empty={track ? undefined : ""}
+      data-droppable={takesDrop || undefined}
+      onDragOver={(event) => {
+        if (!takesDrop) return;
+        // Without the preventDefault the browser refuses the drop and the
+        // cursor says so, whatever the handler below would have done.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        if (!takesDrop) return;
+        event.preventDefault();
+        onDropTrack?.();
+      }}
     >
       <div className={styles.transport}>
         <div className={styles.pair}>

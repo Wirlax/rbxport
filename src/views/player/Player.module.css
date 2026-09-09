@@ -938,3 +938,11 @@
   color: var(--c-icon-on);
 }
 
+
+/* A track is being dragged and this deck would take it. The sleeve is what is
+   marked, not the whole deck: a dashed outline around a 279pt panel reads as
+   an error state, and the sleeve is where the track lands. */
+.player[data-droppable] .artwork {
+  outline: 1px dashed var(--c-accent);
+  outline-offset: -1px;
+}
