@@ -14,6 +14,25 @@
 //! they happen to be at, and on anything tonal that is a warble. Searching a
 //! few milliseconds either side for the offset that best matches what came
 //! before costs one correlation a hop and removes most of it.
+//!
+//! **What this backend is not good enough for, measured.** Shifting a key —
+//! resampling by an interval and stretching back by its inverse — needs the
+//! stretch to hold a pitch to a fraction of a percent, and this holds it to a
+//! few percent: asked for two semitones down, the tone came back a quarter of
+//! a semitone out, and at one semitone half of one. The arrangement is right
+//! and the accuracy is not, so nothing in the interface offers a key shift.
+//! It is the clearest argument for the trait: a real stretcher goes behind it
+//! and key shifting becomes possible, and that is a licensing decision rather
+//! than a coding one.
+//!
+//! The reason is the search's tolerance, which has to stay under the
+//! difference between the two hops — a search that reaches the point where the
+//! signal matches itself lands there, and the stretch stops happening. Near
+//! the file's own speed that leaves too little room to align a phase. The
+//! usual answer is a different parameterisation, with the hop several times
+//! the overlap so the two are far apart; that is a rewrite of this file, and
+//! the right moment for it is when a better stretcher is not going behind the
+//! trait after all.
 
 use crate::smooth::Smoothed;
 
