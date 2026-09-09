@@ -18,6 +18,7 @@ use rtrb::Producer;
 use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS};
 use crate::clock::DeckClock;
 use crate::decode::Streamer;
+use crate::scrub::{PcmWindow, Scrubber, WINDOW_REACH};
 use crate::{Deck, DeckEvent, EventSink};
 
 /// What the control side asks a deck to do.
@@ -27,6 +28,13 @@ pub enum Command {
     /// command exists to wake the thread from its blocking wait.
     Wake,
     Seek(u64),
+    /// A drag has started. The deck decodes a window around the playhead and
+    /// starts producing from it at whatever rate the drag asks for.
+    ScrubBegin,
+    /// Where the pointer is now, in device-rate frames.
+    ScrubTo(u64),
+    /// The drag is over: the streamer picks up where the head was left.
+    ScrubEnd,
     Unload,
     Quit,
 }
@@ -81,6 +89,8 @@ pub fn spawn(
                 events,
                 streamer: None,
                 generation: 0,
+                scrubber: None,
+                window: PcmWindow::empty(),
             };
             worker.run(&rx);
         })?;
@@ -95,6 +105,12 @@ struct Worker {
     events: EventSink,
     streamer: Option<Streamer>,
     generation: u32,
+    /// The read head, present only while a drag is running.
+    scrubber: Option<Scrubber>,
+    /// Decoded audio around that head. Emptied when the drag ends, because
+    /// several megabytes for a gesture that is over is several megabytes
+    /// nobody asked for.
+    window: PcmWindow,
 }
 
 impl Worker {
@@ -116,7 +132,7 @@ impl Worker {
                 produced = true;
             }
 
-            let waiting = if produced || self.clock.playing() {
+            let waiting = if produced || self.clock.sounding() {
                 // Playing: top up as the callback drains, without spinning.
                 match commands.recv_timeout(TOP_UP_WAIT) {
                     Ok(command) => Some(command),
@@ -145,6 +161,9 @@ impl Worker {
         match command {
             Command::Load(path) => self.load(&path),
             Command::Seek(frame) => self.seek(frame),
+            Command::ScrubBegin => self.scrub_begin(),
+            Command::ScrubTo(frame) => self.scrub_to(frame),
+            Command::ScrubEnd => self.scrub_end(),
             Command::Unload => self.unload(),
             Command::Wake => {}
             Command::Quit => return false,
@@ -199,6 +218,9 @@ impl Worker {
     }
 
     fn unload(&mut self) {
+        self.scrubber = None;
+        self.window = PcmWindow::empty();
+        self.clock.set_scrubbing(false);
         self.clock.set_playing(false);
         self.streamer = None;
         self.generation = self.clock.bump_generation();
@@ -208,8 +230,90 @@ impl Worker {
         self.clock.set_end_of_stream(false);
     }
 
+    /// Starts a drag: the head begins where the playhead is.
+    fn scrub_begin(&mut self) {
+        if self.streamer.is_none() {
+            return;
+        }
+        let at = self.clock.position();
+        self.scrubber = Some(Scrubber::new(at));
+        // The blocks already in flight belong to normal playback and are at the
+        // wrong place and the wrong speed; a new generation drops them.
+        self.generation = self.clock.bump_generation();
+        self.fill_window(at);
+        self.clock.set_scrubbing(true);
+    }
+
+    fn scrub_to(&mut self, frame: u64) {
+        if let Some(scrubber) = self.scrubber.as_mut() {
+            scrubber.aim(frame);
+        }
+    }
+
+    /// Ends a drag, leaving the playhead where the head came to rest.
+    fn scrub_end(&mut self) {
+        let Some(scrubber) = self.scrubber.take() else { return };
+        self.clock.set_scrubbing(false);
+        self.window = PcmWindow::empty();
+        // The streamer has been sitting wherever the window was filled from,
+        // so it has to be put where the drag finished before playback resumes.
+        self.seek(scrubber.cursor());
+    }
+
+    /// Decodes the window a drag reads from, centred on `at`.
+    ///
+    /// One demuxer seek and a few seconds of decoding, which is what buys the
+    /// thousands of reads a drag makes without touching the file again.
+    fn fill_window(&mut self, at: u64) {
+        let Some(streamer) = self.streamer.as_mut() else { return };
+        let start = at.saturating_sub(WINDOW_REACH);
+        if streamer.seek(start).is_err() {
+            self.window = PcmWindow::empty();
+            return;
+        }
+        let wanted = (WINDOW_REACH * 2) as usize;
+        let mut samples = vec![0.0_f32; wanted * 2];
+        let mut filled = 0_usize;
+        while filled < wanted {
+            let Some(chunk) = samples.get_mut(filled * 2..) else { break };
+            // A short read or a decode error both mean the window is as long
+            // as it is going to get; a drag past its end hears silence, which
+            // is what the end of a record sounds like.
+            match streamer.fill(chunk) {
+                Ok(frames) if frames > 0 => filled += frames,
+                _ => break,
+            }
+        }
+        samples.truncate(filled * 2);
+        self.window = PcmWindow { start, samples };
+    }
+
+    /// One block of a drag. False when there is nothing to add.
+    fn produce_scrub(&mut self) -> bool {
+        if self.producer.is_full() {
+            return false;
+        }
+        let generation = self.generation;
+        let Some(scrubber) = self.scrubber.as_mut() else { return false };
+        // Refill before the head reaches the edge, not after: a demuxer seek
+        // costs more than a block, and running off the end is silence.
+        let at = scrubber.cursor();
+        let comfortable = self.window.comfortable(at as f64, WINDOW_REACH / 4);
+        if !comfortable {
+            self.fill_window(at);
+        }
+        let Some(scrubber) = self.scrubber.as_mut() else { return false };
+        let mut block = Block::empty(generation, scrubber.cursor());
+        let frames = scrubber.render(&self.window, &mut block.samples);
+        block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
+        self.producer.push(block).is_ok()
+    }
+
     /// Decodes one block into the ring. False when there is nothing to add.
     fn produce(&mut self) -> bool {
+        if self.scrubber.is_some() {
+            return self.produce_scrub();
+        }
         if self.producer.is_full() {
             return false;
         }

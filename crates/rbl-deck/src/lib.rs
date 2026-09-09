@@ -31,6 +31,7 @@ mod block;
 mod clock;
 mod deck;
 mod decode;
+mod scrub;
 mod sink;
 
 use std::path::{Path, PathBuf};
@@ -242,12 +243,44 @@ impl Engine {
         self.decks.iter().any(|deck| deck.clock().playing())
     }
 
+    /// Whether anything needs the device: playing, or being dragged.
+    fn any_sounding(&self) -> bool {
+        self.decks.iter().any(|deck| deck.clock().sounding())
+    }
+
+    /// Starts a drag on a deck. Audio follows the pointer until `scrub_end`.
+    pub fn scrub_begin(&self, deck: Deck) {
+        let Some(handle) = self.deck(deck) else { return };
+        if !handle.clock().loaded() {
+            return;
+        }
+        handle.clock().set_scrubbing(true);
+        handle.send(deck::Command::ScrubBegin);
+        self.settle_device();
+    }
+
+    /// Where the pointer is now, in milliseconds.
+    pub fn scrub_to_ms(&self, deck: Deck, ms: u64) {
+        let Some(handle) = self.deck(deck) else { return };
+        let frames = ms.saturating_mul(u64::from(self.sample_rate)) / 1000;
+        handle.send(deck::Command::ScrubTo(frames));
+    }
+
+    /// Ends a drag. The playhead stays where the head came to rest.
+    pub fn scrub_end(&self, deck: Deck) {
+        let Some(handle) = self.deck(deck) else { return };
+        handle.clock().set_scrubbing(false);
+        handle.send(deck::Command::ScrubEnd);
+        handle.send(deck::Command::Wake);
+        self.settle_device();
+    }
+
     /// Starts the device when a deck needs it and stops it when neither does.
     ///
     /// A stream that is left running costs a callback every 11 ms for silence,
     /// which is exactly the sort of idle cost the budget rules out.
     fn settle_device(&self) {
-        let wanted = self.any_playing();
+        let wanted = self.any_sounding();
         let result = if wanted { self.sink.start() } else { self.sink.stop() };
         if let Err(e) = result {
             tracing::error!(error = %e, "the audio device would not change state");
@@ -289,7 +322,7 @@ struct DeckReader {
 impl DeckReader {
     fn mix_into(&mut self, out: &mut [f32]) {
         let generation = self.clock.generation();
-        if !self.clock.playing() {
+        if !self.clock.sounding() {
             self.discard_stale(generation);
             return;
         }

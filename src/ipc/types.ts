@@ -236,6 +236,17 @@ export interface Backend {
   deckPlay(deck: DeckId): Promise<void>;
   deckPause(deck: DeckId): Promise<void>;
   deckSeek(deck: DeckId, positionMs: number): Promise<void>;
+  /**
+   * Dragging the waveform like a record.
+   *
+   * Between `deckScrubBegin` and `deckScrubEnd` the deck reads a decoded
+   * window at the drag's own rate — forwards, backwards, and silent when the
+   * pointer stops — rather than seeking. A seek per pointer move gives the
+   * right place at the wrong speed: a burst of normal-speed audio each time.
+   */
+  deckScrubBegin(deck: DeckId): Promise<void>;
+  deckScrubTo(deck: DeckId, positionMs: number): Promise<void>;
+  deckScrubEnd(deck: DeckId): Promise<void>;
   /** Both decks now, to anchor the interface when it starts. */
   deckState(): Promise<Tick>;
   /** Both decks, ten times a second, and only while something is playing. */

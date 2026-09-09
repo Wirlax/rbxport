@@ -23,6 +23,7 @@ pub struct DeckClock {
     /// resampler is in.
     sample_rate: AtomicU32,
     playing: AtomicBool,
+    scrubbing: AtomicBool,
     loaded: AtomicBool,
     /// The decode thread has pushed the last block it will push. The callback
     /// stops the deck when it has drained what is left.
@@ -83,6 +84,25 @@ impl DeckClock {
 
     pub fn set_playing(&self, playing: bool) {
         self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    /// Whether a drag is running.
+    ///
+    /// Separate from `playing`, because a scrub makes a sound whether or not
+    /// the deck was playing and must not be mistaken for the transport having
+    /// been started: the callback mixes it, the device stays awake for it, and
+    /// letting go puts the transport back exactly as it was.
+    pub fn scrubbing(&self) -> bool {
+        self.scrubbing.load(Ordering::Relaxed)
+    }
+
+    pub fn set_scrubbing(&self, scrubbing: bool) {
+        self.scrubbing.store(scrubbing, Ordering::Relaxed);
+    }
+
+    /// Whether the callback should be pulling audio from this deck at all.
+    pub fn sounding(&self) -> bool {
+        self.playing() || self.scrubbing()
     }
 
     pub fn loaded(&self) -> bool {

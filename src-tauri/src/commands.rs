@@ -742,6 +742,51 @@ pub async fn deck_seek(
     Ok(())
 }
 
+/// Starts a drag on a deck.
+///
+/// Audio follows the pointer from here until `deck_scrub_end`: the deck reads
+/// a decoded window at whatever rate the drag asks for, forwards or backwards,
+/// which is what a hand on a record does and what a seek per pointer move
+/// cannot do.
+#[tauri::command]
+pub async fn deck_scrub_begin(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.scrub_begin(crate::player::deck_of(&deck));
+    crate::player::start_ticker(&app);
+    Ok(())
+}
+
+/// Where the pointer is now, mid-drag.
+#[tauri::command]
+pub async fn deck_scrub_to(
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    position_ms: u64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.scrub_to_ms(crate::player::deck_of(&deck), position_ms);
+    }
+    Ok(())
+}
+
+/// Ends a drag. The playhead stays where the head came to rest.
+#[tauri::command]
+pub async fn deck_scrub_end(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.scrub_end(crate::player::deck_of(&deck));
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
 /// Both decks now, for the interface to anchor itself when it starts up or
 /// comes back from a reload.
 #[tauri::command]

@@ -64,8 +64,8 @@ export interface Playback {
   subscribe: (listener: (seconds: number) => void) => () => void;
 }
 
-/** The preview player is deck A. The second deck arrives with the mixer. */
-const DECK: DeckId = "a";
+/** The preview player is deck A; the 2-player layout adds B. */
+const DEFAULT_DECK: DeckId = "a";
 
 /** What went wrong, in the words of whoever knows. */
 const FALLBACK = "This track could not be played.";
@@ -88,7 +88,7 @@ export function reasonFrom(error: unknown): string {
   return FALLBACK;
 }
 
-export function usePlayback(trackId: string | null): Playback {
+export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK): Playback {
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -103,9 +103,8 @@ export function usePlayback(trackId: string | null): Playback {
   const shownGeneration = useRef(0);
   /** Which track this deck was told to load, so a stale tick is ignored. */
   const loading = useRef<string | null>(null);
-  /** Whether a drag is running, and what the transport was doing before it. */
+  /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
-  const wasPlaying = useRef(false);
   /** The seek a drag is waiting to send, coalesced to one a frame. */
   const pending = useRef<number | null>(null);
   const flushing = useRef(0);
@@ -125,7 +124,7 @@ export function usePlayback(trackId: string | null): Playback {
   /** Takes a tick as the truth about where the deck is. */
   const anchorOn = useCallback(
     (tick: Tick) => {
-      const deck = tick.a;
+      const deck = DECK === "b" ? tick.b : tick.a;
       const rate = tick.sampleRate;
       anchor.current = {
         frames: deck.frames,
@@ -146,7 +145,7 @@ export function usePlayback(trackId: string | null): Playback {
         emit(at);
       }
     },
-    [emit],
+    [emit, DECK],
   );
 
   // The deck reports itself loaded, or says why it could not be.
@@ -184,7 +183,7 @@ export function usePlayback(trackId: string | null): Playback {
       live = false;
       stop?.();
     };
-  }, [anchorOn]);
+  }, [anchorOn, DECK]);
 
   // Point the deck at the selected track. Loading does not start playback:
   // choosing a track in the browser should not make noise.
@@ -210,7 +209,7 @@ export function usePlayback(trackId: string | null): Playback {
         if (loading.current === trackId) setError(reasonFrom(failure));
       }
     })();
-  }, [trackId, emit]);
+  }, [trackId, emit, DECK]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
@@ -249,7 +248,7 @@ export function usePlayback(trackId: string | null): Playback {
         setError(reasonFrom(failure));
       }
     })();
-  }, [idle, playing]);
+  }, [idle, playing, DECK]);
 
   const seek = useCallback(
     (seconds: number) => {
@@ -272,39 +271,37 @@ export function usePlayback(trackId: string | null): Playback {
         }
       })();
     },
-    [idle, emit],
+    [idle, emit, DECK],
   );
 
   /**
    * Audio follows the pointer while a waveform is dragged.
    *
-   * The deck plays for the length of the drag whether or not it was playing
-   * before, which is the whole point: a silent scrub tells you where you are
-   * on the screen and nothing about the music.
+   * The engine does the work — see `crates/rbl-deck/src/scrub.rs`. It reads a
+   * decoded window at the drag's own rate, so the pitch follows the hand and
+   * pulling backwards plays backwards, which is what a record does. The
+   * transport is not touched: a drag sounds whether or not the deck was
+   * playing, and letting go leaves it as it was found.
    */
   const scrubBegin = useCallback(() => {
     if (idle || scrubbing.current) return;
     scrubbing.current = true;
-    wasPlaying.current = playing;
-    if (playing) return;
-    setPlaying(true);
-    anchor.current = { ...anchor.current, playing: true, at: performance.now() };
     void (async () => {
       try {
         const backend = await getBackend();
-        await backend.deckPlay(DECK);
+        await backend.deckScrubBegin(DECK);
       } catch (failure) {
         setError(reasonFrom(failure));
       }
     })();
-  }, [idle, playing]);
+  }, [idle, DECK]);
 
   /**
    * Where the drag is now.
    *
-   * The playhead and the waveform move on the spot; the seek behind them is
+   * The playhead and the waveform move on the spot; the message behind them is
    * coalesced to one a frame, because a trackpad emits pointer moves faster
-   * than the screen refreshes and every one of them would be a demuxer seek.
+   * than the screen refreshes and the engine only needs the latest.
    */
   const scrubTo = useCallback(
     (seconds: number) => {
@@ -327,32 +324,30 @@ export function usePlayback(trackId: string | null): Playback {
         void (async () => {
           try {
             const backend = await getBackend();
-            await backend.deckSeek(DECK, Math.round(target * 1000));
+            if (scrubbing.current) await backend.deckScrubTo(DECK, Math.round(target * 1000));
+            else await backend.deckSeek(DECK, Math.round(target * 1000));
           } catch (failure) {
             setError(reasonFrom(failure));
           }
         })();
       });
     },
-    [idle, emit],
+    [idle, emit, DECK],
   );
 
-  /** Puts the transport back the way the drag found it. */
+  /** Lets go. The playhead stays where the drag left it. */
   const scrubEnd = useCallback(() => {
     if (!scrubbing.current) return;
     scrubbing.current = false;
-    if (wasPlaying.current) return;
-    setPlaying(false);
-    anchor.current = { ...anchor.current, playing: false, at: performance.now() };
     void (async () => {
       try {
         const backend = await getBackend();
-        await backend.deckPause(DECK);
+        await backend.deckScrubEnd(DECK);
       } catch (failure) {
         setError(reasonFrom(failure));
       }
     })();
-  }, []);
+  }, [DECK]);
 
   // A drag that is still pending when the player goes away must not fire.
   useEffect(
