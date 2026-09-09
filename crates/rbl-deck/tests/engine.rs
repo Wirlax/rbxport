@@ -171,11 +171,24 @@ impl Harness {
     }
 
     /// Pulls until the deck's position has moved past `frames`, or gives up.
+    ///
+    /// Yields whenever a pull produced nothing new. A null sink drained in a
+    /// tight loop takes the whole core, and the decode thread it is waiting on
+    /// gets none of it — which on a loaded machine showed up as this returning
+    /// short and the caller asserting against audio that had not arrived yet.
+    /// One millisecond is nothing to the common case, where the ring is
+    /// already full and the position moves every pull.
     fn play_until(&self, deck: Deck, frames: u64) -> Vec<f32> {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut out = Vec::new();
+        let mut last = self.position(deck);
         while self.position(deck) < frames {
             out.extend(self.sink.pull(512));
+            let at = self.position(deck);
+            if at == last {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            last = at;
             if Instant::now() > deadline {
                 break;
             }
