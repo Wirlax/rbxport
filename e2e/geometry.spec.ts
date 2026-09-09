@@ -271,3 +271,33 @@ test("the player carries the controls a deck has", async ({ page }) => {
   await expect(player.getByRole("tab", { name: "HOT CUE" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "INFO" })).toBeVisible();
 });
+
+test("the mixer strip is the measured width, and its buttons the measured size", async ({
+  page,
+}) => {
+  // Scanned off the two-player capture: the strip x 72.5..120.5pt, the kill
+  // buttons x 78.5..114.5pt and 15pt tall on a 20pt pitch.
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  const mixer = page.getByRole("group", { name: "Mixer" });
+  await expect(mixer).toBeVisible();
+
+  const box = await mixer.boundingBox();
+  expect(box?.width).toBeCloseTo(await token(page, "--s-mixer-strip-w"), 0);
+
+  const high = mixer.getByRole("button", { name: "HIGH" }).first();
+  const mid = mixer.getByRole("button", { name: "MID" }).first();
+  const band = await high.boundingBox();
+  expect(band?.width).toBeCloseTo(await token(page, "--s-mixer-band-w"), 0);
+  expect(band?.height).toBeCloseTo(await token(page, "--s-mixer-band-h"), 0);
+
+  // The pitch is the button plus its gap, which is what the capture measures.
+  const next = await mid.boundingBox();
+  const pitch = await token(page, "--s-mixer-band-h") + await token(page, "--s-mixer-band-gap");
+  expect((next?.y ?? 0) - (band?.y ?? 0)).toBeCloseTo(pitch, 0);
+
+  const fader = mixer.getByRole("slider", { name: "Crossfader" });
+  const travel = await fader.boundingBox();
+  expect(travel?.height).toBeCloseTo(await token(page, "--s-mixer-fader-h"), 0);
+  expect(travel?.width).toBeCloseTo(await token(page, "--s-mixer-fader-handle-w"), 0);
+});

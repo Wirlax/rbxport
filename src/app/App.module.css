@@ -56,14 +56,25 @@
    measured: the pad bar ends at 335pt and the track list starts at 338pt. A
    border on the player drew a line in the panel colour instead. */
 .decks { display: grid; }
+/* The mixer strip runs down the left of both decks, spanning them: it is one
+   strip for the pair, not one per deck. */
+.decks[data-mixer] {
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "mixer a" "mixer b" "gutter gutter";
+}
+.decks[data-mixer] > :nth-child(1) { grid-area: mixer; }
+.decks[data-mixer] > :nth-child(2) { grid-area: a; }
+.decks[data-mixer] > :nth-child(3) { grid-area: b; }
+.decks[data-mixer] > .playerGutter { grid-area: gutter; }
 /* DUAL PLAYER: the two decks beside each other, which is the difference its
    icon draws against 2 PLAYER's stacked bars. */
 .decks[data-side-by-side] {
-  grid-template-columns: 1fr 1fr;
-  grid-template-areas: "a b" "gutter gutter";
+  grid-template-columns: auto 1fr 1fr;
+  grid-template-areas: "mixer a b" "gutter gutter gutter";
 }
-.decks[data-side-by-side] > :nth-child(1) { grid-area: a; }
-.decks[data-side-by-side] > :nth-child(2) { grid-area: b; }
+.decks[data-side-by-side] > :nth-child(1) { grid-area: mixer; }
+.decks[data-side-by-side] > :nth-child(2) { grid-area: a; }
+.decks[data-side-by-side] > :nth-child(3) { grid-area: b; }
 .decks[data-side-by-side] > .playerGutter { grid-area: gutter; }
 .playerGutter { height: var(--s-player-gutter-h); background: var(--c-black); }
 

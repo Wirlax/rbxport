@@ -265,6 +265,22 @@ export interface Backend {
   deckScrubEnd(deck: DeckId): Promise<void>;
   /** The master output level, 0 to 1. It arrives back on the next tick. */
   setMasterLevel(level: number): Promise<void>;
+  /**
+   * One deck's channel strip.
+   *
+   * Knob positions rather than decibels: what a position means is the mixer's
+   * to decide and it changes with the EQ / ISOLATOR switch, so the interface
+   * never has to know the curve. 0.5 is centre and 0.5 is unity.
+   */
+  setChannelBand(deck: DeckId, band: EqBand, position: number): Promise<void>;
+  /** Kill a band: the knob at the bottom of whichever curve is in use. */
+  setChannelKill(deck: DeckId, band: EqBand, killed: boolean): Promise<void>;
+  /** The deck's gain, 0 to 2 — up to +6 dB, as a mixer's trim gives. */
+  setChannelTrim(deck: DeckId, trim: number): Promise<void>;
+  /** The crossfader: 0 is deck A alone, 1 is deck B alone, 0.5 is both. */
+  setCrossfade(position: number): Promise<void>;
+  /** EQ or ISOLATOR — the bottom of each band's travel, and nothing else. */
+  setEqCurve(isolator: boolean): Promise<void>;
   /** Both decks now, to anchor the interface when it starts. */
   deckState(): Promise<Tick>;
   /** Both decks, ten times a second, and only while something is playing. */
@@ -301,6 +317,9 @@ export interface Backend {
 export type DeckId = "a" | "b";
 
 /** One deck in a tick. */
+/** The three bands of a channel strip, high to low as the strip is drawn. */
+export type EqBand = "high" | "mid" | "low";
+
 export interface DeckTick {
   /** The engine's frame counter, in device-rate frames. */
   frames: number;

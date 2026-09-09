@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use rbl_deck::{Band, Curve};
 use rbl_index::Library;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
@@ -798,6 +799,94 @@ pub async fn set_master_level(
     let engine = player.engine(&app)?;
     engine.master().set_gain(level);
     Ok(())
+}
+
+/// One deck's channel strip: the trim, the three bands, and the kill buttons.
+///
+/// Every one of these is a knob position rather than a gain in dB — what a
+/// position means is the mixer's to decide, and it changes with the EQ /
+/// ISOLATOR switch. The interface should not have to know the curve.
+#[tauri::command]
+pub async fn set_channel_band(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    band: String,
+    position: f32,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    if let Some(channel) = engine.mixer().channels.get(channel_of(&deck)) {
+        channel.set_band(band_of(&band), position);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_channel_kill(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    band: String,
+    killed: bool,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    if let Some(channel) = engine.mixer().channels.get(channel_of(&deck)) {
+        channel.set_kill(band_of(&band), killed);
+    }
+    Ok(())
+}
+
+/// The deck's gain, 0 to 2 — up to +6 dB, as a mixer's trim gives.
+#[tauri::command]
+pub async fn set_channel_trim(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    trim: f32,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    if let Some(channel) = engine.mixer().channels.get(channel_of(&deck)) {
+        channel.set_trim(trim);
+    }
+    Ok(())
+}
+
+/// The crossfader: 0 is deck A alone, 1 is deck B alone, 0.5 is both.
+#[tauri::command]
+pub async fn set_crossfade(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    position: f32,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.mixer().set_crossfade(position);
+    Ok(())
+}
+
+/// EQ or ISOLATOR, which is what the bottom of each band's travel means.
+#[tauri::command]
+pub async fn set_eq_curve(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    isolator: bool,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.mixer().set_curve(if isolator { Curve::Isolator } else { Curve::Eq });
+    Ok(())
+}
+
+/// Which strip a deck name means. Anything but "b" is deck A, as everywhere.
+fn channel_of(deck: &str) -> usize {
+    usize::from(matches!(deck, "b" | "B"))
+}
+
+/// Which band a name means, defaulting to the one a typo cannot silence.
+fn band_of(name: &str) -> Band {
+    match name {
+        "low" => Band::Low,
+        "mid" => Band::Mid,
+        _ => Band::High,
+    }
 }
 
 /// Shows a track's file in the Finder.

@@ -621,6 +621,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    // The mixer is the engine's; a browser has no audio to apply it to, so
+    // these are accepted and dropped rather than pretended at.
+    setChannelBand: () => wait(undefined),
+    setChannelKill: () => wait(undefined),
+    setChannelTrim: () => wait(undefined),
+    setCrossfade: () => wait(undefined),
+    setEqCurve: () => wait(undefined),
     deckScrubEnd: () => {
       deckA.generation += 1;
       sendTick();

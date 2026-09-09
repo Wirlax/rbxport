@@ -1561,6 +1561,39 @@ test("clicking the artwork ejects the track from the deck", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
 });
 
+test("the mixer belongs to the two-deck layouts and to nothing else", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const mixer = page.getByRole("group", { name: "Mixer" });
+  // One deck: no mixer and no crossfader, as rekordbox has it — and so a deck
+  // nobody has touched a fader for plays at the level of its file.
+  await expect(mixer).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  await expect(mixer).toBeVisible();
+
+  // Three kill buttons a deck, and a gain knob each.
+  await expect(mixer.getByRole("button")).toHaveCount(6);
+  await expect(mixer.getByRole("slider", { name: /gain/i })).toHaveCount(2);
+
+  // A kill is a toggle, not a momentary: it stays on until it is pressed again.
+  const low = mixer.getByRole("button", { name: "LOW" }).first();
+  await expect(low).toHaveAttribute("aria-pressed", "false");
+  await low.click();
+  await expect(low).toHaveAttribute("aria-pressed", "true");
+  await low.click();
+  await expect(low).toHaveAttribute("aria-pressed", "false");
+
+  // The crossfader starts in the middle, where both decks are heard whole.
+  const fader = mixer.getByRole("slider", { name: "Crossfader" });
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.5");
+  await fader.press("ArrowDown");
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.55");
+  await fader.dblclick();
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.5");
+});
+
 test("the layout switch draws one deck, two, a short one, or none", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

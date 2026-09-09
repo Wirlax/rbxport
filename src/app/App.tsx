@@ -31,6 +31,7 @@ import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { Player } from "@/views/player/Player";
+import { MixerStrip } from "@/views/player/MixerStrip";
 import { Settings } from "@/views/settings/Settings";
 import { useAnalysis } from "@/store/useAnalysis";
 
@@ -700,7 +701,15 @@ export function App() {
       />
       {/* Full Browser draws no deck at all, and no gutter under one. */}
       {deckCount(layout) > 0 ? (
-        <div className={styles.decks} data-side-by-side={isSideBySide(layout) ? "" : undefined}>
+        <div
+          className={styles.decks}
+          data-side-by-side={isSideBySide(layout) ? "" : undefined}
+          data-mixer={deckCount(layout) > 1 ? "" : undefined}
+        >
+          {/* Only with two decks. The one-player layout has no mixer and no
+              crossfader, which is what rekordbox does — and what keeps a deck
+              nobody has touched a fader for playing at the level of its file. */}
+          {deckCount(layout) > 1 ? <MixerStrip /> : null}
           <Player
             track={playerTrack}
             onEject={() => setPlayerTrack(null)}
