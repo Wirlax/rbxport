@@ -27,7 +27,7 @@ import {
   formatPercent,
   useDiagnostics,
 } from "@/store/useDiagnostics";
-import { deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
+import { asLayout, deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -415,6 +415,10 @@ export function App() {
         }
         if (outcome.action === "sub") {
           setSubOpen((open) => !open);
+          return;
+        }
+        if (outcome.action.startsWith("layout-")) {
+          setLayout(asLayout(outcome.action.slice("layout-".length)));
           return;
         }
         // Both the settings panel and the missing-file manager live in

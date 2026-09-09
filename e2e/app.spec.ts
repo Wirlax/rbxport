@@ -1341,3 +1341,33 @@ test("hovering the sleeve shows what clicking it does", async ({ page }) => {
   // Polled, because it fades rather than switching off.
   await expect.poll(shown).toBe(0);
 });
+
+test("the deck answers rekordbox's own keys", async ({ page }) => {
+  // Transcribed from the Export preset in rekordbox's KeyMappings, not chosen.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // Space plays and pauses.
+  await page.keyboard.press(" ");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await page.keyboard.press(" ");
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+
+  // Q toggles quantize.
+  const q = page.getByRole("button", { name: "Quantize" });
+  await expect(q).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("q");
+  await expect(q).toHaveAttribute("aria-pressed", "false");
+
+  // F10, F11 and F12 are the three cue lists.
+  for (const [key, tab] of [["F11", "HOT CUE"], ["F12", "INFO"], ["F10", "MEMORY"]] as const) {
+    await page.keyboard.press(key);
+    await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+  }
+
+  // And none of them fire into the search box.
+  await page.getByPlaceholder(/Search/).first().click();
+  await page.keyboard.press("q");
+  await expect(q).toHaveAttribute("aria-pressed", "false");
+});

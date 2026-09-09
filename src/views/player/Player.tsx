@@ -48,6 +48,7 @@ import {
   type PadMode,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
+import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { VocalStrip } from "./VocalStrip";
 import styles from "./Player.module.css";
@@ -347,6 +348,7 @@ export const Player = memo(function Player({
    * keys move the browser's cursor when the browser has it.
    */
   const [armed, setArmed] = useState(false);
+  const platform = useMemo(detectPlatform, []);
   /**
    * Where the scrolling layer is drawn from. Not the playhead: the layer is
    * drawn once across `OVERDRAW` spans and slid by a transform, and it is
@@ -529,18 +531,6 @@ export const Player = memo(function Player({
     [jumpBeats, track, playback],
   );
 
-  useEffect(() => {
-    if (!armed) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      // Otherwise the browser scrolls its list under the deck at the same time.
-      event.preventDefault();
-      jump(event.key === "ArrowRight" ? 1 : -1);
-    };
-    // `globalThis`, because `window` here is the slice of the track on screen.
-    globalThis.addEventListener("keydown", onKey);
-    return () => globalThis.removeEventListener("keydown", onKey);
-  }, [armed, jump]);
 
   /*
    * CUE, as a CDJ does it: stop and rewind while playing, preview while held
@@ -549,7 +539,7 @@ export const Player = memo(function Player({
    */
   const previewing = useRef(false);
 
-  const holdCue = () => {
+  const holdCue = useCallback(() => {
     if (playback.idle) return;
     const action = pressCue(
       playback.positionRef.current,
@@ -561,15 +551,72 @@ export const Player = memo(function Player({
     if (action.cuePoint !== cuePoint) setCuePoint(action.cuePoint);
     if (action.seekTo !== null) playback.seek(action.seekTo);
     if (action.playing !== playback.playing) playback.toggle();
-  };
+  }, [playback, cuePoint, quantize, grid]);
 
-  const dropCue = () => {
+  const dropCue = useCallback(() => {
     const action = releaseCue(previewing.current, cuePoint);
     previewing.current = false;
     if (!action) return;
     playback.seek(action.seekTo ?? cuePoint);
     if (playback.playing) playback.toggle();
-  };
+  }, [playback, cuePoint]);
+
+  /*
+   * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
+   *
+   * Space, C, Q and F10-F12 belong to the deck whenever nothing is being typed
+   * into, as they do in rekordbox. The arrows are the exception: they move the
+   * browser's cursor as readily as the track, so they wait until the deck has
+   * been clicked, which is what turns the playhead red.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const action = dispatch(event, platform, event.target as HTMLElement | null);
+      if (action === null) return;
+      if (action === "jumpBack" || action === "jumpForward") {
+        if (!armed) return;
+        // Otherwise the list scrolls under the deck at the same time.
+        event.preventDefault();
+        jump(action === "jumpForward" ? 1 : -1);
+        return;
+      }
+      if (playback.idle && action !== "showMemory" && action !== "showHotCues"
+        && action !== "showInfo") {
+        return;
+      }
+      switch (action) {
+        case "playPause":
+          // Space scrolls the page otherwise.
+          event.preventDefault();
+          playback.toggle();
+          break;
+        case "cue":
+          holdCue();
+          dropCue();
+          break;
+        case "quantize":
+          setQuantize((on) => !on);
+          break;
+        case "showMemory":
+          event.preventDefault();
+          setPanel("memory");
+          break;
+        case "showHotCues":
+          event.preventDefault();
+          setPanel("hotCue");
+          break;
+        case "showInfo":
+          event.preventDefault();
+          setPanel("info");
+          break;
+        default:
+          break;
+      }
+    };
+    // `globalThis`, because `window` here is the slice of the track on screen.
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, [armed, jump, platform, playback, holdCue, dropCue]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding

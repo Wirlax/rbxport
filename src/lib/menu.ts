@@ -7,7 +7,16 @@
  * refused while rekordbox holds it, exactly as the other write paths are.
  */
 
-export type MenuAction = "settings" | "import" | "missing" | "info" | "sub";
+export type MenuAction =
+  | "settings"
+  | "import"
+  | "missing"
+  | "info"
+  | "sub"
+  | "layout-one"
+  | "layout-two"
+  | "layout-simple"
+  | "layout-browser";
 
 export interface MenuCommand {
   action: MenuAction;
@@ -21,6 +30,11 @@ const COMMANDS: Record<string, MenuCommand> = {
   missing: { action: "missing", writes: true },
   info: { action: "info", writes: false },
   sub: { action: "sub", writes: false },
+  // ⌘7/8/9/0, which is where rekordbox's Export key map puts them.
+  "layout-one": { action: "layout-one", writes: false },
+  "layout-two": { action: "layout-two", writes: false },
+  "layout-simple": { action: "layout-simple", writes: false },
+  "layout-browser": { action: "layout-browser", writes: false },
 };
 
 /** The command an item id names, or null when it is not one of ours. */

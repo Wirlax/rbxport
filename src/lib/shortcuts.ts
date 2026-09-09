@@ -20,7 +20,18 @@ export type Action =
   | "pageUp"
   | "pageDown"
   | "toTop"
-  | "toBottom";
+  | "toBottom"
+  // The deck. Every key below is rekordbox's own, transcribed from the Export
+  // preset in `KeyMappings/rekordbox_0000000000030.mappings` — the key map the
+  // mode we clone ships with, not a guess at what feels natural.
+  | "playPause"
+  | "cue"
+  | "quantize"
+  | "jumpBack"
+  | "jumpForward"
+  | "showMemory"
+  | "showHotCues"
+  | "showInfo";
 
 /** The parts of a keyboard event the map reads. */
 export interface KeyChord {
@@ -69,6 +80,31 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
   if (mod && chord.key === "ArrowDown") return "toBottom";
 
   if (!mod && !chord.altKey) {
+    // The deck's keys, unmodified, exactly as the Export preset binds them.
+    switch (chord.key) {
+      case " ":
+        return "playPause";
+      case "F10":
+        return "showMemory";
+      case "F11":
+        return "showHotCues";
+      case "F12":
+        return "showInfo";
+      case "ArrowLeft":
+        return "jumpBack";
+      case "ArrowRight":
+        return "jumpForward";
+      default:
+        break;
+    }
+    switch (chord.key.toLowerCase()) {
+      case "c":
+        return "cue";
+      case "q":
+        return "quantize";
+      default:
+        break;
+    }
     switch (chord.key) {
       case "Escape":
         return "clearSearch";

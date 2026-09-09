@@ -49,13 +49,13 @@ describe("actionFor", () => {
 
   it("returns null for anything it does not claim", () => {
     // A claimed-but-unhandled key would be swallowed, and browser and OS
-    // shortcuts would stop working inside the app.
+    // shortcuts would stop working inside the app. The arrows are claimed now
+    // — rekordbox's Export map puts beat jump on them — so they are not here.
     for (const chord of [
       { key: "q", metaKey: true },
       { key: "r", metaKey: true },
       { key: "Tab" },
       { key: "x" },
-      { key: "ArrowLeft" },
       { key: "F5" },
       { key: "a", metaKey: true, altKey: true },
     ]) {
@@ -97,5 +97,37 @@ describe("isTyping", () => {
 
   it("recognises a contenteditable element whatever its tag", () => {
     expect(isTyping({ tagName: "DIV", isContentEditable: true })).toBe(true);
+  });
+});
+
+describe("rekordbox's own Export key map", () => {
+  // Transcribed from `KeyMappings/rekordbox_0000000000030.mappings`, the key
+  // map rekordbox ships for the mode this clones. The keys are its, not ours.
+  const mac = { mac: true };
+
+  it("gives the deck the keys rekordbox gives it", () => {
+    expect(actionFor({ key: " " }, mac)).toBe("playPause");
+    expect(actionFor({ key: "c" }, mac)).toBe("cue");
+    expect(actionFor({ key: "q" }, mac)).toBe("quantize");
+    expect(actionFor({ key: "ArrowLeft" }, mac)).toBe("jumpBack");
+    expect(actionFor({ key: "ArrowRight" }, mac)).toBe("jumpForward");
+  });
+
+  it("puts the three cue lists on F10, F11 and F12", () => {
+    expect(actionFor({ key: "F10" }, mac)).toBe("showMemory");
+    expect(actionFor({ key: "F11" }, mac)).toBe("showHotCues");
+    expect(actionFor({ key: "F12" }, mac)).toBe("showInfo");
+  });
+
+  it("leaves the deck's letters alone when a modifier is held", () => {
+    // ⌘C is copy, and ⌘Q quits. Taking either would be a bug people notice at
+    // the worst moment.
+    expect(actionFor({ key: "c", metaKey: true }, mac)).not.toBe("cue");
+    expect(actionFor({ key: "q", metaKey: true }, mac)).not.toBe("quantize");
+  });
+
+  it("does not fire the deck's letters into a search box", () => {
+    expect(dispatch({ key: "c" }, mac, { tagName: "INPUT" })).toBeNull();
+    expect(dispatch({ key: " " }, mac, { tagName: "INPUT" })).toBeNull();
   });
 });

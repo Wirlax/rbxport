@@ -82,7 +82,30 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .separator()
         .item(
             &MenuItemBuilder::with_id("fullscreen", label("Full screen"))
-                .accelerator("CmdOrCtrl+Ctrl+F")
+                // rekordbox's own, from its Export key map.
+                .accelerator("Shift+CmdOrCtrl+F")
+                .build(app)?,
+        )
+        .separator()
+        // The layout switch, on the keys rekordbox's Export preset gives it.
+        .item(
+            &MenuItemBuilder::with_id("layout-one", label("1 Player"))
+                .accelerator("CmdOrCtrl+7")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("layout-two", label("2 Players"))
+                .accelerator("CmdOrCtrl+8")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("layout-simple", label("Simple Player"))
+                .accelerator("CmdOrCtrl+9")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("layout-browser", label("Full Browser"))
+                .accelerator("CmdOrCtrl+0")
                 .build(app)?,
         )
         .build()?;
