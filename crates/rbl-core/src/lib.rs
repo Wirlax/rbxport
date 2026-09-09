@@ -3,6 +3,7 @@
 //! Nothing here touches the filesystem, the network, or Tauri.
 
 pub mod ids;
+pub mod musickey;
 pub mod time;
 
 use serde::{Deserialize, Serialize};
