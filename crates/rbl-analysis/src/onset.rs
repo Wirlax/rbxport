@@ -10,6 +10,12 @@ use realfft::RealFftPlanner;
 /// Analysis frame size. At 44.1 kHz this is ~23 ms, short enough to place a
 /// kick precisely and long enough for a usable spectrum.
 pub const FRAME: usize = 1024;
+/// The frame a low band is taken over: ~93 ms at 44.1 kHz.
+///
+/// Four times the usual, because a bin is only as narrow as the frame is long
+/// and the whole of a kick lives in the first few. At 1024 samples everything
+/// under 200 Hz is four and a half bins; at 4096 it is eighteen.
+pub const LOW_FRAME: usize = 4096;
 /// Frames advance by this many samples: ~5.8 ms at 44.1 kHz.
 pub const HOP: usize = 256;
 
@@ -43,33 +49,33 @@ impl OnsetEnvelope {
 /// thirds of rekordbox's tempo for that reason. Onsets taken from below a
 /// couple of hundred hertz simply do not contain the hi-hats.
 ///
-/// **Measured, and the hypothesis lost.** On 150 tracks of the reference
-/// library, tempo from `Band::LOW` scored 79% against the full band's 95%,
-/// fixing 5 tracks and breaking 30.
+/// **Measured once, and the hypothesis lost on a frame size.** On 150 tracks
+/// of the reference library, tempo from a 200 Hz band scored 79% against the
+/// full band's 95%, fixing 5 tracks and breaking 30 — with a 1024-sample
+/// frame, where a bin is 43 Hz wide and everything below 200 Hz is four and a
+/// half bins. Spectral flux over four bins cannot place an onset.
 ///
-/// The reason is this module's own frame size, not the idea. `FRAME` is 1024
-/// samples, so a bin is 43 Hz wide at 44.1 kHz and everything below 200 Hz is
-/// **four and a half bins**. Spectral flux over four bins is too coarse to
-/// place an onset, so the low band trades the hi-hat ambiguity for a much
-/// worse one. A future attempt needs a longer frame for the low band — or an
-/// onset measure that is not an FFT at all — rather than a different cutoff.
-///
-/// Kept because the tuning rig scores it (`tempotune`'s pass 1d) and because
-/// `Band::FULL` is the path everything uses. Nothing shipping reads
-/// `Band::LOW`.
+/// So a band carries its own frame. The resolution/latency trade runs the
+/// other way down there: a kick is not a click, and 93 ms of window at 44.1
+/// kHz buys eighteen bins under 200 Hz instead of four. The hop does not
+/// change with it, so the envelope stays at the same rate whatever band it
+/// came from and the tempo estimator cannot tell the difference.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
     pub low_hz: f32,
     /// `f32::INFINITY` for everything up to Nyquist.
     pub high_hz: f32,
+    /// Samples in one analysis frame. A power of two, and at least `HOP`.
+    pub frame: usize,
 }
 
 impl Band {
     /// Every frequency the signal carries.
-    pub const FULL: Self = Self { low_hz: 0.0, high_hz: f32::INFINITY };
+    pub const FULL: Self = Self { low_hz: 0.0, high_hz: f32::INFINITY, frame: FRAME };
     /// Kick territory: low enough to exclude a hi-hat, wide enough to keep a
-    /// kick's attack, which is not a pure tone.
-    pub const LOW: Self = Self { low_hz: 0.0, high_hz: 200.0 };
+    /// kick's attack, which is not a pure tone — and over a frame long enough
+    /// to resolve that far down.
+    pub const LOW: Self = Self { low_hz: 0.0, high_hz: 200.0, frame: LOW_FRAME };
 }
 
 /// Computes the spectral-flux onset envelope over every frequency.
@@ -80,27 +86,28 @@ pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
 /// Computes the spectral-flux onset envelope over one band.
 pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> OnsetEnvelope {
     let rate = f64::from(sample_rate) / HOP as f64;
-    if samples.len() < FRAME || sample_rate == 0 {
+    let frame = band.frame.max(HOP);
+    if samples.len() < frame || sample_rate == 0 {
         return OnsetEnvelope { values: Vec::new(), rate };
     }
 
     let mut planner = RealFftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(FRAME);
+    let fft = planner.plan_fft_forward(frame);
     let mut input = fft.make_input_vec();
     let mut output = fft.make_output_vec();
 
     // Hann window: without it, frame edges produce spectral splatter that looks
     // like an onset on every frame.
-    let window: Vec<f32> = (0..FRAME)
+    let window: Vec<f32> = (0..frame)
         .map(|i| {
-            let x = std::f32::consts::PI * 2.0 * i as f32 / FRAME as f32;
+            let x = std::f32::consts::PI * 2.0 * i as f32 / frame as f32;
             0.5 - 0.5 * x.cos()
         })
         .collect();
 
     // The FFT bins the band covers. Bin `i` is centred at
-    // `i * sample_rate / FRAME` hertz.
-    let hz_per_bin = f64::from(sample_rate) / FRAME as f64;
+    // `i * sample_rate / frame` hertz.
+    let hz_per_bin = f64::from(sample_rate) / frame as f64;
     let first_bin = (f64::from(band.low_hz) / hz_per_bin).floor().max(0.0) as usize;
     let last_bin = if band.high_hz.is_finite() {
         (f64::from(band.high_hz) / hz_per_bin).ceil() as usize
@@ -108,13 +115,13 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
         usize::MAX
     };
 
-    let frames = (samples.len().saturating_sub(FRAME)) / HOP + 1;
+    let frames = (samples.len().saturating_sub(frame)) / HOP + 1;
     let mut values = Vec::with_capacity(frames);
     let mut previous = vec![0.0_f32; output.len()];
 
     for frame in 0..frames {
         let start = frame * HOP;
-        let Some(chunk) = samples.get(start..start + FRAME) else { break };
+        let Some(chunk) = samples.get(start..start + frame) else { break };
         for (i, slot) in input.iter_mut().enumerate() {
             *slot = chunk.get(i).copied().unwrap_or(0.0) * window.get(i).copied().unwrap_or(0.0);
         }
