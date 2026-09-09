@@ -779,7 +779,9 @@ pub async fn deck_seek(
     app: tauri::AppHandle,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
-    position_ms: u64,
+    // Fractional: a cue point is a place in the music, and a whole
+    // millisecond is 44 frames at 44.1 kHz.
+    position_ms: f64,
 ) -> AppResult<()> {
     if let Some(engine) = player.opened() {
         engine.seek_ms(crate::player::deck_of(&deck), position_ms);

@@ -440,13 +440,31 @@ impl Engine {
         // The clock moves now rather than when the first block after the seek
         // is played: a seek while paused must show where it landed.
         handle.clock().set_position(frame.min(handle.clock().total().max(frame)));
+        // And the generation with it, here rather than on the deck thread.
+        //
+        // The callback treats "the clock's generation is ahead of mine" as
+        // "a seek is in flight" and stops moving the playhead for audio the
+        // seek has replaced. Bumping only when the deck thread got round to
+        // the command left a window — position already moved, generation not
+        // yet — in which the callback still believed the old blocks in the
+        // ring were current and stamped their position back over the one that
+        // had just been set. Measured releasing CUE: a cue at 1.4346 s read
+        // back as 1.4106, 24 ms in front of it, and the next press then moved
+        // the cue point there because it was outside `CUE_TOLERANCE`.
+        handle.clock().bump_generation();
         handle.send(deck::Command::Seek(frame));
         handle.send(deck::Command::Wake);
     }
 
     /// Moves the playhead, in milliseconds.
-    pub fn seek_ms(&self, deck: Deck, ms: u64) {
-        let frames = ms.saturating_mul(u64::from(self.sample_rate)) / 1000;
+    ///
+    /// Fractional, for the same reason `scrub_to_ms` is: a whole millisecond
+    /// is 44 frames at 44.1 kHz and 96 at 96, and a cue point is a place in
+    /// the music rather than a rounded one. Returning to a cue used to land
+    /// 0.3 ms in front of it every time, measured, because the position went
+    /// out as a rounded integer.
+    pub fn seek_ms(&self, deck: Deck, ms: f64) {
+        let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
         self.seek_frames(deck, frames);
     }
 
@@ -625,7 +643,24 @@ impl DeckReader {
             if let Some(slot) = out.get_mut(done * 2 + 1) {
                 *slot += right * gain;
             }
-            position = at;
+            // Only for audio the deck still stands behind. Mid-changeover
+            // these frames are the tail of where it *was*, fading out under a
+            // seek that has already replaced them, and they sit behind the
+            // ring — stamping them walks the playhead backwards past the point
+            // it was just sent to.
+            //
+            // Releasing CUE is where it shows. That sends a seek and a pause as
+            // two commands, and when the seek is handled first the fade-out
+            // that follows it stamped the old audio's position over the cue.
+            // Measured in the app: a release onto a cue at 1.4513 s reported
+            // 1.4367 s, 14 ms in front of it.
+            //
+            // The same rule the underrun above already follows: no audio from
+            // where the deck is going was played, so the playhead does not
+            // move for it.
+            if !changing {
+                position = at;
+            }
             done += 1;
             // A stop that has finished fading stops consuming: the frames past
             // it belong to wherever the deck is resumed from.

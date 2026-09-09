@@ -69,7 +69,7 @@ fn main() {
     ];
 
     for (label, to_ms) in targets {
-        engine.seek_ms(rbl_deck::Deck::A, from_ms);
+        engine.seek_ms(rbl_deck::Deck::A, from_ms as f64);
         engine.play(rbl_deck::Deck::A);
         // Let the ring fill, so what is measured is the jump rather than the
         // start of playback.
@@ -86,7 +86,7 @@ fn main() {
         // has taken a block of the new generation.
         let target = to_ms * u64::from(sample_rate) / 1000;
         let asked = Instant::now();
-        engine.seek_ms(rbl_deck::Deck::A, to_ms);
+        engine.seek_ms(rbl_deck::Deck::A, to_ms as f64);
         let mut silent = 0_u32;
         let mut heard = None;
         while asked.elapsed() < PATIENCE {

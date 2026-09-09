@@ -333,7 +333,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       void (async () => {
         try {
           const backend = await getBackend();
-          await backend.deckSeek(DECK, Math.round(at * 1000));
+          // Not rounded: a whole millisecond is 44 frames at 44.1 kHz and
+          // 96 at 96, and a cue point is a place in the music rather
+          // than a rounded one.
+          await backend.deckSeek(DECK, at * 1000);
         } catch (failure) {
           setError(reasonFrom(failure));
         }
@@ -401,7 +404,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
             // frames — enough to quantise a slow drag's speed into a stall and
             // a lurch.
             if (scrubbing.current) await backend.deckScrubTo(DECK, target * 1000);
-            else await backend.deckSeek(DECK, Math.round(target * 1000));
+            else await backend.deckSeek(DECK, target * 1000);
           } catch (failure) {
             setError(reasonFrom(failure));
           }

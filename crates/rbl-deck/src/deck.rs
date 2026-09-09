@@ -263,7 +263,11 @@ impl Worker {
                 self.clock.set_position(landed);
                 self.head = landed as f64;
                 self.restart_stretch();
-                self.generation = self.clock.bump_generation();
+                // Adopted, not bumped: `seek_frames` already moved the counter
+                // when it moved the position, so that the callback stopped
+                // trusting the ring at the same instant. Bumping again here
+                // would start a second changeover for one seek.
+                self.generation = self.clock.generation();
             }
             Err(e) => {
                 (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });

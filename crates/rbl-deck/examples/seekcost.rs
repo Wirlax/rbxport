@@ -60,7 +60,7 @@ fn main() {
             let next = Instant::now() + period;
             if hz > 0 && last_seek.elapsed() >= gap {
                 at_ms += 40;
-                engine.seek_ms(rbl_deck::Deck::A, at_ms);
+                engine.seek_ms(rbl_deck::Deck::A, at_ms as f64);
                 last_seek = Instant::now();
             }
             // Pull as a device callback would, and count the buffers that came

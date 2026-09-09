@@ -378,7 +378,7 @@ fn a_seek_while_paused_moves_the_playhead_without_starting_the_device() {
     h.engine.load(Deck::A, &path);
     h.wait_for_load(1);
 
-    h.engine.seek_ms(Deck::A, 1_000);
+    h.engine.seek_ms(Deck::A, 1_000.0);
     assert_eq!(h.position(Deck::A), u64::from(RATE));
     assert!(!h.sink.running());
 }
@@ -951,4 +951,47 @@ fn no_transport_move_stands_out_from_the_music_around_it() {
     let found = clicks(&audio);
     assert_eq!(found, 0, "{found} steps stood out from the music");
     assert_eq!(audio.last().copied(), Some(0.0), "the stream must end at silence");
+}
+
+#[test]
+fn a_release_onto_the_cue_lands_on_it_or_after_it_but_never_before() {
+    // Letting go of CUE: the deck is previewing, and the release seeks back to
+    // the cue point and pauses in the same breath. The playhead must not end up
+    // *before* the cue — the report was "sometimes when I release the C key it
+    // rewinds too far", measured landing 36 ms in front of it, which is outside
+    // `CUE_TOLERANCE` and so moved the cue point there on the next press.
+    //
+    // **This does not reproduce the intermittent case.** That needs the control
+    // thread to move the clock while the audio callback is mid-block on the
+    // ring it just invalidated, and the window is too narrow to open on demand
+    // from a test that owns the callback. It was measured in the app instead:
+    // worst error 36 ms before the fixes, 4.8 ms after, and the cue point stops
+    // drifting. What is left here is the invariant, which a gross regression
+    // would still break.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 4);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+
+    let cue = u64::from(RATE) * 2;
+    for attempt in 0..20 {
+        h.engine.seek_frames(Deck::A, cue);
+        h.engine.play(Deck::A);
+        h.play_until(Deck::A, cue + 1_024);
+
+        h.engine.seek_frames(Deck::A, cue);
+        h.engine.pause(Deck::A);
+        for _ in 0..8 {
+            let _ = h.sink.pull(512);
+        }
+        let landed = h.position(Deck::A);
+        assert!(
+            landed >= cue,
+            "attempt {attempt}: released onto {landed}, {} frames before the cue at {cue}",
+            cue.saturating_sub(landed),
+        );
+    }
 }

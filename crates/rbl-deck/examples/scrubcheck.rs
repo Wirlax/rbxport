@@ -97,7 +97,7 @@ fn main() {
     };
 
     let period = Duration::from_secs_f64(BUFFER as f64 / f64::from(sample_rate));
-    engine.seek_ms(rbl_deck::Deck::A, 60_000);
+    engine.seek_ms(rbl_deck::Deck::A, 60_000.0);
     std::thread::sleep(Duration::from_millis(200));
     engine.scrub_begin(rbl_deck::Deck::A);
 
