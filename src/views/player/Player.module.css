@@ -582,7 +582,9 @@
   translate: -100% 0;
   will-change: transform;
   padding-right: 6px;
-  font-size: var(--f-size-title);
+  /* Its own size, measured: it was borrowing the track title's 17px, which is
+     three points bigger than the capture's. */
+  font-size: var(--f-size-bars);
   font-weight: 700;
   color: var(--c-bars-label);
   white-space: nowrap;

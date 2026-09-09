@@ -116,6 +116,7 @@
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
   --f-size-sm: 12px; /* status bar 'Analyzing: 8319 Tracks', 128pt wide, bold */
+  --f-size-bars: 14px; /* docs/screenshots at 2x: the bar count reads 20px tall over the detail band, which is a 14px face */
   --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
 }
