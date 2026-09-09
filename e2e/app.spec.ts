@@ -1615,13 +1615,15 @@ test("hovering the sleeve shows what clicking it does", async ({ page }) => {
   await sleeve.hover();
   await expect.poll(shown).toBe(1);
 
-  // And nothing to eject means nothing offered: the sleeve is disabled.
+  // Ejected, the same square is the load button instead, and the glyph that
+  // said "eject" is gone with the track it belonged to.
   await sleeve.click();
-  await expect(sleeve).toBeDisabled();
-  await page.mouse.move(0, 0);
-  await sleeve.hover({ force: true });
-  // Polled, because it fades rather than switching off.
-  await expect.poll(shown).toBe(0);
+  await expect(sleeve).toHaveCount(0);
+  const empty = page.getByRole("button", { name: "Load the selected track" });
+  await expect(empty).toBeVisible();
+  // Live, because the double-click that loaded the track also selected it.
+  await expect(empty).toBeEnabled();
+  await expect(empty.locator("svg")).toHaveCount(1);
 });
 
 test("the deck answers rekordbox's own keys", async ({ page }) => {
