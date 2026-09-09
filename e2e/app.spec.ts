@@ -1371,3 +1371,47 @@ test("the deck answers rekordbox's own keys", async ({ page }) => {
   await page.keyboard.press("q");
   await expect(q).toHaveAttribute("aria-pressed", "false");
 });
+
+test("right-clicking a track opens rekordbox's own menu", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: "Track" });
+  await expect(menu).toBeVisible();
+  // Its own list, in its own order — greyed entries and all, because a menu
+  // half the length of the real one is a menu people have to relearn later.
+  await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "Get Info from iTunes" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Load", exact: true })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Show information" })).toBeEnabled();
+  // Not in a playlist, so there is nothing to remove it from.
+  await expect(menu.getByRole("menuitem", { name: "Remove from Playlist" })).toBeDisabled();
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
+test("right-clicking the tree opens the folder menu", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const playlist = page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first();
+  await playlist.click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: "Playlist" });
+  await expect(menu).toBeVisible();
+  // A playlist says playlist and a folder says folder, as rekordbox does.
+  await expect(menu.getByRole("menuitem", { name: "Export Playlist" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Delete Playlist" })).toBeVisible();
+
+  // Reading is offered; writing is not, because the mock's library is
+  // read-only — the same refusal the rest of the app makes when rekordbox is
+  // holding the database.
+  await expect(menu.getByRole("menuitem", { name: "Export Playlist" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "Create New Playlist" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Delete Playlist" })).toBeDisabled();
+
+  // And the entries rekordbox has that this does not are greyed either way.
+  await expect(menu.getByRole("menuitem", { name: "Sort Items" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeDisabled();
+});

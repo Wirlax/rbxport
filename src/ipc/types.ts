@@ -273,6 +273,9 @@ export interface Backend {
   /** A reading of this process, sampled on demand. */
   appDiagnostics(): Promise<Diagnostics>;
 
+  /** Shows a track's file in the Finder. */
+  revealTrack(trackId: string): Promise<void>;
+
   missingTracks(limit: number): Promise<MissingTracks>;
 
   /**

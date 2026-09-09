@@ -8,20 +8,22 @@ import { memo, useCallback, useMemo, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
 import { DeviceIcon, FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
+import { ContextMenu } from "@/components/ContextMenu";
+import { treeMenu } from "@/lib/contextMenus";
 import {
   branchIds, emptySources, nodesForSource, sourceOf, toggle, visibleNodes, type Source,
 } from "@/lib/tree";
 import { SourceRail } from "./SourceRail";
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onExport,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu,
 }: {
   node: TreeNode;
   selected: boolean;
   /** Whether a track drag could land here. */
   droppable: boolean;
   onDropTracks: ((playlistId: string) => void) | undefined;
-  onExport: ((node: TreeNode) => void) | undefined;
+  onMenu: ((node: TreeNode, at: { x: number; y: number }) => void) | undefined;
   /** Whether anything sits under this node, so it can be opened at all. */
   branch: boolean;
   open: boolean;
@@ -55,11 +57,11 @@ const Row = memo(function Row({
         onDropTracks?.(node.id);
       }}
       onContextMenu={(e) => {
-        // Only a playlist can be exported; a folder would have to invent which
-        // of its playlists was meant.
-        if (node.kind !== "playlist" || !onExport) return;
+        // Only the two kinds that have a menu: the fixed roots and the device
+        // nodes are not playlists and have nothing to offer.
+        if ((node.kind !== "playlist" && node.kind !== "folder") || !onMenu) return;
         e.preventDefault();
-        onExport(node);
+        onMenu(node, { x: e.clientX, y: e.clientY });
       }}
       data-droppable={droppable || undefined}
       role="treeitem"
@@ -94,6 +96,12 @@ export interface TreeViewProps {
   onSelect: (node: TreeNode) => void;
   /** Write a playlist to a stick. */
   onExport?: (node: TreeNode) => void;
+  /** Create, delete and rename, which the shell owns because they write. */
+  onCreatePlaylist?: (parent: TreeNode) => void;
+  onCreateFolder?: (parent: TreeNode) => void;
+  onDeleteNode?: (node: TreeNode) => void;
+  /** rekordbox is running, so every write is greyed rather than raced. */
+  readOnly?: boolean;
   /** True while tracks are being dragged, so playlists can offer themselves. */
   dragging?: boolean;
   /** Drop the dragged tracks onto a playlist. */
@@ -102,7 +110,10 @@ export interface TreeViewProps {
 
 export function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport,
+  onCreatePlaylist, onCreateFolder, onDeleteNode, readOnly = false,
 }: TreeViewProps) {
+  /** The tree menu: where it is, and which node it was opened on. */
+  const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   // Which nodes the user has closed. Absent means open, so a freshly-loaded
   // tree renders exactly as the backend sent it.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
@@ -143,13 +154,42 @@ export function TreeView({
             onToggle={onToggle}
             droppable={Boolean(dragging) && node.kind === "playlist"}
             onDropTracks={onDropTracks}
-            onExport={onExport}
+            onMenu={(node, at) => setMenu({ ...at, node })}
           />
         ))}
         {visible.length === 0 ? (
           <p className={styles.emptyNote}>Nothing here yet.</p>
         ) : null}
       </div>
+
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          rows={treeMenu(menu.node.kind === "folder" ? "folder" : "playlist")}
+          label={menu.node.kind === "folder" ? "Folder" : "Playlist"}
+          context={{ inPlaylist: true, hasFile: true, readOnly }}
+          onChoose={(action) => {
+            switch (action) {
+              case "export":
+                onExport?.(menu.node);
+                break;
+              case "createPlaylist":
+                onCreatePlaylist?.(menu.node);
+                break;
+              case "createFolder":
+                onCreateFolder?.(menu.node);
+                break;
+              case "delete":
+                onDeleteNode?.(menu.node);
+                break;
+              default:
+                break;
+            }
+          }}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </nav>
   );
 }

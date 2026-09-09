@@ -119,6 +119,7 @@ async function realBackend(): Promise<Backend> {
     deckScrubTo: (deck, positionMs) => invoke<void>("deck_scrub_to", { deck, positionMs }),
     deckScrubEnd: (deck) => invoke<void>("deck_scrub_end", { deck }),
     appDiagnostics: () => invoke<Diagnostics>("app_diagnostics"),
+    revealTrack: (trackId) => invoke<void>("reveal_track", { track: trackId }),
     deckState: () => invoke<Tick>("deck_state"),
     onDeckTick: (listener) => subscribe<Tick>("deck:tick", listener),
     onDeckEvent: (listener) => {

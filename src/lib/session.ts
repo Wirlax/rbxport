@@ -8,7 +8,9 @@
  *
  * The search box is deliberately absent. Reopening to a filtered library you
  * did not ask for reads as a broken library, and the one keystroke to clear it
- * is not worth that.
+ * is not worth that. So is the deck's track: reopening loads it before the
+ * library is up, which fails, and the window comes back showing an error over
+ * a track nobody asked to hear.
  *
  * Everything stored is checked on the way back in. A playlist can be deleted
  * between runs, a stored width can come from a wider screen, and a hand-edited
@@ -51,8 +53,6 @@ export interface Session {
   rows: RowDto[];
   /** Row count of the view the rows came from, so the scrollbar is right. */
   count: number;
-  /** What was loaded in the player. */
-  player: RowDto | null;
   /** How much of the window the deck took: 1 player, 2, simple, or none. */
   layout: PlayerLayout;
 }
@@ -68,7 +68,6 @@ export const DEFAULT_SESSION: Session = {
   tree: [],
   rows: [],
   count: 0,
-  player: null,
   layout: "one",
 };
 
@@ -118,12 +117,6 @@ export function sanitiseSession(value: unknown): Session {
       typeof raw.count === "number" && Number.isFinite(raw.count) && raw.count >= 0
         ? Math.round(raw.count)
         : 0,
-    player:
-      typeof raw.player === "object" &&
-      raw.player !== null &&
-      typeof (raw.player as RowDto).id === "string"
-        ? (raw.player as RowDto)
-        : null,
     layout: asLayout(raw.layout),
   };
 }

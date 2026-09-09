@@ -117,6 +117,17 @@ impl Scrubber {
         self.cursor.max(0.0) as u64
     }
 
+    /// Where the pointer left it, which is not where the head got to.
+    ///
+    /// The head is rate-limited — `MAX_RATE` — because a drag has to stay
+    /// audible, so a fast one leaves it seconds behind the hand and a click
+    /// barely moves it at all. Letting go is a statement about the pointer,
+    /// not about the audio that was still catching up, so this is what the
+    /// deck lands on.
+    pub fn target(&self) -> u64 {
+        self.target.max(0.0) as u64
+    }
+
     /// The speed the head is travelling at, as a multiple of normal. Read by
     /// the tests, and by anything that wants to draw the drag.
     #[cfg_attr(not(test), allow(dead_code, reason = "read by the scrub tests"))]
@@ -189,6 +200,20 @@ mod tests {
         let window = ramp(100, 10);
         assert!((window.sample(103.0).0 - 103.0).abs() < 1e-4);
         assert!((window.sample(103.25).0 - 103.25).abs() < 1e-4);
+    }
+
+    #[test]
+    fn letting_go_lands_under_the_pointer_not_behind_it() {
+        // A click on the overview aims seconds away and is over in a frame or
+        // two. The head is capped at MAX_RATE so it has barely left, and
+        // landing on it made the press spring back to where it started.
+        let mut scrubber = Scrubber::new(1_000);
+        scrubber.aim(2_000_000);
+        let window = ramp(0, 8_000);
+        let mut out = vec![0.0; 512];
+        scrubber.render(&window, &mut out);
+        assert!(scrubber.cursor() < 100_000, "the head is rate-limited on purpose");
+        assert_eq!(scrubber.target(), 2_000_000);
     }
 
     #[test]

@@ -603,6 +603,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // costs nothing, so every figure the platform will not give is null.
     appDiagnostics: () =>
       wait({ cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
+    // A browser has no Finder to open, and nothing to open it on.
+    revealTrack: () => wait(undefined),
 
     deckState: () => wait(tick()),
     onDeckTick: (listener) => {

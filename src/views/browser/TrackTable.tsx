@@ -13,6 +13,8 @@ import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
+import { ContextMenu } from "@/components/ContextMenu";
+import { TRACK_MENU } from "@/lib/contextMenus";
 import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
@@ -181,7 +183,7 @@ const EditableCell = memo(function EditableCell({
 });
 
 const TrackRow = memo(function TrackRow({
-  row, top, selected, onSelect, onOpen, onDragStart, index, columns, onRate, onComment,
+  row, top, selected, onSelect, onOpen, onDragStart, index, columns, onRate, onComment, onMenu,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -196,6 +198,7 @@ const TrackRow = memo(function TrackRow({
   onRate: ((id: string, stars: number) => void) | undefined;
   /** Set the track's comment. */
   onComment: ((id: string, comment: string) => void) | undefined;
+  onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
 }) {
   if (!row) {
     // Placeholder keeps the row box the exact height so nothing shifts on arrival.
@@ -209,6 +212,10 @@ const TrackRow = memo(function TrackRow({
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => onSelect(index, row.id, e)}
       onDoubleClick={() => onOpen(index)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(index, row, { x: e.clientX, y: e.clientY });
+      }}
       draggable
       onDragStart={(e) => {
         onDragStart(row.id);
@@ -324,6 +331,12 @@ export interface TrackTableProps {
   onSelectedTracks?: (tracks: { id: string; title: string }[]) => void;
   /** Analyse whatever is selected. */
   onAnalyse?: () => void;
+  /** Right-click actions the table cannot do itself. */
+  onShowInformation?: (row: RowDto) => void;
+  onShowInFinder?: (row: RowDto) => void;
+  onRemoveFromPlaylist?: (ids: readonly string[]) => void;
+  /** rekordbox is running, so every write is refused rather than raced. */
+  readOnly?: boolean;
   /** The last run's rows, drawn until the backend answers. */
   seed?: Seed | undefined;
   /**
@@ -342,6 +355,7 @@ export function TrackTable({
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
+  onShowInformation, onShowInFinder, onRemoveFromPlaylist, readOnly = false,
 }: TrackTableProps) {
   // Analysis is reachable from the keyboard rather than only a menu, since a
   // row context menu does not exist yet.
@@ -495,6 +509,23 @@ export function TrackTable({
   // The rows behind the selection, resolved from what is cached. A selection
   // spanning unfetched rows contributes only what is on hand, which is what
   // the user can see anyway.
+  /** The track menu: where it is, and which row it was opened on. */
+  const [trackMenu, setTrackMenu] = useState<
+    { x: number; y: number; row: RowDto } | null
+  >(null);
+
+  const openTrackMenu = useCallback(
+    (index: number, row: RowDto, at: { x: number; y: number }) => {
+      // Right-clicking a row the selection does not hold selects it first, as
+      // every list does: otherwise the menu acts on something else.
+      setSelection((current) =>
+        current.ids.has(row.id) ? current : { ids: new Set([row.id]), anchorIndex: index },
+      );
+      setTrackMenu({ ...at, row });
+    },
+    [],
+  );
+
   const reportedSelection = useRef("");
   useEffect(() => {
     if (!onSelectedTracks) return;
@@ -646,11 +677,46 @@ export function TrackTable({
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}
                 onOpen={handleOpen}
+                onMenu={openTrackMenu}
               />
             );
           })}
         </div>
       </div>
+
+      {trackMenu ? (
+        <ContextMenu
+          x={trackMenu.x}
+          y={trackMenu.y}
+          rows={TRACK_MENU}
+          label="Track"
+          context={{
+            inPlaylist: spec.source.kind === "playlist",
+            hasFile: true,
+            readOnly,
+          }}
+          onChoose={(action) => {
+            const ids = [...selection.ids];
+            switch (action) {
+              case "analyse":
+                onAnalyse?.();
+                break;
+              case "showInformation":
+                onShowInformation?.(trackMenu.row);
+                break;
+              case "showInFinder":
+                onShowInFinder?.(trackMenu.row);
+                break;
+              case "removeFromPlaylist":
+                onRemoveFromPlaylist?.(ids);
+                break;
+              default:
+                break;
+            }
+          }}
+          onClose={() => setTrackMenu(null)}
+        />
+      ) : null}
 
       {menu ? (
         <ColumnMenu

@@ -84,8 +84,11 @@ export function App() {
   // The rows behind the selection, so they can be queued for analysis.
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // The row the player is showing. Set by the browser as the selection moves,
-  // so the player reflects what is highlighted rather than nothing.
-  const [playerTrack, setPlayerTrack] = useState<RowDto | null>(restored.player);
+  // so the player reflects what is highlighted rather than nothing. It starts
+  // empty on every run: a track restored from the last session would be loaded
+  // before the library is read, which fails, and the deck would open on an
+  // error over something nobody asked to hear.
+  const [playerTrack, setPlayerTrack] = useState<RowDto | null>(null);
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -356,6 +359,90 @@ export function App() {
     [draggedTracks, tree],
   );
 
+  /**
+   * The tree's context menu, and the track's.
+   *
+   * Every one of these writes, so each says why it could not rather than
+   * looking as if it worked — the same rule the drop handler above follows.
+   */
+  const afterWrite = useCallback(async (note: string) => {
+    const backend = await getBackend();
+    setTree(await backend.playlistTree());
+    setLibraryGeneration((generation) => generation + 1);
+    setDropNote(note);
+  }, []);
+
+  const write = useCallback(
+    (run: (backend: Backend) => Promise<string>) => {
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          await afterWrite(await run(backend));
+        } catch (e) {
+          setDropNote(e instanceof Error ? e.message : "That could not be saved.");
+        }
+      })();
+    },
+    [afterWrite],
+  );
+
+  const createPlaylistIn = useCallback(
+    (parent: TreeNode) => {
+      // rekordbox's own default name, from german.lang, and the node the menu
+      // was opened on is the parent — a folder holds it, a playlist's own
+      // folder does.
+      write(async (backend) => {
+        await backend.edits.createPlaylist("New playlist", parent.kind === "folder" ? parent.id : "");
+        return "Created New playlist.";
+      });
+    },
+    [write],
+  );
+
+  const createFolderIn = useCallback(
+    (parent: TreeNode) => {
+      write(async (backend) => {
+        await backend.edits.createFolder("New folder", parent.kind === "folder" ? parent.id : "");
+        return "Created New folder.";
+      });
+    },
+    [write],
+  );
+
+  const deleteNode = useCallback(
+    (node: TreeNode) => {
+      write(async (backend) => {
+        await backend.edits.deletePlaylist(node.id);
+        if (selectedNode?.id === node.id) setSelectedNode(null);
+        return `Deleted ${node.name}.`;
+      });
+    },
+    [write, selectedNode],
+  );
+
+  const removeFromPlaylist = useCallback(
+    (ids: readonly string[]) => {
+      const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
+      if (playlist === null || ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.removeTracksFromPlaylist(playlist, [...ids]);
+        return `Removed ${ids.length} track${ids.length === 1 ? "" : "s"}.`;
+      });
+    },
+    [write, spec],
+  );
+
+  const revealTrack = useCallback((row: RowDto) => {
+    void (async () => {
+      const backend = await getBackend();
+      try {
+        await backend.revealTrack(row.id);
+      } catch (e) {
+        setDropNote(e instanceof Error ? e.message : "That file could not be shown.");
+      }
+    })();
+  }, []);
+
   // Clear the note after a moment: it reports an action, not a state.
   useEffect(() => {
     if (dropNote === null) return;
@@ -506,10 +593,9 @@ export function App() {
       tree: [...tree].slice(0, SEEDED_NODES),
       rows: screen.rows.slice(0, SEEDED_ROWS),
       count: screen.count,
-      player: playerTrack,
       layout,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, playerTrack, layout]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, layout]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement.
@@ -583,6 +669,10 @@ export function App() {
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
           onExport={exportPlaylist}
+          onCreatePlaylist={createPlaylistIn}
+          onCreateFolder={createFolderIn}
+          onDeleteNode={deleteNode}
+          readOnly={summary?.readOnly ?? false}
         />
         <div
           className={styles.splitter}
@@ -609,6 +699,13 @@ export function App() {
           onSelectionChange={setSelectedCount}
           onSelectedTracks={setSelectedTracks}
           onAnalyse={analyseSelection}
+          onShowInformation={(row) => {
+            setPlayerTrack(row);
+            setInfoOpen(true);
+          }}
+          onShowInFinder={revealTrack}
+          onRemoveFromPlaylist={removeFromPlaylist}
+          readOnly={summary?.readOnly ?? false}
           onFocusedRow={setPlayerTrack}
           onDragTracks={setDraggedTracks}
           onRate={rateTrack}

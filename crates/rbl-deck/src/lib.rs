@@ -266,7 +266,8 @@ impl Engine {
         handle.send(deck::Command::ScrubTo(frames));
     }
 
-    /// Ends a drag. The playhead stays where the head came to rest.
+    /// Ends a drag. The playhead lands under the pointer, not on the read
+    /// head, which the audible rate cap leaves behind on a fast drag.
     pub fn scrub_end(&self, deck: Deck) {
         let Some(handle) = self.deck(deck) else { return };
         handle.clock().set_scrubbing(false);

@@ -250,14 +250,21 @@ impl Worker {
         }
     }
 
-    /// Ends a drag, leaving the playhead where the head came to rest.
+    /// Ends a drag, leaving the playhead under the pointer.
+    ///
+    /// Where the pointer is, not where the read head got to. The head is
+    /// capped at `MAX_RATE` so the drag stays audible, which leaves it behind
+    /// the hand on a fast one and barely moved at all on a click; landing on
+    /// it turned a click on the overview into a jump that sprang back.
     fn scrub_end(&mut self) {
         let Some(scrubber) = self.scrubber.take() else { return };
         self.clock.set_scrubbing(false);
         self.window = PcmWindow::empty();
         // The streamer has been sitting wherever the window was filled from,
         // so it has to be put where the drag finished before playback resumes.
-        self.seek(scrubber.cursor());
+        let total = self.clock.total();
+        let at = if total > 0 { scrubber.target().min(total) } else { scrubber.target() };
+        self.seek(at);
     }
 
     /// Decodes the window a drag reads from, centred on `at`.

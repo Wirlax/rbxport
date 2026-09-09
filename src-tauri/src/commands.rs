@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use rbl_index::Library;
 use tauri::State;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
@@ -740,6 +741,32 @@ pub async fn deck_seek(
         crate::player::start_ticker(&app);
     }
     Ok(())
+}
+
+/// Shows a track's file in the Finder.
+///
+/// The OS does the revealing; this only resolves the id to the path the
+/// library holds for it, and says so plainly when that file is not there —
+/// about one track in thirty of the reference library sits on a volume that
+/// is not mounted.
+#[tauri::command]
+pub async fn reveal_track(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<()> {
+    let library = state.library()?;
+    let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
+        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+            .with_detail(format!("track {track}")));
+    };
+    if !path.exists() {
+        return Err(AppError::new(ErrorKind::NotFound, "That track's file could not be found.")
+            .with_detail(path.display().to_string()));
+    }
+    app.opener().reveal_item_in_dir(&path).map_err(|e| {
+        AppError::new(ErrorKind::Internal, "The Finder would not open.").with_detail(e.to_string())
+    })
 }
 
 /// What the app is costing right now, for the title bar's readout.

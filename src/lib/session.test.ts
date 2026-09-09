@@ -20,7 +20,6 @@ describe("sanitiseSession", () => {
       tree: [{ id: "pl-7", name: "Set", kind: "playlist", depth: 1 }],
       rows: [{ id: "100", title: "One" }],
       count: 14,
-      player: { id: "100", title: "One" },
       layout: "two",
     };
     expect(sanitiseSession(session)).toEqual(session);
@@ -33,12 +32,10 @@ describe("sanitiseSession", () => {
     const session = sanitiseSession({
       tree: [{ id: "a" }, "nope", null, { name: "no id" }],
       rows: [{ id: "1" }, 7],
-      player: { title: "no id" },
       count: -3,
     });
     expect(session.tree).toHaveLength(1);
     expect(session.rows).toHaveLength(1);
-    expect(session.player).toBeNull();
     expect(session.count).toBe(0);
   });
 

@@ -339,9 +339,21 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const scrubEnd = useCallback(() => {
     if (!scrubbing.current) return;
     scrubbing.current = false;
+    // Where the drag last aimed has to reach the deck before the drag ends,
+    // because that is what the deck lands on. A click is over well inside one
+    // frame, so the rAF that coalesces moves would still be holding the only
+    // position anybody asked for when the end arrived, and the press would
+    // land back where it started.
+    if (flushing.current) {
+      cancelAnimationFrame(flushing.current);
+      flushing.current = 0;
+    }
+    const target = pending.current;
+    pending.current = null;
     void (async () => {
       try {
         const backend = await getBackend();
+        if (target !== null) await backend.deckScrubTo(DECK, Math.round(target * 1000));
         await backend.deckScrubEnd(DECK);
       } catch (failure) {
         setError(reasonFrom(failure));
