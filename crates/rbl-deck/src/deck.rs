@@ -43,6 +43,12 @@ pub enum Command {
 /// is running. Short enough that a device buffer can never outrun it.
 const TOP_UP_WAIT: Duration = Duration::from_millis(2);
 
+/// Blocks kept queued while a drag is running: about 35 ms.
+///
+/// Playback wants the full ring, which absorbs a decode hiccup. A drag wants
+/// the opposite — every block already queued is a block of the pointer's past.
+const SCRUB_BLOCKS: usize = 3;
+
 pub struct DeckHandle {
     commands: Sender<Command>,
     clock: Arc<DeckClock>,
@@ -297,7 +303,11 @@ impl Worker {
 
     /// One block of a drag. False when there is nothing to add.
     fn produce_scrub(&mut self) -> bool {
-        if self.producer.is_full() {
+        // A shallow ring, not the full sixteen blocks. What is already queued
+        // has to play out before the drag's next move is heard, and 186 ms of
+        // that is a drag that answers the pointer a fifth of a second late and
+        // keeps sounding that long after it stops.
+        if RING_BLOCKS - self.producer.slots() >= SCRUB_BLOCKS {
             return false;
         }
         let generation = self.generation;

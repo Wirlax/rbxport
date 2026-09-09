@@ -163,7 +163,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-right: var(--s-player-inset);
+  /* No right inset: every strip runs to the deck's own edge. */
+  padding-right: 0;
   padding-left: var(--deck-strip-left);
   min-width: 0;
 }
@@ -217,7 +218,8 @@
      waveform gets no height at all. */
   align-items: stretch;
   gap: var(--s-player-artwork-gap);
-  padding: 0 var(--s-player-inset);
+  /* The sleeve keeps its inset; the strip beside it runs to the deck's edge. */
+  padding: 0 0 0 var(--s-player-inset);
   min-width: 0;
 }
 
@@ -342,7 +344,7 @@
 /* Aligned with the overview strip above it, which starts past the sleeve. */
 .phrase {
   position: relative;
-  margin-right: var(--s-player-inset);
+  margin-right: 0;
   margin-left: var(--deck-strip-left);
   overflow: hidden;
 }
@@ -378,24 +380,34 @@
    detail used to run edge to edge while the strips above it stopped short. The
    zoom column then puts the waveform on the overview's own left edge. */
 .detailRow {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
-  padding: 0 var(--s-player-inset) var(--s-player-inset);
+  padding: 0 0 var(--s-player-inset);
 }
 
-/* The zoom column, on the black beside the transport rather than inside it.
-   Exactly as wide as the sleeve and its gap, so the detail waveform starts on
-   the same left edge as the overview strip above it rather than near it. */
+/* Over the waveform, not beside it. The column it used to occupy was as wide
+   as the sleeve and cost the detail strip 55px of music to hold three
+   controls; floating them on a scrim gives that back and still leaves the
+   rings readable over a bright transient.
+
+   A sibling of the strip rather than a child of it, so a press on a button is
+   not also the first frame of a drag on the waveform underneath. */
 .zoom {
-  width: calc(var(--s-player-artwork-size) + var(--s-player-artwork-gap));
-  flex: none;
+  position: absolute;
+  z-index: 3;
+  left: var(--s-player-zoom-inset);
+  top: 50%;
+  translate: 0 -50%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding-top: 12px;
+  gap: 6px;
+  padding: 6px 5px;
+  border-radius: 4px;
+  background: var(--c-zoom-scrim);
 }
 .zoom button {
   width: 20px;

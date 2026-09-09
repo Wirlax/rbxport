@@ -26,6 +26,7 @@
   --c-menu-border: #8C8C8C; /* the light hairline around that panel */
   --c-eject: #CDCDCD; /* sampled from a capture of the sleeve hovered: the eject glyph is a flat (205,205,205) */
   --c-eject-scrim: #000000; /* INFERRED — the sampled sleeve is uniform there, so the darkening cannot be separated from the artwork; without it the glyph is unreadable over bright art */
+  --c-zoom-scrim: rgb(0 0 0 / 55%); /* INFERRED — the zoom cluster sits over the detail waveform, so it needs a ground the waveform still reads through; 55% is the least that keeps the rings legible over a bright transient */
   --c-disc-placeholder: #2E2E2E; /* the record drawn where a sleeve is missing; a shade above the raised square it sits on */
   --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
@@ -79,7 +80,8 @@
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
   --s-player-right-w: 209px; /* measured from a 2x capture of rekordbox 7.2.11 running; memory/hotcue panel x 1711..1920pt */
   --s-player-margin: 2px; /* black around the deck column, so it reads as a panel rather than as the whole strip */
-  --s-player-inset: 12px; /* one inset for every row of the deck; the rows had 16 on the left, 12 on the right, and the detail none at all */
+  --s-player-inset: 12px; /* the deck's left inset; the rows had 16 on the left, 12 on the right, and the detail none at all */
+  --s-player-zoom-inset: 8px; /* how far the zoom cluster floats in from the left edge of the detail waveform it sits over */
   --s-player-artwork-gap: 10px; /* between the sleeve and the overview strip beside it */
   --s-player-title-h: 21px; /* docs/screenshots at 2x: the player spans y 190..746 and the title row y 190..232 */
   --s-player-overview-h: 49px; /* docs/screenshots at 2x: artwork + vocal + overview + position bar, y 232..330 */

@@ -8,6 +8,10 @@ import {
   dragSeconds,
   headPercent,
   JUMP_SIZES,
+  JUMP_SIZE_ID,
+  jumpSizeById,
+  jumpStepSeconds,
+  FINE_JUMP_SECONDS,
   jumpSeconds,
   nextJumpSize,
   zoomBy,
@@ -447,15 +451,49 @@ describe("needsRedraw", () => {
   });
 });
 
-describe("nextJumpSize", () => {
-  it("cycles the sizes a CDJ offers, and wraps", () => {
-    expect(nextJumpSize(1)).toBe(2);
-    expect(nextJumpSize(4)).toBe(8);
-    expect(nextJumpSize(32)).toBe(1);
+describe("the beat jump sizes", () => {
+  it("lists what rekordbox's menu lists, in its order", () => {
+    // Transcribed from the menu itself: it skips 1 and 2 beats and changes
+    // unit at 8 bars, so this is not a generated run of powers of two.
+    expect(JUMP_SIZES.map((size) => size.label)).toEqual([
+      "Fine", "4Beats", "8Beats", "16Beats", "8Bars", "16Bars", "32Bars",
+    ]);
   });
 
-  it("snaps a size it does not know back to the default's neighbour", () => {
-    expect(JUMP_SIZES).toContain(nextJumpSize(7));
+  it("counts a bar as four beats", () => {
+    expect(jumpSizeById("8bars").beats).toBe(32);
+    expect(jumpSizeById("32bars").beats).toBe(128);
+  });
+
+  it("falls back to the default rather than to nothing", () => {
+    expect(jumpSizeById("nonsense").id).toBe(JUMP_SIZE_ID);
+  });
+
+  it("cycles the sizes, and wraps", () => {
+    expect(nextJumpSize("fine")).toBe("4beats");
+    expect(nextJumpSize("32bars")).toBe("fine");
+  });
+
+  it("snaps a size it does not know back to the default", () => {
+    expect(nextJumpSize("nonsense")).toBe(JUMP_SIZES[0]?.id);
+  });
+});
+
+describe("jumpStepSeconds", () => {
+  it("turns beats into seconds at the tempo", () => {
+    // 8 beats at 120 BPM is four seconds.
+    expect(jumpStepSeconds(jumpSizeById("8beats"), 12_000)).toBeCloseTo(4, 6);
+  });
+
+  it("makes Fine a fixed nudge, not a musical length", () => {
+    // The one size that is a time: it must not depend on the tempo, and must
+    // still move a track the analysis never gave a tempo to.
+    expect(jumpStepSeconds(jumpSizeById("fine"), 12_000)).toBe(FINE_JUMP_SECONDS);
+    expect(jumpStepSeconds(jumpSizeById("fine"), 0)).toBe(FINE_JUMP_SECONDS);
+  });
+
+  it("cannot move a beat length with no tempo behind it", () => {
+    expect(jumpStepSeconds(jumpSizeById("8beats"), 0)).toBe(0);
   });
 });
 

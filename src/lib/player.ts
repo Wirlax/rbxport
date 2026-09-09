@@ -28,22 +28,69 @@ export const OVERDRAW = 2;
 /** Zoom levels, in bars across, that the +/- buttons and the wheel step through. */
 export const ZOOM_STEPS = [2, 4, 8, 12, 16, 32, 64] as const;
 
-/** Beat-jump sizes the size button cycles, as a CDJ offers them. */
-export const JUMP_SIZES = [1, 2, 4, 8, 16, 32] as const;
+/** A beat-jump size as the size menu lists it. */
+export interface JumpSize {
+  id: string;
+  /** As printed, with no space — "8Beats", "16Bars". */
+  label: string;
+  /** Beats per press. Zero is the fine nudge, which is a time, not a length. */
+  beats: number;
+}
+
+/**
+ * The sizes rekordbox's beat-jump menu offers, in its order.
+ *
+ * Transcribed from the menu itself rather than derived: it skips 1 and 2 beats
+ * and changes unit at 8 bars, so a generated list of powers of two would be
+ * neither its wording nor its contents.
+ */
+export const JUMP_SIZES: readonly JumpSize[] = [
+  { id: "fine", label: "Fine", beats: 0 },
+  { id: "4beats", label: "4Beats", beats: 4 },
+  { id: "8beats", label: "8Beats", beats: 8 },
+  { id: "16beats", label: "16Beats", beats: 16 },
+  { id: "8bars", label: "8Bars", beats: 32 },
+  { id: "16bars", label: "16Bars", beats: 64 },
+  { id: "32bars", label: "32Bars", beats: 128 },
+];
 
 /** The default, and what the button reads before anyone touches it. */
-export const JUMP_BEATS = 4;
+export const JUMP_SIZE_ID = "4beats";
 
-/** The next size along, wrapping — the button is a cycle, not a spinner. */
-export function nextJumpSize(current: number): number {
-  const at = JUMP_SIZES.indexOf(current as (typeof JUMP_SIZES)[number]);
-  return JUMP_SIZES[(at + 1) % JUMP_SIZES.length] ?? JUMP_BEATS;
+/**
+ * How far a fine press moves, in seconds.
+ *
+ * [ASSUME] Fine is the one size in the menu that is not a musical length, and
+ * what rekordbox moves by has not been measured. Ten milliseconds is the step
+ * a CDJ's fine search uses and is small enough to be a nudge at any tempo;
+ * replace it with a measured figure rather than treating this as settled.
+ */
+export const FINE_JUMP_SECONDS = 0.01;
+
+/** The size with that id, or the default when the id means nothing. */
+export function jumpSizeById(id: string): JumpSize {
+  return (
+    JUMP_SIZES.find((size) => size.id === id) ??
+    JUMP_SIZES.find((size) => size.id === JUMP_SIZE_ID) ??
+    { id: JUMP_SIZE_ID, label: "4Beats", beats: 4 }
+  );
+}
+
+/** The next size along, wrapping — for cycling without opening the menu. */
+export function nextJumpSize(current: string): string {
+  const at = JUMP_SIZES.findIndex((size) => size.id === current);
+  return JUMP_SIZES[(at + 1) % JUMP_SIZES.length]?.id ?? JUMP_SIZE_ID;
 }
 
 /** How long a jump of `beats` lasts at a tempo. Zero when there is no tempo. */
 export function jumpSeconds(beats: number, bpmX100: number): number {
   if (bpmX100 <= 0 || beats <= 0) return 0;
   return (beats * 60) / (bpmX100 / 100);
+}
+
+/** How far one press of the jump buttons moves at the chosen size. */
+export function jumpStepSeconds(size: JumpSize, bpmX100: number): number {
+  return size.beats > 0 ? jumpSeconds(size.beats, bpmX100) : FINE_JUMP_SECONDS;
 }
 
 /**

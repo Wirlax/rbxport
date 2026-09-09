@@ -1208,15 +1208,55 @@ test("the deck takes the keyboard when it is clicked, and gives it back", async 
   expect(await colour()).toBe(white);
 });
 
-test("the beat jump size cycles, and the jump follows it", async ({ page }) => {
+test("the beat jump size is a menu of every size, ticked at the one in use", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
   const size = page.getByRole("button", { name: "Beat jump size" });
   await expect(size).toHaveText(/^4Beats/);
+
+  // It was a cycle: six presses from Fine to 32Bars, and no way to see what
+  // the sizes were without walking them.
   await size.click();
-  await expect(size).toHaveText(/^8Beats/);
+  const menu = page.getByRole("menu", { name: "Beat jump size" });
+  // The tick sits in the item's own text, so these match rather than equal.
+  await expect(menu.getByRole("menuitemradio")).toHaveText([
+    /^Fine$/, /4Beats$/, /^8Beats$/, /^16Beats$/, /^8Bars$/, /^16Bars$/, /^32Bars$/,
+  ]);
+  await expect(
+    menu.getByRole("menuitemradio", { name: "4Beats", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+
+  await menu.getByRole("menuitemradio", { name: "16Bars", exact: true }).click();
+  await expect(menu).toBeHidden();
+  await expect(size).toHaveText(/^16Bars/);
+
+  // And pressing the button again puts the menu away rather than reopening it.
+  await size.click();
+  await expect(page.getByRole("menu", { name: "Beat jump size" })).toBeVisible();
+  await size.click();
+  await expect(page.getByRole("menu", { name: "Beat jump size" })).toBeHidden();
+});
+
+test("the zoom controls float over the detail waveform rather than beside it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // They used to sit in a column as wide as the sleeve, which cost the strip
+  // 55px of music to hold three controls.
+  const detail = await page.getByTestId("player-detail").boundingBox();
+  const zoom = await page.getByRole("button", { name: "Zoom in", exact: true }).boundingBox();
+  expect(zoom?.x ?? 0).toBeGreaterThan(detail?.x ?? 0);
+  expect((zoom?.x ?? 0) + (zoom?.width ?? 0)).toBeLessThan(
+    (detail?.x ?? 0) + (detail?.width ?? 0),
+  );
+
+  // Pressing one zooms and does not also start a drag on the waveform under it.
+  const before = await page.getByTestId("player-bars").textContent();
+  await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+  expect(await page.getByTestId("player-bars").textContent()).toBe(before);
 });
 
 test("the wheel over a waveform zooms it", async ({ page }) => {

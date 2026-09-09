@@ -28,9 +28,9 @@ import {
   cuesFor,
   detailSpan,
   dragSeconds,
-  JUMP_BEATS,
-  jumpSeconds,
-  nextJumpSize,
+  JUMP_SIZE_ID,
+  jumpSizeById,
+  jumpStepSeconds,
   zoomBy,
   needsRedraw,
   OVERDRAW,
@@ -50,6 +50,7 @@ import {
 import { usePlayback } from "@/store/usePlayback";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
+import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import styles from "./Player.module.css";
 
@@ -338,8 +339,11 @@ export const Player = memo(function Player({
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
-  /** Beats a jump moves, cycled by the size button. */
-  const [jumpBeats, setJumpBeats] = useState<number>(JUMP_BEATS);
+  /** How far a jump moves, chosen from the size menu. */
+  const [jumpSizeId, setJumpSizeId] = useState<string>(JUMP_SIZE_ID);
+  /** Where the size menu is open, in client coordinates, or closed. */
+  const [jumpMenu, setJumpMenu] = useState<{ x: number; y: number } | null>(null);
+  const jumpButton = useRef<HTMLButtonElement>(null);
   /**
    * Whether the deck has the keyboard.
    *
@@ -521,14 +525,14 @@ export const Player = memo(function Player({
     return () => document.removeEventListener("pointerdown", elsewhere, true);
   }, []);
 
-  /** Moves by the chosen number of beats. */
+  /** Moves by the chosen size: a number of beats, or the fine nudge. */
   const jump = useCallback(
     (direction: number) => {
-      const step = jumpSeconds(jumpBeats, track?.bpmX100 ?? 0);
+      const step = jumpStepSeconds(jumpSizeById(jumpSizeId), track?.bpmX100 ?? 0);
       if (step === 0) return;
       playback.seek(playback.positionRef.current + step * direction);
     },
-    [jumpBeats, track, playback],
+    [jumpSizeId, track, playback],
   );
 
 
@@ -712,12 +716,23 @@ export const Player = memo(function Player({
           ))}
         </div>
         <button
+          ref={jumpButton}
           type="button"
           className={styles.beats}
           aria-label="Beat jump size"
-          onClick={() => setJumpBeats(nextJumpSize)}
+          aria-haspopup="menu"
+          aria-expanded={jumpMenu !== null}
+          // Transcribed from rekordbox: "Select the beat/bar length jumping
+          // from the current position."
+          title="Select the beat/bar length jumping from the current position."
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+            // Opened beside the button rather than under it: the deck sits at
+            // the bottom of the window and a menu below would be off screen.
+            setJumpMenu((open) => (open ? null : { x: box.right + 6, y: box.top }));
+          }}
         >
-          {jumpBeats}Beats
+          {jumpSizeById(jumpSizeId).label}
           <span className={styles.chevron} aria-hidden />
         </button>
         <button
@@ -1103,6 +1118,17 @@ export const Player = memo(function Player({
           ))}
         </div>
       </aside>
+
+      {jumpMenu ? (
+        <JumpMenu
+          x={jumpMenu.x}
+          y={jumpMenu.y}
+          current={jumpSizeId}
+          anchor={jumpButton.current}
+          onPick={setJumpSizeId}
+          onClose={() => setJumpMenu(null)}
+        />
+      ) : null}
     </section>
   );
 });

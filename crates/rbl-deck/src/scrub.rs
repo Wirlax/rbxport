@@ -42,6 +42,16 @@ const LOOKAHEAD: f64 = 2.0;
 /// and then a hum.
 const REST_RATE: f64 = 0.01;
 
+/// The furthest the head is allowed to fall behind the pointer, in frames.
+///
+/// About 90 ms — what the head can cover at `MAX_RATE` in a couple of blocks. A
+/// flick moves the pointer further than the head can render, and without this
+/// the head grinds through the gap at eight times for as long as it takes,
+/// still playing seconds after the hand has stopped. Capping the lag makes a
+/// fast drag sound like what it is: a burst of the music it passed over, then
+/// silence, with the head where the pointer left it.
+const MAX_LAG: f64 = 4096.0;
+
 /// Decoded audio around the cursor: interleaved stereo at the device rate.
 pub struct PcmWindow {
     /// The frame `samples` starts at.
@@ -101,16 +111,38 @@ pub struct Scrubber {
     cursor: f64,
     target: f64,
     rate: f64,
+    /// Whether the pointer has moved since the last block was planned.
+    ///
+    /// The head only snaps to a target that is standing still. A hand moving
+    /// at about playback speed keeps the head within a block of the pointer,
+    /// and snapping on distance alone would silence exactly the drag that
+    /// should sound most like the record.
+    moving: bool,
 }
 
 impl Scrubber {
     pub fn new(at: u64) -> Self {
-        Self { cursor: at as f64, target: at as f64, rate: 0.0 }
+        Self { cursor: at as f64, target: at as f64, rate: 0.0, moving: false }
     }
 
     /// Where the pointer is now.
+    ///
+    /// The head is pulled up behind it if it has fallen further than
+    /// `MAX_LAG`: what it skips over is not rendered, which is the difference
+    /// between fast-forwarding and grinding.
     pub fn aim(&mut self, frame: u64) {
-        self.target = frame as f64;
+        // Both sides are whole frames that came in as integers, so this is a
+        // comparison of exact values rather than of two computed floats: the
+        // pointer either sent a new frame or repeated the last one.
+        let aimed = frame as f64;
+        self.moving = (aimed - self.target).abs() >= 1.0;
+        self.target = aimed;
+        let lag = self.target - self.cursor;
+        if lag > MAX_LAG {
+            self.cursor = self.target - MAX_LAG;
+        } else if lag < -MAX_LAG {
+            self.cursor = self.target + MAX_LAG;
+        }
     }
 
     pub fn cursor(&self) -> u64 {
@@ -141,6 +173,18 @@ impl Scrubber {
     /// a second of music in the last block wants half a second of music played
     /// in the next one, which is what makes the pitch follow the drag.
     pub fn plan(&mut self, frames: usize) -> f64 {
+        // Arrived, and the hand has stopped. Snapping rather than converging
+        // is what makes the sound stop: an exponential approach spends half a
+        // second getting quiet, which is heard as the drag carrying on after
+        // the hand has. A pointer that is still moving is followed instead,
+        // however close it is.
+        let moving = self.moving;
+        self.moving = false;
+        if !moving && (self.target - self.cursor).abs() < frames as f64 * LOOKAHEAD {
+            self.cursor = self.target;
+            self.rate = 0.0;
+            return 0.0;
+        }
         let span = (frames as f64 * LOOKAHEAD).max(1.0);
         let wanted = ((self.target - self.cursor) / span).clamp(-MAX_RATE, MAX_RATE);
         self.rate += (wanted - self.rate) * SMOOTH;
@@ -205,14 +249,19 @@ mod tests {
     #[test]
     fn letting_go_lands_under_the_pointer_not_behind_it() {
         // A click on the overview aims seconds away and is over in a frame or
-        // two. The head is capped at MAX_RATE so it has barely left, and
-        // landing on it made the press spring back to where it started.
+        // two. The head cannot render that distance and does not try: it is
+        // pulled up to within `MAX_LAG`, plays that, and the deck lands on the
+        // pointer. Landing on the head instead made the press spring back.
         let mut scrubber = Scrubber::new(1_000);
         scrubber.aim(2_000_000);
         let window = ramp(0, 8_000);
         let mut out = vec![0.0; 512];
         scrubber.render(&window, &mut out);
-        assert!(scrubber.cursor() < 100_000, "the head is rate-limited on purpose");
+        assert!(
+            (2_000_000.0 - scrubber.cursor() as f64) <= MAX_LAG,
+            "the head follows the pointer rather than grinding after it: {}",
+            scrubber.cursor(),
+        );
         assert_eq!(scrubber.target(), 2_000_000);
     }
 
@@ -255,6 +304,63 @@ mod tests {
         let mut scrubber = Scrubber::new(10_000);
         scrubber.aim(0);
         assert!(scrubber.plan(512) < 0.0);
+    }
+
+    #[test]
+    fn a_slow_drag_is_never_pulled_up_and_stays_continuous() {
+        // The cap is for flicks. A hand moving at anything like playback speed
+        // never reaches it, so nothing is skipped and the sound is unbroken.
+        let mut scrubber = Scrubber::new(0);
+        let window = ramp(0, 44_100 * 4);
+        let mut out = vec![0.0_f32; 512 * 2];
+        let mut at = 0_u64;
+        for _ in 0..20 {
+            at += 512;
+            scrubber.aim(at);
+            scrubber.render(&window, &mut out);
+            assert!(out.iter().any(|s| *s != 0.0), "a slow drag should not go quiet");
+        }
+    }
+
+    #[test]
+    fn a_flick_leaves_the_head_close_behind_rather_than_seconds_behind() {
+        // A fast drag moves the pointer further than the head can render. It
+        // plays the last stretch and skips the rest: grinding through at eight
+        // times means audio still running long after the hand has stopped.
+        let mut scrubber = Scrubber::new(0);
+        scrubber.aim(44_100 * 30);
+        assert!(
+            (scrubber.target() as f64 - scrubber.cursor() as f64) <= MAX_LAG,
+            "left {} frames behind",
+            scrubber.target() - scrubber.cursor(),
+        );
+    }
+
+    #[test]
+    fn dragging_back_fast_pulls_the_head_back_too() {
+        let mut scrubber = Scrubber::new(44_100 * 30);
+        scrubber.aim(0);
+        assert!((scrubber.cursor() as f64) <= MAX_LAG, "at {}", scrubber.cursor());
+    }
+
+    #[test]
+    fn a_pointer_that_stops_lets_the_head_reach_it_and_go_quiet() {
+        // The whole shape of a fast drag: a burst, then silence, and the head
+        // where the pointer is rather than somewhere behind it.
+        let window = ramp(0, 44_100 * 8);
+        let mut scrubber = Scrubber::new(0);
+        scrubber.aim(44_100 * 2);
+        let mut out = vec![0.0_f32; 512 * 2];
+        let mut sounding = 0;
+        for _ in 0..40 {
+            scrubber.render(&window, &mut out);
+            if out.iter().any(|s| *s != 0.0) {
+                sounding += 1;
+            }
+        }
+        assert!(sounding > 0, "a drag should be audible");
+        assert_eq!(scrubber.rate(), 0.0, "and then stop");
+        assert!(out.iter().all(|s| *s == 0.0), "the last block should be silent");
     }
 
     #[test]
