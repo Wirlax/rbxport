@@ -142,17 +142,38 @@ impl Master {
     }
 
     /// The loudest sample of the last callback, per channel.
+    ///
+    /// Held rather than replaced: the callback runs every 11 ms and the
+    /// interface reads whenever it likes, so a transient between two reads
+    /// would be missed if each callback simply overwrote the last.
     fn report(&self, left: f32, right: f32) {
-        self.peak_left.store(left.to_bits(), Ordering::Relaxed);
-        self.peak_right.store(right.to_bits(), Ordering::Relaxed);
+        Self::hold(&self.peak_left, left);
+        Self::hold(&self.peak_right, right);
     }
 
-    /// Reads the meters. Peaks, not an average: an average of eleven
-    /// milliseconds is a meter that never moves.
+    fn hold(slot: &AtomicU32, value: f32) {
+        let mut current = slot.load(Ordering::Relaxed);
+        while value > f32::from_bits(current) {
+            match slot.compare_exchange_weak(
+                current,
+                value.to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(seen) => current = seen,
+            }
+        }
+    }
+
+    /// Reads the meters and clears them, so the next read is the next span.
+    ///
+    /// Peaks, not an average: an average of eleven milliseconds is a meter
+    /// that never moves.
     pub fn peaks(&self) -> (f32, f32) {
         (
-            f32::from_bits(self.peak_left.load(Ordering::Relaxed)),
-            f32::from_bits(self.peak_right.load(Ordering::Relaxed)),
+            f32::from_bits(self.peak_left.swap(0, Ordering::Relaxed)),
+            f32::from_bits(self.peak_right.swap(0, Ordering::Relaxed)),
         )
     }
 }
@@ -495,5 +516,24 @@ mod master_tests {
         let master = Master::default();
         master.report(0.5, 0.25);
         assert_eq!(master.peaks(), (0.5, 0.25));
+    }
+
+    #[test]
+    fn a_transient_between_two_reads_is_not_lost() {
+        // The callback runs every 11 ms and the meter is read when it is read.
+        // Overwriting each time would drop the loud callback in between.
+        let master = Master::default();
+        master.report(0.2, 0.2);
+        master.report(0.9, 0.8);
+        master.report(0.1, 0.1);
+        assert_eq!(master.peaks(), (0.9, 0.8));
+    }
+
+    #[test]
+    fn reading_the_meters_clears_them_for_the_next_span() {
+        let master = Master::default();
+        master.report(0.7, 0.7);
+        assert_eq!(master.peaks(), (0.7, 0.7));
+        assert_eq!(master.peaks(), (0.0, 0.0), "silence since the last read");
     }
 }

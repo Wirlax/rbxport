@@ -21,12 +21,7 @@ import { resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
-import {
-  formatCount,
-  formatMemory,
-  formatPercent,
-  useDiagnostics,
-} from "@/store/useDiagnostics";
+import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
 import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
@@ -623,12 +618,8 @@ export function App() {
         {/* What the app is costing, in the corner. A dash is a figure the
             platform will not give rather than a zero, which would be a claim. */}
         <div className={styles.cost} data-testid="app-cost">
-          <span title="Processor, as a percentage of one core">
-            CPU {formatPercent(cost.cpu)}
-          </span>
-          <span title="macOS accounts GPU per process only to root, so this cannot be read">
-            GPU {formatPercent(cost.gpu)}
-          </span>
+          {/* Processor lives in the top bar's own meter now, and GPU was
+              always a dash: macOS accounts it per process only to root. */}
           <span title="Resident memory">MEM {formatMemory(cost.memoryMb)}</span>
           <span title="Threads in the process">THR {formatCount(cost.threads)}</span>
           <span title="Open file descriptors">FD {formatCount(cost.openFiles)}</span>

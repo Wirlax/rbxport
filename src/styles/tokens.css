@@ -23,6 +23,9 @@
   --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
+  --c-meter-green: #2FBF4E; /* UNMEASURED — the capture's meters are silent, so a level meter's own convention: green below -6 dB */
+  --c-meter-yellow: #E8C020; /* UNMEASURED — the same convention: yellow from -6 dB to -3 */
+  --c-meter-red: #E23B2E; /* UNMEASURED — the same convention: red in the last 3 dB before clipping */
   --c-meter-fill: #3D72E9; /* capture of rekordbox's top bar: the knob's arc and the CPU meter's lit part */
   --c-menu: #1A1A1A; /* the layout menu's panel in a capture of rekordbox 7.2.11 */
   --c-menu-border: #8C8C8C; /* the light hairline around that panel */
@@ -67,7 +70,7 @@
   --s-top-bar-h: 30px;
   --s-eject-glyph-w: 15px; /* the glyph is 26px of a 79px sleeve in the capture, and the sleeve is 45pt */
   --s-top-gear-size: 14px; /* capture of rekordbox's top bar at 2x: the gear is 28x28px */
-  --s-top-knob-size: 18px; /* capture at 2x: the volume knob spans x 100..135, 36px across */
+  --s-top-knob-size: 28px; /* enlarged by request from the 18pt the capture measures — x 100..135, 36px across at 2x */
   --s-top-vu-w: 80px; /* capture at 2x: the meter runs x 156..315, 160px */
   --s-top-meter-h: 3px; /* capture at 2x: each meter bar is 6px tall */
   --s-top-vu-gap: 3px; /* capture at 2x: 6px of black between the two channels */

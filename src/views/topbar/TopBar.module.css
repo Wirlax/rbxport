@@ -32,6 +32,24 @@
   background: var(--c-meter-fill);
 }
 
+/* Green, yellow, red — a level meter's own convention rather than a
+   measurement: the capture's meters are silent. The gradient is painted
+   across the whole bar and revealed by the fill's width, so a given position
+   is always the same colour; colouring the whole bar by its level would make
+   a loud moment turn the quiet end red too. */
+.vu .meterFill {
+  background: linear-gradient(
+    to right,
+    var(--c-meter-green) 0%,
+    var(--c-meter-green) 70%,
+    var(--c-meter-yellow) 70%,
+    var(--c-meter-yellow) 90%,
+    var(--c-meter-red) 90%
+  );
+  background-size: var(--s-top-vu-w) 100%;
+  background-repeat: no-repeat;
+}
+
 .vu {
   display: flex;
   flex-direction: column;

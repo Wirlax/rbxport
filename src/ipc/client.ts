@@ -6,7 +6,7 @@
  */
 import type {
   AnalysisResult, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport, Phrase, ImportReport,
-  LibrarySummary, LinkPeer,
+  LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
 } from "./types";
@@ -123,6 +123,7 @@ async function realBackend(): Promise<Backend> {
     revealTrack: (trackId) => invoke<void>("reveal_track", { track: trackId }),
     deckState: () => invoke<Tick>("deck_state"),
     onDeckTick: (listener) => subscribe<Tick>("deck:tick", listener),
+    onMeters: (listener) => subscribe<Meters>("deck:meters", listener),
     onDeckEvent: (listener) => {
       // Loaded and failed are the same shape and the same subscription; the
       // message is what tells them apart.

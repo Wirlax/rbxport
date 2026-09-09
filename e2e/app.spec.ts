@@ -291,6 +291,17 @@ test("the level knob turns, and both meters are the measured size", async ({ pag
   expect(vu?.width).toBeCloseTo(await width("--s-top-vu-w"), 0);
   expect(cpu?.width).toBeCloseTo(await width("--s-top-cpu-w"), 0);
   expect(vu?.height).toBeCloseTo(await width("--s-top-meter-h"), 0);
+
+  // Green, yellow, red by position rather than by level: the gradient is
+  // painted across the whole track and revealed by the fill's width, so a loud
+  // moment does not turn the quiet end of the bar red.
+  const fill = bar.getByRole("meter", { name: "Master output L" }).locator("span");
+  const paint = await fill.evaluate((el) => ({
+    image: getComputedStyle(el).backgroundImage,
+    size: getComputedStyle(el).backgroundSize,
+  }));
+  expect(paint.image).toContain("linear-gradient");
+  expect(Number.parseFloat(paint.size)).toBeCloseTo(await width("--s-top-vu-w"), 0);
 });
 
 test("the tree and the browser are separated by a black gutter", async ({ page }) => {
@@ -1362,13 +1373,15 @@ test("the title bar carries the name in the middle of the window", async ({ page
 test("the title bar reads out what the app is costing", async ({ page }) => {
   // A browser cannot see its own process, so what this pins is that every
   // figure is labelled and that an unavailable one is a dash rather than a
-  // zero — a zero would claim the app uses no memory and no GPU.
+  // zero — a zero would claim the app is resident in no memory at all.
   await page.goto("/");
   const cost = page.getByTestId("app-cost");
-  for (const label of ["CPU", "GPU", "MEM", "THR", "FD", "FPS"]) {
+  for (const label of ["MEM", "THR", "FD", "FPS"]) {
     await expect(cost).toContainText(label);
   }
-  await expect(cost).toContainText("GPU —");
+  // Processor has its own meter in the top bar, and GPU was always a dash.
+  await expect(cost).not.toContainText("CPU");
+  await expect(cost).not.toContainText("GPU");
   await expect(cost).toContainText("MEM —");
   // FPS is measured in the window itself, so it arrives even here.
   await expect(cost).not.toContainText("FPS —");

@@ -11,6 +11,27 @@ import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 
+/**
+ * How much of the last reading a meter keeps when the next is quieter.
+ *
+ * Fast attack, slow release, as every meter has: 0.8 a frame at thirty a
+ * second falls about 30 dB a second, which reads as a needle settling rather
+ * than as a bar flickering.
+ */
+const RELEASE = 0.8;
+
+/**
+ * The value a meter shows next: the reading, or the last one decayed.
+ *
+ * Fast attack, slow release. A meter that simply took each reading flickers,
+ * and the loud moment — the one worth seeing — is gone before the eye is.
+ */
+export function nextPeak(shown: number, reading: number): number {
+  const safe = Number.isFinite(reading) ? Math.max(reading, 0) : 0;
+  const held = Number.isFinite(shown) ? Math.max(shown, 0) * RELEASE : 0;
+  return Math.min(Math.max(safe, held), 1);
+}
+
 export interface Master {
   /** 0 to 1. */
   level: number;
@@ -27,15 +48,20 @@ export function useMaster(): Master {
     let stop: (() => void) | undefined;
     void (async () => {
       const backend = await getBackend();
-      const unlisten = backend.onDeckTick((tick) => {
+      // The meters come on their own beat, three times as often as the decks.
+      const unlisten = backend.onMeters((meters) => {
         if (!live) return;
-        setState((current) =>
-          current.level === tick.master &&
-          current.peakLeft === tick.peakLeft &&
-          current.peakRight === tick.peakRight
+        setState((current) => {
+          // A peak falls back rather than dropping: a meter that snaps to the
+          // next reading flickers, and the loud moment is the one to see.
+          const left = nextPeak(current.peakLeft, meters.peakLeft);
+          const right = nextPeak(current.peakRight, meters.peakRight);
+          return current.level === meters.master &&
+            current.peakLeft === left &&
+            current.peakRight === right
             ? current
-            : { level: tick.master, peakLeft: tick.peakLeft, peakRight: tick.peakRight },
-        );
+            : { level: meters.master, peakLeft: left, peakRight: right };
+        });
       });
       if (!live) {
         unlisten();

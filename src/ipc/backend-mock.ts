@@ -628,6 +628,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       deckTickListeners.add(listener);
       return () => deckTickListeners.delete(listener);
     },
+    // A browser has no audio callback, so there is nothing to meter and no
+    // beat to send it on.
+    onMeters: () => () => undefined,
     onDeckEvent: (listener) => {
       deckEventListeners.add(listener);
       return () => deckEventListeners.delete(listener);

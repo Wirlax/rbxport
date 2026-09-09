@@ -22,8 +22,12 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult, ErrorKind};
 
-/// How often a tick goes out while something is playing.
-const TICK: Duration = Duration::from_millis(100);
+/// How often the meters go out. A tenth of a second is a meter that steps
+/// rather than moves, and the payload is three numbers.
+const METER_TICK: Duration = Duration::from_millis(33);
+
+/// Meter ticks to a deck tick, so both come off one thread.
+const TICKS_PER_DECK_TICK: u32 = 3;
 
 /// One deck in a tick.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -67,6 +71,19 @@ impl TickDto {
         };
         Self { a: empty, b: empty, sample_rate: 0, peak_left: 0.0, peak_right: 0.0, master: 1.0 }
     }
+}
+
+/// The master's meters, on their own faster beat.
+///
+/// Separate from the deck tick because it is wanted three times as often and
+/// is a twentieth of the size: sending the decks at meter rate would be pure
+/// IPC churn, and sending the meters at deck rate is a meter that steps.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeterDto {
+    pub peak_left: f32,
+    pub peak_right: f32,
+    pub master: f32,
 }
 
 /// What a deck reports outside the tick.
@@ -161,12 +178,32 @@ pub fn start_ticker(app: &AppHandle) {
     // that ends when playback does, and it must not share a runtime worker
     // with a command that is reading the database.
     let spawned = std::thread::Builder::new().name("rbl-deck-tick".to_owned()).spawn(move || {
+        let mut since_deck_tick = 0_u32;
         loop {
-            std::thread::sleep(TICK);
+            std::thread::sleep(METER_TICK);
             let player = handle.state::<Arc<Player>>();
             let Some(engine) = player.opened() else { break };
+            let master = engine.master();
+            let (peak_left, peak_right) = master.peaks();
+            if let Err(e) = handle.emit(
+                "deck:meters",
+                MeterDto { peak_left, peak_right, master: master.gain() },
+            ) {
+                tracing::warn!(error = %e, "a meter tick did not reach the interface");
+            }
+
+            since_deck_tick += 1;
+            if since_deck_tick < TICKS_PER_DECK_TICK {
+                continue;
+            }
+            since_deck_tick = 0;
             let snapshot = engine.snapshot();
-            if let Err(e) = handle.emit("deck:tick", tick_of(&snapshot, engine.master())) {
+            // The peaks were taken and cleared above, so the deck tick carries
+            // what this pass read rather than an empty meter.
+            let mut tick = tick_of(&snapshot, master);
+            tick.peak_left = peak_left;
+            tick.peak_right = peak_right;
+            if let Err(e) = handle.emit("deck:tick", tick) {
                 tracing::warn!(error = %e, "a deck tick did not reach the interface");
             }
             if !snapshot.any_playing() {

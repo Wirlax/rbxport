@@ -269,6 +269,14 @@ export interface Backend {
   deckState(): Promise<Tick>;
   /** Both decks, ten times a second, and only while something is playing. */
   onDeckTick(listener: (tick: Tick) => void): () => void;
+  /**
+   * The master's meters, thirty times a second.
+   *
+   * Its own event because it is wanted three times as often as the decks and
+   * is a twentieth of the size. The peaks are cleared as they are read, so
+   * each one is the loudest sample since the last.
+   */
+  onMeters(listener: (meters: Meters) => void): () => void;
   /** A deck has finished loading a track, or could not. */
   onDeckEvent(listener: (event: DeckEvent) => void): () => void;
 
@@ -314,6 +322,13 @@ export interface Tick {
   peakLeft: number;
   peakRight: number;
   /** The master level, 0 to 1. */
+  master: number;
+}
+
+/** The master's meters and level, on their own faster beat. */
+export interface Meters {
+  peakLeft: number;
+  peakRight: number;
   master: number;
 }
 
