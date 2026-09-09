@@ -24,6 +24,7 @@ import {
   DETAIL_BARS,
   NO_BEATS,
   ZOOM_STEPS,
+  showsEveryBeat,
   beatsIn,
   cuesFor,
   detailSpan,
@@ -158,17 +159,20 @@ const CueMarkers = memo(function CueMarkers({
  * a grid readable at a glance rather than a picket fence.
  */
 const BeatGrid = memo(function BeatGrid({
-  beats, totalMs, window,
+  beats, totalMs, window, everyBeat = true,
 }: {
   beats: readonly { timeMs: number; downbeat: boolean }[];
   totalMs: number;
   window: { from: number; to: number };
+  /** False at the widest zoom, where only the bar lines are drawn. */
+  everyBeat?: boolean;
 }) {
   if (totalMs <= 0 || beats.length === 0) return null;
   const span = Math.max(window.to - window.from, 1e-6);
   return (
     <>
       {beats.map((beat) => {
+        if (!everyBeat && !beat.downbeat) return null;
         const at = beat.timeMs / totalMs;
         if (at < window.from || at > window.to) return null;
         return (
@@ -877,7 +881,12 @@ export const Player = memo(function Player({
                   inset={WAVE_INSET}
                 />
               ) : null}
-              <BeatGrid beats={beats} totalMs={total * 1000} window={window} />
+              <BeatGrid
+                beats={beats}
+                totalMs={total * 1000}
+                window={window}
+                everyBeat={showsEveryBeat(bars)}
+              />
               <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} />
             </div>
             {/* Bars elapsed, printed to the left of the playhead. Its text and

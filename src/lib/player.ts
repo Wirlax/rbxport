@@ -28,6 +28,17 @@ export const OVERDRAW = 2;
 /** Zoom levels, in bars across, that the +/- buttons and the wheel step through. */
 export const ZOOM_STEPS = [2, 4, 8, 12, 16, 32, 64] as const;
 
+/**
+ * Whether the grid draws every beat, or only the bar lines.
+ *
+ * At the widest step the beats are a few pixels apart and the grid stops being
+ * a grid: it is a picket fence over the waveform, and the downbeats that make
+ * it readable are lost among them. Bars alone still say where the phrase is.
+ */
+export function showsEveryBeat(bars: number): boolean {
+  return bars < (ZOOM_STEPS.at(-1) ?? 64);
+}
+
 /** A beat-jump size as the size menu lists it. */
 export interface JumpSize {
   id: string;

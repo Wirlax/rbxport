@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+/** Presses that take the detail waveform from any step out to the widest. */
+const ZOOM_STEPS_COUNT = 8;
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("grid")).toBeVisible();
@@ -794,6 +797,38 @@ test("the detail waveform shows a window, not the whole track again", async ({ p
   await expect
     .poll(async () => detail.locator('[title^="Hot cue"], [title="Memory cue"]').count())
     .toBeLessThan(5);
+});
+
+test("the widest zoom draws bar lines only, not a picket fence of beats", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const detail = page.getByTestId("player-detail");
+  // The grey beats between the white downbeats, by the colour the capture
+  // measures — the class names are hashed by the CSS modules build.
+  const greys = async () =>
+    (await detail.locator("span").evaluateAll((els) =>
+      els.map((e) => getComputedStyle(e).backgroundColor),
+    )).filter((colour) => colour === "rgb(76, 76, 76)").length;
+
+  await expect.poll(greys).toBeGreaterThan(0);
+
+  // Out to the last step. Past it the beats are a few pixels apart and the
+  // downbeats that make the grid readable are lost among them.
+  const out = page.getByRole("button", { name: "Zoom out", exact: true });
+  for (let i = 0; i < ZOOM_STEPS_COUNT; i++) await out.click();
+  await expect.poll(greys).toBe(0);
+
+  // The bar lines stay: they are what says where the phrase is.
+  const whites = await detail.locator("span").evaluateAll((els) =>
+    els.filter((e) => getComputedStyle(e).backgroundColor === "rgb(255, 255, 255)").length,
+  );
+  expect(whites).toBeGreaterThan(0);
+
+  // And one step back in, the beats return.
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await expect.poll(greys).toBeGreaterThan(0);
 });
 
 test("the detail waveform draws a beat grid with heavier downbeats", async ({ page }) => {

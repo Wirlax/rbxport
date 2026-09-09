@@ -14,6 +14,8 @@ import {
   FINE_JUMP_SECONDS,
   jumpSeconds,
   nextJumpSize,
+  showsEveryBeat,
+  ZOOM_STEPS,
   zoomBy,
   phraseKind,
   phraseSpans,
@@ -522,5 +524,20 @@ describe("zoomBy", () => {
 
   it("snaps an unrecognised zoom back to the default", () => {
     expect(zoomBy(9, 0)).toBe(DETAIL_BARS);
+  });
+});
+
+describe("showsEveryBeat", () => {
+  it("drops to bar lines only at the widest zoom", () => {
+    // 64 bars across puts the beats a few pixels apart, and the downbeats that
+    // make the grid readable are lost among them.
+    expect(showsEveryBeat(64)).toBe(false);
+    expect(showsEveryBeat(32)).toBe(true);
+  });
+
+  it("keeps every beat at every step the buttons can reach below it", () => {
+    for (const bars of ZOOM_STEPS.slice(0, -1)) {
+      expect(showsEveryBeat(bars)).toBe(true);
+    }
   });
 });
