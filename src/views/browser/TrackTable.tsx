@@ -15,7 +15,6 @@ import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { applyClick, emptySelection, modifierFor, type SelectionState } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor } from "@/lib/contextMenus";
-import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { SortDownIcon, SortUpIcon } from "@/components/icons";
@@ -478,15 +477,29 @@ export function TrackTable({
 
   const items = virtualizer.getVirtualItems();
 
+  // The rows being drawn, as indices. These are what the fetch below keys on.
+  //
+  // It used to key on `items.length` — how *many* rows are on screen — which
+  // does not change while scrolling. So moving the window asked for nothing,
+  // and every row it landed on stayed a placeholder: a list at its full height
+  // with a working scrollbar and no content in it.
+  //
+  // The page chain hid it. Each page that landed re-rendered the table and
+  // re-ran the effect, which caught the window up by accident, so it only bit
+  // when the scroll outran the fetches or moved after they had all settled.
+  // Measured in the app: a drag ended on row 19,329 with the last request made
+  // for rows 17,065-17,105, and nothing asked again for eight seconds.
+  const firstIndex = items.length > 0 ? (items[0]?.index ?? 0) : -1;
+  const lastIndex = items.length > 0 ? (items[items.length - 1]?.index ?? 0) : -1;
+
   // Ask for the pages covering what is on screen. Cheap and idempotent.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // scrollTop counts the sticky header; the list's own offset does not.
-    const listTop = Math.max(0, el.scrollTop - COL_HEADER_H);
-    const w = visibleWindow(listTop, el.clientHeight, ROW_H, view.count);
-    view.ensureRange(w.start, w.end);
-  }, [items.length, view, view.count, view.token]);
+    if (firstIndex < 0) return;
+    // The virtualizer's own window, overscan included, rather than the same
+    // arithmetic done twice: it already accounts for `scrollMargin`, so this
+    // cannot drift a header's worth out of step with what is rendered.
+    view.ensureRange(firstIndex, lastIndex + 1);
+  }, [firstIndex, lastIndex, view, view.count, view.token]);
 
   const startDraggingTracks = useCallback(
     (row: RowDto) => {

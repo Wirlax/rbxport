@@ -98,11 +98,16 @@ const settle = async () => {
 
 let latest: { count: number; error: string | null; rowAt: (i: number) => RowDto | undefined };
 
+/** The scroll position the stand-in table is showing. */
+let window_: { start: number; end: number } = { start: 0, end: 32 };
+/** The last screen of the previous run, as `App` hands it over. */
+let seed: { count: number; rows: RowDto[] } | undefined;
+
 function Probe() {
-  const view = useTrackView(SPEC);
+  const view = useTrackView(SPEC, 0, undefined, seed);
   latest = view;
   // A table asks for the window it is showing; this stands in for that.
-  view.ensureRange(0, 32);
+  view.ensureRange(window_.start, window_.end);
   return null;
 }
 
@@ -112,6 +117,8 @@ beforeEach(async () => {
   ready = false;
   readyListeners = new Set();
   opens = 0;
+  window_ = { start: 0, end: 32 };
+  seed = undefined;
   ({ __setBackend: setBackend } = await import("@/ipc/client"));
   setBackend(makeBackend());
   ({ useTrackView } = await import("./useTrackView"));
@@ -154,6 +161,37 @@ describe("useTrackView, against a library that is not up yet", () => {
     await settle();
 
     expect(latest.rowAt(0)?.title).toBe("Track 0");
+  });
+
+  it("serves real rows past the seed once the library arrives", async () => {
+    // What the window actually looked like. `App` hands the table the last
+    // screen of the previous run so it is not empty while the library loads:
+    // the *count* is the whole library, so the list has its full height and a
+    // working scrollbar, but only the first screenful of rows exists.
+    //
+    // So a view that failed to open looked perfectly healthy at the top and
+    // went blank the moment it was scrolled — every row past the seed is a
+    // placeholder, for ever. That is the bug as it was reported: pick the
+    // playlists root, drag the scrollbar halfway, see nothing.
+    seed = { count: 500, rows: Array.from({ length: 30 }, (_, i) => row(i)) };
+
+    act(() => {
+      root.render(<Probe />);
+    });
+    await settle();
+
+    // The shape of the trap: full height, a good first screen, nothing under it.
+    expect(latest.count).toBe(500);
+    expect(latest.rowAt(0)?.title).toBe("Track 0");
+    expect(latest.rowAt(400)).toBeUndefined();
+
+    // Now scroll halfway, exactly as the report describes.
+    window_ = { start: 400, end: 432 };
+    release();
+    await settle();
+    await settle();
+
+    expect(latest.rowAt(400)?.title).toBe("Track 400");
   });
 
   it("does not reopen a view that opened perfectly well", async () => {
