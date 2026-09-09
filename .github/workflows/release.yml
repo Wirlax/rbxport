@@ -38,6 +38,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
     runs-on: ${{ matrix.os }}
+    env:
+      # `secrets` is not a context a step `if:` can read, so whether there is
+      # anything to sign with is decided once, here.
+      HAVE_APPLE: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      HAVE_AZURE: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +82,50 @@ jobs:
             }
           ' "$version"
 
+      - name: Teach the Windows bundler to sign
+        # Tauri has no Windows equivalent of `APPLE_CERTIFICATE`: checked
+        # against the CLI binary (2.11.4) and against `tauri-action`, and
+        # neither contains the string `WINDOWS_CERTIFICATE` at all. A pair of
+        # env vars by that name used to sit on the build step below and signed
+        # nothing. Windows signing is a `bundle.windows.signCommand`, and the
+        # certificate is Azure Artifact Signing — an HSM, so there is no `.pfx`
+        # for a thumbprint to point at.
+        #
+        # The command is written into the config here rather than checked in,
+        # so a build with no signing account still bundles, and so this file
+        # names no signing account of anyone's.
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AZURE_SIGNING_ACCOUNT_NAME:-}" ]; then
+            echo "No Azure signing account — the installer will be unsigned."
+            exit 0
+          fi
+          # An Azure Artifact Signing certificate lives about three days, so
+          # the signature only outlives the week because the tool timestamps
+          # every file it signs.
+          cargo install artifact-signing-cli --version 0.11.0 --locked
+          node -e '
+            const fs = require("fs");
+            const file = "src-tauri/tauri.conf.json";
+            const json = JSON.parse(fs.readFileSync(file, "utf8"));
+            json.bundle.windows.signCommand = {
+              cmd: "artifact-signing-cli",
+              args: [
+                "-e", process.env.AZURE_SIGNING_ENDPOINT,
+                "-a", process.env.AZURE_SIGNING_ACCOUNT_NAME,
+                "-c", process.env.AZURE_SIGNING_CERT_PROFILE,
+                "%1",
+              ],
+            };
+            fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+          '
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -88,9 +137,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows Authenticode, when there is a certificate to sign with.
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # What the sign command above authenticates with. Azure's
+          # `EnvironmentCredential` looks for exactly these three names, which
+          # is why they lose the `_SIGNING` the vault stores them under.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
@@ -116,6 +168,40 @@ jobs:
           # A release that uploads nothing is worse than one that fails: it
           # looks like it worked.
           test "$(find out -type f | wc -l)" -gt 0
+
+      # Signing failures are routinely non-fatal to a bundler, so a run that
+      # goes green is not evidence of a signed installer. Both checks below are
+      # gates only where there was a credential to sign with: without one the
+      # build is deliberately unsigned and has nothing to check.
+      - name: The macOS signature is checked, not assumed
+        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dmg in out/*.dmg; do
+            codesign --verify --strict --verbose=2 "$dmg"
+            # The notarisation ticket, not just the signature. `open` is the
+            # right policy for a downloaded disk image; `install` is for pkgs.
+            spctl --assess --type open --context context:primary-signature -vv "$dmg"
+          done
+
+      - name: The Windows signature is checked, not assumed
+        if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem out\*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            Write-Host "$($_.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne "Valid") { $bad = 1 }
+            # An Artifact Signing certificate lives about three days, so an
+            # untimestamped signature is broken by the weekend.
+            if (-not $sig.TimeStamperCertificate) {
+              Write-Host "  no timestamp - this signature dies with the certificate"
+              $bad = 1
+            }
+          }
+          exit $bad
 
       - uses: actions/upload-artifact@v4
         with:
