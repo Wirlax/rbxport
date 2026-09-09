@@ -169,6 +169,31 @@ jobs:
           # looks like it worked.
           test "$(find out -type f | wc -l)" -gt 0
 
+      - name: The disk image is notarised too, not just the app inside it
+        # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and
+        # signs that — and stops. The image a user actually downloads is
+        # therefore a signed but unnotarised Developer ID artifact, which
+        # Gatekeeper refuses on first open. Caught by the check below, which
+        # said `source=Unnotarized Developer ID` on an otherwise valid image.
+        #
+        # Notarising the copy in `out/` rather than the one under `target/` is
+        # deliberate: that is the file that gets uploaded.
+        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for dmg in out/*.dmg; do
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+              --wait
+            # Stapling is what makes it work for someone with no network.
+            xcrun stapler staple "$dmg"
+          done
+
       # Signing failures are routinely non-fatal to a bundler, so a run that
       # goes green is not evidence of a signed installer. Both checks below are
       # gates only where there was a credential to sign with: without one the
