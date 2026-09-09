@@ -1,6 +1,7 @@
 //! Tauri shell. Command bodies live in the `rbl-*` crates; everything here is
 //! a thin adapter so the backend stays testable without a webview.
 
+mod windowfit;
 mod commands;
 mod diagnostics;
 mod link;
@@ -128,6 +129,115 @@ fn spawn_library_load(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Brings the window onto a screen that can hold it, at startup.
+///
+/// The configured 1800x1130 is larger than a 13-inch laptop's work area, and
+/// the window-state plugin restores wherever the window was last — which may
+/// be a monitor that is no longer plugged in. Either way the result is a
+/// window partly or wholly out of reach, and on macOS a title bar above the
+/// menu bar cannot be dragged back.
+///
+/// Best effort throughout: a screen that cannot be measured is a reason to
+/// leave the window alone, not to fail the launch.
+/// The label the window in `tauri.conf.json` gets by default.
+const MAIN_WINDOW: &str = "main";
+
+/// How long after the window appears its geometry is still corrected.
+///
+/// The restored position arrives asynchronously and was measured landing
+/// within a second. Two gives that room without reaching as far as anything a
+/// person could have done deliberately.
+const SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
+
+/// Puts the window back where it was, then makes sure that is on a screen.
+///
+/// Registered after the window-state plugin, which is told to
+/// `skip_initial_state` so that the restore happens here instead — the check
+/// has to follow it, and it cannot follow something this does not control.
+fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    use tauri_plugin_window_state::{StateFlags, WindowExt};
+
+    tauri::plugin::Builder::<tauri::Wry>::new("windowfit")
+        .on_window_ready(|window| {
+            if window.label() != MAIN_WINDOW {
+                return;
+            }
+            if let Err(e) = window.restore_state(StateFlags::all()) {
+                tracing::warn!(error = %e, "could not restore the window's geometry");
+            }
+
+            // Once now, which covers a first run: no saved geometry to restore,
+            // and a configured size larger than the screen it opened on.
+            fit_window(&window);
+
+            // And again as the restore lands, which is the case that actually
+            // bites. That move is posted to the windowing system and does not
+            // arrive for the best part of a second — measured, the window
+            // reported x=120 immediately, from a callback queued on the main
+            // thread behind the move, and from the first `Moved` event, while
+            // its real restored position was x=936 and stayed that way. No
+            // single read is trustworthy, so this watches the window's own
+            // events for a moment instead.
+            //
+            // Bounded, because every move after startup is somebody dragging
+            // the window, and one that will not stay where it is put is worse
+            // than one that hangs off an edge.
+            let opened = std::time::Instant::now();
+            let subject = window.clone();
+            window.on_window_event(move |event| {
+                if !matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                    return;
+                }
+                if opened.elapsed() < SETTLE_WINDOW {
+                    fit_window(&subject);
+                }
+            });
+        })
+        .build()
+}
+
+fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
+    use tauri::{PhysicalPosition, PhysicalSize};
+
+    // The monitor the window is on, or the primary one when it is off every
+    // screen and Tauri cannot say which it belongs to.
+    let monitor = match window.current_monitor() {
+        Ok(Some(monitor)) => Some(monitor),
+        _ => window.primary_monitor().ok().flatten(),
+    };
+    let Some(monitor) = monitor else { return };
+
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return;
+    };
+
+    // The work area, not the whole monitor: it excludes the menu bar and the
+    // Dock, which is what "on the screen" means to someone using it.
+    let area = monitor.work_area();
+    let available =
+        windowfit::Rect::new(area.position.x, area.position.y, area.size.width, area.size.height);
+    let current = windowfit::Rect::new(position.x, position.y, size.width, size.height);
+    let fitted = windowfit::fit_within(current, available);
+    if fitted == current {
+        return;
+    }
+
+    tracing::info!(
+        from = format!("{}x{} at {},{}", current.width, current.height, current.x, current.y),
+        to = format!("{}x{} at {},{}", fitted.width, fitted.height, fitted.x, fitted.y),
+        "window did not fit the screen"
+    );
+    // Size first: moving a window that is still too big only pins it to a
+    // corner with the far edge still off.
+    if (fitted.width, fitted.height) != (current.width, current.height) {
+        let _ = window.set_size(PhysicalSize::new(fitted.width, fitted.height));
+    }
+    if (fitted.x, fitted.y) != (current.x, current.y) {
+        let _ = window.set_position(PhysicalPosition::new(fitted.x, fitted.y));
+    }
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -146,7 +256,15 @@ pub fn run() {
         // Puts the window back where it was: size, position, and whether it
         // was maximised. Restored before the window is shown, so it does not
         // appear at the default size and jump.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // The saved geometry is put back by hand rather than automatically,
+        // because it has to be followed by a check that it still fits a screen
+        // that is present. Every way of doing that afterwards was tried
+        // against a real saved state of 3600x1982 at x=936 on a 3840-wide
+        // display — in `setup`, on `RunEvent::Ready`, and from a plugin hook
+        // registered after this one — and all three measured the window before
+        // the restore had moved it, so all three found nothing wrong.
+        .plugin(tauri_plugin_window_state::Builder::default().skip_initial_state(MAIN_WINDOW).build())
+        .plugin(window_geometry())
         .manage(Arc::new(AppState::new()))
         .manage(Arc::new(crate::player::Player::default()))
         .setup(|app| {
@@ -227,10 +345,13 @@ pub fn run() {
             commands::set_track_comment,
             commands::set_track_color,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(e) = result {
-        tracing::error!(error = %e, "fatal: could not start the application");
-        std::process::exit(1);
+    match result {
+        Ok(app) => app.run(|_handle, _event| {}),
+        Err(e) => {
+            tracing::error!(error = %e, "fatal: could not start the application");
+            std::process::exit(1);
+        }
     }
 }
