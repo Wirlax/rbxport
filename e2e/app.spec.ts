@@ -1060,3 +1060,53 @@ test("the playhead is moved by a transform, not by laying the strip out again", 
   const fill = page.locator('[class*="scrubFill"]');
   await expect(fill).toHaveCSS("transform", "matrix(0, 0, 0, 1, 0, 0)");
 });
+
+test("the detail playhead is pinned to the middle, whatever the track does", async ({ page }) => {
+  // The window moves under the head rather than the head across the window,
+  // which is what a CDJ shows and what makes the head mean "here".
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const detail = await page.getByTestId("player-detail").boundingBox();
+  const head = await page.getByTestId("player-detail-head").boundingBox();
+  expect((head?.x ?? 0) - (detail?.x ?? 0)).toBeCloseTo((detail?.width ?? 0) / 2, 0);
+});
+
+test("dragging the detail waveform scrubs, and dragging the overview seeks", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // A browser build has no engine to move the playhead, so what is pinned here
+  // is that both strips take a drag at all: pointer capture is what keeps one
+  // going when the pointer leaves the strip, and it was a mousedown before.
+  for (const id of ["player-detail", "player-overview"]) {
+    const strip = page.getByTestId(id);
+    const box = await strip.boundingBox();
+    await strip.evaluate((el) => {
+      (el as HTMLElement).dataset["dragged"] = "";
+      el.addEventListener("pointermove", () => {
+        (el as HTMLElement).dataset["dragged"] = "yes";
+      });
+    });
+    await page.mouse.move((box?.x ?? 0) + 40, (box?.y ?? 0) + 5);
+    await page.mouse.down();
+    await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 5, { steps: 4 });
+    await page.mouse.up();
+    await expect(strip).toHaveAttribute("data-dragged", "yes");
+  }
+});
+
+test("Q toggles quantize, and starts on the way a CDJ ships", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const q = page.getByRole("button", { name: "Quantize" });
+  await expect(q).toHaveAttribute("aria-pressed", "true");
+  await q.click();
+  await expect(q).toHaveAttribute("aria-pressed", "false");
+  await q.click();
+  await expect(q).toHaveAttribute("aria-pressed", "true");
+});

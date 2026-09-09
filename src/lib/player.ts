@@ -33,26 +33,44 @@ export function detailSpan(bars: number, bpmX100: number, durationSec: number): 
   return Math.min(1, Math.max(seconds / durationSec, 1e-4));
 }
 
-/** The slice of the track a window of `span` centred on `at` covers. */
+/**
+ * The slice of the track a window of `span` centred on `at` covers.
+ *
+ * Not clamped to the track. The head stays in the middle and the waveform
+ * moves under it, so at the start and the end the window hangs off the edge
+ * and the empty half is drawn empty — which is what a CDJ shows, and the only
+ * way the head can mean "here" rather than "somewhere in this strip".
+ */
 export function windowAround(at: number, span: number): { from: number; to: number } {
-  const half = Math.min(span, 1) / 2;
-  const centre = Math.min(Math.max(at, half), 1 - half);
-  return { from: centre - half, to: centre + half };
+  const half = Math.max(span, 0) / 2;
+  return { from: at - half, to: at + half };
 }
 
 /**
  * Where the playhead sits inside that window, as a percentage.
  *
- * Centred, except near either end where the window stops moving and the head
- * crosses it instead — which is what a CDJ does and what makes the start and
- * end of a track reachable.
+ * Always the middle. The window moves instead — see `windowAround`.
  */
-export function headPercent(at: number, span: number): number {
-  const width = Math.min(span, 1);
-  const half = width / 2;
-  if (at <= half) return (at / width) * 100;
-  if (at >= 1 - half) return ((at - (1 - width)) / width) * 100;
+export function headPercent(): number {
   return 50;
+}
+
+/**
+ * How far a drag of `dx` pixels moves the playhead, in seconds.
+ *
+ * Negated: dragging the waveform to the right pulls earlier music into view,
+ * so the playhead goes back. The window's own span sets the rate, which is
+ * what makes a zoomed-in drag fine and a zoomed-out one coarse rather than
+ * both moving by the same amount of music per pixel.
+ */
+export function dragSeconds(
+  dx: number,
+  width: number,
+  span: number,
+  durationSec: number,
+): number {
+  if (width <= 0 || durationSec <= 0 || !Number.isFinite(dx)) return 0;
+  return -(dx / width) * Math.max(span, 0) * durationSec;
 }
 
 /**
@@ -270,4 +288,80 @@ export function beatsIn(
     out.push({ timeMs, downbeat: grid.numbers[i] === 1 });
   }
   return out;
+}
+
+/**
+ * The beat nearest `ms`, or `ms` itself when there is no grid.
+ *
+ * What the Q button does. A cue set by hand lands a few tens of milliseconds
+ * off the beat and every loop and every mix from it inherits that; quantising
+ * is why a CDJ's cues sit on the grid whatever the finger did.
+ */
+export function nearestBeatMs(grid: BeatGrid, ms: number): number {
+  const { times } = grid;
+  if (times.length === 0) return ms;
+  const at = lowerBound(times, ms);
+  const after = times[Math.min(at, times.length - 1)] ?? ms;
+  // `lowerBound` gives the first beat at or after; the one before it is the
+  // only other candidate, so this is two comparisons rather than a scan.
+  const before = times[Math.max(at - 1, 0)] ?? after;
+  return Math.abs(ms - before) <= Math.abs(after - ms) ? before : after;
+}
+
+/** What the deck should do, decided by the CUE button. */
+export interface CueAction {
+  /** Where to move the playhead, or `null` to leave it. */
+  seekTo: number | null;
+  /** Whether audio should be running after this. */
+  playing: boolean;
+  /** The cue point afterwards, which a press away from it moves. */
+  cuePoint: number;
+}
+
+/** How close to the cue point still counts as being on it, in seconds. */
+export const CUE_TOLERANCE = 0.02;
+
+/**
+ * Pressing CUE, as a CDJ does it.
+ *
+ * Three cases, and they are not variations of one thing:
+ *
+ * - **Playing.** Stop, and jump back to the cue point. This is the one people
+ *   use mid-mix, and it is why the button is where it is.
+ * - **Paused on the cue point.** Play for as long as the button is held, then
+ *   snap back — `releaseCue` is the other half. Previewing the drop without
+ *   losing your place is the whole point of the control.
+ * - **Paused anywhere else.** Set the cue point here. A CDJ does not need a
+ *   separate "set cue" button because this is it.
+ */
+export function pressCue(
+  position: number,
+  cuePoint: number,
+  playing: boolean,
+  /** The grid to snap a new cue point to, when Q is on. */
+  quantiseTo: BeatGrid | null = null,
+): CueAction {
+  if (playing) return { seekTo: cuePoint, playing: false, cuePoint };
+  if (Math.abs(position - cuePoint) <= CUE_TOLERANCE) {
+    return { seekTo: null, playing: true, cuePoint };
+  }
+  const at = Math.max(position, 0);
+  // With Q on the new cue lands on the nearest beat, and the playhead goes
+  // there with it — a cue point the head is not standing on would immediately
+  // read as "paused somewhere else" and the next press would move it again.
+  const set = quantiseTo ? Math.max(nearestBeatMs(quantiseTo, at * 1000) / 1000, 0) : at;
+  return { seekTo: set === at ? null : set, playing: false, cuePoint: set };
+}
+
+/**
+ * Letting CUE go.
+ *
+ * Only a held preview does anything: the button was pressed on the cue point
+ * and audio has been running since, so releasing it stops and rewinds. A
+ * release that follows any other press is not a rewind — that would undo the
+ * jump the press just made.
+ */
+export function releaseCue(previewing: boolean, cuePoint: number): CueAction | null {
+  if (!previewing) return null;
+  return { seekTo: cuePoint, playing: false, cuePoint };
 }

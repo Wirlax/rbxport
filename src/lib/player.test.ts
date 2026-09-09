@@ -5,12 +5,17 @@ import {
   DETAIL_BARS,
   beatsIn,
   detailSpan,
+  dragSeconds,
   headPercent,
   phraseKind,
   phraseSpans,
   splitTime,
   memoryTime,
   cuesFor,
+  nearestBeatMs,
+  NO_BEATS,
+  pressCue,
+  releaseCue,
   parseBeatGrid,
   windowAround,
 } from "./player";
@@ -48,30 +53,48 @@ describe("detailSpan", () => {
 });
 
 describe("windowAround", () => {
-  it("centres on the playhead in the middle of a track", () => {
+  it("centres on the playhead", () => {
     expect(windowAround(0.5, 0.1)).toEqual({ from: 0.45, to: 0.55 });
   });
 
-  it("pins at either end rather than running off the track", () => {
-    expect(windowAround(0, 0.1)).toEqual({ from: 0, to: 0.1 });
-    expect(windowAround(1, 0.1).to).toBeCloseTo(1, 6);
-    expect(windowAround(1, 0.1).from).toBeCloseTo(0.9, 6);
+  it("runs off the ends rather than sliding the head across the strip", () => {
+    // The head is the middle of the strip, always. At the start of a track the
+    // window hangs off the front and the left half draws empty — pinning it
+    // instead makes the head mean "somewhere in here" for the first bars.
+    expect(windowAround(0, 0.1)).toEqual({ from: -0.05, to: 0.05 });
+    expect(windowAround(1, 0.1).from).toBeCloseTo(0.95, 6);
+    expect(windowAround(1, 0.1).to).toBeCloseTo(1.05, 6);
   });
 
   it("handles a span wider than the track", () => {
-    expect(windowAround(0.3, 5)).toEqual({ from: 0, to: 1 });
+    expect(windowAround(0.3, 5)).toEqual({ from: -2.2, to: 2.8 });
   });
 });
 
 describe("headPercent", () => {
-  it("sits at the centre for most of a track", () => {
-    expect(headPercent(0.5, 0.1)).toBe(50);
+  it("is the middle of the strip wherever the track is", () => {
+    expect(headPercent()).toBe(50);
+  });
+});
+
+describe("dragSeconds", () => {
+  it("pulls the track the way the pointer moves", () => {
+    // Dragging right brings earlier music into view, so the playhead goes back.
+    expect(dragSeconds(100, 1000, 0.1, 300)).toBeCloseTo(-3, 6);
+    expect(dragSeconds(-100, 1000, 0.1, 300)).toBeCloseTo(3, 6);
   });
 
-  it("crosses the window at the ends, so the start is reachable", () => {
-    expect(headPercent(0, 0.1)).toBe(0);
-    expect(headPercent(1, 0.1)).toBeCloseTo(100, 5);
-    expect(headPercent(0.025, 0.1)).toBeCloseTo(25, 5);
+  it("moves less music per pixel the further it is zoomed in", () => {
+    expect(Math.abs(dragSeconds(50, 1000, 0.02, 300)))
+      .toBeLessThan(Math.abs(dragSeconds(50, 1000, 0.2, 300)));
+  });
+
+  it("returns nothing rather than a NaN when there is nothing to drag", () => {
+    for (const [dx, w, span, dur] of [
+      [10, 0, 0.1, 300], [10, 100, 0.1, 0], [Number.NaN, 100, 0.1, 300],
+    ] as const) {
+      expect(dragSeconds(dx, w, span, dur)).toBe(0);
+    }
   });
 });
 
@@ -306,5 +329,79 @@ describe("beatsIn", () => {
   it("is empty for a window past the end, and for one the wrong way round", () => {
     expect(beatsIn(grid, 1_000_000, 1_100_000)).toEqual([]);
     expect(beatsIn(grid, 2_000, 1_000)).toEqual([]);
+  });
+});
+
+describe("pressCue", () => {
+  it("stops and rewinds to the cue point while playing", () => {
+    expect(pressCue(90, 30, true)).toEqual({ seekTo: 30, playing: false, cuePoint: 30 });
+  });
+
+  it("previews from the cue point when paused on it", () => {
+    // Held, not toggled: the deck plays while the button is down.
+    expect(pressCue(30, 30, false)).toEqual({ seekTo: null, playing: true, cuePoint: 30 });
+    expect(pressCue(30.01, 30, false).playing).toBe(true);
+  });
+
+  it("sets the cue point when paused anywhere else", () => {
+    // A CDJ has no separate "set cue" button because this is it.
+    expect(pressCue(75.5, 30, false)).toEqual({ seekTo: null, playing: false, cuePoint: 75.5 });
+  });
+
+  it("never sets a cue point before the start of the track", () => {
+    expect(pressCue(-4, 30, false).cuePoint).toBe(0);
+  });
+});
+
+describe("releaseCue", () => {
+  it("snaps back and stops after a held preview", () => {
+    expect(releaseCue(true, 30)).toEqual({ seekTo: 30, playing: false, cuePoint: 30 });
+  });
+
+  it("does nothing after any other press", () => {
+    // Rewinding here would undo the jump the press itself just made.
+    expect(releaseCue(false, 30)).toBeNull();
+  });
+});
+
+describe("nearestBeatMs", () => {
+  const grid = { times: new Uint32Array([0, 500, 1000, 1500]), numbers: new Uint8Array([1, 2, 3, 4]) };
+
+  it("snaps to whichever beat is closer", () => {
+    expect(nearestBeatMs(grid, 460)).toBe(500);
+    expect(nearestBeatMs(grid, 240)).toBe(0);
+    expect(nearestBeatMs(grid, 260)).toBe(500);
+  });
+
+  it("takes the earlier beat on a tie, so a snap is repeatable", () => {
+    expect(nearestBeatMs(grid, 250)).toBe(0);
+  });
+
+  it("clamps to the ends rather than running off the grid", () => {
+    expect(nearestBeatMs(grid, -900)).toBe(0);
+    expect(nearestBeatMs(grid, 99_000)).toBe(1500);
+  });
+
+  it("leaves the position alone when the track has no grid", () => {
+    expect(nearestBeatMs(NO_BEATS, 1234)).toBe(1234);
+  });
+});
+
+describe("pressCue with quantize on", () => {
+  const grid = { times: new Uint32Array([0, 500, 1000, 1500]), numbers: new Uint8Array([1, 2, 3, 4]) };
+
+  it("puts a new cue point on the nearest beat, and the playhead with it", () => {
+    // The head has to move too: a cue point it is not standing on reads as
+    // "paused somewhere else", and the next press would move the cue again.
+    expect(pressCue(0.46, 9, false, grid)).toEqual({ seekTo: 0.5, playing: false, cuePoint: 0.5 });
+  });
+
+  it("leaves the cue where the finger put it when Q is off", () => {
+    expect(pressCue(0.46, 9, false).cuePoint).toBeCloseTo(0.46, 6);
+  });
+
+  it("still previews and still rewinds, quantized or not", () => {
+    expect(pressCue(0.5, 0.5, false, grid).playing).toBe(true);
+    expect(pressCue(90, 30, true, grid)).toEqual({ seekTo: 30, playing: false, cuePoint: 30 });
   });
 });

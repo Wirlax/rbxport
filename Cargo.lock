@@ -3264,6 +3264,8 @@ name = "rbl-deck"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "rbl-db",
+ "rbl-index",
  "rtrb",
  "rubato",
  "symphonia",

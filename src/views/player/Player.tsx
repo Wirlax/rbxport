@@ -27,6 +27,9 @@ import {
   beatsIn,
   cuesFor,
   detailSpan,
+  dragSeconds,
+  pressCue,
+  releaseCue,
   headPercent,
   parseBeatGrid,
   phraseSpans,
@@ -96,31 +99,27 @@ const CueMarkers = memo(function CueMarkers({
         // to the edge reads as a cue that is there.
         if (at < from || at > to) return null;
         const left = `${((at - from) / span) * 100}%`;
-        if (cue.memory) {
-          return (
-            <span
-              key={`m-${cue.positionMs}`}
-              className={styles.memoryCue}
-              data-band={band}
-              style={{ left }}
-              title="Memory cue"
-              aria-hidden
-            >
-              <i className={styles.cueHead} />
-            </span>
+        // The detail marks every cue the same way: a red triangle at the top
+        // of the band. The overview tells them apart, because there is room to.
+        const head =
+          band === "detail" ? (
+            <i className={styles.cueTriangle} />
+          ) : cue.memory ? (
+            <i className={styles.cueHead} />
+          ) : (
+            <b className={styles.hotCueBadge}>{cue.letter}</b>
           );
-        }
         return (
           <span
-            key={`h-${cue.letter}-${cue.positionMs}`}
-            className={styles.hotCue}
+            key={cue.memory ? `m-${cue.positionMs}` : `h-${cue.letter}-${cue.positionMs}`}
+            className={cue.memory ? styles.memoryCue : styles.hotCue}
             data-band={band}
-            data-cue={cue.letter}
+            data-cue={cue.memory ? "" : cue.letter}
             style={{ left }}
-            title={`Hot cue ${cue.letter}`}
+            title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
             aria-hidden
           >
-            <b className={styles.hotCueBadge}>{cue.letter}</b>
+            {head}
           </span>
         );
       })}
@@ -302,6 +301,18 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   const [bars, setBars] = useState<number>(DETAIL_BARS);
   const [padMode, setPadMode] = useState<PadMode>("cue");
   const [panel, setPanel] = useState<CuePanel>("memory");
+  /**
+   * Where CUE returns to. A track opens on its first memory cue, which is
+   * where rekordbox and a CDJ both put the playhead, and CUE moves it from
+   * there the way the deck does.
+   */
+  const [cuePoint, setCuePoint] = useState(0);
+  /**
+   * Quantize — the Q button at the end of the pad row. On by default, as a CDJ
+   * ships: a cue set by hand lands tens of milliseconds off the beat, and every
+   * loop and mix taken from it inherits that.
+   */
+  const [quantize, setQuantize] = useState(true);
 
   useEffect(() => {
     if (!track) {
@@ -319,6 +330,8 @@ export const Player = memo(function Player({ track }: PlayerProps) {
       // The track may have changed while these were in flight.
       if (!live) return;
       setCues(foundCues);
+      const first = cuesFor(foundCues, "memory")[0];
+      setCuePoint(first ? first.positionMs / 1000 : 0);
       setPhrases(foundPhrases);
     })();
     return () => {
@@ -386,9 +399,9 @@ export const Player = memo(function Player({ track }: PlayerProps) {
         overviewHead.current.style.transform = `translateX(${at * overview.width}px)`;
       }
       if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${at})`;
-      // The detail window is centred on the head, so the head only moves near
-      // the ends of the track — but it moves there, and by the same rule.
-      const x = (headPercent(at, span) / 100) * detail.width;
+      // The detail head does not move at all: the window is centred on it and
+      // the waveform scrolls underneath.
+      const x = (headPercent() / 100) * detail.width;
       if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
       if (barsLabel.current) {
         barsLabel.current.style.transform = `translateX(${x}px)`;
@@ -399,7 +412,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     // and the head would otherwise sit where the last track left it.
     apply(positionRef.current);
     return subscribe(apply);
-  }, [total, span, bpm, overview.width, detail.width, positionRef, subscribe]);
+  }, [total, bpm, overview.width, detail.width, positionRef, subscribe]);
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {
@@ -411,10 +424,79 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     });
   }, []);
 
-  const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
+  /*
+   * CUE, as a CDJ does it: stop and rewind while playing, preview while held
+   * on the cue point, set the cue point anywhere else. `pressCue` decides
+   * which; this only carries it out and remembers whether a preview is running.
+   */
+  const previewing = useRef(false);
+
+  const holdCue = () => {
+    if (playback.idle) return;
+    const action = pressCue(
+      playback.positionRef.current,
+      cuePoint,
+      playback.playing,
+      quantize ? grid : null,
+    );
+    previewing.current = action.playing;
+    if (action.cuePoint !== cuePoint) setCuePoint(action.cuePoint);
+    if (action.seekTo !== null) playback.seek(action.seekTo);
+    if (action.playing !== playback.playing) playback.toggle();
+  };
+
+  const dropCue = () => {
+    const action = releaseCue(previewing.current, cuePoint);
+    previewing.current = false;
+    if (!action) return;
+    playback.seek(action.seekTo ?? cuePoint);
+    if (playback.playing) playback.toggle();
+  };
+
+  /**
+   * The overview is a scrubber: the pointer goes where you put it, and holding
+   * it down drags the playhead along the track.
+   */
+  const scrubOverview = (event: React.PointerEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    const box = element.getBoundingClientRect();
+    if (box.width <= 0) return;
+    element.setPointerCapture(event.pointerId);
+    playback.seekFraction((event.clientX - box.left) / box.width);
+  };
+
+  const dragOverview = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
     const box = event.currentTarget.getBoundingClientRect();
     if (box.width <= 0) return;
     playback.seekFraction((event.clientX - box.left) / box.width);
+  };
+
+  /**
+   * The detail is the record, not a scrubber: it moves *with* the pointer, so
+   * dragging right pulls earlier music into view. Absolute seeking here would
+   * jump the track by half a window on the first pixel of movement, because
+   * the head sits in the middle whatever it is pointing at.
+   */
+  const grab = useRef<{ x: number; at: number } | null>(null);
+
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    grab.current = { x: event.clientX, at: playback.positionRef.current };
+  };
+
+  const dragDetail = (event: React.PointerEvent<HTMLDivElement>) => {
+    const held = grab.current;
+    if (!held || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    playback.seek(held.at + dragSeconds(event.clientX - held.x, box.width, span, total));
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    grab.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   // A beat's length, for phrases whose time the grid did not resolve.
@@ -468,8 +550,12 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           type="button"
           className={styles.cue}
           aria-label="Cue"
-          // Back to the start, which is what CUE does with no cue point set.
-          onClick={() => playback.seek(0)}
+          // Held, not clicked: on the cue point the deck plays for as long as
+          // the button is down and snaps back when it comes up.
+          onPointerDown={holdCue}
+          onPointerUp={dropCue}
+          onPointerCancel={dropCue}
+          onPointerLeave={dropCue}
           disabled={playback.idle}
         >
           CUE
@@ -524,7 +610,10 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               ref={overviewRef}
               className={styles.overview}
               data-testid="player-overview"
-              onMouseDown={scrub}
+              onPointerDown={scrubOverview}
+              onPointerMove={dragOverview}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
               role="slider"
               aria-label="Position"
               aria-valuemin={0}
@@ -565,7 +654,15 @@ export const Player = memo(function Player({ track }: PlayerProps) {
             <span className={styles.rst} aria-hidden>RST</span>
             <button type="button" aria-label="Zoom out" onClick={() => zoom(1)}>−</button>
           </div>
-          <div ref={detailRef} className={styles.detail} data-testid="player-detail" onMouseDown={scrub}>
+          <div
+            ref={detailRef}
+            className={styles.detail}
+            data-testid="player-detail"
+            onPointerDown={startDrag}
+            onPointerMove={dragDetail}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
             {track && track.analysed ? (
               <WaveformDetail
                 trackId={track.id}
@@ -590,7 +687,12 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               drawn at the centre rather than at the progress fraction — except
               near the ends, where the window is pinned and the head moves.
             */}
-            <span ref={detailHead} className={styles.playhead} aria-hidden />
+            <span
+              ref={detailHead}
+              className={styles.playhead}
+              data-testid="player-detail-head"
+              aria-hidden
+            />
           </div>
         </div>
 
@@ -712,7 +814,16 @@ export const Player = memo(function Player({ track }: PlayerProps) {
           </div>
           )}
 
-          <button type="button" className={styles.chip} aria-label="Quantize" data-on>Q</button>
+          <button
+            type="button"
+            className={styles.chip}
+            aria-label="Quantize"
+            aria-pressed={quantize}
+            data-on={quantize ? "" : undefined}
+            onClick={() => setQuantize((on) => !on)}
+          >
+            Q
+          </button>
           <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
         </div>
 

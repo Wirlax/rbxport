@@ -90,23 +90,36 @@ export const WaveformDetail = memo(function WaveformDetail({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Centred on the playhead, and pinned at either end so the window never
-    // runs off the track and leaves half the panel empty.
-    const reach = Math.min(span, 1) / 2;
-    const centre = Math.min(Math.max(progress, reach), 1 - reach);
-    // The detail's amber is the darker of the two; the overview strip above it
-    // uses the brighter one.
+    // Centred on the playhead and *not* pinned: the head stays in the middle
+    // and the track moves under it, so at either end the window hangs off the
+    // edge. The overhang is drawn as nothing rather than as a stretched copy
+    // of the first bar.
+    const reach = Math.max(span, 0) / 2;
+    const from = progress - reach;
+    const to = progress + reach;
+    const width_ = Math.max(to - from, 1e-9);
     // Both tags cover the whole track, so a window into one is a slice of its
     // columns rather than a second fetch.
     const columns = Math.floor(data.length / 3);
-    const first = Math.max(0, Math.floor((centre - reach) * columns)) * 3;
-    const last = Math.min(data.length, Math.ceil((centre + reach) * columns) * 3);
+    const shownFrom = Math.min(Math.max(from, 0), 1);
+    const shownTo = Math.min(Math.max(to, 0), 1);
+    const first = Math.floor(shownFrom * columns) * 3;
+    const last = Math.min(data.length, Math.ceil(shownTo * columns) * 3);
+    // Where in the canvas that slice belongs, so the music stays under the
+    // part of the strip it actually occupies.
+    const x0 = ((shownFrom - from) / width_) * w;
+    const span_ = ((shownTo - shownFrom) / width_) * w;
     // The inset is given in CSS pixels; the canvas is in device pixels.
     const scale = h / Math.max(height, 1);
-    drawBands(ctx, data.subarray(first, last), w, h, detail ? "detail" : "overview", half, {
+    ctx.clearRect(0, 0, w, h);
+    if (last <= first || span_ < 1) return;
+    ctx.save();
+    ctx.translate(x0, 0);
+    drawBands(ctx, data.subarray(first, last), span_, h, detail ? "detail" : "overview", half, {
       top: inset.top * scale,
       bottom: inset.bottom * scale,
     });
+    ctx.restore();
   }, [data, progress, span, width, height, half, detail, inset.top, inset.bottom]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;

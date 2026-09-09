@@ -22,7 +22,7 @@
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
   --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
-  --c-cue-memory-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a memory cue, left of the hot cue badge sharing its position */
+  --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
   --c-cue-e: #11B176;
   --c-cue-f: #FF8C00;
   --c-cue-g: #305AFF;

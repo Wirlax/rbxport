@@ -356,57 +356,62 @@
   will-change: transform;
 }
 
-/* A memory cue is a small red head at its position, widest at the top and
-   tapering to a point — measured beside each hot cue badge in the overview,
-   where it draws no line at all. The detail keeps a line so the cue stays
-   placeable; that line's grey is still unmeasured. Red is right here and wrong
-   for the line, which is the downbeat's colour. */
-.memoryCue {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  pointer-events: none;
-}
-.memoryCue[data-band="detail"]::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--c-cue-memory);
-}
-
-.cueHead {
-  position: absolute;
-  top: 0;
-  left: calc(-1 * var(--s-cue-head-w));
-  width: var(--s-cue-head-w);
-  height: var(--s-cue-head-h);
-  background: var(--c-cue-memory-head);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-}
-
-/* A hot cue: the position itself is the left edge, with a red tick hanging off
-   it and the lettered badge to its right. Zero width, so the badge overhangs
-   the position instead of nudging it. */
+/* Cues sit over the waveform, the grid and the bar count — a marker behind a
+   downbeat line is a marker nobody can find. */
+.memoryCue,
 .hotCue {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 0;
   pointer-events: none;
+  z-index: 2;
 }
-/* The detail keeps a line up through the waveform; the overview has none. */
+
+/* In the overview a memory cue is a small red head at its position, widest at
+   the top and tapering to a point, and no line at all: measured beside each
+   hot cue badge, with the waveform under it unbroken. */
+.cueHead {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--s-cue-head-w));
+  width: var(--s-cue-head-w);
+  height: var(--s-cue-head-h);
+  background: var(--c-cue-head);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+/* In the detail every cue is a small red triangle at the very top of the band,
+   hard against the phrase blocks above it, pointing down at what it marks.
+   Sized from the beat marker's own head so the two read as one family. */
+.cueTriangle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  translate: -50% 0;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: var(--s-beat-head-h) solid var(--c-cue-head);
+}
+
+/* The line under that triangle keeps the cue placeable while the grid is being
+   edited: green for a hot cue, grey for a memory cue, and that grey is still
+   unmeasured. */
+.memoryCue[data-band="detail"]::before,
 .hotCue[data-band="detail"]::before {
   content: "";
   position: absolute;
-  top: 0;
+  top: var(--s-beat-head-h);
   bottom: 0;
   width: 1px;
-  background: var(--c-cue-hot);
+  background: var(--c-cue-memory);
 }
+.hotCue[data-band="detail"]::before { background: var(--c-cue-hot); }
 
+/* The overview's badge: 11pt square, the letter inside, its left edge on the
+   cue so the marker overhangs the position rather than nudging it. */
 .hotCueBadge {
   position: absolute;
   top: 0;
@@ -421,8 +426,6 @@
   font-weight: 700;
   line-height: 1;
 }
-
-.hotCue[data-band="detail"] .hotCueBadge { top: auto; bottom: 0; }
 
 .beat,
 .downbeat {
