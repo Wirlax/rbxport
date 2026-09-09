@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rtrb::Producer;
 
@@ -32,8 +32,15 @@ pub enum Command {
     /// A drag has started. The deck decodes a window around the playhead and
     /// starts producing from it at whatever rate the drag asks for.
     ScrubBegin,
-    /// Where the pointer is now, in device-rate frames.
-    ScrubTo(u64),
+    /// Where the pointer is, in device-rate frames, and when it said so.
+    ///
+    /// The instant is stamped where the report enters the engine rather than
+    /// counted in blocks on the way out. Blocks are 11.6 ms and a hand
+    /// crossing thirty pixels a second reports every 33 ms, so rounding the
+    /// gap between reports to whole blocks quantises the measured speed by a
+    /// sixth — the same mistake on the time axis that rounding the position to
+    /// whole milliseconds was on the distance axis. See `Engine::scrub_to_ms`.
+    ScrubTo(u64, Instant),
     /// The drag is over: the streamer picks up where the head was left.
     ScrubEnd,
     /// How fast to play, as a multiple of the file's own speed.
@@ -101,6 +108,7 @@ pub fn spawn(
                 streamer: None,
                 generation: 0,
                 scrubber: None,
+                last_report: None,
                 window: PcmWindow::empty(),
                 keylock: key_lock(device_rate),
                 varispeed: Varispeed::new(device_rate),
@@ -125,6 +133,8 @@ struct Worker {
     generation: u32,
     /// The read head, present only while a drag is running.
     scrubber: Option<Scrubber>,
+    /// When the pointer last reported, so the next one can be timed.
+    last_report: Option<Instant>,
     /// Decoded audio around that head. Emptied when the drag ends, because
     /// several megabytes for a gesture that is over is several megabytes
     /// nobody asked for.
@@ -204,7 +214,7 @@ impl Worker {
             Command::Load(path) => self.load(&path),
             Command::Seek(frame) => self.seek(frame),
             Command::ScrubBegin => self.scrub_begin(),
-            Command::ScrubTo(frame) => self.scrub_to(frame),
+            Command::ScrubTo(frame, at) => self.scrub_to(frame, at),
             Command::ScrubEnd => self.scrub_end(),
             Command::SetTempo(tempo) => self.set_tempo(tempo),
             Command::SetMasterTempo(on) => {
@@ -322,6 +332,9 @@ impl Worker {
         }
         let at = self.clock.position();
         self.scrubber = Some(Scrubber::new(at));
+        // A new drag times its reports from scratch; the gap since the last
+        // one is however long ago the previous drag was, which is not a speed.
+        self.last_report = None;
         // The blocks already in flight belong to normal playback and are at the
         // wrong place and the wrong speed; a new generation drops them.
         self.generation = self.clock.bump_generation();
@@ -329,9 +342,15 @@ impl Worker {
         self.clock.set_scrubbing(true);
     }
 
-    fn scrub_to(&mut self, frame: u64) {
+    fn scrub_to(&mut self, frame: u64, at: Instant) {
+        // Output frames since the report before this one, which is what the
+        // head's speed is measured over. Nothing for the first report of a
+        // drag: there is no report before it to measure against.
+        let since = self.last_report.replace(at).map_or(0.0, |last| {
+            at.saturating_duration_since(last).as_secs_f64() * f64::from(self.device_rate)
+        });
         if let Some(scrubber) = self.scrubber.as_mut() {
-            scrubber.aim(frame);
+            scrubber.aim(frame, since);
         }
     }
 

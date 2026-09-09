@@ -508,7 +508,11 @@ impl Engine {
     pub fn scrub_to_ms(&self, deck: Deck, ms: f64) {
         let Some(handle) = self.deck(deck) else { return };
         let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
-        handle.send(deck::Command::ScrubTo(frames));
+        // Stamped here, on the way in, rather than counted in blocks on the
+        // way out: the same argument as the fractional milliseconds above, on
+        // the other axis. Distance over time is the speed, and rounding either
+        // of them quantises it.
+        handle.send(deck::Command::ScrubTo(frames, std::time::Instant::now()));
     }
 
     /// Ends a drag. The playhead lands under the pointer, not on the read

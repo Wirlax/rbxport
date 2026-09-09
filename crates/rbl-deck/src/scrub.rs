@@ -79,7 +79,7 @@ const REST_RATE: f64 = 0.01;
 /// silence, with the head where the pointer left it.
 const MAX_LAG: f64 = 4096.0;
 
-/// Blocks without a pointer move before the head is allowed to settle.
+/// Blocks without a pointer report before the head is allowed to settle.
 ///
 /// A pointer emits about one move a screen frame and a block is 11.6 ms, so
 /// two or three blocks pass between moves during an ordinary drag. Settling
@@ -107,20 +107,22 @@ const STOPPED_INTERVALS: f64 = 2.0;
 ///
 /// Swept against a pixel-crossing hand (`a_hand_crossing_pixels_slowly_still_
 /// turns_the_record`), reading the warble averaged over the speeds it covers
-/// and at the worst of them:
+/// and at the worst of them, against how many reports it takes to follow a
+/// hand that has changed speed:
 ///
-/// | speed | correct | warble, mean | worst |
-/// |-------|---------|--------------|-------|
-/// | 0.25  | 0.15    | 4.1%         | 9.2%  |
-/// | 0.40  | 0.10    | 3.9%         | 10.5% |
-/// | 0.40  | 0.15    | 4.0%         | 10.0% |
-/// | 0.60  | 0.15    | 4.3%         | 10.7% |
-/// | 0.80  | 0.15    | 4.8%         | 11.2% |
+/// | value | warble, mean | worst | follows a change in |
+/// |-------|--------------|-------|---------------------|
+/// | 0.20  | 4.3%         | 6.3%  | 11 reports          |
+/// | 0.30  | 4.5%         | 6.8%  | 7 reports           |
+/// | 0.40  | 4.8%         | 7.1%  | 5 reports           |
+/// | 0.60  | 5.2%         | 7.7%  | 4 reports           |
+/// | 0.80  | 5.6%         | 8.1%  | 3 reports           |
 ///
-/// The surface is flat — nothing in that range is audibly better than the
-/// rest, and what is left is the beat between the hand's reporting rate and
-/// the block rate rather than anything these two can filter out.
-const SPEED_SMOOTH: f64 = 0.4;
+/// The warble is flat across the useful range and the responsiveness is not,
+/// so this is chosen for the second: two tenths of a percent of warble is not
+/// audible, and four more reports at a hundred milliseconds each is nearly
+/// half a second of the head ignoring a hand that has sped up.
+const SPEED_SMOOTH: f64 = 0.30;
 
 /// How sharply the measured gap between reports is followed.
 ///
@@ -128,7 +130,7 @@ const SPEED_SMOOTH: f64 = 0.4;
 /// stopped, and a single late report must not be read as the hand slowing.
 const INTERVAL_SMOOTH: f64 = 0.2;
 
-/// What a report interval is taken to be before one has been measured.
+/// Blocks a report interval is taken to be before one has been measured.
 ///
 /// A pointer coalesced to the screen's rate against an 11.6 ms block, which is
 /// what a hand moving at any speed worth hearing reports at.
@@ -143,7 +145,22 @@ const INITIAL_INTERVAL: f64 = 2.0;
 /// at one: a pixel of a twelve-bar waveform is 1102 frames, about one `span`,
 /// so every pixel the cursor crossed commanded a full-speed sprint however
 /// long the hand had taken to cross it.
-const CORRECT: f64 = 0.15;
+///
+/// It trades the two ways the head can be wrong against each other — how
+/// steady it runs against how close to the hand's own speed it settles — and
+/// the warble is the audible one:
+///
+/// | value | warble, mean | worst | speed off by |
+/// |-------|--------------|-------|--------------|
+/// | 0.05  | 4.3%         | 7.0%  | 2.9%         |
+/// | 0.10  | 4.8%         | 7.1%  | 2.5%         |
+/// | 0.15  | 5.1%         | 7.2%  | 2.2%         |
+/// | 0.25  | 5.4%         | 7.5%  | 1.6%         |
+///
+/// Being a steady 2.5% off the hand's speed is a pitch nobody hears as wrong;
+/// wandering by 5% of itself several times a second is a warble anybody does.
+/// Below 0.05 the head takes too long to recover from having been clamped.
+const CORRECT: f64 = 0.10;
 
 /// Decoded audio around the cursor: interleaved stereo at the device rate.
 pub struct PcmWindow {
@@ -215,7 +232,7 @@ pub struct Scrubber {
     /// has to play out before the first real sound, which was heard as a gap
     /// at the start of every drag.
     aimed: bool,
-    /// Blocks planned since the pointer last moved.
+    /// Output frames rendered since the pointer last reported.
     ///
     /// Not a flag. Blocks come out faster than a pointer emits moves — 11.6 ms
     /// against a screen frame — so a boolean cleared by the first block after
@@ -232,10 +249,11 @@ pub struct Scrubber {
     /// ten milliseconds over it or a hundred. The time it took is what sets
     /// the pitch, exactly as the speed of a hand on a record does.
     speed: f64,
-    /// Blocks between the last two reports, smoothed.
+    /// Output frames between the last two reports, smoothed.
     ///
     /// The hand's own clock: how far behind the pointer the head should sit,
-    /// and how long a silence means the hand has stopped.
+    /// and how long a silence means the hand has stopped. Zero until a report
+    /// has been timed; `interval` is what reads it.
     interval: f64,
     /// Reports the pointer has sent, up to the point where it stops mattering.
     ///
@@ -244,12 +262,13 @@ pub struct Scrubber {
     /// happened to be is not one. Until a second has arrived there is no
     /// measured speed, so the distance is all the head has to go on and it is
     /// followed at full strength — which is the old loop, kept for exactly as
-    /// long as it is the best available answer.
+    /// long as it is the best available answer. The second report is taken
+    /// whole and the ones after it are smoothed.
     reports: u32,
     /// Frames in a block, as the last one came in.
     ///
-    /// The interval is counted in blocks and the speed is wanted per frame, so
-    /// one has to be converted into the other.
+    /// The settle thresholds are naturally expressed in blocks and everything
+    /// else in frames, so one has to be converted into the other.
     block: f64,
 }
 
@@ -261,7 +280,7 @@ impl Scrubber {
             rate: 0.0,
             still: 0.0,
             speed: 0.0,
-            interval: INITIAL_INTERVAL,
+            interval: 0.0,
             reports: 0,
             block: 512.0,
             aimed: false,
@@ -274,32 +293,73 @@ impl Scrubber {
     /// The head is pulled up behind it if it has fallen further than
     /// `MAX_LAG`: what it skips over is not rendered, which is the difference
     /// between fast-forwarding and grinding.
-    pub fn aim(&mut self, frame: u64) {
+    pub fn aim(&mut self, frame: u64, since: f64) {
         // Both sides are whole frames that came in as integers, so this is a
         // comparison of exact values rather than of two computed floats: the
         // pointer either sent a new frame or repeated the last one.
         let to = frame as f64;
         let moved = to - self.target;
         if moved.abs() >= 1.0 {
-            // How long the hand took over that, in blocks. `still` is the
-            // count since the last report, so it is the gap being measured;
-            // a report arriving inside the same block reads as one block
-            // rather than as no time at all.
-            let over = self.still.max(1.0);
-            if self.reports > 0 {
-                self.speed += (moved / (over * self.block) - self.speed) * SPEED_SMOOTH;
+            // How long the hand took over that, in output frames, off the
+            // clock the report was stamped with. Counting the blocks rendered
+            // in between instead rounds the gap to 11.6 ms, and a hand
+            // reporting every 33 ms then reads as moving at five sixths or
+            // seven sixths of its real speed on alternate reports — which is
+            // audible on anything sustained. Falling back on the block count
+            // only covers a caller that has no clock to stamp with.
+            let over = if since.is_finite() && since > 0.0 {
+                since
+            } else {
+                self.still.max(self.block)
+            };
+            // Clamped where it is measured, not only where it is used. A
+            // flick crosses thirty seconds of music in a fifth of a second,
+            // which is a hand moving at over a hundred times playback; the
+            // head cannot run at that, so carrying the number around only lets
+            // it inflate everything worked out from it — the trail, and with
+            // it how far behind the head is allowed to fall.
+            let seen = (moved / over).clamp(-MAX_RATE, MAX_RATE);
+            if self.reports > 1 {
+                self.speed += (seen - self.speed) * SPEED_SMOOTH;
                 self.interval += (over - self.interval) * INTERVAL_SMOOTH;
+            } else if self.reports == 1 {
+                // Taken whole, not smoothed up from nothing. Smoothing needs
+                // something to smooth towards, and until the second report
+                // there is nothing: starting from zero and filtering meant a
+                // hand reporting every 100 ms was read as reporting every 30
+                // for the first half second of the drag, and then read as
+                // having stopped between its own reports.
+                self.speed = seen;
+                self.interval = over;
             }
             self.reports = self.reports.saturating_add(1);
             self.still = 0.0;
         }
         self.target = to;
         self.aimed = true;
+        self.pull_up();
+    }
+
+    /// Pulls the head up if it has fallen further behind than it may be.
+    ///
+    /// Measured from where the head ought to be, not from the pointer. A hand
+    /// moving at three times playback belongs 5 000 frames behind, so a flat
+    /// cap of `MAX_LAG` was pulling the head up on every report of an ordinary
+    /// fast drag and holding it to nine tenths of the speed of the hand. What
+    /// the cap is for is the gap a flick opens *beyond* the trail, which no
+    /// rate could ever close.
+    fn pull_up(&mut self) {
+        // One report's worth of trail, not the whole of it. The ring's own
+        // lead is 2 blocks, which at the top rate is another 8 000 frames the
+        // head would be entitled to grind through after a flick before the
+        // stop is noticed — and a flick that keeps sounding is the thing
+        // `MAX_LAG` exists to prevent.
+        let limit = MAX_LAG + (self.speed * self.interval()).abs();
         let lag = self.target - self.cursor;
-        if lag > MAX_LAG {
-            self.cursor = self.target - MAX_LAG;
-        } else if lag < -MAX_LAG {
-            self.cursor = self.target + MAX_LAG;
+        if lag > limit {
+            self.cursor = self.target - limit;
+        } else if lag < -limit {
+            self.cursor = self.target + limit;
         }
     }
 
@@ -330,6 +390,25 @@ impl Scrubber {
         self.rate
     }
 
+    /// How far behind the pointer the head belongs, in frames.
+    ///
+    /// One report plus the ring's own lead, at the speed the hand is moving,
+    /// so that a hand reporting every hundred milliseconds still has a hundred
+    /// milliseconds of music in hand to play.
+    fn trail(&self) -> f64 {
+        self.speed * (self.interval() + LOOKAHEAD * self.block)
+    }
+
+    /// Output frames between the pointer's reports, or what to assume before
+    /// one has been timed.
+    fn interval(&self) -> f64 {
+        if self.interval > 0.0 {
+            self.interval
+        } else {
+            INITIAL_INTERVAL * self.block
+        }
+    }
+
     /// Chooses the rate for the next `frames` of output.
     ///
     /// The distance left to the pointer *is* the speed: a hand that moved half
@@ -337,13 +416,20 @@ impl Scrubber {
     /// in the next one, which is what makes the pitch follow the drag.
     pub fn plan(&mut self, frames: usize) -> f64 {
         self.block = (frames as f64).max(1.0);
-        self.still += 1.0;
+        self.still += self.block;
         let span = (self.block * LOOKAHEAD).max(1.0);
         // Quiet for a couple of its own intervals: the hand has stopped rather
         // than gone slow, so the speed it was carrying is no longer true.
-        let stopped = self.still > self.interval * STOPPED_INTERVALS + SETTLE_BLOCKS;
+        let stopped = self.still > self.interval() * STOPPED_INTERVALS + SETTLE_BLOCKS * self.block;
         if stopped {
             self.speed = 0.0;
+            // The trail goes with the speed, and so does what the head is
+            // allowed to be behind by. Applying that here as well as in `aim`
+            // is what ends a flick: the last report of one leaves the head the
+            // better part of a second's worth of music behind, and without
+            // this there is no further report to pull it up — it grinds
+            // through all of it at `MAX_RATE` after the hand has stopped.
+            self.pull_up();
             // Arrived as well, so there is nothing left to play. Snapping
             // rather than converging is what makes the sound stop: an
             // exponential approach spends half a second getting quiet, which
@@ -357,11 +443,18 @@ impl Scrubber {
                 return 0.0;
             }
         }
-        // Where the head belongs: one report plus the ring's own lead behind
-        // the pointer, so that a hand reporting every hundred milliseconds
-        // still has a hundred milliseconds of music in hand to play.
-        let trail = self.speed * (self.interval + LOOKAHEAD) * self.block;
-        let drift = (self.target - self.cursor) - trail;
+        // Where the pointer will have got to by now, not where it last said
+        // it was. The hand keeps moving between reports, so the gap to the
+        // last reported position is a sawtooth — it grows for a whole report
+        // interval and then drops — and correcting against a sawtooth puts one
+        // into the rate. Carrying the report forward at the speed the hand was
+        // measured at takes it out.
+        // Carried no further than the next report was due. Past that the hand
+        // has said nothing about where it is, and a hand that has stopped is
+        // exactly the case where guessing it kept moving is wrong: the head
+        // would chase a pointer that is not there until the stop is noticed.
+        let expected = self.target + self.speed * self.still.min(self.interval());
+        let drift = (expected - self.cursor) - self.trail();
         // The hand's speed, with a gentle pull back onto where the head ought
         // to be by now. The pull is what keeps a measurement that is slightly
         // off from becoming a head a second behind the pointer; it is weak
@@ -455,7 +548,7 @@ mod tests {
         // pulled up to within `MAX_LAG`, plays that, and the deck lands on the
         // pointer. Landing on the head instead made the press spring back.
         let mut scrubber = Scrubber::new(1_000);
-        scrubber.aim(2_000_000);
+        scrubber.aim(2_000_000, 0.0);
         let window = ramp(0, 8_000);
         let mut out = vec![0.0; 512];
         scrubber.render(&window, &mut out);
@@ -491,7 +584,7 @@ mod tests {
         // A pointer that has run ahead pulls the head after it; one that has
         // not moved lets it come to rest.
         let mut scrubber = Scrubber::new(0);
-        scrubber.aim(10_000);
+        scrubber.aim(10_000, 0.0);
         let first = scrubber.plan(512);
         assert!(first > 0.0, "{first}");
         let mut last = first;
@@ -504,7 +597,7 @@ mod tests {
     #[test]
     fn dragging_backwards_plays_backwards() {
         let mut scrubber = Scrubber::new(10_000);
-        scrubber.aim(0);
+        scrubber.aim(0, 0.0);
         assert!(scrubber.plan(512) < 0.0);
     }
 
@@ -518,7 +611,7 @@ mod tests {
         let mut at = 0_u64;
         for _ in 0..20 {
             at += 512;
-            scrubber.aim(at);
+            scrubber.aim(at, 512.0);
             scrubber.render(&window, &mut out);
             assert!(out.iter().any(|s| *s != 0.0), "a slow drag should not go quiet");
         }
@@ -566,7 +659,7 @@ mod tests {
             // where a jump would come from.
             if pass % 12 < 5 {
                 at += 600;
-                scrubber.aim(at);
+                scrubber.aim(at, 0.0);
             }
             scrubber.render(&window, &mut out);
             stream.extend_from_slice(&out);
@@ -591,7 +684,7 @@ mod tests {
             // A move every third block, which is slower than a real pointer.
             if pass % 3 == 0 {
                 at += 1_500;
-                scrubber.aim(at);
+                scrubber.aim(at, 512.0 * 3.0);
             }
             scrubber.render(&window, &mut out);
             if out.iter().all(|s| *s == 0.0) {
@@ -631,7 +724,7 @@ mod tests {
                     // Fractional, as `scrub_to_ms` now takes it: rounding this
                     // to a whole millisecond is 44 frames of quantisation and
                     // takes the spread below from 4% to 38% at 0.05x.
-                    scrubber.aim((pointer_ms / 1000.0 * RATE) as u64);
+                    scrubber.aim((pointer_ms / 1000.0 * RATE) as u64, 16.7 / 1000.0 * RATE);
                     next_move += 16.7;
                 }
                 scrubber.render(&window, &mut out);
@@ -689,7 +782,7 @@ mod tests {
             let mut scrubber = Scrubber::new(start as u64);
             let mut out = vec![0.0_f32; BLOCK * 2];
             let mut rates = Vec::new();
-            let (mut reported, mut next_report) = (0.0_f64, 0.0_f64);
+            let (mut reported, mut next_report, mut last_report) = (0.0_f64, 0.0_f64, 0.0_f64);
             for block in 0..(2.0 / BLOCK_SECONDS) as usize {
                 let now = block as f64 * BLOCK_SECONDS;
                 while next_report <= now {
@@ -697,7 +790,12 @@ mod tests {
                     // Whole pixels, and only once one has been crossed.
                     if (exact - reported).abs() >= 1.0 {
                         reported = exact;
-                        scrubber.aim((start + reported * FRAMES_PER_PIXEL) as u64);
+                        // Stamped when the pointer reported, which is what the
+                        // engine does — not when the block that follows it is
+                        // rendered.
+                        let since = (next_report - last_report) * RATE;
+                        last_report = next_report;
+                        scrubber.aim((start + reported * FRAMES_PER_PIXEL) as u64, since);
                     }
                     next_report += 1.0 / POINTER_HZ;
                 }
@@ -714,19 +812,23 @@ mod tests {
                 "at {px_per_second} px/s the head went quiet mid-drag",
             );
             let mean = rates.iter().sum::<f64>() / rates.len() as f64;
+            // Measured within 6.5%, and within 1% at the speeds a hand
+            // spends most of its time at. The pull back onto the pointer is
+            // deliberately weak, and a steady few percent off is a pitch
+            // nobody hears as wrong — see `CORRECT`.
             assert!(
-                (mean - hand).abs() < hand * 0.15,
+                (mean - hand).abs() < hand * 0.10,
                 "a {hand}x hand turned the record at {mean}x",
             );
             let sd = (rates.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
                 / rates.len() as f64)
                 .sqrt();
             let warble = sd / mean * 100.0;
-            // Measured at 4.0% averaged over these speeds and 10.0% at the
+            // Measured at 4.2% averaged over these speeds and 6.8% at the
             // worst of them, against 117.7% at 10 px/s before. The bound is
             // where a regression shows up, not where the ear gives out.
             assert!(
-                warble < 15.0,
+                warble < 10.0,
                 "at {px_per_second} px/s the rate wandered by {warble:.1}% of itself",
             );
         }
@@ -739,7 +841,7 @@ mod tests {
         let window = ramp(0, 44_100 * 4);
         let mut scrubber = Scrubber::new(0);
         let mut out = vec![0.0_f32; 512 * 2];
-        scrubber.aim(2_000);
+        scrubber.aim(2_000, 0.0);
         for _ in 0..(SETTLE_BLOCKS as u32 + 6) {
             scrubber.render(&window, &mut out);
         }
@@ -753,7 +855,7 @@ mod tests {
         // plays the last stretch and skips the rest: grinding through at eight
         // times means audio still running long after the hand has stopped.
         let mut scrubber = Scrubber::new(0);
-        scrubber.aim(44_100 * 30);
+        scrubber.aim(44_100 * 30, 0.0);
         assert!(
             (scrubber.target() as f64 - scrubber.cursor() as f64) <= MAX_LAG,
             "left {} frames behind",
@@ -764,7 +866,7 @@ mod tests {
     #[test]
     fn dragging_back_fast_pulls_the_head_back_too() {
         let mut scrubber = Scrubber::new(44_100 * 30);
-        scrubber.aim(0);
+        scrubber.aim(0, 0.0);
         assert!((scrubber.cursor() as f64) <= MAX_LAG, "at {}", scrubber.cursor());
     }
 
@@ -774,7 +876,7 @@ mod tests {
         // where the pointer is rather than somewhere behind it.
         let window = ramp(0, 44_100 * 8);
         let mut scrubber = Scrubber::new(0);
-        scrubber.aim(44_100 * 2);
+        scrubber.aim(44_100 * 2, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         let mut sounding = 0;
         for _ in 0..40 {
@@ -791,7 +893,7 @@ mod tests {
     #[test]
     fn a_flick_is_clamped_rather_than_becoming_noise() {
         let mut scrubber = Scrubber::new(0);
-        scrubber.aim(u64::from(u32::MAX));
+        scrubber.aim(u64::from(u32::MAX), 0.0);
         for _ in 0..50 {
             scrubber.plan(512);
         }
@@ -804,7 +906,7 @@ mod tests {
         // rather than plan: planning alone leaves the distance unchanged.
         let window = ramp(0, 40_000);
         let mut scrubber = Scrubber::new(0);
-        scrubber.aim(5_000);
+        scrubber.aim(5_000, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         for _ in 0..60 {
             scrubber.render(&window, &mut out);
@@ -825,7 +927,7 @@ mod tests {
     fn rendering_reads_the_window_where_the_head_is() {
         let window = ramp(0, 4_000);
         let mut scrubber = Scrubber::new(1_000);
-        scrubber.aim(1_000 + 512 * 2);
+        scrubber.aim(1_000 + 512 * 2, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         assert_eq!(scrubber.render(&window, &mut out), 512);
         // Past the fade-in, which is what keeps a start from being a step: the
@@ -840,7 +942,7 @@ mod tests {
         // A held sample is a click and then a hum; a stopped record is quiet.
         let window = ramp(0, 4_000);
         let mut scrubber = Scrubber::new(1_000);
-        scrubber.aim(1_000);
+        scrubber.aim(1_000, 0.0);
         let mut out = vec![9.0_f32; 512 * 2];
         scrubber.render(&window, &mut out);
         assert!(out.iter().all(|s| *s == 0.0));
@@ -850,7 +952,7 @@ mod tests {
     fn the_head_never_runs_before_the_start_of_the_track() {
         let window = ramp(0, 4_000);
         let mut scrubber = Scrubber::new(100);
-        scrubber.aim(0);
+        scrubber.aim(0, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         for _ in 0..20 {
             scrubber.render(&window, &mut out);
