@@ -50,6 +50,31 @@ pub struct TempoOptions {
     pub prior_centre: f64,
     /// The prior's spread, in natural logs of tempo ratio.
     pub prior_width: f64,
+    /// A second lobe for the prior, in BPM, or 0 for none.
+    ///
+    /// Dance music is not one hump. House and techno sit around 125 and drum
+    /// and bass, hardstyle and their neighbours sit around 170, and a single
+    /// lobe centred between them either covers neither or covers everything.
+    /// The tracks this was built for are the ones where a 174 BPM reading is
+    /// punished by the prior until its own two-thirds relative at 116 — right
+    /// in the middle of the first lobe — outscores it.
+    ///
+    /// **Measured, and it changed nothing at all.** Twelve combinations of
+    /// centre (155 to 180), width (0.08 to 0.25) and weight (0.5 to 1.0) over
+    /// 150 tracks: every one scored 87% train and 95% test, identical to no
+    /// second lobe, **fixing 0 tracks and breaking 0**. A lobe at 172 raises
+    /// the prior at 174 BPM by about 30% over the shipped one, so the boost is
+    /// real and the answer does not move — which says the 3:2 error is not the
+    /// prior thumbing the scale towards the slower reading. It is in the score.
+    ///
+    /// Kept because `tempotune`'s pass 1f is what measured that, and a knob
+    /// that has been ruled out is worth more than one nobody tried. It is off
+    /// by default and the shipped prior is exactly what it was.
+    pub prior_second_centre: f64,
+    /// The second lobe's spread, on the same scale as `prior_width`.
+    pub prior_second_width: f64,
+    /// How tall the second lobe is against the first.
+    pub prior_second_weight: f64,
     /// How many multiples of a candidate period to add into its score.
     ///
     /// 1 is plain autocorrelation. Higher values reward a period whose own
@@ -84,6 +109,9 @@ impl Default for TempoOptions {
         Self {
             prior_centre: 126.0,
             prior_width: 0.85,
+            prior_second_centre: 0.0,
+            prior_second_width: 0.25,
+            prior_second_weight: 0.0,
             harmonics: 1,
             harmonic_decay: 1.0,
             refine_phases: 32,
@@ -250,8 +278,19 @@ fn tempo_prior(bpm: f64, options: TempoOptions) -> f64 {
     if bpm <= 0.0 || options.prior_width <= 0.0 || options.prior_centre <= 0.0 {
         return 0.0;
     }
-    let x = (bpm / options.prior_centre).ln() / options.prior_width;
-    (-0.5 * x * x).exp()
+    let lobe = |centre: f64, width: f64| {
+        if centre <= 0.0 || width <= 0.0 {
+            return 0.0;
+        }
+        let x = (bpm / centre).ln() / width;
+        (-0.5 * x * x).exp()
+    };
+    let first = lobe(options.prior_centre, options.prior_width);
+    let second = options.prior_second_weight
+        * lobe(options.prior_second_centre, options.prior_second_width);
+    // The taller of the two, not their sum. A sum would raise the ground
+    // between the humps, and the claim is that music sits *on* them.
+    first.max(second)
 }
 
 /// Finds the fractional lag that best explains the onset envelope.
