@@ -6,11 +6,11 @@
  * its memory panel 209pt, and the five bands inside it (title, overview,
  * phrase, detail, pads) have their measured heights recorded as token sources.
  *
- * Playback is an `<audio>` element over the `rbl://` scheme rather than an
- * audio stack in Rust — see `usePlayback`. Outside Tauri there is no such
- * scheme, so the transport is drawn and disabled: a player waiting for a
- * backend, rather than an unfinished panel. Controls with nothing behind them
- * yet are drawn the same way, for the same reason.
+ * Playback is the Rust engine behind the `deck_*` commands — see
+ * `usePlayback` and `crates/rbl-deck`. Outside Tauri there is no engine, so
+ * the transport is drawn and disabled: a player waiting for a backend, rather
+ * than an unfinished panel. Controls with nothing behind them yet are drawn
+ * the same way, for the same reason.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 

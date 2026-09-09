@@ -5,8 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Cue, Device, ExportReport, Phrase, ImportReport, LibrarySummary, LinkPeer,
-  LinkStatus, MissingTracks, RowDto,
+  AnalysisResult, Backend, Cue, DeckEvent, Device, ExportReport, Phrase, ImportReport, LibrarySummary, LinkPeer,
+  LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
 } from "./types";
 
@@ -109,6 +109,23 @@ async function realBackend(): Promise<Backend> {
       });
     },
     listDevices: () => invoke<Device[]>("list_devices"),
+    deckLoad: (deck, trackId) => invoke<void>("deck_load", { deck, track: trackId }),
+    deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
+    deckPlay: (deck) => invoke<void>("deck_play", { deck }),
+    deckPause: (deck) => invoke<void>("deck_pause", { deck }),
+    deckSeek: (deck, positionMs) => invoke<void>("deck_seek", { deck, positionMs }),
+    deckState: () => invoke<Tick>("deck_state"),
+    onDeckTick: (listener) => subscribe<Tick>("deck:tick", listener),
+    onDeckEvent: (listener) => {
+      // Loaded and failed are the same shape and the same subscription; the
+      // message is what tells them apart.
+      const stopLoaded = subscribe<DeckEvent>("deck:loaded", listener);
+      const stopError = subscribe<DeckEvent>("deck:error", listener);
+      return () => {
+        stopLoaded();
+        stopError();
+      };
+    },
     onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
     onMenu: (listener) => subscribe<string>("menu", listener),

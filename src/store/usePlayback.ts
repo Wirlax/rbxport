@@ -1,28 +1,37 @@
 /**
  * Playback for the preview player.
  *
- * An `<audio>` element rather than an audio stack in Rust: the webview already
- * decodes every format the library holds, buffers off the UI thread, and gives
- * seeking for free over the range requests the backend answers. A Rust output
- * path would buy lower latency, which a preview player does not need.
+ * The audio itself is in Rust — `crates/rbl-deck` — rather than on an
+ * `<audio>` element. A media element has no primitive for phase-locked beat
+ * sync, key sync or audible drag-scrub, which is what the 2-player view needs;
+ * see `docs/player-engine.md`.
+ *
+ * Position does not come back from a command. The engine emits one tick ten
+ * times a second carrying both decks' frame counters, and every frame in
+ * between is that anchor plus the time since it arrived. Sixty ticks a second
+ * would be IPC churn and the interface would still have to interpolate.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { audioUrl, canPlay } from "@/ipc/audio";
+import { getBackend } from "@/ipc/client";
+import type { DeckId, Tick } from "@/ipc/types";
+import { canPlay } from "@/ipc/audio";
+import { extrapolate, follow, NO_ANCHOR, type Anchor } from "@/lib/clock";
 
 export interface Playback {
   /** True while audio is actually running. */
   playing: boolean;
   /**
-   * Seconds elapsed, as React state — updated ten times a second, which is as
-   * fine as the readouts get and as often as the waveform is worth redrawing.
+   * Seconds elapsed, as React state — updated on each tick, ten times a
+   * second, which is as fine as the readouts get and as often as the waveform
+   * is worth redrawing.
    *
    * The playhead does not use this: see `subscribe`.
    */
   position: number;
-  /** Seconds total, or 0 before metadata arrives. */
+  /** Seconds total, or 0 before the deck has said. */
   duration: number;
-  /** Nothing to play: no track, or a build with no backend. */
+  /** Nothing to play: no track, or a build with no engine behind it. */
   idle: boolean;
   error: string | null;
   toggle: () => void;
@@ -43,16 +52,10 @@ export interface Playback {
   subscribe: (listener: (seconds: number) => void) => () => void;
 }
 
-/**
- * How often the React readouts are updated, in seconds.
- *
- * The time is printed to a tenth, so ten a second is every digit it can show.
- * The playhead moves on every frame regardless — it goes through `subscribe`.
- */
-const STATE_TICK = 0.1;
+/** The preview player is deck A. The second deck arrives with the mixer. */
+const DECK: DeckId = "a";
 
 export function usePlayback(trackId: string | null): Playback {
-  const element = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -61,6 +64,12 @@ export function usePlayback(trackId: string | null): Playback {
   // The live position, and who wants it every frame.
   const positionRef = useRef(0);
   const listeners = useRef(new Set<(seconds: number) => void>());
+  // The last tick, which every frame in between is measured from.
+  const anchor = useRef<Anchor>(NO_ANCHOR);
+  /** The generation the playhead last snapped to. */
+  const shownGeneration = useRef(0);
+  /** Which track this deck was told to load, so a stale tick is ignored. */
+  const loading = useRef<string | null>(null);
 
   const emit = useCallback((seconds: number) => {
     positionRef.current = seconds;
@@ -74,119 +83,157 @@ export function usePlayback(trackId: string | null): Playback {
     };
   }, []);
 
-  // One element for the life of the component, re-pointed as the track
-  // changes: creating one per track leaks decoders and restarts buffering.
+  /** Takes a tick as the truth about where the deck is. */
+  const anchorOn = useCallback(
+    (tick: Tick) => {
+      const deck = tick.a;
+      const rate = tick.sampleRate;
+      anchor.current = {
+        frames: deck.frames,
+        at: performance.now(),
+        sampleRate: rate,
+        playing: deck.playing,
+        generation: deck.generation,
+        rate: 1,
+      };
+      setPlaying(deck.playing);
+      setDuration(rate > 0 ? deck.totalFrames / rate : 0);
+      const at = extrapolate(anchor.current, performance.now());
+      setPosition(at);
+      // A load or a seek moves the playhead deliberately; anything else is
+      // drift, and is eased in rather than jumped.
+      if (deck.generation !== shownGeneration.current) {
+        shownGeneration.current = deck.generation;
+        emit(at);
+      }
+    },
+    [emit],
+  );
+
+  // The deck reports itself loaded, or says why it could not be.
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-    element.current = audio;
-
-    // `timeupdate` fires about four times a second, which is what made the
-    // playhead step; while playing, the frame loop below is what moves it, and
-    // this stays as the backstop for a position that changed some other way.
-    const onTime = () => {
-      setPosition(audio.currentTime);
-      emit(audio.currentTime);
-    };
-    const onMeta = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onEnded = () => {
-      setPlaying(false);
-      setPosition(0);
-      emit(0);
-    };
-    const onError = () => {
-      setPlaying(false);
-      setError("This track could not be played.");
-    };
-
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("loadedmetadata", onMeta);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("ended", onEnded);
-    audio.addEventListener("error", onError);
+    if (!canPlay) return;
+    let live = true;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const backend = await getBackend();
+      const unlistenTick = backend.onDeckTick((tick) => {
+        if (live) anchorOn(tick);
+      });
+      const unlistenEvent = backend.onDeckEvent((event) => {
+        if (!live || event.deck !== DECK) return;
+        if (event.message !== null) {
+          setError("This track could not be played.");
+          return;
+        }
+        setError(null);
+        if (event.sampleRate > 0) setDuration(event.totalFrames / event.sampleRate);
+      });
+      if (!live) {
+        unlistenTick();
+        unlistenEvent();
+        return;
+      }
+      stop = () => {
+        unlistenTick();
+        unlistenEvent();
+      };
+      // What the deck holds right now, so a reload does not start at zero.
+      anchorOn(await backend.deckState());
+    })();
     return () => {
-      audio.pause();
-      // Dropping the source lets the decoder go rather than keeping the file
-      // open for the life of the window.
-      audio.removeAttribute("src");
-      audio.load();
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("loadedmetadata", onMeta);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("error", onError);
-      element.current = null;
+      live = false;
+      stop?.();
     };
-  }, [emit]);
+  }, [anchorOn]);
+
+  // Point the deck at the selected track. Loading does not start playback:
+  // choosing a track in the browser should not make noise.
+  useEffect(() => {
+    if (!canPlay) return;
+    loading.current = trackId;
+    anchor.current = NO_ANCHOR;
+    setPosition(0);
+    setDuration(0);
+    setPlaying(false);
+    setError(null);
+    emit(0);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (loading.current !== trackId) return;
+        if (trackId === null) await backend.deckUnload(DECK);
+        else await backend.deckLoad(DECK, trackId);
+      } catch {
+        // A missing file, or no audio device at all. Either way the deck has
+        // nothing, and saying so is better than a transport that does nothing.
+        if (loading.current === trackId) setError("This track could not be played.");
+      }
+    })();
+  }, [trackId, emit]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
   useEffect(() => {
     if (!playing) return;
     let frame = 0;
-    let lastState = positionRef.current;
+    let last = performance.now();
     const tick = () => {
       frame = requestAnimationFrame(tick);
-      const audio = element.current;
-      if (!audio) return;
-      const now = audio.currentTime;
-      emit(now);
-      if (Math.abs(now - lastState) >= STATE_TICK) {
-        lastState = now;
-        setPosition(now);
-      }
+      const now = performance.now();
+      const target = extrapolate(anchor.current, now);
+      const next = follow(positionRef.current, target, now - last);
+      last = now;
+      emit(next);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing, emit]);
 
-  // Point it at the selected track. Loading does not start playback: choosing
-  // a track in the browser should not make noise.
-  useEffect(() => {
-    const audio = element.current;
-    if (!audio) return;
-    const url = trackId === null ? undefined : audioUrl(trackId);
-    setPosition(0);
-    emit(0);
-    setDuration(0);
-    setError(null);
-    if (url === undefined) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-      return;
-    }
-    audio.src = url;
-    audio.load();
-  }, [trackId, emit]);
-
   const idle = !canPlay || trackId === null;
 
   const toggle = useCallback(() => {
-    const audio = element.current;
-    if (!audio || idle) return;
-    if (audio.paused) {
-      // A rejected play() is normal — an unreadable file, or a policy block —
-      // and must surface rather than leave the button looking stuck.
-      void audio.play().catch(() => setError("This track could not be played."));
-    } else {
-      audio.pause();
-    }
-  }, [idle]);
+    if (idle) return;
+    const wanted = !playing;
+    // The button follows at once rather than on the next tick, which is up to
+    // a tenth of a second away.
+    setPlaying(wanted);
+    anchor.current = { ...anchor.current, playing: wanted, at: performance.now() };
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (wanted) await backend.deckPlay(DECK);
+        else await backend.deckPause(DECK);
+      } catch {
+        setPlaying(false);
+        setError("This track could not be played.");
+      }
+    })();
+  }, [idle, playing]);
 
-  const seek = useCallback((seconds: number) => {
-    const audio = element.current;
-    if (!audio || !Number.isFinite(seconds)) return;
-    audio.currentTime = Math.max(0, seconds);
-    setPosition(audio.currentTime);
-    // Straight away, rather than on the next frame: a seek while paused
-    // schedules no frame at all, and the head would sit where it was.
-    emit(audio.currentTime);
-  }, [emit]);
+  const seek = useCallback(
+    (seconds: number) => {
+      if (idle || !Number.isFinite(seconds)) return;
+      const at = Math.max(0, seconds);
+      // Locally first: the head must move under the pointer, not a tick later.
+      anchor.current = {
+        ...anchor.current,
+        frames: anchor.current.sampleRate > 0 ? at * anchor.current.sampleRate : 0,
+        at: performance.now(),
+      };
+      setPosition(at);
+      emit(at);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          await backend.deckSeek(DECK, Math.round(at * 1000));
+        } catch {
+          setError("This track could not be played.");
+        }
+      })();
+    },
+    [idle, emit],
+  );
 
   const seekFraction = useCallback(
     (fraction: number) => {
@@ -196,5 +243,7 @@ export function usePlayback(trackId: string | null): Playback {
     [duration, seek],
   );
 
-  return { playing, position, duration, idle, error, toggle, seek, seekFraction, positionRef, subscribe };
+  return {
+    playing, position, duration, idle, error, toggle, seek, seekFraction, positionRef, subscribe,
+  };
 }

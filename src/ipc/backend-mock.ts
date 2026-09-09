@@ -488,6 +488,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
 
+    // The decks are the audio engine, which is Rust and is not here. A browser
+    // build draws the transport and disables it — a player waiting for a
+    // backend rather than an unfinished panel — so these accept the calls and
+    // report two stopped decks rather than pretending to play.
+    deckLoad: () => wait(undefined),
+    deckUnload: () => wait(undefined),
+    deckPlay: () => wait(undefined),
+    deckPause: () => wait(undefined),
+    deckSeek: () => wait(undefined),
+    deckState: () =>
+      wait({
+        a: { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false },
+        b: { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false },
+        sampleRate: 0,
+      }),
+    onDeckTick: () => () => undefined,
+    onDeckEvent: () => () => undefined,
+
     onLibraryReady: (listener) => {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);

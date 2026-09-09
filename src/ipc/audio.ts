@@ -1,22 +1,11 @@
 /**
- * Where a track's audio comes from.
+ * Whether this build can play anything.
  *
- * The same scheme as artwork, and for the same reason: an `<audio src>` lets
- * the webview stream, decode and buffer off the UI thread, where pulling
- * bytes through `invoke` would blow the IPC cap and block the main thread.
- * The backend answers range requests, so seeking costs one chunk rather than
- * a whole file.
- *
- * Outside Tauri there is no such scheme, so this returns nothing and the
- * player stays inert — which is what `pnpm dev:mock` and Playwright see.
+ * Playback is the Rust engine behind the `deck_*` commands, so it exists only
+ * inside Tauri. In a browser — `pnpm dev:mock`, and Playwright — the transport
+ * is drawn and disabled: a player waiting for a backend, rather than an
+ * unfinished panel.
  */
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-export function audioUrl(trackId: string): string | undefined {
-  if (!isTauri) return undefined;
-  // Resolved against the library by id; no path crosses from here.
-  return `rbl://audio/${encodeURIComponent(trackId)}`;
-}
-
-/** Whether this build can play anything at all. */
 export const canPlay = isTauri;

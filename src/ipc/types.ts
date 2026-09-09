@@ -221,6 +221,28 @@ export interface Backend {
   /** Called as the set of devices on the network changes. */
   onLinkPeers(listener: (peers: LinkPeer[]) => void): () => void;
 
+  /**
+   * The decks.
+   *
+   * Playback is in Rust — see `crates/rbl-deck`. The audio device is not
+   * opened until one of these is called, so a window nobody has played
+   * anything in holds no device at all.
+   *
+   * Position does not come back from any of these: it arrives on `onDeckTick`
+   * ten times a second and the interface extrapolates between ticks.
+   */
+  deckLoad(deck: DeckId, trackId: string): Promise<void>;
+  deckUnload(deck: DeckId): Promise<void>;
+  deckPlay(deck: DeckId): Promise<void>;
+  deckPause(deck: DeckId): Promise<void>;
+  deckSeek(deck: DeckId, positionMs: number): Promise<void>;
+  /** Both decks now, to anchor the interface when it starts. */
+  deckState(): Promise<Tick>;
+  /** Both decks, ten times a second, and only while something is playing. */
+  onDeckTick(listener: (tick: Tick) => void): () => void;
+  /** A deck has finished loading a track, or could not. */
+  onDeckEvent(listener: (event: DeckEvent) => void): () => void;
+
   missingTracks(limit: number): Promise<MissingTracks>;
 
   /**
@@ -230,6 +252,38 @@ export interface Backend {
    * there is no picker, so it resolves to `null` immediately.
    */
   relocateTrack(trackId: string): Promise<string | null>;
+}
+
+/** Which deck. Two, named rather than indexed, as the mixer is. */
+export type DeckId = "a" | "b";
+
+/** One deck in a tick. */
+export interface DeckTick {
+  /** The engine's frame counter, in device-rate frames. */
+  frames: number;
+  /** The track's length in the same frames, or 0 when it is not known. */
+  totalFrames: number;
+  /** Bumped on every load and seek; a new one means snap, not slide. */
+  generation: number;
+  playing: boolean;
+  loaded: boolean;
+}
+
+/** Both decks at one instant. About 200 bytes, well inside the event cap. */
+export interface Tick {
+  a: DeckTick;
+  b: DeckTick;
+  /** The device's rate, which is what every frame count here is in. */
+  sampleRate: number;
+}
+
+/** A deck finishing a load, or failing one. */
+export interface DeckEvent {
+  deck: DeckId;
+  totalFrames: number;
+  sampleRate: number;
+  /** Set when the load failed, and says why. */
+  message: string | null;
 }
 
 /**
