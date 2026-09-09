@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { RowDto, ViewSpec } from "@/ipc/types";
+import type { Backend, RowDto, ViewSpec } from "@/ipc/types";
 import { RowCache, PAGE_SIZE, type CacheToken } from "@/lib/rowCache";
 import { planFetches } from "@/lib/virtual";
 
@@ -81,15 +81,20 @@ export function useTrackView(
 
   useEffect(() => {
     let cancelled = false;
+    let opened = false;
+    let stopReady: (() => void) | undefined;
     cache.current.clear();
     inFlight.current.clear();
     setState((s) => ({ ...s, error: null }));
 
-    void (async () => {
+    const attempt = async (backend: Backend) => {
+      // One open per spec. A later ready event — a library reload — must not
+      // make every view that is already up refetch itself.
+      if (cancelled || opened) return;
       try {
-        const backend = await getBackend();
         const handle = await backend.openView(spec);
         if (cancelled) return;
+        opened = true;
         setState({
           viewId: handle.viewId,
           count: handle.len,
@@ -103,10 +108,32 @@ export function useTrackView(
         // loading and retries forever.
         setState((s) => ({ ...s, specKey, error: e instanceof Error ? e.message : String(e) }));
       }
+    };
+
+    void (async () => {
+      const backend = await getBackend();
+      if (cancelled) return;
+      // The library is read on its own thread, so this open can arrive before
+      // there is anything to answer it and come back "not finished loading".
+      // That is a race the app is expected to lose sometimes, and it has to
+      // recover on its own: the effect keys on the spec, so without this a
+      // view that lost it stayed at zero rows until the user picked something
+      // else — and a table with a count of zero draws nothing at any scroll
+      // position, which is a blank window.
+      //
+      // Subscribed before the first attempt, not after, for the reason
+      // `App.tsx` gives about the tree: the library can become ready in the
+      // gap between a failed attempt and a later subscription, and that gap is
+      // exactly where this used to get stuck.
+      stopReady = backend.onLibraryReady(() => {
+        void attempt(backend);
+      });
+      await attempt(backend);
     })();
 
     return () => {
       cancelled = true;
+      stopReady?.();
     };
     // specKey captures every field that changes the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
