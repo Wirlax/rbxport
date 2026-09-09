@@ -71,3 +71,47 @@ test("two decks playing cost no more per frame than none at all", async ({ page 
 
   expect(both - empty).toBeLessThan(ALLOWANCE);
 });
+
+test("scrolling the track list costs no more per frame than sitting still", async ({ page }) => {
+  // The other place a list app drops frames. Rows are virtualised and keyed by
+  // id, and this is the gate that says so: a hard scroll — a screenful and a
+  // half every frame, all the way down — against the same window sitting
+  // still.
+  await page.setViewportSize({ width: 1800, height: 1130 });
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  // The whole collection, not the playlist the app opens on: thirty rows fit
+  // on screen and a list that does not scroll measures nothing.
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
+  const still = await medianFrame(page);
+
+  const scrolling = await page.evaluate(async (count: number) => {
+    const el = document.querySelector('[data-testid="track-scroll"]');
+    if (!(el instanceof HTMLElement)) return 0;
+    const deltas: number[] = [];
+    let last = performance.now();
+    let y = 0;
+    await new Promise<void>((done) => {
+      const tick = () => {
+        const now = performance.now();
+        deltas.push(now - last);
+        last = now;
+        y += 900;
+        el.scrollTop = y;
+        if (deltas.length < count) requestAnimationFrame(tick);
+        else done();
+      };
+      requestAnimationFrame(tick);
+    });
+    const sorted = [...deltas].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)] ?? 0;
+  }, FRAMES);
+
+  // It really moved, rather than sitting at the bottom for most of the run.
+  const reached = await page
+    .locator('[data-testid="track-scroll"]')
+    .evaluate((el) => el.scrollTop);
+  expect(reached).toBeGreaterThan(10_000);
+  expect(scrolling - still).toBeLessThan(ALLOWANCE);
+});
