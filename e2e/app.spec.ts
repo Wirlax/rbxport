@@ -1561,6 +1561,50 @@ test("clicking the artwork ejects the track from the deck", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
 });
 
+test("beat sync belongs to two decks, and pulls the follower to the master", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  // One deck has nothing to sync to and nothing to be master of.
+  await expect(page.getByRole("button", { name: "Beat sync" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+
+  // Two tracks at different tempos: 127 on deck A and 129 on deck B.
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(1);
+  await cell.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+
+  const a = page.getByRole("region", { name: "Preview player" }).first();
+  const b = page.getByRole("region", { name: "Preview player B" });
+
+  // Deck A is master to begin with, so its own BEAT SYNC has nothing to do.
+  await expect(a.getByRole("button", { name: "Sync master" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(a.getByRole("button", { name: "Beat sync" })).toBeDisabled();
+  await expect(b.getByRole("button", { name: "Beat sync" })).toBeEnabled();
+
+  // Syncing B pulls it to A's tempo: 127 against its own 129.
+  const bpmB = b.getByTestId("player-bpm");
+  const before = Number(await bpmB.innerText());
+  await b.getByRole("button", { name: "Beat sync" }).click();
+  await expect.poll(async () => Number(await bpmB.innerText())).not.toBe(before);
+  const leader = Number(await a.getByTestId("player-bpm").innerText());
+  expect(Number(await bpmB.innerText())).toBeCloseTo(leader, 0);
+
+  // And master moves: whichever deck holds it, the other is the one that syncs.
+  await b.getByRole("button", { name: "Sync master" }).click();
+  await expect(b.getByRole("button", { name: "Beat sync" })).toBeDisabled();
+  await expect(a.getByRole("button", { name: "Beat sync" })).toBeEnabled();
+});
+
 test("the tempo control moves the deck's BPM, and MT and RST are real", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

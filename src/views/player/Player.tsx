@@ -50,6 +50,7 @@ import {
   type PadMode,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
+import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
 import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { JumpMenu } from "./JumpMenu";
@@ -124,6 +125,19 @@ export interface PlayerProps {
   onBars?: (bars: number) => void;
   jumpSize?: string;
   onJumpSize?: (id: string) => void;
+  /**
+   * Sync, which needs both decks and so is arranged by the shell.
+   *
+   * `publishSync` registers a getter the *other* deck reads when its BEAT SYNC
+   * is pressed, and `peerSync` is that other deck's. Getters rather than
+   * state: a deck's position changes every frame and sync reads it once, at
+   * the moment the button goes down.
+   */
+  publishSync?: ((get: () => SyncDeck | null) => void) | undefined;
+  peerSync?: (() => SyncDeck | null) | undefined;
+  /** Whether this deck is the one the other syncs to. */
+  isMaster?: boolean;
+  onMaster?: () => void;
   /**
    * Load whatever the browser has selected.
    *
@@ -374,6 +388,7 @@ export const Player = memo(function Player({
   track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
+  publishSync, peerSync, isMaster = false, onMaster,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -762,6 +777,30 @@ export const Player = memo(function Player({
   const remaining = splitTime(Math.max(total - playback.position, 0));
   const elapsed = splitTime(playback.position);
 
+  // What the other deck reads when its BEAT SYNC is pressed. A ref holding a
+  // closure over the current render, registered once: the shell keeps the
+  // getter, not the values, so nothing here re-renders anything there.
+  const syncState = useRef<() => SyncDeck | null>(() => null);
+  syncState.current = () =>
+    track
+      ? { bpmX100: track.bpmX100, position: playback.positionRef.current, grid }
+      : null;
+  useEffect(() => {
+    publishSync?.(() => syncState.current());
+  }, [publishSync]);
+
+  /** Match this deck to the other one: its tempo, then its bar. */
+  const beatSync = useCallback(() => {
+    const leader = peerSync?.();
+    const follower = syncState.current();
+    if (!leader || !follower) return;
+    const { tempo, nudge } = syncTo(leader, follower);
+    playback.setTempo(tempo);
+    // The nudge second: it is measured against where the follower is now, and
+    // the tempo does not move the playhead.
+    if (Math.abs(nudge) > 0.001) playback.seek(follower.position + nudge);
+  }, [peerSync, playback]);
+
   const takesDrop = dragging && Boolean(onDropTrack);
 
   // The track skips, which the two-deck column does not draw: rekordbox
@@ -945,6 +984,36 @@ export const Player = memo(function Player({
               <span className={styles.readout}>{track.key}</span>
               <span className={styles.readout}>{formatBpm(track.bpmX100)}</span>
             </>
+          ) : null}
+          {/* Sync belongs to the two-deck layouts and to nothing else: one
+              deck has nothing to sync to and nothing to be master of. */}
+          {peerSync ? (
+            <div className={styles.sync} role="group" aria-label="Sync">
+              <button
+                type="button"
+                className={styles.chip}
+                aria-label="Beat sync"
+                disabled={!track || isMaster}
+                title={
+                  isMaster
+                    ? "This deck is the master; sync the other one to it."
+                    : "Match this deck to the master's tempo and bar."
+                }
+                onClick={beatSync}
+              >
+                BEAT SYNC
+              </button>
+              <button
+                type="button"
+                className={styles.chip}
+                aria-label="Sync master"
+                aria-pressed={isMaster}
+                data-on={isMaster ? "" : undefined}
+                onClick={onMaster}
+              >
+                MASTER
+              </button>
+            </div>
           ) : null}
         </div>
 

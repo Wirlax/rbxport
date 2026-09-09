@@ -300,7 +300,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
     tempo: 1, masterTempo: false,
   };
-  const idle = {
+  // Deck B holds its own tempo and key lock even though a browser has no
+  // audio to apply them to: a control that snapped back on the next tick would
+  // read as a broken one, and the deck it stands for does keep them.
+  const deckB = {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
     tempo: 1, masterTempo: false,
   };
@@ -314,7 +317,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   const tick = (): Tick => ({
     a: { ...deckA },
-    b: { ...idle },
+    b: { ...deckB },
     sampleRate: SAMPLE_RATE,
     // A browser has no audio callback, so there is nothing to meter. Zero is
     // the truth here rather than a placeholder: nothing is coming out.
@@ -632,13 +635,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The tempo is the engine's, but the mock keeps it so the readout and the
     // MT button move: a browser has no audio to apply it to, and a control
     // that does not respond reads as a broken one.
-    deckTempo: (_deck, tempo) => {
-      deckA.tempo = Math.min(Math.max(tempo, 0.5), 2);
+    deckTempo: (deck, tempo) => {
+      const on = deck === "b" ? deckB : deckA;
+      on.tempo = Math.min(Math.max(tempo, 0.5), 2);
       sendTick();
       return wait(undefined);
     },
-    deckMasterTempo: (_deck, on) => {
-      deckA.masterTempo = on;
+    deckMasterTempo: (deck, on) => {
+      (deck === "b" ? deckB : deckA).masterTempo = on;
       sendTick();
       return wait(undefined);
     },

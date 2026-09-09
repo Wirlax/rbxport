@@ -981,6 +981,16 @@
 
 /* Three equal tabs: the selected one is a lighter blue than the pad buttons,
    the others are outlined. */
+/* Sync, at the end of the title row where the capture puts it. **Not
+   measured**: the capture's own pair sits in a header this deck does not draw
+   the same way. */
+.sync {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
 /* The tempo cluster in the control row: the BPM being played with a step
    either side, the key lock, and a reset — the order the capture has them in.
    **The sizes here are not measured**: the capture's own row is a different

@@ -31,6 +31,7 @@ import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
+import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
@@ -107,6 +108,39 @@ export function App() {
    * Off, each deck keeps its own; on, the shell holds them and hands the same
    * value to both, so a wheel over one waveform moves the other with it.
    */
+  /**
+   * Which deck the other syncs to.
+   *
+   * Deck A to begin with, because that is the one a single-player layout has
+   * and the one a first track lands on. Only ever one, which is what MASTER
+   * means.
+   */
+  const [syncMaster, setSyncMaster] = useState<DeckId>("a");
+  /**
+   * How each deck reads the other for sync.
+   *
+   * Getters rather than state: a deck's position moves every frame and sync
+   * reads it once, when the button goes down. Holding it as state would
+   * re-render the shell sixty times a second for a number nobody is looking
+   * at.
+   */
+  const syncA = useRef<() => SyncDeck | null>(() => null);
+  const syncB = useRef<() => SyncDeck | null>(() => null);
+  const publishSync = useMemo(
+    () => ({
+      a: (get: () => SyncDeck | null) => {
+        syncA.current = get;
+      },
+      b: (get: () => SyncDeck | null) => {
+        syncB.current = get;
+      },
+    }),
+    [],
+  );
+  const peerSync = useMemo(
+    () => ({ a: () => syncB.current(), b: () => syncA.current() }),
+    [],
+  );
   const [dual, setDual] = useState(false);
   const [dualBars, setDualBars] = useState(DETAIL_BARS);
   const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
@@ -767,6 +801,10 @@ export function App() {
             onLoadSelected={loadSelectedInto.a}
             transportSlot={deckCount(layout) > 1 ? transportA : null}
             {...(deckCount(layout) > 1 ? linked : {})}
+            publishSync={publishSync.a}
+            {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
+            isMaster={syncMaster === "a"}
+            onMaster={() => setSyncMaster("a")}
           />
           {deckCount(layout) > 1 ? (
             <Player
@@ -781,6 +819,10 @@ export function App() {
               transportSlot={transportB}
               flipped
               {...linked}
+              publishSync={publishSync.b}
+              peerSync={peerSync.b}
+              isMaster={syncMaster === "b"}
+              onMaster={() => setSyncMaster("b")}
             />
           ) : null}
           <div className={styles.playerGutter} aria-hidden />
