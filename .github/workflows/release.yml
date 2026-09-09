@@ -1,0 +1,151 @@
+name: Release
+
+# A tag is the release. `v1.2.3` builds macOS and Windows, signs them where the
+# signing secrets exist, and publishes the installers to the R2 bucket under
+# that version — plus a `latest/` copy, so a download link does not have to
+# name a version.
+#
+# `workflow_dispatch` builds the same way without publishing, which is how a
+# change to this file is tried before a tag depends on it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    # GitHub-hosted for both, deliberately. macOS signing and notarisation need
+    # a real macOS with Xcode's notarytool, and the self-hosted fleet (`arc`)
+    # is Linux — which can cross-compile neither target. Putting a signing
+    # certificate on a shared runner to save minutes is the wrong trade.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            # One binary for both Apple architectures, which is what a
+            # download page should be able to offer without asking.
+            target: universal-apple-darwin
+            bundles: dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: The version comes from the tag
+        # One source of truth. A build whose installer says 0.1.0 because a
+        # file was not bumped is worse than a build that fails here.
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" != "push" ]; then
+            version="0.0.0-dev"
+          fi
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          node -e '
+            const fs = require("fs");
+            const [, version] = process.argv;
+            for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = version;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            }
+          ' "$version"
+
+      - name: Build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Present only on the repository, so a fork builds unsigned rather
+          # than failing. Tauri skips signing when they are empty.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows Authenticode, when there is a certificate to sign with.
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Collect the installers
+        shell: bash
+        run: |
+          mkdir -p out
+          # Both bundlers put their output under the target directory; which
+          # subdirectory depends on the target, so this finds them rather than
+          # spelling out two paths that would rot.
+          find src-tauri/target -type f \( -name '*.dmg' -o -name '*-setup.exe' \) \
+            -exec cp {} out/ \;
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.target }}
+          path: out/
+          retention-days: 14
+
+  publish:
+    # Only a tag publishes. A manual run builds and stops, so this file can be
+    # changed without a bucket write to prove it.
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: out
+
+      - name: Publish to R2
+        # S3-compatible, so the AWS CLI already on the runner is the whole
+        # client. The endpoint is the account's; the bucket is a variable so
+        # this file names no account of anyone's.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          test -n "$BUCKET"
+          ls -l out
+          aws s3 sync out "s3://$BUCKET/$version/" --endpoint-url "$ENDPOINT" --no-progress
+          # A stable path as well as the versioned one, so a download link on a
+          # page does not have to be edited for every release.
+          aws s3 sync out "s3://$BUCKET/latest/" --endpoint-url "$ENDPOINT" --no-progress --delete
+
+      - name: Attach them to the GitHub release too
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
