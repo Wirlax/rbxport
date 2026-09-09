@@ -66,6 +66,11 @@
   --c-beat-head: #7C7C7C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's triangle heads, lighter than its line */
   --c-downbeat-head: #EA3323; /* measured from docs/screenshots; the detail band runs y 358..650: a downbeat's triangle heads — the red is the head, not the line */
   --c-bars-label: #367BDA; /* measured from docs/screenshots; the detail band runs y 358..650: the bar count above the playhead */
+  --c-mixer-band: #282828; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the HIGH/MID/LOW buttons */
+  --c-mixer-knob: #1C1C1C; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the A-GAIN ring, barely above the panel it sits on */
+  --c-mixer-knob-pointer: #D0D0D0; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the knob's tick, the one bright thing in the gain block */
+  --c-mixer-label: #414141; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the 0.0dB readout and the A-GAIN caption, both greyed */
+  --c-mixer-ab: #969696; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the A and B letters above and below the crossfader */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -128,6 +133,19 @@
   --s-player-btn-w: 26px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport buttons, two per 56pt row */
   --s-player-btn-h: 22px; /* measured from a 2x capture of rekordbox 7.2.11 running */
   --s-player-jog-w: 40px; /* measured from a 2x capture of rekordbox 7.2.11 running; CUE and PLAY circles */
+  --s-mixer-strip-w: 48px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the strip x 72.5..120.5pt */
+  --s-mixer-transport-w: 70px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the transport column x 0..70pt — narrower than the 80 of the 1-player layout, because the mixer strip sits beside it */
+  --s-mixer-gutter-w: 2px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the black between the transport column and the strip */
+  --s-mixer-band-w: 36px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): HIGH/MID/LOW x 78.5..114.5pt, 6pt inside the strip on each side */
+  --s-mixer-band-h: 15px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): HIGH y 158..173pt */
+  --s-mixer-band-gap: 5px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): HIGH ends 173pt, MID starts 178pt */
+  --s-mixer-knob-size: 19px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the A-GAIN ring x 87..106pt */
+  --s-mixer-knob-tick-h: 5px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the knob's tick y 116.5..121pt */
+  --s-mixer-fader-h: 53px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the crossfader track y 240.5..293.5pt */
+  --s-mixer-fader-track-w: 2px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the track line x 95.5..97.5pt */
+  --s-mixer-fader-handle-w: 28px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the handle x 82.5..110.5pt */
+  --s-mixer-fader-handle-h: 3px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the handle y 265..268pt */
+  --s-player-dual-h: 420px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the two-deck band y 56.5..476.5pt, mirrored about its own centre at 266.5 */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
