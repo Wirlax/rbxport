@@ -97,13 +97,25 @@ jobs:
       - name: Collect the installers
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p out
-          # Both bundlers put their output under the target directory; which
-          # subdirectory depends on the target, so this finds them rather than
-          # spelling out two paths that would rot.
-          find src-tauri/target -type f \( -name '*.dmg' -o -name '*-setup.exe' \) \
-            -exec cp {} out/ \;
+          # Both bundlers put their output under a target directory, and which
+          # one that is depends on the workspace: this repo builds into `target`
+          # at the root, not `src-tauri/target`. Found by running the macOS
+          # build locally, where a step that looked only under `src-tauri`
+          # collected nothing at all. Both are searched rather than one being
+          # picked, since either can be right depending on cargo's config.
+          # By path, and never the bundler's own working files: a failed DMG
+          # run leaves `rw.NNNNN.<name>.dmg` scratch images beside the real
+          # one, and a plain *.dmg glob picks those up. Found locally, with
+          # two of them sitting in the bundle directory.
+          find target src-tauri/target -type f ! -name 'rw.*' \
+            \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \) \
+            -exec cp {} out/ \; 2>/dev/null || true
           ls -l out
+          # A release that uploads nothing is worse than one that fails: it
+          # looks like it worked.
+          test "$(find out -type f | wc -l)" -gt 0
 
       - uses: actions/upload-artifact@v4
         with:
