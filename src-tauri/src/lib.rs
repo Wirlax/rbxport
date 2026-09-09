@@ -198,6 +198,7 @@ pub fn run() {
             commands::deck_scrub_end,
             commands::app_diagnostics,
             commands::reveal_track,
+            commands::set_master_level,
             commands::deck_state,
             commands::track_cues,
             commands::track_phrases,

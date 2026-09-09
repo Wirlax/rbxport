@@ -294,7 +294,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let clock: ReturnType<typeof setTimeout> | null = null;
   let clockAt = 0;
 
-  const tick = (): Tick => ({ a: { ...deckA }, b: { ...idle }, sampleRate: SAMPLE_RATE });
+  /** The master level, which a browser can hold even with nothing to apply it to. */
+  let master = 1;
+
+  const tick = (): Tick => ({
+    a: { ...deckA },
+    b: { ...idle },
+    sampleRate: SAMPLE_RATE,
+    // A browser has no audio callback, so there is nothing to meter. Zero is
+    // the truth here rather than a placeholder: nothing is coming out.
+    peakLeft: 0,
+    peakRight: 0,
+    master,
+  });
 
   const sendTick = () => {
     const now = tick();
@@ -591,6 +603,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     deckScrubBegin: () => wait(undefined),
     deckScrubTo: (_deck, positionMs) => {
       deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      sendTick();
+      return wait(undefined);
+    },
+    setMasterLevel: (level) => {
+      master = Math.min(Math.max(level, 0), 1);
       sendTick();
       return wait(undefined);
     },

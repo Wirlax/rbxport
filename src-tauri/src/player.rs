@@ -46,6 +46,12 @@ pub struct TickDto {
     pub a: DeckTickDto,
     pub b: DeckTickDto,
     pub sample_rate: u32,
+    /// The loudest sample the device was given last callback, per channel, so
+    /// the meter reads what can be heard rather than what is in the file.
+    pub peak_left: f32,
+    pub peak_right: f32,
+    /// The master level, 0 to 1.
+    pub master: f32,
 }
 
 impl TickDto {
@@ -59,7 +65,7 @@ impl TickDto {
             playing: false,
             loaded: false,
         };
-        Self { a: empty, b: empty, sample_rate: 0 }
+        Self { a: empty, b: empty, sample_rate: 0, peak_left: 0.0, peak_right: 0.0, master: 1.0 }
     }
 }
 
@@ -160,7 +166,7 @@ pub fn start_ticker(app: &AppHandle) {
             let player = handle.state::<Arc<Player>>();
             let Some(engine) = player.opened() else { break };
             let snapshot = engine.snapshot();
-            if let Err(e) = handle.emit("deck:tick", tick_of(&snapshot)) {
+            if let Err(e) = handle.emit("deck:tick", tick_of(&snapshot, engine.master())) {
                 tracing::warn!(error = %e, "a deck tick did not reach the interface");
             }
             if !snapshot.any_playing() {
@@ -176,7 +182,7 @@ pub fn start_ticker(app: &AppHandle) {
     }
 }
 
-pub fn tick_of(snapshot: &rbl_deck::Snapshot) -> TickDto {
+pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> TickDto {
     let deck = |s: &rbl_deck::DeckSnapshot| DeckTickDto {
         frames: s.position_frames,
         total_frames: s.total_frames,
@@ -184,7 +190,15 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot) -> TickDto {
         playing: s.playing,
         loaded: s.loaded,
     };
-    TickDto { a: deck(&snapshot.a), b: deck(&snapshot.b), sample_rate: snapshot.sample_rate }
+    let (peak_left, peak_right) = master.peaks();
+    TickDto {
+        a: deck(&snapshot.a),
+        b: deck(&snapshot.b),
+        sample_rate: snapshot.sample_rate,
+        peak_left,
+        peak_right,
+        master: master.gain(),
+    }
 }
 
 /// Which deck a command names. Unknown names are deck A rather than an error:

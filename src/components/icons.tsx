@@ -47,7 +47,7 @@ export const FolderIcon = (props: IconProps) => (
 
 export const GearIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.4"/> <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"> <path d="M8 1.2v2.0M8 12.8v2.0M1.2 8h2.0M12.8 8h2.0"/> <path d="M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/> </g>
+    <g fill="currentColor"> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(0 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(45 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(90 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(135 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(180 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(225 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(270 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(315 8 8)"/> <path fillRule="evenodd" d="M8 1.7A6.3 6.3 0 1 0 8 14.3 6.3 6.3 0 0 0 8 1.7zm0 2.7a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2z"/> </g>
   </svg>
 );
 

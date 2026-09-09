@@ -27,6 +27,7 @@ import {
   formatPercent,
   useDiagnostics,
 } from "@/store/useDiagnostics";
+import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
@@ -110,6 +111,7 @@ export function App() {
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
   const cost = useDiagnostics(true);
+  const master = useMaster();
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {
@@ -641,6 +643,11 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         layout={layout}
         onLayoutChange={setLayout}
+        level={master.level}
+        onLevelChange={master.setLevel}
+        peakLeft={master.peakLeft}
+        peakRight={master.peakRight}
+        cpu={cost.cpu / 100}
       />
       {/* Full Browser draws no deck at all, and no gutter under one. */}
       {deckCount(layout) > 0 ? (

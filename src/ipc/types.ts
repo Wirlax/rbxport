@@ -263,6 +263,8 @@ export interface Backend {
   deckScrubBegin(deck: DeckId): Promise<void>;
   deckScrubTo(deck: DeckId, positionMs: number): Promise<void>;
   deckScrubEnd(deck: DeckId): Promise<void>;
+  /** The master output level, 0 to 1. It arrives back on the next tick. */
+  setMasterLevel(level: number): Promise<void>;
   /** Both decks now, to anchor the interface when it starts. */
   deckState(): Promise<Tick>;
   /** Both decks, ten times a second, and only while something is playing. */
@@ -308,6 +310,11 @@ export interface Tick {
   b: DeckTick;
   /** The device's rate, which is what every frame count here is in. */
   sampleRate: number;
+  /** The loudest sample the device was given last callback, per channel. */
+  peakLeft: number;
+  peakRight: number;
+  /** The master level, 0 to 1. */
+  master: number;
 }
 
 /** A deck finishing a load, or failing one. */

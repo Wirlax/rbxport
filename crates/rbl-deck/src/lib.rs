@@ -35,6 +35,7 @@ mod scrub;
 mod sink;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use rtrb::Consumer;
@@ -107,10 +108,60 @@ impl Snapshot {
     }
 }
 
+/// The master level, and the peaks that came out of it.
+///
+/// One `AtomicU32` a value, holding an `f32`'s bits: the callback writes them
+/// and the interface reads them, and neither ever blocks the other.
+#[derive(Debug)]
+pub struct Master {
+    gain: AtomicU32,
+    peak_left: AtomicU32,
+    peak_right: AtomicU32,
+}
+
+impl Default for Master {
+    fn default() -> Self {
+        Self {
+            gain: AtomicU32::new(1.0_f32.to_bits()),
+            peak_left: AtomicU32::new(0),
+            peak_right: AtomicU32::new(0),
+        }
+    }
+}
+
+impl Master {
+    pub fn gain(&self) -> f32 {
+        f32::from_bits(self.gain.load(Ordering::Relaxed))
+    }
+
+    /// Sets the level, 0 to 1. Anything outside is clamped rather than refused:
+    /// a knob dragged past its end is a knob at its end.
+    pub fn set_gain(&self, gain: f32) {
+        let safe = if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 1.0 };
+        self.gain.store(safe.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The loudest sample of the last callback, per channel.
+    fn report(&self, left: f32, right: f32) {
+        self.peak_left.store(left.to_bits(), Ordering::Relaxed);
+        self.peak_right.store(right.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Reads the meters. Peaks, not an average: an average of eleven
+    /// milliseconds is a meter that never moves.
+    pub fn peaks(&self) -> (f32, f32) {
+        (
+            f32::from_bits(self.peak_left.load(Ordering::Relaxed)),
+            f32::from_bits(self.peak_right.load(Ordering::Relaxed)),
+        )
+    }
+}
+
 pub struct Engine {
     decks: [deck::DeckHandle; 2],
     sink: Arc<dyn Sink>,
     sample_rate: u32,
+    master: Arc<Master>,
 }
 
 impl Engine {
@@ -138,16 +189,33 @@ impl Engine {
 
         // The callback owns the readers outright: nothing else touches them,
         // so it never has to take a lock to read one.
+        // The master level and what came out of it. Atomics rather than a
+        // lock: the callback is realtime and must never wait for the interface
+        // to finish reading a meter.
+        let master = Arc::new(Master::default());
+        let mixing = Arc::clone(&master);
         let render: Render = Box::new(move |out: &mut [f32]| {
             for reader in &mut readers {
                 reader.mix_into(out);
             }
+            let gain = mixing.gain();
             // Two decks at full level sum past 1.0. A clamp is not a limiter —
             // that is the mixer's job, in P3 — but it keeps a hot sum from
             // reaching the device as a wrap.
-            for sample in out.iter_mut() {
-                *sample = sample.clamp(-1.0, 1.0);
+            let (mut left, mut right) = (0.0_f32, 0.0_f32);
+            for (i, sample) in out.iter_mut().enumerate() {
+                let value = (*sample * gain).clamp(-1.0, 1.0);
+                *sample = value;
+                // The meter reads what the device is given, after the level:
+                // a meter before the fader tells you about the file rather
+                // than about what anyone can hear.
+                if i % 2 == 0 {
+                    left = left.max(value.abs());
+                } else {
+                    right = right.max(value.abs());
+                }
             }
+            mixing.report(left, right);
         });
 
         let sink = open(render)?;
@@ -168,11 +236,16 @@ impl Engine {
         let decks: [deck::DeckHandle; 2] = handles
             .try_into()
             .map_err(|_| DeckError::Device("could not start both decks".to_owned()))?;
-        Ok(Self { decks, sink, sample_rate })
+        Ok(Self { decks, sink, sample_rate, master })
     }
 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// The master level and its meters.
+    pub fn master(&self) -> &Arc<Master> {
+        &self.master
     }
 
     fn deck(&self, deck: Deck) -> Option<&deck::DeckHandle> {
@@ -391,5 +464,36 @@ impl DeckReader {
             self.current = None;
             self.offset = 0;
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::float_cmp, reason = "exact values are set and read back")]
+mod master_tests {
+    use super::*;
+
+    #[test]
+    fn a_new_master_is_open_and_silent() {
+        let master = Master::default();
+        assert_eq!(master.gain(), 1.0);
+        assert_eq!(master.peaks(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_knob_dragged_past_its_end_is_a_knob_at_its_end() {
+        let master = Master::default();
+        master.set_gain(2.5);
+        assert_eq!(master.gain(), 1.0);
+        master.set_gain(-1.0);
+        assert_eq!(master.gain(), 0.0);
+        master.set_gain(f32::NAN);
+        assert_eq!(master.gain(), 1.0, "a NaN level would silence the app");
+    }
+
+    #[test]
+    fn the_meters_read_what_the_device_was_given() {
+        let master = Master::default();
+        master.report(0.5, 0.25);
+        assert_eq!(master.peaks(), (0.5, 0.25));
     }
 }

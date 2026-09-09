@@ -743,6 +743,22 @@ pub async fn deck_seek(
     Ok(())
 }
 
+/// The master output level, 0 to 1.
+///
+/// It reaches the meters on the next tick rather than coming back from here:
+/// the level is the audio callback's to apply, and the interface reads what it
+/// actually did rather than what it was asked for.
+#[tauri::command]
+pub async fn set_master_level(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    level: f32,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.master().set_gain(level);
+    Ok(())
+}
+
 /// Shows a track's file in the Finder.
 ///
 /// The OS does the revealing; this only resolves the id to the path the
@@ -832,7 +848,7 @@ pub async fn deck_state(
     player: State<'_, Arc<crate::player::Player>>,
 ) -> AppResult<crate::player::TickDto> {
     Ok(player.opened().map_or_else(crate::player::TickDto::silent, |engine| {
-        crate::player::tick_of(&engine.snapshot())
+        crate::player::tick_of(&engine.snapshot(), engine.master())
     }))
 }
 

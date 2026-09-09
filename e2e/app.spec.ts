@@ -232,15 +232,19 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
 });
 
 test("the top bar carries what rekordbox's does, in its order", async ({ page }) => {
-  // Read off a capture of 7.2.11 running: information, the plan badge,
-  // settings, headphone monitoring, the master level, then the clock.
+  // Read off a capture of 7.2.11 running: information, the plan badge, the
+  // gear, the level knob, the two-channel output meter, the processor meter,
+  // then the clock. The knob replaced a headphone button that rekordbox does
+  // not have there.
   await page.goto("/");
   const bar = page.getByRole("banner");
   await expect(bar.getByRole("button", { name: "Information" })).toBeVisible();
   await expect(bar.getByText("Professional")).toBeVisible();
   await expect(bar.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
-  await expect(bar.getByRole("button", { name: "Headphone monitoring" })).toBeVisible();
-  await expect(bar.getByRole("meter", { name: "Master level" })).toBeVisible();
+  await expect(bar.getByRole("slider", { name: "Master level" })).toBeVisible();
+  await expect(bar.getByRole("meter", { name: "Master output L" })).toBeVisible();
+  await expect(bar.getByRole("meter", { name: "Master output R" })).toBeVisible();
+  await expect(bar.getByRole("meter", { name: "Processor" })).toBeVisible();
 
   // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
   await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
@@ -251,13 +255,42 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
     bar.getByRole("button", { name: "Information" }),
     bar.getByText("Professional"),
     bar.getByRole("button", { name: "Settings", exact: true }),
-    bar.getByRole("button", { name: "Headphone monitoring" }),
-    bar.getByRole("meter", { name: "Master level" }),
+    bar.getByRole("slider", { name: "Master level" }),
+    bar.getByRole("meter", { name: "Master output L" }),
+    bar.getByRole("meter", { name: "Processor" }),
     page.getByTestId("clock"),
   ]) {
     xs.push((await item.boundingBox())?.x ?? 0);
   }
   expect(xs).toEqual([...xs].sort((a, b) => a - b));
+});
+
+test("the level knob turns, and both meters are the measured size", async ({ page }) => {
+  await page.goto("/");
+  const bar = page.getByRole("banner");
+  const knob = bar.getByRole("slider", { name: "Master level" });
+  await expect(knob).toHaveAttribute("aria-valuenow", "100");
+
+  // Dragged, not clicked, and up is louder — so a drag down turns it down.
+  const box = await knob.boundingBox();
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9);
+  await page.mouse.down();
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 69, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await knob.getAttribute("aria-valuenow")))
+    .toBeLessThan(100);
+
+  // The meters are the capture's: 80pt over two channels, and 35pt alone.
+  const vu = await bar.getByRole("meter", { name: "Master output L" }).boundingBox();
+  const cpu = await bar.getByRole("meter", { name: "Processor" }).boundingBox();
+  const width = async (name: string) =>
+    page.evaluate(
+      (n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)),
+      name,
+    );
+  expect(vu?.width).toBeCloseTo(await width("--s-top-vu-w"), 0);
+  expect(cpu?.width).toBeCloseTo(await width("--s-top-cpu-w"), 0);
+  expect(vu?.height).toBeCloseTo(await width("--s-top-meter-h"), 0);
 });
 
 test("the tree and the browser are separated by a black gutter", async ({ page }) => {
