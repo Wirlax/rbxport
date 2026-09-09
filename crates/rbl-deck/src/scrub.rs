@@ -6,6 +6,9 @@
 //! is under the needle at whatever speed the hand is moving it, forwards or
 //! backwards, and stops making a sound when the hand stops.
 //!
+//! What this was measured at when it was judged to sound right, and which test
+//! holds each of those numbers, is in `docs/design-notes/scrub-baseline.md`.
+//!
 //! So: a window of decoded audio around the cursor, and a read head that moves
 //! through it at the drag's own rate. Both halves are here and neither knows
 //! about threads — the decode thread fills the window, and calls `render` to
@@ -349,12 +352,25 @@ impl Scrubber {
     /// the cap is for is the gap a flick opens *beyond* the trail, which no
     /// rate could ever close.
     fn pull_up(&mut self) {
-        // One report's worth of trail, not the whole of it. The ring's own
-        // lead is 2 blocks, which at the top rate is another 8 000 frames the
-        // head would be entitled to grind through after a flick before the
-        // stop is noticed — and a flick that keeps sounding is the thing
-        // `MAX_LAG` exists to prevent.
-        let limit = MAX_LAG + (self.speed * self.interval()).abs();
+        // Not while the head is still getting up to speed. It cannot
+        // accelerate in a block, so at the start of a fast drag it falls
+        // further behind than the trail through no fault of its own — and that
+        // lag is real music it is about to work off, not a gap it can never
+        // close. Jumping it forward instead was a step of most of full scale
+        // half a dozen times over the first tenth of a second of a five-times
+        // drag, which is a click. What the cap is for is the gap a flick
+        // opens, and there the rate is at its own ceiling within a block or
+        // two and this stops holding it off.
+        if self.rate.abs() < self.speed.abs() * 0.9 {
+            return;
+        }
+        // The whole trail, never less. Where the head belongs is where the
+        // head belongs: a limit tighter than the trail is one the head sits
+        // outside of on every report of an ordinary drag, and being yanked
+        // forward is a jump in the read position — a step of over a full scale
+        // at three times playback, which is a click. Trimming this to shorten
+        // what a flick plays after the hand stops bought 28 ms and cost that.
+        let limit = MAX_LAG + self.trail().abs();
         let lag = self.target - self.cursor;
         if lag > limit {
             self.cursor = self.target - limit;
@@ -753,65 +769,166 @@ mod tests {
         }
     }
 
+    const RATE: f64 = 44_100.0;
+    const BLOCK: usize = 512;
+    const BLOCK_SECONDS: f64 = BLOCK as f64 / RATE;
+    /// A 60 Hz screen: a pointer cannot report more often than this.
+    const POINTER_HZ: f64 = 60.0;
+    /// Frames of music one pixel of the detail waveform covers.
+    ///
+    /// Twelve bars at 128 BPM is 22.5 s, over a strip about 900 px wide. This
+    /// number is why the old loop failed: it is about one `span`, so a single
+    /// pixel commanded a full-speed sprint.
+    const FRAMES_PER_PIXEL: f64 = 22.5 * RATE / 900.0;
+
+    /// What a hand did to the head, block by block.
+    struct Drag {
+        /// The rate planned for each block.
+        rates: Vec<f64>,
+        /// Where the head and the pointer were at each block, so one can be
+        /// checked against the other.
+        heads: Vec<f64>,
+        pointers: Vec<f64>,
+        /// Everything the head played, for measuring steps in.
+        stream: Vec<f32>,
+    }
+
+    impl Drag {
+        /// The mean planned rate, ignoring the first `skip` seconds.
+        fn mean(&self, skip: f64) -> f64 {
+            let from = (skip / BLOCK_SECONDS) as usize;
+            let rates = &self.rates[from.min(self.rates.len())..];
+            rates.iter().sum::<f64>() / rates.len() as f64
+        }
+
+        /// How much the rate wandered, as a percentage of what it averaged.
+        fn warble(&self, skip: f64) -> f64 {
+            let from = (skip / BLOCK_SECONDS) as usize;
+            let rates = &self.rates[from.min(self.rates.len())..];
+            let mean = self.mean(skip);
+            let sd = (rates.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / rates.len() as f64)
+                .sqrt();
+            sd / mean.abs() * 100.0
+        }
+
+        /// Blocks after `from` before the head is silent for good.
+        ///
+        /// The audio, not the rate: a head whose rate has reached zero is
+        /// still fading, and a head being pulled up over and over has a rate
+        /// that keeps passing through zero while it grinds on. What a listener
+        /// hears is whether anything is coming out.
+        fn blocks_until_quiet(&self, from: usize) -> usize {
+            self.stream
+                .chunks(BLOCK * 2)
+                .enumerate()
+                .skip(from)
+                .rev()
+                .find(|(_, block)| block.iter().any(|s| *s != 0.0))
+                .map_or(0, |(i, _)| i + 1 - from)
+        }
+
+        /// Steps big enough to be the head jumping rather than the music.
+        ///
+        /// A 60 Hz sine moves by under a hundredth between neighbouring frames
+        /// at playback speed and under a twentieth at the fastest the head
+        /// runs, so anything past a half is a discontinuity.
+        fn jumps(&self) -> usize {
+            self.stream
+                .chunks_exact(2)
+                .map(|f| f[0])
+                .collect::<Vec<_>>()
+                .windows(2)
+                .filter(|w| (w[1] - w[0]).abs() > 0.5)
+                .count()
+        }
+    }
+
+    /// Drives a hand across the detail waveform and reports what the head did.
+    ///
+    /// A mouse, not a trackpad: the pointer reports only once the cursor has
+    /// crossed a whole pixel, and each report is stamped with the time it was
+    /// sent rather than counted in blocks afterwards, which is what the engine
+    /// does. `px_per_second` may be negative, which is a hand pulling back.
+    fn drag_pixels(px_per_second: f64, seconds: f64) -> Drag {
+        drag_varying(&[(px_per_second, seconds)])
+    }
+
+    /// The same, for a hand that changes speed part way through.
+    fn drag_varying(legs: &[(f64, f64)]) -> Drag {
+        let start = 1_000_000.0_f64;
+        let window = bass(0, 2_000_000);
+        let mut scrubber = Scrubber::new(start as u64);
+        let mut out = vec![0.0_f32; BLOCK * 2];
+        let mut drag =
+            Drag { rates: Vec::new(), heads: Vec::new(), pointers: Vec::new(), stream: Vec::new() };
+
+        // Where the pointer physically is, in pixels, and the last whole one
+        // it managed to report.
+        let (mut exact, mut reported, mut last_report) = (0.0_f64, 0.0_f64, 0.0_f64);
+        let (mut next_report, mut now) = (0.0_f64, 0.0_f64);
+        let total: f64 = legs.iter().map(|(_, s)| s).sum();
+        while now < total {
+            while next_report <= now {
+                // How fast the hand is going just now.
+                let mut at = next_report;
+                let speed = legs
+                    .iter()
+                    .find(|(_, seconds)| {
+                        at -= seconds;
+                        at < 0.0
+                    })
+                    .map_or(0.0, |(px, _)| *px);
+                exact += speed / POINTER_HZ;
+                if (exact.floor() - reported).abs() >= 1.0 {
+                    reported = exact.floor();
+                    let since = (next_report - last_report) * RATE;
+                    last_report = next_report;
+                    scrubber.aim((start + reported * FRAMES_PER_PIXEL) as u64, since);
+                }
+                next_report += 1.0 / POINTER_HZ;
+            }
+            scrubber.render(&window, &mut out);
+            drag.rates.push(scrubber.rate());
+            drag.heads.push(scrubber.cursor() as f64);
+            drag.pointers.push(scrubber.target() as f64);
+            drag.stream.extend_from_slice(&out);
+            now += BLOCK_SECONDS;
+        }
+        drag
+    }
+
+    /// The speed such a hand is asking for, as a multiple of playback.
+    fn hand_rate(px_per_second: f64) -> f64 {
+        px_per_second * FRAMES_PER_PIXEL / RATE
+    }
+
     /// A hand crossing pixels slowly still turns the record.
     ///
     /// The one the second report was about: dragging slowly sounded like the
     /// track playing at its own pitch in bursts with gaps between. A mouse
     /// only reports once the cursor has crossed a whole pixel, and a pixel of
-    /// the detail waveform at its default zoom is 1102 frames — about one
-    /// `span`. So under the old loop every pixel crossed commanded a full
-    /// speed sprint however long the hand had taken to cross it, and then the
-    /// settle timer expired before the next pixel arrived and cut the head to
-    /// silence. Below about 30 px/s it was quiet more than half the time.
+    /// the detail waveform at its default zoom is about one `span`. So under
+    /// the old loop every pixel crossed commanded a full-speed sprint however
+    /// long the hand had taken to cross it, and then the settle timer expired
+    /// before the next pixel arrived and cut the head to silence. Below about
+    /// 30 px/s it was quiet more than half the time.
     ///
     /// `a_steady_hand_turns_the_record_at_a_steady_speed` missed it because it
     /// models a pointer reporting a fresh fractional position every screen
     /// frame, which is a trackpad rather than a mouse.
     #[test]
     fn a_hand_crossing_pixels_slowly_still_turns_the_record() {
-        const RATE: f64 = 44_100.0;
-        const BLOCK: usize = 512;
-        const BLOCK_SECONDS: f64 = BLOCK as f64 / RATE;
-        const POINTER_HZ: f64 = 60.0;
-        /// Twelve bars at 128 BPM is 22.5 s, over a strip about 900 px wide.
-        const FRAMES_PER_PIXEL: f64 = 22.5 * RATE / 900.0;
-
         for px_per_second in [10.0_f64, 20.0, 30.0, 50.0, 120.0] {
-            let start = 1_000_000.0_f64;
-            let window = ramp(0, 2_000_000);
-            let mut scrubber = Scrubber::new(start as u64);
-            let mut out = vec![0.0_f32; BLOCK * 2];
-            let mut rates = Vec::new();
-            let (mut reported, mut next_report, mut last_report) = (0.0_f64, 0.0_f64, 0.0_f64);
-            for block in 0..(2.0 / BLOCK_SECONDS) as usize {
-                let now = block as f64 * BLOCK_SECONDS;
-                while next_report <= now {
-                    let exact = (next_report * px_per_second).floor();
-                    // Whole pixels, and only once one has been crossed.
-                    if (exact - reported).abs() >= 1.0 {
-                        reported = exact;
-                        // Stamped when the pointer reported, which is what the
-                        // engine does — not when the block that follows it is
-                        // rendered.
-                        let since = (next_report - last_report) * RATE;
-                        last_report = next_report;
-                        scrubber.aim((start + reported * FRAMES_PER_PIXEL) as u64, since);
-                    }
-                    next_report += 1.0 / POINTER_HZ;
-                }
-                scrubber.render(&window, &mut out);
-                // Past the quarter second the head takes to reach speed.
-                if now > 0.25 {
-                    rates.push(scrubber.rate());
-                }
-            }
+            let drag = drag_pixels(px_per_second, 2.0);
+            let hand = hand_rate(px_per_second);
 
-            let hand = px_per_second * FRAMES_PER_PIXEL / RATE;
+            // Past the quarter second the head takes to reach speed.
+            let from = (0.25 / BLOCK_SECONDS) as usize;
             assert!(
-                rates.iter().all(|r| *r != 0.0),
+                drag.rates[from..].iter().all(|r| *r != 0.0),
                 "at {px_per_second} px/s the head went quiet mid-drag",
             );
-            let mean = rates.iter().sum::<f64>() / rates.len() as f64;
+            let mean = drag.mean(0.25);
             // Measured within 6.5%, and within 1% at the speeds a hand
             // spends most of its time at. The pull back onto the pointer is
             // deliberately weak, and a steady few percent off is a pitch
@@ -820,16 +937,191 @@ mod tests {
                 (mean - hand).abs() < hand * 0.10,
                 "a {hand}x hand turned the record at {mean}x",
             );
-            let sd = (rates.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
-                / rates.len() as f64)
-                .sqrt();
-            let warble = sd / mean * 100.0;
+            let warble = drag.warble(0.25);
             // Measured at 4.2% averaged over these speeds and 6.8% at the
             // worst of them, against 117.7% at 10 px/s before. The bound is
             // where a regression shows up, not where the ear gives out.
             assert!(
                 warble < 10.0,
                 "at {px_per_second} px/s the rate wandered by {warble:.1}% of itself",
+            );
+            // Tighter at the slow end, which is where the gap to the last
+            // reported position is worst: a hand crossing a pixel every tenth
+            // of a second leaves the head correcting against a step of a whole
+            // pixel that then vanishes. Carrying the pointer forward at its
+            // measured speed between reports is what takes that sawtooth out,
+            // and this is the only thing that notices whether it does.
+            // Measured at 4.8% and 5.3% here, against 5.5% and 6.5% without.
+            if px_per_second <= 20.0 {
+                assert!(
+                    warble < 6.0,
+                    "at {px_per_second} px/s the rate wandered by {warble:.1}% of itself",
+                );
+            }
+        }
+    }
+
+    /// A hand pulling back turns the record back, just as evenly.
+    ///
+    /// The rate loop is signed throughout and there is no reason for backwards
+    /// to behave differently, which is exactly why it is worth an assertion:
+    /// the trail, the settle threshold and the clamp on overtaking all have a
+    /// sign in them, and one of them getting it wrong would be silent.
+    #[test]
+    fn a_hand_pulling_back_turns_the_record_backwards() {
+        for px_per_second in [-10.0_f64, -20.0, -30.0, -50.0, -120.0] {
+            let drag = drag_pixels(px_per_second, 2.0);
+            let hand = hand_rate(px_per_second);
+            let from = (0.25 / BLOCK_SECONDS) as usize;
+            assert!(
+                drag.rates[from..].iter().all(|r| *r < 0.0),
+                "at {px_per_second} px/s the head stopped or ran forwards",
+            );
+            let mean = drag.mean(0.25);
+            assert!(
+                (mean - hand).abs() < hand.abs() * 0.10,
+                "a {hand}x hand turned the record at {mean}x",
+            );
+            // Measured at 3.2% averaged over these speeds, the same as
+            // forwards; the bound matches the forward test's.
+            let warble = drag.warble(0.25);
+            assert!(
+                warble < 10.0,
+                "at {px_per_second} px/s the rate wandered by {warble:.1}% of itself",
+            );
+        }
+    }
+
+    /// A flick stops soon after the hand does.
+    ///
+    /// The one that regressed silently while the rate loop was being reworked:
+    /// carrying the pointer forward at its measured speed between reports, and
+    /// letting the head trail by a distance worked out from that speed, both
+    /// grow with the speed — and a flick's is enormous. Nothing caught it at
+    /// 692 ms because every test of a stop aimed *once* and then waited, which
+    /// leaves the speed at zero and the trail with it. It takes a burst of
+    /// fast reports to build either of them up.
+    #[test]
+    fn a_flick_stops_soon_after_the_hand_does() {
+        // The pointer crosses four thousand pixels a second — the whole strip
+        // several times over — for a fifth of a second, and then stops dead.
+        let drag = drag_varying(&[(4_000.0, 0.2), (0.0, 1.0)]);
+        let stopped_at = (0.2 / BLOCK_SECONDS) as usize;
+        let played = drag.blocks_until_quiet(stopped_at);
+        // Measured at 6 blocks, 70 ms; 9 if the measured speed is not clamped
+        // where it is taken. A flick is meant to sound like the music it
+        // passed over and then stop, and a fifth of a second of it after the
+        // hand has stopped is not that.
+        assert!(
+            played <= 8,
+            "the head played on for {played} blocks after the hand stopped",
+        );
+        assert!(played > 0, "a flick should be audible at all");
+    }
+
+    /// The head never gets in front of the pointer.
+    ///
+    /// A record only turns as far as it has been pushed. This is also what
+    /// brings a drag to rest the moment the hand does — the head plays out
+    /// what it was trailing by and then has nothing left — so it holding is
+    /// what keeps a stop from needing a timer to notice it.
+    #[test]
+    fn the_head_never_gets_in_front_of_the_pointer() {
+        for px_per_second in [10.0_f64, 50.0, 200.0, -50.0] {
+            let drag = drag_pixels(px_per_second, 2.0);
+            let ahead = drag
+                .heads
+                .iter()
+                .zip(&drag.pointers)
+                .map(|(head, pointer)| (head - pointer) * px_per_second.signum())
+                .fold(f64::MIN, f64::max);
+            // Within a frame: the clamp is checked before each sample is
+            // taken, so the head can cross by at most the one step it was
+            // already committed to, which at eight times is eight frames.
+            assert!(
+                ahead <= 8.0,
+                "at {px_per_second} px/s the head got {ahead:.0} frames in front of the pointer",
+            );
+        }
+    }
+
+    /// A hand that changes speed is followed.
+    ///
+    /// The speed is measured between reports and smoothed, so it lags a hand
+    /// that changes its mind — `SPEED_SMOOTH` is chosen for how long. This is
+    /// the assertion that keeps that choice honest: filter the speed harder to
+    /// buy a smoother number and the head stops answering the hand.
+    #[test]
+    fn a_hand_that_changes_speed_is_followed() {
+        for (from, to) in [(20.0_f64, 80.0_f64), (80.0, 20.0)] {
+            let drag = drag_varying(&[(from, 1.0), (to, 1.0)]);
+            let wanted = hand_rate(to);
+            let changed_at = (1.0 / BLOCK_SECONDS) as usize;
+            let took = drag.rates[changed_at..]
+                .iter()
+                .position(|rate| (rate - wanted).abs() < wanted * 0.1);
+            // Measured at 13 blocks speeding up and 42 slowing down, which is
+            // 150 ms and 490 ms. Slowing takes longer because the hand reports
+            // less often once it has: the head is timing itself against a
+            // clock that has itself slowed down.
+            assert!(
+                took.is_some_and(|blocks| blocks <= 60),
+                "{from} -> {to} px/s: the head took {took:?} blocks to follow",
+            );
+            // And it settles there rather than merely passing through.
+            let settled = drag.mean(1.5);
+            assert!(
+                (settled - wanted).abs() < wanted * 0.10,
+                "{from} -> {to} px/s: the head settled at {settled}x, not {wanted}x",
+            );
+        }
+    }
+
+    /// A fast drag is not a string of jumps.
+    ///
+    /// Being pulled up is a jump in the read position, and a jump is a step in
+    /// the waveform. One at the end of a flick is the point of `MAX_LAG` —
+    /// music the head could never render is skipped rather than ground
+    /// through. A drag the head *can* keep up with should not be pulled up at
+    /// all, and the two ways it was: a lag limit drawn tighter than the trail
+    /// the head is deliberately keeping, and pulling the head up over the lag
+    /// it builds while it is still getting to speed, which it works off by
+    /// itself given a moment.
+    #[test]
+    fn a_fast_drag_is_not_a_string_of_jumps() {
+        for px_per_second in [120.0_f64, 200.0] {
+            let jumps = drag_pixels(px_per_second, 2.0).jumps();
+            // Measured at 1 and 2 over two seconds. With the limit drawn at a
+            // flat `MAX_LAG` and no hold-off while the head accelerates it was
+            // 15 and 67 — a click every other block through the run-up.
+            assert!(
+                jumps <= 4,
+                "at {px_per_second} px/s the head jumped {jumps} times in two seconds",
+            );
+        }
+    }
+
+    /// A drag at the speeds a hand works at does not step.
+    ///
+    /// Crackle is a discontinuity, and bass is where it is loudest. Every jump
+    /// the head can take is guarded elsewhere — the settle does not close the
+    /// last of a gap, the stop is faded, the head is not pulled up while it is
+    /// still getting to speed — and this is the assertion that all of them
+    /// together add up to an unbroken waveform.
+    #[test]
+    fn a_drag_at_hand_speeds_does_not_step() {
+        for px_per_second in [10.0_f64, 20.0, 30.0, 50.0, -30.0] {
+            let drag = drag_pixels(px_per_second, 2.0);
+            let worst = worst_step(&drag.stream);
+            // Measured at 0.008. Neighbouring frames of a 60 Hz sine differ by
+            // under a hundredth at playback speed, so the bound is a little
+            // over what the music itself does; anything above it came from the
+            // head. Above about three times playback the head is pulled up on
+            // a long drag and that is a step by design — see `pull_up` — but
+            // no hand scrubs a waveform at three times for two seconds.
+            assert!(
+                worst < 0.02,
+                "at {px_per_second} px/s the head stepped by {worst}, which is a click",
             );
         }
     }
