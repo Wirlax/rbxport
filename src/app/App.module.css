@@ -22,15 +22,16 @@
   user-select: none;
 }
 
-/* The cost readout, in the corner past the traffic lights. Absolute, so the
-   name stays on the window's own centre rather than the centre of whatever is
-   left of the strip. */
+/* The cost readout, at the right end of the strip. Absolute, so the name stays
+   on the window's own centre rather than on the centre of whatever is left of
+   it. Not bold: the name is the title, and this is the instrumentation. */
 .cost {
   position: absolute;
-  left: 82px;
+  right: 14px;
   display: flex;
   gap: 12px;
   color: var(--c-text-dim);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
