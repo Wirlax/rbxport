@@ -296,8 +296,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    */
   const SAMPLE_RATE = 44_100;
   const TICK_MS = 100;
-  const deckA = { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false };
-  const idle = { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false };
+  const deckA = {
+    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
+    tempo: 1, masterTempo: false,
+  };
+  const idle = {
+    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
+    tempo: 1, masterTempo: false,
+  };
   const deckTickListeners = new Set<(tick: Tick) => void>();
   const deckEventListeners = new Set<(event: DeckEvent) => void>();
   let clock: ReturnType<typeof setTimeout> | null = null;
@@ -623,6 +629,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     // The mixer is the engine's; a browser has no audio to apply it to, so
     // these are accepted and dropped rather than pretended at.
+    // The tempo is the engine's, but the mock keeps it so the readout and the
+    // MT button move: a browser has no audio to apply it to, and a control
+    // that does not respond reads as a broken one.
+    deckTempo: (_deck, tempo) => {
+      deckA.tempo = Math.min(Math.max(tempo, 0.5), 2);
+      sendTick();
+      return wait(undefined);
+    },
+    deckMasterTempo: (_deck, on) => {
+      deckA.masterTempo = on;
+      sendTick();
+      return wait(undefined);
+    },
     setChannelBand: () => wait(undefined),
     setChannelKill: () => wait(undefined),
     setChannelTrim: () => wait(undefined),

@@ -50,6 +50,19 @@ export interface Playback {
   scrubBegin: () => void;
   scrubTo: (seconds: number) => void;
   scrubEnd: () => void;
+  /**
+   * How fast the deck is playing, as a multiple of the file's own speed.
+   *
+   * 1 is the track as recorded. What BPM that comes to is the caller's to work
+   * out from the track, because the deck does not know the track's.
+   */
+  tempo: number;
+  /** Whether the pitch is held while the speed changes: rekordbox's MT. */
+  masterTempo: boolean;
+  setTempo: (tempo: number) => void;
+  /** One step of the tempo control, up or down. */
+  nudgeTempo: (direction: number) => void;
+  setMasterTempo: (on: boolean) => void;
   /** Where playback is right now, without waiting for a render. */
   positionRef: React.RefObject<number>;
   /**
@@ -102,6 +115,8 @@ export function reasonFrom(error: unknown): string {
 
 export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK): Playback {
   const [playing, setPlaying] = useState(false);
+  const [tempo, setTempoState] = useState(1);
+  const [masterTempo, setMasterTempoState] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +158,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       const now = performance.now();
       setPlaying(deck.playing);
       setDuration(rate > 0 ? deck.totalFrames / rate : 0);
+      // The engine's word for both, so a deck loaded by something else still
+      // shows what it is doing.
+      setTempoState(deck.tempo > 0 ? deck.tempo : 1);
+      setMasterTempoState(deck.masterTempo);
       // A drag owns the playhead, and the deck's head is not under the
       // pointer: it is rate-limited so the drag stays audible, so it trails a
       // fast hand and rests a block past a still one. Taking it as the anchor
@@ -389,6 +408,55 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   );
 
   /** Lets go. The playhead stays where the drag left it. */
+  /**
+   * One press of the tempo control, as a fraction of the file's speed.
+   *
+   * A tenth of a percent, which is what a CDJ's ± buttons move by on the
+   * finest setting: it is the step somebody uses to hold a beat, and a coarser
+   * one would be a control for changing key rather than for mixing.
+   */
+  const TEMPO_STEP = 0.001;
+
+  const setTempo = useCallback(
+    (next: number) => {
+      if (idle || !Number.isFinite(next)) return;
+      const safe = Math.min(Math.max(next, 0.5), 2);
+      // Shown at once rather than on the next tick: a fader that answers a
+      // tenth of a second later is a fader people press twice.
+      setTempoState(safe);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          await backend.deckTempo(DECK, safe);
+        } catch (failure) {
+          setError(reasonFrom(failure));
+        }
+      })();
+    },
+    [idle, DECK],
+  );
+
+  const nudgeTempo = useCallback(
+    (direction: number) => setTempo(tempo + TEMPO_STEP * Math.sign(direction)),
+    [setTempo, tempo],
+  );
+
+  const setMasterTempo = useCallback(
+    (on: boolean) => {
+      if (idle) return;
+      setMasterTempoState(on);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          await backend.deckMasterTempo(DECK, on);
+        } catch (failure) {
+          setError(reasonFrom(failure));
+        }
+      })();
+    },
+    [idle, DECK],
+  );
+
   const scrubEnd = useCallback(() => {
     if (!scrubbing.current) return;
     scrubbing.current = false;
@@ -436,5 +504,6 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   return {
     playing, position, duration, idle, error, toggle, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, subscribe,
+    tempo, masterTempo, setTempo, nudgeTempo, setMasterTempo,
   };
 }

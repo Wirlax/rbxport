@@ -1185,6 +1185,55 @@ export const Player = memo(function Player({
           </div>
           )}
 
+          {/* The tempo cluster, as the capture has it: the BPM the deck is
+              playing at with a step either side, the key lock, and a reset.
+              rekordbox puts them between the pads and Q. */}
+          <div className={styles.tempo} role="group" aria-label="Tempo">
+            <button
+              type="button"
+              className={styles.step}
+              aria-label="Slower"
+              disabled={playback.idle}
+              onClick={() => playback.nudgeTempo(-1)}
+            >
+              −
+            </button>
+            <span className={styles.bpmField} data-testid="player-bpm">
+              {formatBpm(Math.round((track?.bpmX100 ?? 0) * playback.tempo))}
+            </span>
+            <button
+              type="button"
+              className={styles.step}
+              aria-label="Faster"
+              disabled={playback.idle}
+              onClick={() => playback.nudgeTempo(1)}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className={styles.chip}
+              // Master Tempo, which rekordbox labels MT: the key stays put
+              // while the speed changes.
+              aria-label="Master tempo"
+              aria-pressed={playback.masterTempo}
+              data-on={playback.masterTempo ? "" : undefined}
+              disabled={playback.idle}
+              onClick={() => playback.setMasterTempo(!playback.masterTempo)}
+            >
+              MT
+            </button>
+            <button
+              type="button"
+              className={styles.chip}
+              aria-label="Reset tempo"
+              disabled={playback.idle || playback.tempo === 1}
+              onClick={() => playback.setTempo(1)}
+            >
+              RST
+            </button>
+          </div>
+
           <button
             type="button"
             className={styles.chip}

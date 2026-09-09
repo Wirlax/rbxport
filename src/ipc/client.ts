@@ -119,6 +119,8 @@ async function realBackend(): Promise<Backend> {
     deckScrubTo: (deck, positionMs) => invoke<void>("deck_scrub_to", { deck, positionMs }),
     deckScrubEnd: (deck) => invoke<void>("deck_scrub_end", { deck }),
     setMasterLevel: (level) => invoke<void>("set_master_level", { level }),
+    deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),
+    deckMasterTempo: (deck, on) => invoke<void>("deck_master_tempo", { deck, on }),
     setChannelBand: (deck, band, position) =>
       invoke<void>("set_channel_band", { deck, band, position }),
     setChannelKill: (deck, band, killed) =>

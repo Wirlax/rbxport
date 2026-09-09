@@ -1561,6 +1561,39 @@ test("clicking the artwork ejects the track from the deck", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
 });
 
+test("the tempo control moves the deck's BPM, and MT and RST are real", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  // A track, so there is a BPM to move.
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+
+  const deck = page.getByRole("region", { name: "Preview player" }).first();
+  const bpm = deck.getByTestId("player-bpm");
+  const at = async () => Number(await bpm.innerText());
+  const resting = await at();
+  expect(resting).toBeGreaterThan(0);
+
+  // A tenth of a percent a press, which is the step a CDJ's fine setting uses.
+  await deck.getByRole("button", { name: "Faster" }).click();
+  await expect.poll(at).toBeGreaterThan(resting);
+  await deck.getByRole("button", { name: "Slower" }).click();
+  await deck.getByRole("button", { name: "Slower" }).click();
+  await expect.poll(at).toBeLessThan(resting);
+
+  // RST puts it back, and goes inert once there is nothing to reset.
+  const reset = deck.getByRole("button", { name: "Reset tempo" });
+  await expect(reset).toBeEnabled();
+  await reset.click();
+  await expect.poll(at).toBe(resting);
+  await expect(reset).toBeDisabled();
+
+  // MT is a toggle: the key stays put while the speed changes.
+  const mt = deck.getByRole("button", { name: "Master tempo" });
+  await expect(mt).toHaveAttribute("aria-pressed", "false");
+  await mt.click();
+  await expect(mt).toHaveAttribute("aria-pressed", "true");
+});
+
 test("dual control links what both decks are showing", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

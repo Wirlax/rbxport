@@ -266,6 +266,15 @@ export interface Backend {
   /** The master output level, 0 to 1. It arrives back on the next tick. */
   setMasterLevel(level: number): Promise<void>;
   /**
+   * How fast a deck plays, as a multiple of the file's own speed.
+   *
+   * A ratio rather than a BPM: what BPM that comes to depends on the track,
+   * and the deck does not need to know the track's to play it faster.
+   */
+  deckTempo(deck: DeckId, tempo: number): Promise<void>;
+  /** Master Tempo: whether the pitch is held while the speed changes. */
+  deckMasterTempo(deck: DeckId, on: boolean): Promise<void>;
+  /**
    * One deck's channel strip.
    *
    * Knob positions rather than decibels: what a position means is the mixer's
@@ -329,6 +338,10 @@ export interface DeckTick {
   generation: number;
   playing: boolean;
   loaded: boolean;
+  /** A multiple of the file's own speed: 1 is the track as recorded. */
+  tempo: number;
+  /** Whether the pitch is held while that speed changes. */
+  masterTempo: boolean;
 }
 
 /** Both decks at one instant. About 200 bytes, well inside the event cap. */

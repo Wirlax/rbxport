@@ -191,6 +191,11 @@ fn the_audio_callback_allocates_nothing() {
             100 => engine.play(Deck::A),
             140 => engine.master().set_gain(0.3),
             160 => engine.mixer().set_crossfade(0.8),
+            // The tempo control puts a stretcher in the path, which is the
+            // most likely place for a buffer to be grown mid-track.
+            170 => engine.set_tempo(Deck::A, 1.06),
+            180 => engine.set_master_tempo(Deck::A, true),
+            190 => engine.set_tempo(Deck::A, 0.94),
             _ => {}
         }
         worst = worst.max(sink.pull(true));

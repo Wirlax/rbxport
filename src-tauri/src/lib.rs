@@ -199,6 +199,8 @@ pub fn run() {
             commands::app_diagnostics,
             commands::reveal_track,
             commands::set_master_level,
+            commands::deck_tempo,
+            commands::deck_master_tempo,
             commands::set_channel_band,
             commands::set_channel_kill,
             commands::set_channel_trim,

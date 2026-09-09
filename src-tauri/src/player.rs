@@ -40,6 +40,10 @@ pub struct DeckTickDto {
     pub generation: u32,
     pub playing: bool,
     pub loaded: bool,
+    /// How fast the deck is playing, as a multiple of the file's own speed.
+    pub tempo: f32,
+    /// Whether the pitch is held while that speed changes.
+    pub master_tempo: bool,
 }
 
 /// Both decks, which is what one tick carries: about 200 bytes, well inside
@@ -68,6 +72,8 @@ impl TickDto {
             generation: 0,
             playing: false,
             loaded: false,
+            tempo: 1.0,
+            master_tempo: false,
         };
         Self { a: empty, b: empty, sample_rate: 0, peak_left: 0.0, peak_right: 0.0, master: 1.0 }
     }
@@ -226,6 +232,8 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         generation: s.generation,
         playing: s.playing,
         loaded: s.loaded,
+        tempo: s.tempo,
+        master_tempo: s.master_tempo,
     };
     let (peak_left, peak_right) = master.peaks();
     TickDto {

@@ -34,9 +34,13 @@ const HOP: usize = FRAME / 2;
 /// most of one below it.
 const SEARCH: usize = 256;
 
-/// Frames the input buffer holds. One segment, the search either side of it,
-/// and a hop's worth of slack at twice speed.
-const CAPACITY: usize = FRAME + SEARCH * 2 + HOP * 2;
+/// Frames the input buffer holds.
+///
+/// A segment, the search either side of it, and four hops of slack. The slack
+/// is what double speed needs: the ideal position runs a hop ahead of the
+/// window that has been compacted away, so the buffer has to hold a segment
+/// beyond it as well as the segment being used.
+const CAPACITY: usize = FRAME + SEARCH * 2 + HOP * 4;
 
 /// The slowest and fastest a deck may be asked to play.
 ///
@@ -208,11 +212,19 @@ impl Wsola {
         best
     }
 
+    /// Whether there is input for another segment.
+    fn can_advance(&self) -> bool {
+        // A whole segment from where the next one starts, plus the search
+        // window beyond it.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss,
+                reason = "`at` is non-negative and bounded by the buffer")]
+        let needed = self.at as usize + FRAME + SEARCH;
+        self.held >= needed.min(CAPACITY) && self.held >= FRAME
+    }
+
     /// Produces one hop of output, if there is input for it.
     fn advance(&mut self) -> bool {
-        // A whole segment, plus the search either side of where it might land.
-        let needed = self.at as usize + FRAME + SEARCH;
-        if self.held < needed.min(CAPACITY) || self.held < FRAME {
+        if !self.can_advance() {
             return false;
         }
         // The hop first: the search's tolerance depends on it.
@@ -312,14 +324,13 @@ impl Stretcher for Wsola {
     }
 
     fn ready(&self, frames: usize) -> bool {
-        // What is already overlapped, plus what the input on hand can still
-        // produce at this speed.
+        // What is already overlapped, plus the one hop another segment would
+        // add. Asked exactly the way `advance` decides, rather than estimated
+        // from how much input is held: an estimate that ignored where in the
+        // buffer the next segment starts said yes while `advance` said no, and
+        // the deck starved with a caller that believed it was full.
         let waiting = HOP.saturating_sub(self.taken);
-        let usable = self.held.saturating_sub(FRAME + SEARCH);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss,
-                reason = "a ratio is between 0.5 and 2")]
-        let produced = (usable as f32 / self.target.max(MIN_RATIO)) as usize;
-        waiting + produced >= frames
+        waiting + if self.can_advance() { HOP } else { 0 } >= frames
     }
 
     fn pull(&mut self, out: &mut [f32]) -> usize {
@@ -349,6 +360,111 @@ impl Stretcher for Wsola {
         self.tail.fill(0.0);
         self.template.fill(0.0);
         self.ready.fill(0.0);
+    }
+}
+
+/// Playing at a different speed the way a record does: the pitch moves with
+/// it.
+///
+/// The other half of a tempo control. With Master Tempo off, a deck pitched up
+/// is pitched up — that is what a turntable does and what a CDJ does with the
+/// key lock off, and it is not a defect to be corrected. Reading the input at
+/// a fractional rate with linear interpolation is the whole of it.
+pub struct Varispeed {
+    input: Vec<f32>,
+    held: usize,
+    /// Where the next output sample is read from, in frames.
+    at: f32,
+    ratio: Smoothed,
+    target: f32,
+}
+
+impl Varispeed {
+    #[must_use]
+    pub fn new(sample_rate: u32) -> Self {
+        Self {
+            input: vec![0.0; CAPACITY * 2],
+            held: 0,
+            at: 0.0,
+            ratio: Smoothed::new(1.0, sample_rate),
+            target: 1.0,
+        }
+    }
+
+    /// One channel of the frame at `at`, between the two samples either side.
+    fn sample(&self, at: f32, channel: usize) -> f32 {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss,
+                reason = "`at` is non-negative and bounded by the buffer")]
+        let whole = at as usize;
+        let fraction = at - at.floor();
+        let a = self.input.get(whole * 2 + channel).copied().unwrap_or(0.0);
+        let b = self.input.get((whole + 1) * 2 + channel).copied().unwrap_or(a);
+        a + (b - a) * fraction
+    }
+}
+
+impl Stretcher for Varispeed {
+    fn set_ratio(&mut self, ratio: f32) {
+        self.target = if ratio.is_finite() { ratio.clamp(MIN_RATIO, MAX_RATIO) } else { 1.0 };
+    }
+
+    fn ratio(&self) -> f32 {
+        self.target
+    }
+
+    fn wants(&self) -> usize {
+        CAPACITY - self.held
+    }
+
+    fn feed(&mut self, input: &[f32]) -> usize {
+        let frames = (input.len() / 2).min(self.wants());
+        let Some(from) = input.get(..frames * 2) else { return 0 };
+        let Some(into) = self.input.get_mut(self.held * 2..(self.held + frames) * 2) else {
+            return 0;
+        };
+        into.copy_from_slice(from);
+        self.held += frames;
+        frames
+    }
+
+    fn ready(&self, frames: usize) -> bool {
+        #[allow(clippy::cast_precision_loss, reason = "a frame count inside a 2k buffer")]
+        let left = self.held as f32 - self.at - 1.0;
+        left >= frames as f32 * self.target
+    }
+
+    fn pull(&mut self, out: &mut [f32]) -> usize {
+        let mut done = 0;
+        for frame in out.chunks_exact_mut(2) {
+            // One sample short of the end: interpolation needs the frame after.
+            #[allow(clippy::cast_precision_loss, reason = "a frame count inside a 2k buffer")]
+            let last = self.held as f32 - 1.0;
+            if self.at >= last {
+                break;
+            }
+            for (channel, sample) in frame.iter_mut().enumerate() {
+                *sample = self.sample(self.at, channel);
+            }
+            self.at += self.ratio.step(self.target);
+            done += 1;
+        }
+        // Drop what has been read, so the buffer never grows.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss,
+                reason = "`at` is non-negative and bounded by the buffer")]
+        let used = self.at as usize;
+        if used > 0 {
+            self.input.copy_within(used * 2..self.held * 2, 0);
+            self.held -= used;
+            #[allow(clippy::cast_precision_loss, reason = "a frame count inside a 2k buffer")]
+            let moved = used as f32;
+            self.at -= moved;
+        }
+        done
+    }
+
+    fn reset(&mut self) {
+        self.held = 0;
+        self.at = 0.0;
     }
 }
 
@@ -448,6 +564,62 @@ mod tests {
             assert!(
                 (hz - 440.0).abs() < 12.0,
                 "at {ratio}x the tone came out at {hz} Hz, not 440",
+            );
+        }
+    }
+
+    /// The same harness, for whichever backend.
+    fn through(mut deck: impl Stretcher, input: &[f32]) -> Vec<f32> {
+        let mut out = Vec::new();
+        let mut block = vec![0.0_f32; 512 * 2];
+        let mut fed = 0;
+        loop {
+            while deck.wants() > 0 && fed < input.len() / 2 {
+                let take = deck.wants().min(input.len() / 2 - fed);
+                let Some(slice) = input.get(fed * 2..(fed + take) * 2) else { break };
+                fed += deck.feed(slice);
+            }
+            let produced = deck.pull(&mut block);
+            if produced == 0 {
+                break;
+            }
+            out.extend_from_slice(block.get(..produced * 2).unwrap_or(&[]));
+        }
+        out
+    }
+
+    #[test]
+    fn without_the_key_lock_the_pitch_moves_with_the_speed() {
+        // The other half of a tempo control, and not a defect: a record
+        // pitched up is pitched up.
+        let input = sine(440.0, RATE as usize);
+        for ratio in [0.5_f32, 0.75, 1.0, 1.5, 2.0] {
+            let mut deck = Varispeed::new(RATE);
+            deck.set_ratio(ratio);
+            let out = through(deck, &input);
+            let frames = out.len() / 2;
+            assert!(frames > 1_000, "at {ratio}x only {frames} frames came out");
+            let hz = crossings(&out) as f32 * RATE as f32 / frames as f32;
+            let want = 440.0 * ratio;
+            assert!(
+                (hz - want).abs() < want * 0.03,
+                "at {ratio}x the tone came out at {hz} Hz, not {want}",
+            );
+        }
+    }
+
+    #[test]
+    fn varispeed_at_its_own_speed_gives_back_what_went_in() {
+        let input = sine(440.0, RATE as usize / 4);
+        let mut deck = Varispeed::new(RATE);
+        deck.set_ratio(1.0);
+        let out = through(deck, &input);
+        for (i, frame) in out.chunks_exact(2).enumerate().skip(2_000).take(2_000) {
+            let want = input.get(i * 2).copied().unwrap_or(0.0);
+            assert!(
+                (frame[0] - want).abs() < 0.01,
+                "frame {i} came back as {} rather than {want}",
+                frame[0],
             );
         }
     }

@@ -28,10 +28,15 @@ pub struct DeckClock {
     /// The decode thread has pushed the last block it will push. The callback
     /// stops the deck when it has drained what is left.
     end_of_stream: AtomicBool,
+    /// How fast the deck is playing, as a multiple of the file's own speed,
+    /// in an `f32`'s bits. Read by the interface for the tempo readout, and by
+    /// anything extrapolating the playhead between ticks.
+    tempo: AtomicU32,
+    master_tempo: AtomicBool,
 }
 
 /// A deck's state at one instant, for the tick the interface extrapolates from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeckSnapshot {
     pub position_frames: u64,
     pub total_frames: u64,
@@ -39,6 +44,10 @@ pub struct DeckSnapshot {
     pub sample_rate: u32,
     pub playing: bool,
     pub loaded: bool,
+    /// A multiple of the file's own speed: 1.0 is the track as recorded.
+    pub tempo: f32,
+    /// Whether the pitch is held while the speed changes.
+    pub master_tempo: bool,
 }
 
 impl DeckClock {
@@ -50,7 +59,28 @@ impl DeckClock {
             sample_rate: self.sample_rate.load(Ordering::Relaxed),
             playing: self.playing.load(Ordering::Relaxed),
             loaded: self.loaded.load(Ordering::Relaxed),
+            tempo: self.tempo(),
+            master_tempo: self.master_tempo(),
         }
+    }
+
+    /// A tempo of zero means nothing has set one; a fresh clock plays a track
+    /// at its own speed.
+    pub fn tempo(&self) -> f32 {
+        let stored = f32::from_bits(self.tempo.load(Ordering::Relaxed));
+        if stored > 0.0 && stored.is_finite() { stored } else { 1.0 }
+    }
+
+    pub fn set_tempo(&self, tempo: f32) {
+        self.tempo.store(tempo.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn master_tempo(&self) -> bool {
+        self.master_tempo.load(Ordering::Relaxed)
+    }
+
+    pub fn set_master_tempo(&self, on: bool) {
+        self.master_tempo.store(on, Ordering::Relaxed);
     }
 
     pub fn position(&self) -> u64 {

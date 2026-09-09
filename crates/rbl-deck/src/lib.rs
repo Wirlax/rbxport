@@ -53,7 +53,7 @@ use fade::Ramp;
 use smooth::Smoothed;
 
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
-pub use stretch::{Stretcher, Wsola, MAX_RATIO, MIN_RATIO};
+pub use stretch::{Stretcher, Varispeed, Wsola, MAX_RATIO, MIN_RATIO};
 
 /// Frames the mixer works on at a time.
 ///
@@ -113,7 +113,7 @@ pub enum DeckEvent {
 pub type EventSink = Arc<dyn Fn(DeckEvent) + Send + Sync>;
 
 /// Both decks at one instant, which is what one tick of the clock carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Snapshot {
     pub a: DeckSnapshot,
     pub b: DeckSnapshot,
@@ -341,6 +341,29 @@ impl Engine {
         self.sample_rate
     }
 
+    /// How fast a deck plays, as a multiple of the file's own speed.
+    ///
+    /// 1.0 is the track as recorded, 1.06 is six percent fast. Clamped to what
+    /// a deck offers rather than refused.
+    pub fn set_tempo(&self, deck: Deck, tempo: f32) {
+        if let Some(handle) = self.decks.get(deck.index()) {
+            handle.send(deck::Command::SetTempo(tempo));
+        }
+    }
+
+    /// Master Tempo: whether the pitch is held while the speed changes.
+    ///
+    /// Off is what a record does. On costs the stretcher's work — a fifth of a
+    /// percent of realtime for two decks — and holds the key.
+    pub fn set_master_tempo(&self, deck: Deck, on: bool) {
+        if let Some(clock) = self.decks.get(deck.index()).map(deck::DeckHandle::clock) {
+            clock.set_master_tempo(on);
+        }
+        if let Some(handle) = self.decks.get(deck.index()) {
+            handle.send(deck::Command::SetMasterTempo(on));
+        }
+    }
+
     /// The channel strips and the crossfader.
     pub fn mixer(&self) -> &Arc<MixerSettings> {
         &self.mixer
@@ -480,6 +503,8 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             sample_rate: 0,
             playing: false,
             loaded: false,
+            tempo: 1.0,
+            master_tempo: false,
         })
     }
 }

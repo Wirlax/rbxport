@@ -889,6 +889,35 @@ fn band_of(name: &str) -> Band {
     }
 }
 
+/// How fast a deck plays, as a multiple of the file's own speed.
+///
+/// A ratio rather than a BPM: what BPM that comes to depends on the track, and
+/// the deck does not need to know the track's to play it faster.
+#[tauri::command]
+pub async fn deck_tempo(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    tempo: f32,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.set_tempo(crate::player::deck_of(&deck), tempo);
+    Ok(())
+}
+
+/// Master Tempo: whether the pitch is held while the speed changes.
+#[tauri::command]
+pub async fn deck_master_tempo(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    on: bool,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.set_master_tempo(crate::player::deck_of(&deck), on);
+    Ok(())
+}
+
 /// Shows a track's file in the Finder.
 ///
 /// The OS does the revealing; this only resolves the id to the path the

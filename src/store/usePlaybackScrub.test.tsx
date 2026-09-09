@@ -32,10 +32,15 @@ function tickAt(seconds: number, generation: number, playing = true): Tick {
     generation,
     playing,
     loaded: true,
+    tempo: 1,
+    masterTempo: false,
   };
   return {
     a: deck,
-    b: { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false },
+    b: {
+      frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
+      tempo: 1, masterTempo: false,
+    },
     sampleRate: RATE,
     peakLeft: 0,
     peakRight: 0,

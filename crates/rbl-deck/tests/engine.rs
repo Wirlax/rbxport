@@ -518,6 +518,94 @@ fn a_track_is_audible_within_the_load_budget() {
 }
 
 #[test]
+fn a_deck_played_fast_covers_more_of_the_track_in_the_same_time() {
+    // What a tempo control is for. The playhead is in track time, so at +50%
+    // the same number of output frames has to cover half as much again of the
+    // file — and at −25%, three quarters of it.
+    for (tempo, expected) in [(1.5_f32, 1.5_f64), (0.75, 0.75)] {
+        for master_tempo in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("ramp.wav");
+            ramp(&path, RATE as usize * 20);
+
+            let h = harness();
+            h.engine.load(Deck::A, &path);
+            h.wait_for_load(1);
+            h.engine.set_master_tempo(Deck::A, master_tempo);
+            h.engine.set_tempo(Deck::A, tempo);
+            h.engine.play(Deck::A);
+
+            // A fixed number of output frames, and where the playhead
+            // reached. Pulled at about the rate a device would: drained faster
+            // than the decode thread can stretch, the ring empties and the
+            // playhead measures how fast the test ran rather than the deck.
+            let pulls = 60;
+            for _ in 0..pulls {
+                h.sink.pull(512);
+                std::thread::sleep(Duration::from_millis(12));
+            }
+            let covered = h.position(Deck::A) as f64;
+            let out = f64::from(pulls * 512);
+            let ratio = covered / out;
+            assert!(
+                (ratio - expected).abs() < 0.15,
+                "at {tempo}x with master tempo {master_tempo} the playhead \
+                 covered {ratio:.2} of the track per frame played, not {expected}",
+            );
+        }
+    }
+}
+
+#[test]
+fn master_tempo_holds_the_pitch_and_without_it_the_pitch_moves() {
+    // The difference between the two, measured on the audio rather than
+    // asserted: a tone through the deck at +50%, counted by its zero
+    // crossings. With the key lock it is the same tone; without it, it is a
+    // record played fast.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.wav");
+    tone(&path, RATE as usize * 10);
+
+    let mut heard = Vec::new();
+    for master_tempo in [true, false] {
+        let h = harness();
+        h.engine.load(Deck::A, &path);
+        h.wait_for_load(1);
+        h.engine.set_master_tempo(Deck::A, master_tempo);
+        h.engine.set_tempo(Deck::A, 1.5);
+        h.engine.play(Deck::A);
+
+        // Pulled at about the rate a device would, because the frequency is
+        // counted over the whole window: drained faster than the decode thread
+        // can fill the stretcher, most of it would be silence and the count
+        // would measure the gaps rather than the tone.
+        let mut out = Vec::new();
+        for _ in 0..80 {
+            out.extend(h.sink.pull(512));
+            std::thread::sleep(Duration::from_millis(12));
+        }
+        // Past the fade in, and the left channel only.
+        let left: Vec<f32> = out.chunks_exact(2).skip(4_096).map(|f| f[0]).collect();
+        let sounding = left.iter().filter(|s| s.abs() > 0.05).count();
+        assert!(
+            sounding * 4 > left.len(),
+            "the deck was mostly silent: {sounding} of {} samples",
+            left.len(),
+        );
+        let crossings = left.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        #[allow(clippy::cast_precision_loss)]
+        let hz = crossings as f32 * RATE as f32 / left.len() as f32;
+        heard.push(hz);
+    }
+
+    let (locked, free) = (heard[0], heard[1]);
+    // The fixture's tone is 220 Hz. Locked it stays there; free it goes up by
+    // half, which is what a record does.
+    assert!((locked - 220.0).abs() < 12.0, "with master tempo the tone was {locked} Hz");
+    assert!((free - 330.0).abs() < 18.0, "without it the tone was {free} Hz");
+}
+
+#[test]
 fn one_deck_going_wrong_leaves_the_other_playing() {
     // The case that matters in front of an audience: a file that will not
     // decode, or one that simply ends, must not take the other deck with it.

@@ -981,6 +981,17 @@
 
 /* Three equal tabs: the selected one is a lighter blue than the pad buttons,
    the others are outlined. */
+/* The tempo cluster in the control row: the BPM being played with a step
+   either side, the key lock, and a reset — the order the capture has them in.
+   **The sizes here are not measured**: the capture's own row is a different
+   set of controls, and this cluster has not been scanned off it the way the
+   pad row was. */
+.tempo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .sideTabs { display: flex; gap: 4px; padding: 4px; }
 .sideTab {
   flex: 1;

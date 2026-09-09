@@ -19,6 +19,7 @@ use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS};
 use crate::clock::DeckClock;
 use crate::decode::Streamer;
 use crate::scrub::{PcmWindow, Scrubber, WINDOW_REACH};
+use crate::stretch::{Stretcher, Varispeed, Wsola};
 use crate::{Deck, DeckEvent, EventSink};
 
 /// What the control side asks a deck to do.
@@ -35,6 +36,10 @@ pub enum Command {
     ScrubTo(u64),
     /// The drag is over: the streamer picks up where the head was left.
     ScrubEnd,
+    /// How fast to play, as a multiple of the file's own speed.
+    SetTempo(f32),
+    /// Master Tempo: whether the pitch is held while the speed changes.
+    SetMasterTempo(bool),
     Unload,
     Quit,
 }
@@ -97,6 +102,13 @@ pub fn spawn(
                 generation: 0,
                 scrubber: None,
                 window: PcmWindow::empty(),
+                keylock: Wsola::new(device_rate),
+                varispeed: Varispeed::new(device_rate),
+                tempo: 1.0,
+                master_tempo: false,
+                head: 0.0,
+                feed: vec![0.0; BLOCK_FRAMES * 2],
+                fed: 0,
             };
             worker.run(&rx);
         })?;
@@ -117,6 +129,26 @@ struct Worker {
     /// several megabytes for a gesture that is over is several megabytes
     /// nobody asked for.
     window: PcmWindow,
+    /// The two ways to play at another speed: with the pitch held, and with
+    /// the pitch moving as a record's does. Both are built at load, because
+    /// building one takes an allocation and the switch between them is a
+    /// button somebody presses mid-track.
+    keylock: Wsola,
+    varispeed: Varispeed,
+    tempo: f32,
+    master_tempo: bool,
+    /// Where the audio coming out of the stretcher sits in the track, in
+    /// input frames.
+    ///
+    /// Not the streamer's position: by the time a block comes out of the
+    /// stretcher the streamer has read a bufferful past it, and a playhead
+    /// that ran 60 ms ahead of the sound would put every cue in the wrong
+    /// place. Advanced by what the output consumes instead.
+    head: f64,
+    /// Frames of decoded audio waiting to go into the stretcher.
+    feed: Vec<f32>,
+    /// How much of `feed` has been handed over.
+    fed: usize,
 }
 
 impl Worker {
@@ -170,6 +202,14 @@ impl Worker {
             Command::ScrubBegin => self.scrub_begin(),
             Command::ScrubTo(frame) => self.scrub_to(frame),
             Command::ScrubEnd => self.scrub_end(),
+            Command::SetTempo(tempo) => self.set_tempo(tempo),
+            Command::SetMasterTempo(on) => {
+                // The two hold different audio, so switching between them
+                // starts the new one from where the old one had reached
+                // rather than from what it happened to have buffered.
+                self.master_tempo = on;
+                self.restart_stretch();
+            }
             Command::Unload => self.unload(),
             Command::Wake => {}
             Command::Quit => return false,
@@ -188,6 +228,8 @@ impl Worker {
                 let total = streamer.total_frames();
                 self.generation = self.clock.bump_generation();
                 self.clock.set_position(0);
+                self.head = 0.0;
+                self.restart_stretch();
                 self.clock.set_total(total);
                 self.clock.set_sample_rate(self.device_rate);
                 self.streamer = Some(streamer);
@@ -215,12 +257,41 @@ impl Worker {
                 // them in that order, and must never take a new generation's
                 // blocks while still believing the old position.
                 self.clock.set_position(landed);
+                self.head = landed as f64;
+                self.restart_stretch();
                 self.generation = self.clock.bump_generation();
             }
             Err(e) => {
                 (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
             }
         }
+    }
+
+    /// How fast to play, as a multiple of the file's own speed.
+    fn set_tempo(&mut self, tempo: f32) {
+        let safe = if tempo.is_finite() {
+            tempo.clamp(crate::stretch::MIN_RATIO, crate::stretch::MAX_RATIO)
+        } else {
+            1.0
+        };
+        self.tempo = safe;
+        self.keylock.set_ratio(safe);
+        self.varispeed.set_ratio(safe);
+        self.clock.set_tempo(safe);
+    }
+
+    /// Whichever of the two is in the path.
+    fn stretcher(&mut self) -> &mut dyn Stretcher {
+        if self.master_tempo { &mut self.keylock } else { &mut self.varispeed }
+    }
+
+    /// Empties both, so nothing of the last position or the last mode is
+    /// played after a seek or a switch.
+    fn restart_stretch(&mut self) {
+        self.keylock.reset();
+        self.varispeed.reset();
+        self.fed = 0;
+        self.feed.fill(0.0);
     }
 
     fn unload(&mut self) {
@@ -347,6 +418,9 @@ impl Worker {
             return false;
         }
 
+        if (self.tempo - 1.0).abs() > f32::EPSILON {
+            return self.produce_stretched(generation);
+        }
         let mut block = Block::empty(generation, streamer.position());
         let frames = match streamer.fill(&mut block.samples) {
             Ok(frames) => frames,
@@ -364,6 +438,68 @@ impl Worker {
             }
             return false;
         }
+        self.head = streamer.position() as f64 + frames as f64;
+        block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
+        self.producer.push(block).is_ok()
+    }
+
+    /// The same, with the tempo control in the path.
+    ///
+    /// The block's position is not the streamer's: by the time audio comes out
+    /// of a stretcher the streamer has read a bufferful past it, and a
+    /// playhead running ahead of its own sound puts every cue in the wrong
+    /// place. It is counted forward instead, by what each block of output
+    /// consumed at the speed it was played at.
+    fn produce_stretched(&mut self, generation: u32) -> bool {
+        let tempo = f64::from(self.tempo);
+        // Top the stretcher up first: it needs a segment and its search window
+        // before it can produce anything at all.
+        loop {
+            let wanted = self.stretcher().wants();
+            if wanted == 0 || self.stretcher().ready(BLOCK_FRAMES) {
+                break;
+            }
+            if self.fed == 0 {
+                let Some(streamer) = self.streamer.as_mut() else { return false };
+                let frames = match streamer.fill(&mut self.feed) {
+                    Ok(frames) => frames,
+                    Err(e) => {
+                        self.clock.set_end_of_stream(true);
+                        (self.events)(DeckEvent::Error {
+                            deck: self.deck,
+                            message: e.to_string(),
+                        });
+                        return false;
+                    }
+                };
+                if frames == 0 {
+                    if streamer.finished() {
+                        self.clock.set_end_of_stream(true);
+                    }
+                    break;
+                }
+                self.fed = frames;
+            }
+            let take = self.fed.min(wanted);
+            // The fields taken apart by hand rather than through `stretcher`,
+            // so the buffer can be lent to the stretcher without copying it:
+            // one method borrowing all of `self` would have meant a fresh
+            // allocation for every block a stretched deck plays.
+            let stretcher: &mut dyn Stretcher =
+                if self.master_tempo { &mut self.keylock } else { &mut self.varispeed };
+            let Some(from) = self.feed.get(..take * 2) else { break };
+            let taken = stretcher.feed(from);
+            // What was not taken stays at the front for the next pass.
+            self.feed.copy_within(taken * 2..self.fed * 2, 0);
+            self.fed -= taken;
+        }
+
+        let mut block = Block::empty(generation, self.head as u64);
+        let frames = self.stretcher().pull(&mut block.samples);
+        if frames == 0 {
+            return false;
+        }
+        self.head += frames as f64 * tempo;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
         self.producer.push(block).is_ok()
     }
