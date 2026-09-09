@@ -55,11 +55,21 @@ impl OnsetEnvelope {
 /// frame, where a bin is 43 Hz wide and everything below 200 Hz is four and a
 /// half bins. Spectral flux over four bins cannot place an onset.
 ///
-/// So a band carries its own frame. The resolution/latency trade runs the
-/// other way down there: a kick is not a click, and 93 ms of window at 44.1
-/// kHz buys eighteen bins under 200 Hz instead of four. The hop does not
-/// change with it, so the envelope stays at the same rate whatever band it
-/// came from and the tempo estimator cannot tell the difference.
+/// So a band carries its own frame, and the longer one was tried: 4096
+/// samples, eighteen bins under 200 Hz instead of four, the hop unchanged so
+/// the envelope stays at the same rate.
+///
+/// **It made no difference, which is the useful part.** On the same 150
+/// tracks the long-frame low band scored **75% test / 72% train, fixing 1 and
+/// breaking 27** — against the short frame's 79% / 69%, fixing 5 and breaking
+/// 30. Within the noise of each other, and both far below the full band's 95%.
+/// Used only as a tie-breaker, where the two bands disagree by exactly the
+/// 3:2 the whole idea was aimed at, it **fixed none of them and broke five**.
+///
+/// So the frame size was never the problem: the low band does not carry enough
+/// to place a beat in this material, at any resolution. Whatever answers the
+/// 3:2 error is not "look at the kick alone" — that hypothesis is finished,
+/// and a sixth attempt should start somewhere else entirely.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
     pub low_hz: f32,
