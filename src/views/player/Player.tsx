@@ -51,7 +51,7 @@ import {
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
 import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
-import { detectPlatform, dispatch } from "@/lib/shortcuts";
+import { actionFor, detectPlatform, dispatch } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
@@ -696,8 +696,13 @@ export const Player = memo(function Player({
           playback.toggle();
           break;
         case "cue":
-          holdCue();
-          dropCue();
+          // Pressed, not tapped. CUE is a held control on the hardware and in
+          // rekordbox: on the cue point it plays for as long as it is down and
+          // snaps back when it comes up, which is how a preview works. Doing
+          // both on the key down made the key the one control that could not
+          // preview — and auto-repeat then ran the pair thirty times a second
+          // for as long as the key was held. `keyup` below lets go.
+          if (!event.repeat) holdCue();
           break;
         case "quantize":
           setQuantize((on) => !on);
@@ -718,9 +723,32 @@ export const Player = memo(function Player({
           break;
       }
     };
+    /**
+     * Letting go of CUE.
+     *
+     * Mapped without the typing guard `dispatch` applies, on purpose: a key
+     * released while the search box has the focus still has to end a preview
+     * that is running, and `dropCue` does nothing when none is. The same
+     * reasoning covers the window losing focus altogether — a preview that
+     * outlives the key would play on with nothing able to stop it.
+     */
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (actionFor({ key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey, altKey: event.altKey }, platform) === "cue") {
+        dropCue();
+      }
+    };
+    const onBlur = () => dropCue();
+
     // `globalThis`, because `window` here is the slice of the track on screen.
     globalThis.addEventListener("keydown", onKey);
-    return () => globalThis.removeEventListener("keydown", onKey);
+    globalThis.addEventListener("keyup", onKeyUp);
+    globalThis.addEventListener("blur", onBlur);
+    return () => {
+      globalThis.removeEventListener("keydown", onKey);
+      globalThis.removeEventListener("keyup", onKeyUp);
+      globalThis.removeEventListener("blur", onBlur);
+    };
   }, [armed, jump, platform, playback, holdCue, dropCue]);
 
   /**
