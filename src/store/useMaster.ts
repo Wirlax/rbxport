@@ -24,6 +24,16 @@ const FALL_DB_PER_SECOND = 20;
 const MAX_STEP_SECONDS = 0.25;
 
 /**
+ * Where the fall gives up and calls it silence.
+ *
+ * An exponential decay approaches nothing without ever arriving, so a meter
+ * left to it keeps a sliver of bar lit for good. -60 dB is under a pixel of a
+ * 34-point meter and well below anything audible, so it reads as off — and it
+ * gives the fall an end to reach, which is what lets the animation stop.
+ */
+const SILENCE = 0.001;
+
+/**
  * The value a meter shows next: the reading, or the last one fallen.
  *
  * Fast attack, slow release. A meter that simply took each reading flickers,
@@ -37,8 +47,23 @@ export function nextPeak(shown: number, reading: number, seconds: number): numbe
   const previous = Number.isFinite(shown) ? Math.max(shown, 0) : 0;
   const step = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), MAX_STEP_SECONDS) : 0;
   const held = previous * 10 ** ((-FALL_DB_PER_SECOND * step) / 20);
-  return Math.min(Math.max(safe, held), 1);
+  const next = Math.min(Math.max(safe, held), 1);
+  return next < SILENCE ? 0 : next;
 }
+
+/**
+ * How long a meter waits for the next reading before it falls on its own.
+ *
+ * The engine's ticker stops the moment neither deck is playing, which is what
+ * keeps an idle window at no measurable cost. The last reading it emits is the
+ * one taken just before the stop, and that reading is not silence — so without
+ * this the bars would sit where the music left them until something played
+ * again. Past this, the meter drives its own fall.
+ *
+ * Three tick periods at 30 Hz: long enough that a reading arriving late is not
+ * mistaken for the end of the music.
+ */
+const SILENT_AFTER_MS = 100;
 
 export interface Master {
   /** 0 to 1. */
@@ -54,26 +79,71 @@ export function useMaster(): Master {
   useEffect(() => {
     let live = true;
     let stop: (() => void) | undefined;
+    // The shown peaks, which are what the fall works on. They are held here
+    // rather than read back out of the state so that the fall can ask whether
+    // it has finished without reaching into a render.
+    let left = 0;
+    let right = 0;
+    let last = performance.now();
+    let falling: number | undefined;
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+
+    const show = (level?: number) => {
+      setState((current) => {
+        const next = level ?? current.level;
+        return current.level === next &&
+          current.peakLeft === left &&
+          current.peakRight === right
+          ? current
+          : { level: next, peakLeft: left, peakRight: right };
+      });
+    };
+
+    /** The fall, once the readings have stopped coming; ends at silence. */
+    const fall = (now: number) => {
+      falling = undefined;
+      if (!live) return;
+      const elapsed = (now - last) / 1000;
+      last = now;
+      left = nextPeak(left, 0, elapsed);
+      right = nextPeak(right, 0, elapsed);
+      show();
+      // Nothing left to fall, so nothing left to draw: the frames stop here
+      // rather than running on against an idle window.
+      if (left > 0 || right > 0) falling = requestAnimationFrame(fall);
+    };
+
+    /** Hands the meters over to the fall if the next reading does not come. */
+    const watch = () => {
+      if (quiet !== undefined) clearTimeout(quiet);
+      quiet = setTimeout(() => {
+        quiet = undefined;
+        if (!live || falling !== undefined || (left === 0 && right === 0)) return;
+        last = performance.now();
+        falling = requestAnimationFrame(fall);
+      }, SILENT_AFTER_MS);
+    };
+
     void (async () => {
       const backend = await getBackend();
       // The meters come on their own beat, three times as often as the decks.
-      let last = performance.now();
       const unlisten = backend.onMeters((meters) => {
         if (!live) return;
+        // A reading is the music still playing, so the fall stands down and
+        // the readings drive the meter again.
+        if (falling !== undefined) {
+          cancelAnimationFrame(falling);
+          falling = undefined;
+        }
         const now = performance.now();
         const elapsed = (now - last) / 1000;
         last = now;
-        setState((current) => {
-          // A peak falls back rather than dropping: a meter that snaps to the
-          // next reading flickers, and the loud moment is the one to see.
-          const left = nextPeak(current.peakLeft, meters.peakLeft, elapsed);
-          const right = nextPeak(current.peakRight, meters.peakRight, elapsed);
-          return current.level === meters.master &&
-            current.peakLeft === left &&
-            current.peakRight === right
-            ? current
-            : { level: meters.master, peakLeft: left, peakRight: right };
-        });
+        // A peak falls back rather than dropping: a meter that snaps to the
+        // next reading flickers, and the loud moment is the one to see.
+        left = nextPeak(left, meters.peakLeft, elapsed);
+        right = nextPeak(right, meters.peakRight, elapsed);
+        show(meters.master);
+        watch();
       });
       if (!live) {
         unlisten();
@@ -82,13 +152,21 @@ export function useMaster(): Master {
       stop = unlisten;
       // What it holds now, so a reload does not show the knob at the top.
       const now = await backend.deckState();
-      if (live) {
-        setState({ level: now.master, peakLeft: now.peakLeft, peakRight: now.peakRight });
-      }
+      if (!live) return;
+      left = Math.min(Math.max(now.peakLeft, 0), 1);
+      right = Math.min(Math.max(now.peakRight, 0), 1);
+      last = performance.now();
+      show(now.master);
+      // Opening onto a stopped engine is the same case as the music ending:
+      // no reading will come, so the bars have to bring themselves down.
+      watch();
     })();
+
     return () => {
       live = false;
       stop?.();
+      if (quiet !== undefined) clearTimeout(quiet);
+      if (falling !== undefined) cancelAnimationFrame(falling);
     };
   }, []);
 

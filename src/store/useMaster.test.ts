@@ -34,6 +34,15 @@ describe("nextPeak", () => {
     expect(nextPeak(1, 0, 60)).toBeCloseTo(nextPeak(1, 0, 0.25), 6);
   });
 
+  it("reaches nothing rather than a sliver that never goes", () => {
+    // An exponential fall approaches nothing without arriving, so below -60 dB
+    // it is called silence. Otherwise the bar keeps a lit edge for good and
+    // the fall has no end to stop at.
+    let shown = 1;
+    for (let i = 0; i < 300; i++) shown = nextPeak(shown, 0, FRAME);
+    expect(shown).toBe(0);
+  });
+
   it("never leaves the bar, whatever it is handed", () => {
     for (const [shown, reading, seconds] of [
       [Number.NaN, 0.5, FRAME],
