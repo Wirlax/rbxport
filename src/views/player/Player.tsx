@@ -907,6 +907,9 @@ export const Player = memo(function Player({
       // The transport is drawn elsewhere, so the deck is two columns wide
       // rather than three.
       data-shared={transportSlot ? "" : undefined}
+      // Deck B, which reads bottom-up so the two decks' waveforms meet at the
+      // line between them.
+      data-flipped={flipped || undefined}
       data-droppable={takesDrop || undefined}
       onDragOver={(event) => {
         if (!takesDrop) return;

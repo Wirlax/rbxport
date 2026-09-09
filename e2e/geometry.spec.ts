@@ -301,3 +301,40 @@ test("the mixer strip is the measured width, and its buttons the measured size",
   expect(travel?.height).toBeCloseTo(await token(page, "--s-mixer-fader-h"), 0);
   expect(travel?.width).toBeCloseTo(await token(page, "--s-mixer-fader-handle-w"), 0);
 });
+
+test("deck B reads bottom-up, and its waveforms are the mirror of deck A's", async ({ page }) => {
+  // The two-deck layout mirrors the pair about the line between them: deck A's
+  // title at the top of the pair and deck B's at the bottom, with the two
+  // detail waveforms meeting in the middle.
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+
+  const a = page.getByRole("region", { name: "Preview player" }).first();
+  const b = page.getByRole("region", { name: "Preview player B" });
+  const box = async (region: typeof a, testid: string) =>
+    (await region.getByTestId(testid).boundingBox()) ?? { y: 0, height: 0 };
+
+  // Deck A: title above its phrase bar. Deck B: title below its own.
+  const titleA = await box(a, "player-title");
+  const phraseA = await box(a, "player-phrase");
+  const titleB = await box(b, "player-title");
+  const phraseB = await box(b, "player-phrase");
+  expect(titleA.y).toBeLessThan(phraseA.y);
+  expect(titleB.y).toBeGreaterThan(phraseB.y);
+
+  // And the whole of deck B sits below the whole of deck A.
+  expect(titleB.y).toBeGreaterThan(titleA.y);
+
+  // Its waveforms are drawn upside down, which is the only part of a deck
+  // that can be mirrored rather than reordered.
+  const flip = await b
+    .locator("canvas")
+    .first()
+    .evaluate((el) => getComputedStyle(el).transform);
+  expect(flip).toBe("matrix(1, 0, 0, -1, 0, 0)");
+  const upright = await a
+    .locator("canvas")
+    .first()
+    .evaluate((el) => getComputedStyle(el).transform);
+  expect(upright === "none" || upright === "matrix(1, 0, 0, 1, 0, 0)").toBe(true);
+});

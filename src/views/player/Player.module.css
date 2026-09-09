@@ -174,6 +174,41 @@
 
 /* ------------------------------------------------------------------ deck */
 
+/* Deck B reads bottom-up: the pads at the top, the title at the bottom, and
+   the two decks' waveforms meeting at the centre line between them. The rows
+   are reversed rather than the whole panel being flipped, because everything
+   in them is text or a control and a mirrored one of those is unreadable.
+
+   The waveforms themselves *are* mirrored, in `.player[data-flipped] canvas`
+   below: they are the only thing in the deck with no up or down of its own.
+
+   **Not mirrored yet:** the overlays over the waveforms — the playhead, the
+   hot-cue badges, the phrase bar — still hang from the top of their band. In
+   the capture deck B's hang from the bottom. */
+.player[data-flipped] .main {
+  grid-template-rows:
+    var(--s-player-pad-h)
+    1fr
+    var(--s-player-phrase-h)
+    var(--s-player-overview-h)
+    var(--s-player-title-h);
+}
+.player[data-flipped] .head { grid-row: 5; }
+.player[data-flipped] .overviewRow { grid-row: 4; }
+.player[data-flipped] .phrase { grid-row: 3; }
+.player[data-flipped] .detailRow { grid-row: 2; }
+.player[data-flipped] .pads { grid-row: 1; }
+
+/* The waveform bitmaps, upside down. A transform on the canvas rather than a
+   scale inside every draw call: the drawing is where the pixel alignment work
+   lives — a fractional offset splits every one-pixel bar across two columns —
+   and flipping the finished bitmap cannot disturb any of it. Nothing painted
+   into these canvases has an up or a down; the labels and badges over them are
+   DOM, and stay the right way up. */
+.player[data-flipped] .overview canvas,
+.player[data-flipped] .detail canvas,
+.player[data-flipped] .vocal canvas { transform: scaleY(-1); }
+
 .main {
   display: grid;
   grid-template-rows:

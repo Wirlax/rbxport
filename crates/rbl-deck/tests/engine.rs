@@ -488,6 +488,73 @@ fn a_file_that_cannot_be_decoded_reports_an_error_and_leaves_the_deck_empty() {
 }
 
 #[test]
+fn one_deck_going_wrong_leaves_the_other_playing() {
+    // The case that matters in front of an audience: a file that will not
+    // decode, or one that simply ends, must not take the other deck with it.
+    // A stopped device or a frozen playhead on deck B because deck A hit a bad
+    // file is the difference between a mistake and a silence.
+    let dir = tempfile::tempdir().unwrap();
+    let broken = dir.path().join("notes.txt");
+    std::fs::write(&broken, b"not audio").unwrap();
+    let good = dir.path().join("ramp.wav");
+    ramp(&good, RATE as usize * 4);
+
+    let h = harness();
+    h.engine.load(Deck::B, &good);
+    h.wait_for_load(1);
+    h.engine.play(Deck::B);
+    h.play_until(Deck::B, 4_096);
+    let before = h.position(Deck::B);
+
+    // Deck A is handed something that cannot be decoded, and asked to play it.
+    h.engine.load(Deck::A, &broken);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !h.events().iter().any(|e| e.contains("Error")) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(h.events().iter().any(|e| e.contains("Error")), "{:?}", h.events());
+    h.engine.play(Deck::A);
+
+    // Deck B carries on: the device is still running, the playhead is still
+    // moving, and there is still audio coming out of it.
+    let audio = h.play_until(Deck::B, before + 4_096);
+    assert!(h.sink.running(), "the device stopped when the other deck failed");
+    assert!(h.position(Deck::B) > before, "deck B's playhead stopped");
+    let peak = audio.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
+    assert!(peak > 0.4, "deck B went quiet: {peak}");
+}
+
+#[test]
+fn a_track_ending_on_one_deck_leaves_the_other_playing() {
+    // The same property, for the ordinary way a deck runs out: a track that
+    // ends is not an error, and the deck beside it must not notice.
+    let dir = tempfile::tempdir().unwrap();
+    let brief = dir.path().join("brief.wav");
+    ramp(&brief, RATE as usize / 4);
+    let long = dir.path().join("long.wav");
+    ramp(&long, RATE as usize * 4);
+
+    let h = harness();
+    h.engine.load(Deck::A, &brief);
+    h.wait_for_load(1);
+    h.engine.load(Deck::B, &long);
+    h.wait_for_load(2);
+    h.engine.play(Deck::A);
+    h.engine.play(Deck::B);
+
+    // Past the end of the short one.
+    h.play_until(Deck::B, u64::from(RATE) / 2);
+    assert!(h.engine.snapshot().a.position_frames >= u64::from(RATE) / 4 - 4_096);
+
+    let before = h.position(Deck::B);
+    let audio = h.play_until(Deck::B, before + 8_192);
+    assert!(h.sink.running(), "the device stopped when the short track ended");
+    assert!(h.position(Deck::B) > before, "deck B's playhead stopped");
+    let peak = audio.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
+    assert!(peak > 0.4, "deck B went quiet: {peak}");
+}
+
+#[test]
 fn unloading_clears_the_deck() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ramp.wav");
