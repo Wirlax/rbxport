@@ -37,10 +37,17 @@ export function Artwork({ trackId, className, lazy = false }: ArtworkProps) {
   const src = artworkUrl(trackId);
 
   // A recycled row is a different track: forget what the last one managed.
-  useEffect(() => {
+  //
+  // During render, not in an effect. Layout effects run before passive ones,
+  // so a reset in a passive effect landed *after* the cached-image check below
+  // and knocked an already-decoded sleeve back to pending — and a cached image
+  // never fires `load` again, so that square stayed empty for good.
+  const [lastId, setLastId] = useState(trackId);
+  if (lastId !== trackId) {
+    setLastId(trackId);
     setState("pending");
     setAttempt(0);
-  }, [trackId]);
+  }
 
   useEffect(
     () => () => {

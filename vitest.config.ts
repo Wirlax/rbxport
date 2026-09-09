@@ -5,7 +5,9 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "design/**/*.test.ts"],
+    // `.tsx` for the few tests that mount a component. Those opt into jsdom
+    // with a docblock of their own, so everything else stays in node.
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "design/**/*.test.ts"],
     reporters: "dot",
   },
 });
