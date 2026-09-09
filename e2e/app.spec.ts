@@ -1078,24 +1078,66 @@ test("dragging the detail waveform scrubs, and dragging the overview seeks", asy
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
 
-  // A browser build has no engine to move the playhead, so what is pinned here
-  // is that both strips take a drag at all: pointer capture is what keeps one
-  // going when the pointer leaves the strip, and it was a mousedown before.
-  for (const id of ["player-detail", "player-overview"]) {
-    const strip = page.getByTestId(id);
-    const box = await strip.boundingBox();
-    await strip.evaluate((el) => {
-      (el as HTMLElement).dataset["dragged"] = "";
-      el.addEventListener("pointermove", () => {
-        (el as HTMLElement).dataset["dragged"] = "yes";
-      });
-    });
-    await page.mouse.move((box?.x ?? 0) + 40, (box?.y ?? 0) + 5);
-    await page.mouse.down();
-    await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 5, { steps: 4 });
-    await page.mouse.up();
-    await expect(strip).toHaveAttribute("data-dragged", "yes");
-  }
+  // The mock backend keeps a deck, so this is the real behaviour and not just
+  // the wiring: dragging right pulls earlier music in, so the clock goes back.
+  const clock = page.getByTestId("player-time");
+  const detail = await page.getByTestId("player-detail").boundingBox();
+  // Far enough in that a drag backwards has somewhere to go. The deck ticks
+  // ten times a second, so waiting on the button is not waiting on the clock.
+  const start = await clock.textContent();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(clock).not.toHaveText(start ?? "");
+  await page.waitForTimeout(600);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+
+  const before = await clock.textContent();
+  await page.mouse.move((detail?.x ?? 0) + 200, (detail?.y ?? 0) + 20);
+  await page.mouse.down();
+  // Past the edge of the strip: pointer capture is what keeps a drag alive
+  // out there, and this was a mousedown handler that gave up at the border.
+  await page.mouse.move((detail?.x ?? 0) + 900, (detail?.y ?? 0) + 400, { steps: 10 });
+  await page.mouse.up();
+  await expect(clock).not.toHaveText(before ?? "");
+
+  // The overview is the other kind: the head goes where the pointer is.
+  const ovw = await page.getByTestId("player-overview").boundingBox();
+  await page.mouse.move((ovw?.x ?? 0) + (ovw?.width ?? 0) * 0.75, (ovw?.y ?? 0) + 5);
+  await page.mouse.down();
+  await page.mouse.up();
+  const head = await page.getByTestId("player-head").boundingBox();
+  expect((head?.x ?? 0) - (ovw?.x ?? 0)).toBeCloseTo((ovw?.width ?? 0) * 0.75, -1);
+});
+
+test("the waveform actually scrolls while a track plays", async ({ page }) => {
+  // The thing that was broken: the layer moved ten times a second because it
+  // was drawn from the tick. What it must do is move every frame.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const layer = page.locator('[class*="scroller"]');
+  const at = async () => layer.evaluate((el) => getComputedStyle(el).transform);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  const first = await at();
+  await page.waitForTimeout(500);
+  const second = await at();
+  expect(second).not.toBe(first);
+
+  // And it keeps moving between ticks: two reads a frame apart differ, which
+  // they cannot if the layer is only repositioned when a tick arrives.
+  const frames = await layer.evaluate(
+    (el) =>
+      new Promise<string[]>((resolve) => {
+        const seen: string[] = [];
+        const step = () => {
+          seen.push(getComputedStyle(el).transform);
+          if (seen.length < 6) requestAnimationFrame(step);
+          else resolve(seen);
+        };
+        requestAnimationFrame(step);
+      }),
+  );
+  expect(new Set(frames).size).toBeGreaterThan(1);
 });
 
 test("Q toggles quantize, and starts on the way a CDJ ships", async ({ page }) => {

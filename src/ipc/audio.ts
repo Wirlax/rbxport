@@ -1,11 +1,11 @@
 /**
- * Whether this build can play anything.
+ * Whether this build can drive a deck.
  *
- * Playback is the Rust engine behind the `deck_*` commands, so it exists only
- * inside Tauri. In a browser — `pnpm dev:mock`, and Playwright — the transport
- * is drawn and disabled: a player waiting for a backend, rather than an
- * unfinished panel.
+ * Under Tauri that is the Rust engine behind the `deck_*` commands, which
+ * makes sound. In a browser — `pnpm dev:mock`, and Playwright — it is the mock
+ * backend's deck, which keeps time and emits the same ticks but is silent.
+ * Either way the transport is live: a disabled transport meant the scrolling
+ * waveform, the cue point and the readouts could only ever be tested by
+ * looking at their markup.
  */
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-export const canPlay = isTauri;
+export const canPlay = true;

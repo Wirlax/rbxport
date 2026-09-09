@@ -10,8 +10,8 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  Backend, Device, Edits, LibrarySummary, RowDto, SortColumn, TreeNode, ViewHandle, ViewSpec,
-  WaveformKind,
+  Backend, DeckEvent, Device, Edits, LibrarySummary, RowDto, SortColumn, Tick, TreeNode,
+  ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 
@@ -278,6 +278,52 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
   };
 
+  /*
+   * The mock deck.
+   *
+   * `startClock` is a chain of timeouts rather than an interval: an interval
+   * that outlives the page keeps firing, and the engine's own ticker likewise
+   * stops the moment nothing is playing.
+   */
+  const SAMPLE_RATE = 44_100;
+  const TICK_MS = 100;
+  const deckA = { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false };
+  const idle = { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false };
+  const deckTickListeners = new Set<(tick: Tick) => void>();
+  const deckEventListeners = new Set<(event: DeckEvent) => void>();
+  let clock: ReturnType<typeof setTimeout> | null = null;
+  let clockAt = 0;
+
+  const tick = (): Tick => ({ a: { ...deckA }, b: { ...idle }, sampleRate: SAMPLE_RATE });
+
+  const sendTick = () => {
+    const now = tick();
+    for (const listener of deckTickListeners) listener(now);
+  };
+
+  const stopClock = () => {
+    if (clock !== null) clearTimeout(clock);
+    clock = null;
+  };
+
+  const startClock = () => {
+    if (clock !== null) return;
+    clockAt = performance.now();
+    const step = () => {
+      clock = null;
+      const now = performance.now();
+      deckA.frames = Math.min(
+        deckA.frames + Math.round(((now - clockAt) / 1000) * SAMPLE_RATE),
+        deckA.totalFrames,
+      );
+      clockAt = now;
+      if (deckA.frames >= deckA.totalFrames) deckA.playing = false;
+      sendTick();
+      if (deckA.playing) clock = setTimeout(step, TICK_MS);
+    };
+    clock = setTimeout(step, TICK_MS);
+  };
+
   const wait = <T>(value: T): Promise<T> =>
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
@@ -488,23 +534,67 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
 
-    // The decks are the audio engine, which is Rust and is not here. A browser
-    // build draws the transport and disables it — a player waiting for a
-    // backend rather than an unfinished panel — so these accept the calls and
-    // report two stopped decks rather than pretending to play.
-    deckLoad: () => wait(undefined),
-    deckUnload: () => wait(undefined),
-    deckPlay: () => wait(undefined),
-    deckPause: () => wait(undefined),
-    deckSeek: () => wait(undefined),
-    deckState: () =>
-      wait({
-        a: { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false },
-        b: { frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false },
-        sampleRate: 0,
-      }),
-    onDeckTick: () => () => undefined,
-    onDeckEvent: () => () => undefined,
+    // A deck that keeps time but makes no sound. The audio engine is Rust and
+    // is not here, so this counts frames and emits the same ticks the engine
+    // does; everything above it — the scrolling waveform, the cue point, the
+    // readouts — then behaves in a browser exactly as it does in the app, and
+    // can be tested. What a browser cannot do is make a noise.
+    deckLoad: (deck, trackId) => {
+      if (deck !== "a") return wait(undefined);
+      const index = Number.parseInt(trackId, 10) - 100000;
+      const row = all[index];
+      deckA.frames = 0;
+      deckA.totalFrames = row ? row.durationSec * SAMPLE_RATE : 0;
+      deckA.playing = false;
+      deckA.loaded = row !== undefined;
+      deckA.generation += 1;
+      stopClock();
+      for (const listener of deckEventListeners) {
+        listener({
+          deck: "a",
+          totalFrames: deckA.totalFrames,
+          sampleRate: SAMPLE_RATE,
+          message: row ? null : "That track's file could not be found.",
+        });
+      }
+      sendTick();
+      return wait(undefined);
+    },
+    deckUnload: () => {
+      deckA.loaded = false;
+      deckA.playing = false;
+      deckA.frames = 0;
+      stopClock();
+      sendTick();
+      return wait(undefined);
+    },
+    deckPlay: () => {
+      if (!deckA.loaded) return wait(undefined);
+      deckA.playing = true;
+      startClock();
+      return wait(undefined);
+    },
+    deckPause: () => {
+      deckA.playing = false;
+      stopClock();
+      sendTick();
+      return wait(undefined);
+    },
+    deckSeek: (_deck, positionMs) => {
+      deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      deckA.generation += 1;
+      sendTick();
+      return wait(undefined);
+    },
+    deckState: () => wait(tick()),
+    onDeckTick: (listener) => {
+      deckTickListeners.add(listener);
+      return () => deckTickListeners.delete(listener);
+    },
+    onDeckEvent: (listener) => {
+      deckEventListeners.add(listener);
+      return () => deckEventListeners.delete(listener);
+    },
 
     onLibraryReady: (listener) => {
       readyListeners.add(listener);
