@@ -12,23 +12,31 @@ import { useCallback, useEffect, useState } from "react";
 import { getBackend } from "@/ipc/client";
 
 /**
- * How much of the last reading a meter keeps when the next is quieter.
+ * How fast a meter falls, in decibels a second.
  *
- * Fast attack, slow release, as every meter has: 0.8 a frame at thirty a
- * second falls about 30 dB a second, which reads as a needle settling rather
- * than as a bar flickering.
+ * A peak programme meter's own figure: 20 dB in a second reads as a needle
+ * settling. Per frame it was too fast to see — 20 % of what was left every
+ * thirtieth of a second is a bar that has gone before the eye arrives.
  */
-const RELEASE = 0.8;
+const FALL_DB_PER_SECOND = 20;
+
+/** The longest step the fall is applied over, so a stall is not a jump to nil. */
+const MAX_STEP_SECONDS = 0.25;
 
 /**
- * The value a meter shows next: the reading, or the last one decayed.
+ * The value a meter shows next: the reading, or the last one fallen.
  *
  * Fast attack, slow release. A meter that simply took each reading flickers,
  * and the loud moment — the one worth seeing — is gone before the eye is.
+ *
+ * The fall is measured in time rather than in frames, so it looks the same
+ * whatever rate the meters arrive at and does not race if a frame is dropped.
  */
-export function nextPeak(shown: number, reading: number): number {
+export function nextPeak(shown: number, reading: number, seconds: number): number {
   const safe = Number.isFinite(reading) ? Math.max(reading, 0) : 0;
-  const held = Number.isFinite(shown) ? Math.max(shown, 0) * RELEASE : 0;
+  const previous = Number.isFinite(shown) ? Math.max(shown, 0) : 0;
+  const step = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), MAX_STEP_SECONDS) : 0;
+  const held = previous * 10 ** ((-FALL_DB_PER_SECOND * step) / 20);
   return Math.min(Math.max(safe, held), 1);
 }
 
@@ -49,13 +57,17 @@ export function useMaster(): Master {
     void (async () => {
       const backend = await getBackend();
       // The meters come on their own beat, three times as often as the decks.
+      let last = performance.now();
       const unlisten = backend.onMeters((meters) => {
         if (!live) return;
+        const now = performance.now();
+        const elapsed = (now - last) / 1000;
+        last = now;
         setState((current) => {
           // A peak falls back rather than dropping: a meter that snaps to the
           // next reading flickers, and the loud moment is the one to see.
-          const left = nextPeak(current.peakLeft, meters.peakLeft);
-          const right = nextPeak(current.peakRight, meters.peakRight);
+          const left = nextPeak(current.peakLeft, meters.peakLeft, elapsed);
+          const right = nextPeak(current.peakRight, meters.peakRight, elapsed);
           return current.level === meters.master &&
             current.peakLeft === left &&
             current.peakRight === right
