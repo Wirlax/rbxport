@@ -15,6 +15,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { drawBands } from "@/canvas";
 import { getBackend } from "@/ipc/client";
 import { backingSize } from "@/lib/canvasSize";
+import { waveSlice } from "@/lib/player";
 
 /** Raw waveform bytes per track. Small — a few hundred bytes each. */
 const bytesByTrack = new Map<string, Uint8Array>();
@@ -97,22 +98,9 @@ export const WaveformDetail = memo(function WaveformDetail({
     // Centred on the playhead and *not* pinned: the head stays in the middle
     // and the track moves under it, so at either end the window hangs off the
     // edge. The overhang is drawn as nothing rather than as a stretched copy
-    // of the first bar.
-    const reach = Math.max(span, 0) / 2;
-    const from = progress - reach;
-    const to = progress + reach;
-    const width_ = Math.max(to - from, 1e-9);
-    // Both tags cover the whole track, so a window into one is a slice of its
-    // columns rather than a second fetch.
-    const columns = Math.floor(data.length / 3);
-    const shownFrom = Math.min(Math.max(from, 0), 1);
-    const shownTo = Math.min(Math.max(to, 0), 1);
-    const first = Math.floor(shownFrom * columns) * 3;
-    const last = Math.min(data.length, Math.ceil(shownTo * columns) * 3);
-    // Where in the canvas that slice belongs, so the music stays under the
-    // part of the strip it actually occupies.
-    const x0 = ((shownFrom - from) / width_) * w;
-    const span_ = ((shownTo - shownFrom) / width_) * w;
+    // of the first bar. Both tags cover the whole track, so a window into one
+    // is a slice of its columns rather than a second fetch.
+    const { first, last, x0, width: span_ } = waveSlice(progress, span, data.length, w);
     // The inset is given in CSS pixels; the canvas is in device pixels.
     const scale = h / Math.max(height, 1);
     ctx.clearRect(0, 0, w, h);

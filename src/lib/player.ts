@@ -497,3 +497,47 @@ export function needsRedraw(progress: number, anchor: number, span: number): boo
   if (span <= 0) return false;
   return Math.abs(progress - anchor) > (span * (OVERDRAW - 1)) / 4;
 }
+
+/** Where a window into the waveform bytes lands on the canvas. */
+export interface WaveSlice {
+  /** Byte offsets into the tag, so the window is a slice rather than a fetch. */
+  first: number;
+  last: number;
+  /** Where that slice starts on the canvas, in whole device pixels. */
+  x0: number;
+  /** How wide it is there, in whole device pixels. */
+  width: number;
+}
+
+/**
+ * The slice of a waveform tag a window shows, and where it sits on the canvas.
+ *
+ * `x0` and `width` are whole device pixels on purpose. The bars are one pixel
+ * wide, and translating the canvas by a fraction splits every one of them
+ * across two columns at partial alpha — measured, an offset of 285.6 left not
+ * one pure pixel in the strip, which over black reads as the waveform going
+ * pale. Only a window hanging off the start or end of the track has a non-zero
+ * offset at all, and across a sweep of those positions nine in ten were
+ * fractional, so this was most of the strip most of the time near the ends.
+ * Half a pixel of position is invisible; the blending is not.
+ */
+export function waveSlice(
+  progress: number,
+  span: number,
+  bytes: number,
+  canvasWidth: number,
+): WaveSlice {
+  const reach = Math.max(span, 0) / 2;
+  const from = progress - reach;
+  const to = progress + reach;
+  const width_ = Math.max(to - from, 1e-9);
+  const columns = Math.floor(bytes / 3);
+  const shownFrom = Math.min(Math.max(from, 0), 1);
+  const shownTo = Math.min(Math.max(to, 0), 1);
+  return {
+    first: Math.floor(shownFrom * columns) * 3,
+    last: Math.min(bytes, Math.ceil(shownTo * columns) * 3),
+    x0: Math.round(((shownFrom - from) / width_) * canvasWidth),
+    width: Math.round(((shownTo - shownFrom) / width_) * canvasWidth),
+  };
+}

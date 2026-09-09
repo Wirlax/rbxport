@@ -15,6 +15,7 @@ import {
   jumpSeconds,
   nextJumpSize,
   showsEveryBeat,
+  waveSlice,
   ZOOM_STEPS,
   zoomBy,
   phraseKind,
@@ -539,5 +540,47 @@ describe("showsEveryBeat", () => {
     for (const bars of ZOOM_STEPS.slice(0, -1)) {
       expect(showsEveryBeat(bars)).toBe(true);
     }
+  });
+});
+
+describe("waveSlice", () => {
+  const BYTES = 4000 * 3;
+
+  it("puts a window in the middle of the track across the whole canvas", () => {
+    const slice = waveSlice(0.5, 0.05, BYTES, 1200);
+    expect(slice.x0).toBe(0);
+    expect(slice.width).toBe(1200);
+  });
+
+  it("keeps the offset and width on whole pixels when the window overhangs", () => {
+    // The bug: a fractional translate splits every one-pixel bar across two
+    // columns at partial alpha, and the strip goes pale. 0.0131 is one of the
+    // nine in ten overhanging positions that used to land off the grid.
+    for (const progress of [0.0131, 0.00733, 0.9917, 0.001, 0.9999]) {
+      const slice = waveSlice(progress, 0.05, BYTES, 1200);
+      expect(Number.isInteger(slice.x0)).toBe(true);
+      expect(Number.isInteger(slice.width)).toBe(true);
+    }
+  });
+
+  it("draws the overhang as nothing rather than as a stretched first bar", () => {
+    // Half the window is before the track starts, so half the canvas is empty
+    // and the music occupies the other half.
+    const slice = waveSlice(0, 0.05, BYTES, 1200);
+    expect(slice.x0).toBe(600);
+    expect(slice.width).toBe(600);
+    expect(slice.first).toBe(0);
+  });
+
+  it("never reads past the end of the tag", () => {
+    const slice = waveSlice(1, 0.05, BYTES, 1200);
+    expect(slice.last).toBeLessThanOrEqual(BYTES);
+    expect(slice.first).toBeLessThan(slice.last);
+  });
+
+  it("asks for nothing when the track has no waveform at all", () => {
+    const slice = waveSlice(0.5, 0.05, 0, 1200);
+    expect(slice.first).toBe(0);
+    expect(slice.last).toBe(0);
   });
 });
