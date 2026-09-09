@@ -36,6 +36,7 @@ mod mixer;
 mod scrub;
 mod sink;
 mod smooth;
+mod stretch;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -52,6 +53,7 @@ use fade::Ramp;
 use smooth::Smoothed;
 
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
+pub use stretch::{Stretcher, Wsola, MAX_RATIO, MIN_RATIO};
 
 /// Frames the mixer works on at a time.
 ///
