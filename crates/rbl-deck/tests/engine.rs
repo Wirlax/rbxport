@@ -487,6 +487,36 @@ fn a_file_that_cannot_be_decoded_reports_an_error_and_leaves_the_deck_empty() {
     assert!(!h.sink.running());
 }
 
+/// The budget for a track to be audible after it is asked for, in
+/// milliseconds. From the plan's M7-P6 list.
+const LOAD_TO_AUDIO_MS: u128 = 200;
+
+#[test]
+fn a_track_is_audible_within_the_load_budget() {
+    // Load to sound, on the same path the interface uses: `load` returns
+    // immediately and the decode thread opens the file, so what is measured is
+    // the whole of it — the open, the first blocks, and the fade in.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize * 30);
+
+    let h = harness();
+    let asked = Instant::now();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut heard = None;
+    while heard.is_none() && Instant::now() < deadline {
+        if h.sink.pull(512).iter().any(|s| s.abs() > 0.01) {
+            heard = Some(asked.elapsed());
+        }
+    }
+    let took = heard.expect("the deck never made a sound").as_millis();
+    assert!(took <= LOAD_TO_AUDIO_MS, "load to audio took {took} ms");
+}
+
 #[test]
 fn one_deck_going_wrong_leaves_the_other_playing() {
     // The case that matters in front of an audience: a file that will not
