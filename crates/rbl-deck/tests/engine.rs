@@ -361,6 +361,34 @@ fn a_track_that_ends_stops_the_deck_rather_than_running_on() {
 }
 
 #[test]
+fn moving_the_master_level_does_not_step() {
+    // The level is read once a callback and used for the whole of it, so a
+    // hand on the fader arrives as a staircase eleven milliseconds wide —
+    // audible on anything loud, and a click on a fast move. Smoothed per
+    // frame, the largest step is a fraction of what an ear picks out.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.wav");
+    flat(&path, RATE as usize * 2);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    // Past the fade in, so what is left is the fader and nothing else.
+    h.play_until(Deck::A, RING as u64 + 4_096);
+
+    let mut out = Vec::new();
+    // Slammed from full to silence and back, a buffer apart: the worst a hand
+    // can do, and further than a hand can actually move.
+    for level in [0.0_f32, 1.0, 0.2, 1.0] {
+        h.engine.master().set_gain(level);
+        out.extend(h.sink.pull(512));
+    }
+    let worst = worst_step(&out);
+    assert!(worst < step_limit(), "the level stepped by {worst}");
+}
+
+#[test]
 fn the_two_decks_are_independent_and_sum() {
     let dir = tempfile::tempdir().unwrap();
     let one = dir.path().join("one.wav");

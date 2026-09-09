@@ -34,6 +34,7 @@ mod decode;
 mod fade;
 mod scrub;
 mod sink;
+mod smooth;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -47,6 +48,7 @@ pub use sink::{CpalSink, NullSink, Render, Sink};
 
 use block::{Block, RING_BLOCKS};
 use fade::Ramp;
+use smooth::Smoothed;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeckError {
@@ -120,6 +122,11 @@ pub struct Master {
     gain: AtomicU32,
     peak_left: AtomicU32,
     peak_right: AtomicU32,
+    /// The device's rate, so the callback can smooth a fader in real time.
+    ///
+    /// Written once, by the engine, as soon as the sink is open — which is
+    /// before the stream is started and so before any callback runs.
+    rate: AtomicU32,
 }
 
 impl Default for Master {
@@ -128,6 +135,7 @@ impl Default for Master {
             gain: AtomicU32::new(1.0_f32.to_bits()),
             peak_left: AtomicU32::new(0),
             peak_right: AtomicU32::new(0),
+            rate: AtomicU32::new(0),
         }
     }
 }
@@ -167,6 +175,14 @@ impl Master {
                 Err(seen) => current = seen,
             }
         }
+    }
+
+    fn set_rate(&self, rate: u32) {
+        self.rate.store(rate, Ordering::Relaxed);
+    }
+
+    fn rate(&self) -> u32 {
+        self.rate.load(Ordering::Relaxed)
     }
 
     /// Reads the meters and clears them, so the next read is the next span.
@@ -226,25 +242,35 @@ impl Engine {
         // to finish reading a meter.
         let master = Arc::new(Master::default());
         let mixing = Arc::clone(&master);
+        // The level a callback is given is one number for the whole buffer, so
+        // a hand on the fader arrives as a staircase eleven milliseconds wide.
+        // Smoothed per frame instead: see `smooth`. Built at the first
+        // callback, because the device's rate is not known until the sink is
+        // open and the sink is opened with this closure.
+        let mut level: Option<Smoothed> = None;
         let render: Render = Box::new(move |out: &mut [f32]| {
             for reader in &mut readers {
                 reader.mix_into(out);
             }
-            let gain = mixing.gain();
+            let target = mixing.gain();
+            let level = level.get_or_insert_with(|| Smoothed::new(target, mixing.rate()));
             // Two decks at full level sum past 1.0. A clamp is not a limiter —
             // that is the mixer's job, in P3 — but it keeps a hot sum from
             // reaching the device as a wrap.
             let (mut left, mut right) = (0.0_f32, 0.0_f32);
-            for (i, sample) in out.iter_mut().enumerate() {
-                let value = (*sample * gain).clamp(-1.0, 1.0);
-                *sample = value;
-                // The meter reads what the device is given, after the level:
-                // a meter before the fader tells you about the file rather
-                // than about what anyone can hear.
-                if i % 2 == 0 {
-                    left = left.max(value.abs());
-                } else {
-                    right = right.max(value.abs());
+            for frame in out.chunks_exact_mut(2) {
+                let gain = level.step(target);
+                for (channel, sample) in frame.iter_mut().enumerate() {
+                    let value = (*sample * gain).clamp(-1.0, 1.0);
+                    *sample = value;
+                    // The meter reads what the device is given, after the
+                    // level: a meter before the fader tells you about the file
+                    // rather than about what anyone can hear.
+                    if channel == 0 {
+                        left = left.max(value.abs());
+                    } else {
+                        right = right.max(value.abs());
+                    }
                 }
             }
             mixing.report(left, right);
@@ -252,6 +278,8 @@ impl Engine {
 
         let sink = open(render)?;
         let sample_rate = sink.sample_rate();
+        // Before the stream is started, so the first callback already knows it.
+        master.set_rate(sample_rate);
 
         let mut handles = Vec::with_capacity(2);
         for (deck, (clock, producer)) in Deck::ALL.into_iter().zip(clocks.iter().zip(producers)) {
