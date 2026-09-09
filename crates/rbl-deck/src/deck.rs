@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use rtrb::Producer;
 
-use crate::block::{Block, BLOCK_FRAMES};
+use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS};
 use crate::clock::DeckClock;
 use crate::decode::Streamer;
 use crate::{Deck, DeckEvent, EventSink};
@@ -100,9 +100,19 @@ struct Worker {
 impl Worker {
     fn run(&mut self, commands: &Receiver<Command>) {
         loop {
-            // Everything that can be decoded now, before waiting for anything.
+            // A ring's worth at most, then look at the channel again.
+            //
+            // Unbounded, this starves its own commands: a consumer draining as
+            // fast as this fills — anything faster than realtime — means the
+            // ring is never full, `produce` never returns false, and a seek
+            // sits in the channel while the thread decodes the rest of the
+            // track. Seeking four minutes into a track took two seconds
+            // because of it.
             let mut produced = false;
-            while self.produce() {
+            for _ in 0..RING_BLOCKS {
+                if !self.produce() {
+                    break;
+                }
                 produced = true;
             }
 

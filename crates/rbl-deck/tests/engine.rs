@@ -21,6 +21,10 @@ use rbl_deck::{Deck, DeckEvent, Engine, NullSink, Sink};
 
 const RATE: u32 = 44_100;
 
+/// Frames in a deck's ring, which is what the engine's own `RING_BLOCKS`
+/// times `BLOCK_FRAMES` comes to.
+const RING: usize = 16 * 512;
+
 /// A 16-bit PCM WAV, so no fixture file is needed.
 fn write_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) {
     let bits = 16_u16;
@@ -48,7 +52,7 @@ fn write_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) {
 
 /// A track whose sample at frame `n` says what `n` is, so a test can read the
 /// output and say where in the file it came from.
-fn ramp(path: &Path, frames: usize) {
+fn ramp_at(path: &Path, rate: u32, frames: usize) {
     let mut samples = Vec::with_capacity(frames * 2);
     for frame in 0..frames {
         // 0.5 at frame 0 rising to 1.0 at the end, in both channels.
@@ -56,7 +60,11 @@ fn ramp(path: &Path, frames: usize) {
         samples.push(value);
         samples.push(value);
     }
-    write_wav(path, RATE, 2, &samples);
+    write_wav(path, rate, 2, &samples);
+}
+
+fn ramp(path: &Path, frames: usize) {
+    ramp_at(path, RATE, frames);
 }
 
 struct Harness {
@@ -343,4 +351,53 @@ fn unloading_clears_the_deck() {
     assert!(!snapshot.a.loaded);
     assert!(!snapshot.a.playing);
     assert_eq!(snapshot.a.position_frames, 0);
+}
+
+#[test]
+fn a_seek_is_honoured_at_once_even_while_the_decoder_runs_flat_out() {
+    // A minute, so the far end is far past anything already decoded, and a
+    // deck that decoded its way there would take a very long time about it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("long.wav");
+    // At 48 kHz against a 44.1 kHz device, so the resampler runs: that is what
+    // most of the library will do on a real machine, and a deck that decodes
+    // faster than anything can drain it never starves its own commands.
+    ramp_at(&path, 48_000, 48_000 * 60);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    // Straight into playing and seeking, with nothing waited for in between:
+    // the decode thread is filling from the start of the track at the moment
+    // the seek arrives, which is when it used to ignore it.
+    h.engine.play(Deck::A);
+
+    // Fifty seconds into a sixty-second ramp is 0.917; the start is 0.5.
+    let target = u64::from(RATE) * 50;
+    h.engine.seek_frames(Deck::A, target);
+
+    // Frames of audio from the *old* position that get played before the new
+    // position arrives. Silence is not counted: an underrun while the decode
+    // thread refills is a different thing from playing the wrong music, and
+    // counting pulls rather than audio would just measure how busy the machine
+    // is.
+    let mut stale = 0_u64;
+    let mut arrived = false;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !arrived && Instant::now() < deadline {
+        // A whole ring at a time, which is what makes this a test of the
+        // starvation: a consumer that takes less than the decode thread
+        // produces lets the ring fill, and a full ring is what used to be the
+        // only thing that sent the thread back to its channel.
+        let audio = h.sink.pull(RING);
+        arrived = audio.iter().any(|sample| *sample > 0.9);
+        stale += audio.iter().filter(|sample| **sample > 0.4 && **sample < 0.9).count() as u64 / 2;
+    }
+    assert!(arrived, "audio from the new position never arrived");
+    // A ring is 8,192 frames, and the decode thread checks its channel once a
+    // ring, so two is the most that can already be in flight. Anything near a
+    // second means the deck decoded its way to the seek point instead of
+    // jumping — which is what happened while the decode loop could starve its
+    // own command channel.
+    assert!(stale < u64::from(RATE) / 2, "played {stale} frames from the old position");
 }
