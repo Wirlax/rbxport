@@ -50,17 +50,32 @@ export interface PlayerProps {
 /**
  * Cue points on a waveform.
  *
- * No colour: `djmdCue.ColorTableIndex` decides what rekordbox draws and is not
- * understood, so hot cues take the accent and memory cues the dim text colour
- * rather than a guessed palette. Hot cues carry their letter where there is
- * room for it.
+ * A hot cue is a red tick at its exact position with a lettered badge beside
+ * it, not a line: measured off `docs/screenshots`, the badge is 11pt square,
+ * `#77E866` with a black letter, its left edge on the cue and the tick 1.5pt
+ * wide to the left of it. The overview draws no line through the waveform at
+ * all — four hot cues, four badges, and the waveform under them unbroken.
+ *
+ * One colour for every slot: `djmdCue.ColorTableIndex` decides what rekordbox
+ * draws and is still unresolved, so this is the green the capture shows rather
+ * than a guessed palette. Memory cues keep their line, and its grey is
+ * likewise unmeasured.
  */
 const CueMarkers = memo(function CueMarkers({
-  cues, totalMs, labelled, window,
+  cues, totalMs, band = "overview", window,
 }: {
   cues: readonly Cue[];
   totalMs: number;
-  labelled?: boolean;
+  /**
+   * Which waveform this is drawn over.
+   *
+   * The overview hangs its badges from the top of the strip. No export-mode
+   * capture has a cue inside the detail's twelve-bar window, so the detail
+   * follows the performance deck, which sits its badge at the foot of the band
+   * and keeps a line up through the waveform — the thing that makes a cue
+   * placeable while the grid is being edited.
+   */
+  band?: "overview" | "detail";
   /** The slice of the track being shown, for the zoomed detail waveform. */
   window?: { from: number; to: number };
 }) {
@@ -75,15 +90,30 @@ const CueMarkers = memo(function CueMarkers({
         // A cue outside the window is not drawn at the edge — a marker pinned
         // to the edge reads as a cue that is there.
         if (at < from || at > to) return null;
+        const left = `${((at - from) / span) * 100}%`;
+        if (cue.memory) {
+          return (
+            <span
+              key={`m-${cue.positionMs}`}
+              className={styles.memoryCue}
+              style={{ left }}
+              title="Memory cue"
+              aria-hidden
+            />
+          );
+        }
         return (
           <span
-            key={`${cue.memory ? "m" : cue.letter}-${cue.positionMs}`}
-            className={cue.memory ? styles.memoryCue : styles.hotCue}
-            style={{ left: `${((at - from) / span) * 100}%` }}
-            title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
+            key={`h-${cue.letter}-${cue.positionMs}`}
+            className={styles.hotCue}
+            data-band={band}
+            data-cue={cue.letter}
+            style={{ left }}
+            title={`Hot cue ${cue.letter}`}
             aria-hidden
           >
-            {labelled && !cue.memory ? cue.letter : null}
+            <i className={styles.hotCueTick} />
+            <b className={styles.hotCueBadge}>{cue.letter}</b>
           </span>
         );
       })}
@@ -547,7 +577,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
             {track && track.bpmX100 > 0 ? (
               <span ref={barsLabel} className={styles.bars} data-testid="player-bars" />
             ) : null}
-            <CueMarkers cues={cues} totalMs={total * 1000} labelled window={window} />
+            <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} />
             {/*
               The detail window is centred on the playhead, so the head is
               drawn at the centre rather than at the progress fraction — except
