@@ -32,6 +32,7 @@ mod clock;
 mod deck;
 mod decode;
 mod fade;
+mod mixer;
 mod scrub;
 mod sink;
 mod smooth;
@@ -49,6 +50,16 @@ pub use sink::{CpalSink, NullSink, Render, Sink};
 use block::{Block, RING_BLOCKS};
 use fade::Ramp;
 use smooth::Smoothed;
+
+pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
+
+/// Frames the mixer works on at a time.
+///
+/// Each deck goes through its own strip before the two are summed, so each
+/// needs a buffer of its own. One, allocated when the engine starts, and the
+/// callback works in chunks of it — the audio callback allocates nothing, ever.
+/// 4096 is what the device sink already chunks to.
+const MIX_FRAMES: usize = 4096;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeckError {
@@ -202,6 +213,7 @@ pub struct Engine {
     sink: Arc<dyn Sink>,
     sample_rate: u32,
     master: Arc<Master>,
+    mixer: Arc<MixerSettings>,
 }
 
 impl Engine {
@@ -242,6 +254,11 @@ impl Engine {
         // to finish reading a meter.
         let master = Arc::new(Master::default());
         let mixing = Arc::clone(&master);
+        let mixer = Arc::new(MixerSettings::default());
+        let strip = Arc::clone(&mixer);
+        // One buffer per deck, allocated here rather than in the callback.
+        let mut scratch = vec![0.0_f32; MIX_FRAMES * 2];
+        let mut channels: Option<[Channel; 2]> = None;
         // The level a callback is given is one number for the whole buffer, so
         // a hand on the fader arrives as a staircase eleven milliseconds wide.
         // Smoothed per frame instead: see `smooth`. Built at the first
@@ -249,8 +266,27 @@ impl Engine {
         // open and the sink is opened with this closure.
         let mut level: Option<Smoothed> = None;
         let render: Render = Box::new(move |out: &mut [f32]| {
-            for reader in &mut readers {
-                reader.mix_into(out);
+            let rate = mixing.rate();
+            let channels =
+                channels.get_or_insert_with(|| [Channel::new(rate), Channel::new(rate)]);
+            let curve = strip.curve();
+            let (fade_a, fade_b) = strip.fader();
+            // Each deck through its own strip and then summed, which is what a
+            // mixer is: a per-channel EQ applied to the sum would be one EQ.
+            for chunk in out.chunks_mut(MIX_FRAMES * 2) {
+                let Some(buffer) = scratch.get_mut(..chunk.len()) else { continue };
+                for (i, (reader, channel)) in
+                    readers.iter_mut().zip(channels.iter_mut()).enumerate()
+                {
+                    buffer.fill(0.0);
+                    reader.mix_into(buffer);
+                    let fader = if i == 0 { fade_a } else { fade_b };
+                    let Some(settings) = strip.channels.get(i) else { continue };
+                    channel.process(buffer, settings, curve, fader);
+                    for (sample, add) in chunk.iter_mut().zip(buffer.iter()) {
+                        *sample += *add;
+                    }
+                }
             }
             let target = mixing.gain();
             let level = level.get_or_insert_with(|| Smoothed::new(target, mixing.rate()));
@@ -296,11 +332,16 @@ impl Engine {
         let decks: [deck::DeckHandle; 2] = handles
             .try_into()
             .map_err(|_| DeckError::Device("could not start both decks".to_owned()))?;
-        Ok(Self { decks, sink, sample_rate, master })
+        Ok(Self { decks, sink, sample_rate, master, mixer })
     }
 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// The channel strips and the crossfader.
+    pub fn mixer(&self) -> &Arc<MixerSettings> {
+        &self.mixer
     }
 
     /// The master level and its meters.
