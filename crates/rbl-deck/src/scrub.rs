@@ -10,13 +10,22 @@
 //! through it at the drag's own rate. Both halves are here and neither knows
 //! about threads — the decode thread fills the window, and calls `render` to
 //! produce a block.
+//!
+//! A hand that pauses is a stop like any other, so the same envelope guards it:
+//! cutting to silence the moment the head rests is a step from wherever the
+//! waveform happened to be, and on bass that is a crack every time the hand
+//! holds still. See `fade`.
+
+use crate::fade::Ramp;
 
 /// Frames either side of the cursor the window holds.
 ///
-/// Four seconds at 44.1 kHz, so a drag has eight seconds of room before the
-/// demuxer is asked for anything. Stereo `f32` makes that 2.8 MB while a drag
-/// is running and nothing when it is not.
-pub const WINDOW_REACH: u64 = 44_100 * 4;
+/// Two seconds at 44.1 kHz, so a drag has four seconds of room before the
+/// demuxer is asked for anything, and a refill decodes four seconds rather
+/// than eight. That matters: a refill runs on the decode thread, and while it
+/// runs no blocks are produced — an eight-second one outran what a drag has
+/// buffered and left a hole in the middle of it.
+pub const WINDOW_REACH: u64 = 44_100 * 2;
 
 /// The fastest a drag can play, as a multiple of normal speed.
 ///
@@ -38,8 +47,7 @@ const SMOOTH: f64 = 0.4;
 const LOOKAHEAD: f64 = 2.0;
 
 /// Below this the record has stopped, and silence is what a stopped record
-/// makes. Interpolating at a rate this low is a held sample, which is a click
-/// and then a hum.
+/// makes. Interpolating at a rate this low is a held sample, which is a hum.
 const REST_RATE: f64 = 0.01;
 
 /// The furthest the head is allowed to fall behind the pointer, in frames.
@@ -51,6 +59,13 @@ const REST_RATE: f64 = 0.01;
 /// fast drag sound like what it is: a burst of the music it passed over, then
 /// silence, with the head where the pointer left it.
 const MAX_LAG: f64 = 4096.0;
+
+/// Blocks without a pointer move before the head is allowed to settle.
+///
+/// A pointer emits about one move a screen frame and a block is 11.6 ms, so
+/// two or three blocks pass between moves during an ordinary drag. Settling
+/// any sooner than that silences a hand that is still moving.
+const SETTLE_BLOCKS: u32 = 4;
 
 /// Decoded audio around the cursor: interleaved stereo at the device rate.
 pub struct PcmWindow {
@@ -111,18 +126,37 @@ pub struct Scrubber {
     cursor: f64,
     target: f64,
     rate: f64,
-    /// Whether the pointer has moved since the last block was planned.
+    /// How much of the read head is being heard.
     ///
-    /// The head only snaps to a target that is standing still. A hand moving
-    /// at about playback speed keeps the head within a block of the pointer,
-    /// and snapping on distance alone would silence exactly the drag that
-    /// should sound most like the record.
-    moving: bool,
+    /// Ramped rather than switched: see `fade::FADE_FRAMES`.
+    gain: Ramp,
+    /// Whether the pointer has said anything yet.
+    ///
+    /// Until it has, the head has nowhere to go and would render silence. The
+    /// deck holds off rather than filling the ring with it: a ring of silence
+    /// has to play out before the first real sound, which was heard as a gap
+    /// at the start of every drag.
+    aimed: bool,
+    /// Blocks planned since the pointer last moved.
+    ///
+    /// Not a flag. Blocks come out faster than a pointer emits moves — 11.6 ms
+    /// against a screen frame — so a boolean cleared by the first block after
+    /// a move makes the second and third of every pass believe the hand has
+    /// stopped. On a slow drag that is silence two blocks in three, which is
+    /// heard as a stutter over the vinyl.
+    still: u32,
 }
 
 impl Scrubber {
     pub fn new(at: u64) -> Self {
-        Self { cursor: at as f64, target: at as f64, rate: 0.0, moving: false }
+        Self {
+            cursor: at as f64,
+            target: at as f64,
+            rate: 0.0,
+            still: 0,
+            aimed: false,
+            gain: Ramp::silent(),
+        }
     }
 
     /// Where the pointer is now.
@@ -134,15 +168,23 @@ impl Scrubber {
         // Both sides are whole frames that came in as integers, so this is a
         // comparison of exact values rather than of two computed floats: the
         // pointer either sent a new frame or repeated the last one.
-        let aimed = frame as f64;
-        self.moving = (aimed - self.target).abs() >= 1.0;
-        self.target = aimed;
+        let to = frame as f64;
+        if (to - self.target).abs() >= 1.0 {
+            self.still = 0;
+        }
+        self.target = to;
+        self.aimed = true;
         let lag = self.target - self.cursor;
         if lag > MAX_LAG {
             self.cursor = self.target - MAX_LAG;
         } else if lag < -MAX_LAG {
             self.cursor = self.target + MAX_LAG;
         }
+    }
+
+    /// Whether the pointer has moved at all since the drag began.
+    pub fn started(&self) -> bool {
+        self.aimed
     }
 
     pub fn cursor(&self) -> u64 {
@@ -177,11 +219,14 @@ impl Scrubber {
         // is what makes the sound stop: an exponential approach spends half a
         // second getting quiet, which is heard as the drag carrying on after
         // the hand has. A pointer that is still moving is followed instead,
-        // however close it is.
-        let moving = self.moving;
-        self.moving = false;
-        if !moving && (self.target - self.cursor).abs() < frames as f64 * LOOKAHEAD {
-            self.cursor = self.target;
+        // however close it is — and "still moving" means a move has arrived
+        // within the last few blocks, not within the last one.
+        self.still = self.still.saturating_add(1);
+        if self.still > SETTLE_BLOCKS && (self.target - self.cursor).abs() < frames as f64 * LOOKAHEAD {
+            // The rate stops; the head does not move. Closing the last of the
+            // gap by jumping is a step in the waveform, and on bass that is a
+            // crack. What is left is under a block, and letting go lands on
+            // the pointer rather than on the head anyway.
             self.rate = 0.0;
             return 0.0;
         }
@@ -202,13 +247,21 @@ impl Scrubber {
     pub fn render(&mut self, window: &PcmWindow, out: &mut [f32]) -> usize {
         let frames = out.len() / 2;
         let rate = self.plan(frames);
+        // A moving head is heard, a resting one is faded out. The fade is what
+        // keeps a stop from being a step: the waveform is wherever it is when
+        // the hand pauses, and cutting it dead is a click.
+        let sounding = rate != 0.0;
         for i in 0..frames {
-            let (left, right) = if rate == 0.0 { (0.0, 0.0) } else { window.sample(self.cursor) };
+            let gain = self.gain.step(sounding);
+            // Sampled even at rest, so the fade has the waveform to fade out
+            // rather than an abrupt zero. A held sample reaching zero is a
+            // decay; a held sample held is the hum `REST_RATE` guards against.
+            let (left, right) = window.sample(self.cursor);
             if let Some(slot) = out.get_mut(i * 2) {
-                *slot = left;
+                *slot = left * gain;
             }
             if let Some(slot) = out.get_mut(i * 2 + 1) {
-                *slot = right;
+                *slot = right * gain;
             }
             self.cursor = (self.cursor + rate).max(0.0);
         }
@@ -227,6 +280,7 @@ impl Scrubber {
 )]
 mod tests {
     use super::*;
+    use crate::fade::FADE_FRAMES;
 
     /// A window whose left channel is its own frame number, so what came out
     /// says where it was read from.
@@ -322,6 +376,98 @@ mod tests {
         }
     }
 
+    /// A 60 Hz sine, which is what a kick drum looks like to the read head.
+    fn bass(start: u64, frames: u64) -> PcmWindow {
+        let mut samples = Vec::with_capacity(frames as usize * 2);
+        for i in 0..frames {
+            let t = (start + i) as f64 / 44_100.0;
+            let value = (t * 60.0 * std::f64::consts::TAU).sin() as f32;
+            samples.push(value);
+            samples.push(value);
+        }
+        PcmWindow { start, samples }
+    }
+
+    /// The largest step between neighbouring output samples.
+    ///
+    /// Across the whole stream, not within a block: the join between one block
+    /// and the next is exactly where a click hides.
+    fn worst_step(out: &[f32]) -> f32 {
+        out.chunks_exact(2)
+            .map(|f| f[0])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f32, f32::max)
+    }
+
+    #[test]
+    fn a_slow_drag_over_bass_does_not_step() {
+        // Crackle is a discontinuity, and bass is where it is loudest: a big
+        // smooth waveform makes any jump in the read position obvious. At 60 Hz
+        // and about playback speed, neighbouring samples differ by well under
+        // a hundredth; anything above that came from the head, not the music.
+        let window = bass(0, 44_100 * 4);
+        let mut scrubber = Scrubber::new(0);
+        let mut out = vec![0.0_f32; 512 * 2];
+        let mut at = 0_u64;
+        let mut stream: Vec<f32> = Vec::new();
+        for pass in 0..120 {
+            // A hand: moving, then resting long enough for the head to settle,
+            // then moving on. A hand does that constantly, and the settle is
+            // where a jump would come from.
+            if pass % 12 < 5 {
+                at += 600;
+                scrubber.aim(at);
+            }
+            scrubber.render(&window, &mut out);
+            stream.extend_from_slice(&out);
+        }
+        let worst = worst_step(&stream);
+        assert!(worst < 0.02, "the head stepped by {worst}, which is a click");
+    }
+
+    #[test]
+    fn a_drag_stays_audible_between_pointer_moves() {
+        // The one that bit. Blocks come out every 11.6 ms and a pointer moves
+        // about once a screen frame, so most blocks are planned without a new
+        // target. Treating "no move since the last block" as "the hand has
+        // stopped" silenced two blocks in three, which is heard as a stutter
+        // over what should be an unbroken vinyl sound.
+        let window = ramp(0, 44_100 * 4);
+        let mut scrubber = Scrubber::new(0);
+        let mut out = vec![0.0_f32; 512 * 2];
+        let mut at = 0_u64;
+        let mut silent = 0;
+        for pass in 0..30 {
+            // A move every third block, which is slower than a real pointer.
+            if pass % 3 == 0 {
+                at += 1_500;
+                scrubber.aim(at);
+            }
+            scrubber.render(&window, &mut out);
+            if out.iter().all(|s| *s == 0.0) {
+                silent += 1;
+            }
+        }
+        assert_eq!(silent, 0, "{silent} of 30 blocks went quiet mid-drag");
+    }
+
+    #[test]
+    fn the_head_still_settles_once_the_moves_stop() {
+        // And the other half: a hand that has genuinely stopped goes quiet
+        // within a few blocks rather than grinding on.
+        let window = ramp(0, 44_100 * 4);
+        let mut scrubber = Scrubber::new(0);
+        let mut out = vec![0.0_f32; 512 * 2];
+        scrubber.aim(2_000);
+        for _ in 0..(SETTLE_BLOCKS + 6) {
+            scrubber.render(&window, &mut out);
+        }
+        assert_eq!(scrubber.rate(), 0.0, "the record should have stopped");
+        assert!(out.iter().all(|s| *s == 0.0), "and gone quiet");
+    }
+
     #[test]
     fn a_flick_leaves_the_head_close_behind_rather_than_seconds_behind() {
         // A fast drag moves the pointer further than the head can render. It
@@ -395,9 +541,11 @@ mod tests {
         scrubber.aim(1_000 + 512 * 2);
         let mut out = vec![0.0_f32; 512 * 2];
         assert_eq!(scrubber.render(&window, &mut out), 512);
-        // Normal-ish speed forwards: the first sample is where the head was.
-        assert!((out[0] - 1_000.0).abs() < 2.0, "{}", out[0]);
-        assert!(out[1022] > out[0], "the block should move forwards");
+        // Past the fade-in, which is what keeps a start from being a step: the
+        // head is reading the window from where it was told to.
+        let past_fade = usize::from(FADE_FRAMES) * 2;
+        assert!(out[past_fade] > 1_000.0, "{}", out[past_fade]);
+        assert!(out[1022] > out[past_fade], "the block should move forwards");
     }
 
     #[test]
@@ -420,6 +568,9 @@ mod tests {
         for _ in 0..20 {
             scrubber.render(&window, &mut out);
         }
-        assert_eq!(scrubber.cursor(), 0);
+        // Never past the front of the track. It rests a little short of the
+        // target rather than exactly on it — closing that last gap by jumping
+        // is the step this deliberately does not make.
+        assert!(scrubber.cursor() < 1_024, "at {}", scrubber.cursor());
     }
 }

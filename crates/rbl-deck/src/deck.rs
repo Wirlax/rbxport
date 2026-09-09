@@ -312,6 +312,12 @@ impl Worker {
         }
         let generation = self.generation;
         let Some(scrubber) = self.scrubber.as_mut() else { return false };
+        // Nothing until the pointer has said where it is going. Producing
+        // at-rest blocks in the meantime fills the ring with silence, and that
+        // silence has to play out before the first sound of the drag.
+        if !scrubber.started() {
+            return false;
+        }
         // Refill before the head reaches the edge, not after: a demuxer seek
         // costs more than a block, and running off the end is silence.
         let at = scrubber.cursor();
