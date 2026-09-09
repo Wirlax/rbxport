@@ -175,8 +175,16 @@ impl Playlists {
 impl Library {
     /// The row a track's display id names.
     pub fn row_of(&self, display_id: &str) -> Option<Row> {
-        let wanted: u64 = display_id.parse().ok()?;
-        self.row_by_id().get(&wanted).copied()
+        self.row_of_id(display_id.parse().ok()?)
+    }
+
+    /// The row a numeric track id names.
+    ///
+    /// The same map without the parse, for callers that already hold the
+    /// number — a waveform request per row cannot afford to build a string to
+    /// look one up.
+    pub fn row_of_id(&self, id: u64) -> Option<Row> {
+        self.row_by_id().get(&id).copied()
     }
 
     /// A track's cues, ordered by position.

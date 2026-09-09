@@ -22,6 +22,47 @@ const cache = new WaveformCache(500);
  */
 const inFlight = new Map<string, Promise<RenderedWaveform | null>>();
 
+/**
+ * How long a row must stay on screen before its waveform is asked for.
+ *
+ * A flick through a big playlist mounts and unmounts thousands of rows, and
+ * every one of them used to cost a `track_waveform` round trip that read an
+ * analysis file off disk — for a row nobody saw. Those run on the same
+ * blocking pool as `fetch_rows`, so the rows being scrolled *to* queued behind
+ * the waveforms of rows already gone, and the list came up blank until it
+ * drained. Six frames is under what anyone can read; a row that goes past
+ * faster than this now costs nothing at all.
+ */
+const SETTLE_MS = 100;
+
+/**
+ * How many waveform requests may be on the command channel at once.
+ *
+ * A screenful is about twenty rows and they all settle together. Letting all
+ * twenty go at once puts twenty file reads in front of the next `fetch_rows`,
+ * which is the call that actually has to land for the list to draw.
+ */
+const MAX_CONCURRENT = 4;
+
+let active = 0;
+const waiting: Array<() => void> = [];
+
+async function acquire(): Promise<void> {
+  if (active < MAX_CONCURRENT) {
+    active += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    waiting.push(resolve);
+  });
+  active += 1;
+}
+
+function release(): void {
+  active -= 1;
+  waiting.shift()?.();
+}
+
 async function load(
   trackId: string,
   key: string,
@@ -33,6 +74,7 @@ async function load(
   if (existing) return existing;
 
   const pending = (async () => {
+    await acquire();
     try {
       const backend = await getBackend();
       const data = await backend.trackWaveform(trackId, "bands");
@@ -44,6 +86,7 @@ async function load(
       // A track without analysis simply stays blank.
       return null;
     } finally {
+      release();
       inFlight.delete(key);
     }
   })();
@@ -85,12 +128,17 @@ export const WaveformPreview = memo(function WaveformPreview({
       return;
     }
 
-    void load(trackId, key, width, height, dpr).then((rendered) => {
-      if (rendered) paint(rendered);
-    });
+    // Nothing is asked for until the row has settled. A row a flick goes past
+    // is unmounted before this fires, and the request is never made.
+    const timer = window.setTimeout(() => {
+      void load(trackId, key, width, height, dpr).then((rendered) => {
+        if (rendered) paint(rendered);
+      });
+    }, SETTLE_MS);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [trackId, width, height]);
 

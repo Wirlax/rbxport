@@ -151,7 +151,7 @@ export interface MockOptions {
 
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
-  const latency = options.latencyMs ?? 0;
+  const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
   const all = makeRows(trackCount);
   const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
   const tree = makeTree();
@@ -760,4 +760,19 @@ function readCountFromUrl(): number | null {
   const raw = new URLSearchParams(location.search).get("tracks");
   const n = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(n) && n > 0 && n <= 200000 ? n : null;
+}
+
+/**
+ * Simulated IPC latency, from `?latency=25`.
+ *
+ * The real backend answers `fetch_rows` in single-digit milliseconds and the
+ * mock answers in zero, and the difference is not cosmetic: a race between a
+ * moving window and a landing page cannot happen at zero. This is how a scroll
+ * is tested against a backend that takes any time at all.
+ */
+function readLatencyFromUrl(): number | null {
+  if (typeof location === "undefined") return null;
+  const raw = new URLSearchParams(location.search).get("latency");
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 2000 ? n : null;
 }

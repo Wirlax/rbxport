@@ -271,7 +271,11 @@ pub async fn track_waveform(
     };
 
     blocking("track_waveform", move || {
-        let Some(row) = library.ids.iter().position(|&id| id == numeric) else {
+        // Through the id map, not a scan. `ids` is 38,681 long and a screenful
+        // of rows asks once each, which is the reason `artwork_path_of` was
+        // given the map in the first place; this call was still walking the
+        // whole column for every row a scroll went past.
+        let Some(row) = library.row_of_id(numeric).map(|row| row as usize) else {
             return Ok(Vec::new());
         };
         let analysis_path = library.analysis_path.get(row);
