@@ -20,9 +20,9 @@
   --c-wave-high: #F5EAD6;
   --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
-  --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265 */
+  --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
-  --c-cue-hot-tick: #EA3323; /* docs/screenshots at 2x: the tick at the cue's exact position, 3x6px left of the badge */
+  --c-cue-memory-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a memory cue, left of the hot cue badge sharing its position */
   --c-cue-e: #11B176;
   --c-cue-f: #FF8C00;
   --c-cue-g: #305AFF;
@@ -41,7 +41,7 @@
   --c-vocal: #3FA9F5; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: the vocal strip above the overview */
   --c-play-ring: #36642A; /* sampled from the PLAY circle's stroke in a 2x capture of rekordbox 7.2.11 */
   --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
-  --c-cue-memory: #9AA0A6; /* UNMEASURED — the memory-cue marker on the detail waveform has not been isolated */
+  --c-cue-memory: #9AA0A6; /* UNMEASURED — the line down the detail waveform. The head above it is measured; only the line is not */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
   --c-pad-set: #77E866; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
   --c-pad-well: #0F0F0F; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad's own background */
@@ -74,8 +74,8 @@
   --s-player-overview-h: 49px; /* docs/screenshots at 2x: artwork + vocal + overview + position bar, y 232..330 */
   --s-player-overview-wave-h: 30px; /* docs/screenshots at 2x: the overview waveform paints y 244..303, its baseline 303 */
   --s-cue-badge: 11px; /* docs/screenshots at 2x: the hot cue badge is 22x22px, x 1926..1947 y 244..265 */
-  --s-cue-tick-w: 1.5px; /* docs/screenshots at 2x: the red tick spans 3px left of the badge */
-  --s-cue-tick-h: 3px; /* docs/screenshots at 2x: the red tick tapers away over 6px */
+  --s-cue-head-w: 1.5px; /* docs/screenshots at 2x: a memory cue's head spans 3px */
+  --s-cue-head-h: 3px; /* docs/screenshots at 2x: a memory cue's head tapers away over 6px */
   --s-player-scrub-h: 3px; /* docs/screenshots at 2x: the position bar under the overview, y 310..315 */
   --s-player-vocal-h: 5px; /* measured from a 2x capture of rekordbox 7.2.11 running; vocal strip above the overview */
   --s-player-phrase-h: 14px; /* measured from a 2x capture of rekordbox 7.2.11 running; phrase bar y 127..141pt */

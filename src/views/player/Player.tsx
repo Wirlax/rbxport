@@ -50,16 +50,21 @@ export interface PlayerProps {
 /**
  * Cue points on a waveform.
  *
- * A hot cue is a red tick at its exact position with a lettered badge beside
- * it, not a line: measured off `docs/screenshots`, the badge is 11pt square,
- * `#77E866` with a black letter, its left edge on the cue and the tick 1.5pt
- * wide to the left of it. The overview draws no line through the waveform at
- * all — four hot cues, four badges, and the waveform under them unbroken.
+ * A hot cue is a lettered badge, not a line: measured off `docs/screenshots`,
+ * 11pt square, `#77E866`, black letter, its left edge on the cue. The overview
+ * draws no line through the waveform at all — four hot cues, four badges, and
+ * the waveform under them unbroken.
  *
- * One colour for every slot: `djmdCue.ColorTableIndex` decides what rekordbox
- * draws and is still unresolved, so this is the green the capture shows rather
- * than a guessed palette. Memory cues keep their line, and its grey is
- * likewise unmeasured.
+ * A memory cue is a small red head at its position. The capture has one beside
+ * each badge, which looked at first like part of the hot cue marker; the live
+ * `djmdCue` says otherwise — the measured track carries a `Kind` 0 cue at the
+ * same `InMsec` as each of its four hot cues, so the red belongs to those.
+ *
+ * One green for every slot, because that is what the data says rather than a
+ * fallback: all four cues of the measured track carry `ColorTableIndex` 21,
+ * and so do 735,427 of the library's 850,000 hot cues. The rest of the palette
+ * stays unmapped — `cue_colours` found it in neither the database, the skins
+ * nor the analysis files — so an index this has not seen still draws green.
  */
 const CueMarkers = memo(function CueMarkers({
   cues, totalMs, band = "overview", window,
@@ -96,10 +101,13 @@ const CueMarkers = memo(function CueMarkers({
             <span
               key={`m-${cue.positionMs}`}
               className={styles.memoryCue}
+              data-band={band}
               style={{ left }}
               title="Memory cue"
               aria-hidden
-            />
+            >
+              <i className={styles.cueHead} />
+            </span>
           );
         }
         return (
@@ -112,7 +120,6 @@ const CueMarkers = memo(function CueMarkers({
             title={`Hot cue ${cue.letter}`}
             aria-hidden
           >
-            <i className={styles.hotCueTick} />
             <b className={styles.hotCueBadge}>{cue.letter}</b>
           </span>
         );

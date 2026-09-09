@@ -356,15 +356,35 @@
   will-change: transform;
 }
 
-/* Grey, and unmeasured: the memory-cue marker has not been isolated from the
-   detail waveform. Red was tried and is wrong — that is the downbeat. */
+/* A memory cue is a small red head at its position, widest at the top and
+   tapering to a point — measured beside each hot cue badge in the overview,
+   where it draws no line at all. The detail keeps a line so the cue stays
+   placeable; that line's grey is still unmeasured. Red is right here and wrong
+   for the line, which is the downbeat's colour. */
 .memoryCue {
   position: absolute;
   top: 0;
-  width: 2px;
-  height: 100%;
+  bottom: 0;
+  width: 0;
   pointer-events: none;
+}
+.memoryCue[data-band="detail"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
   background: var(--c-cue-memory);
+}
+
+.cueHead {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--s-cue-head-w));
+  width: var(--s-cue-head-w);
+  height: var(--s-cue-head-h);
+  background: var(--c-cue-memory-head);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 /* A hot cue: the position itself is the left edge, with a red tick hanging off
@@ -387,18 +407,6 @@
   background: var(--c-cue-hot);
 }
 
-/* Widest at the badge's top corner, tapering to a point away from it — the
-   capture has it 3px across the top and one at the bottom. */
-.hotCueTick {
-  position: absolute;
-  top: 0;
-  left: calc(-1 * var(--s-cue-tick-w));
-  width: var(--s-cue-tick-w);
-  height: var(--s-cue-tick-h);
-  background: var(--c-cue-hot-tick);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-}
-
 .hotCueBadge {
   position: absolute;
   top: 0;
@@ -415,11 +423,6 @@
 }
 
 .hotCue[data-band="detail"] .hotCueBadge { top: auto; bottom: 0; }
-.hotCue[data-band="detail"] .hotCueTick {
-  top: auto;
-  bottom: 0;
-  clip-path: polygon(0 100%, 100% 100%, 100% 0);
-}
 
 .beat,
 .downbeat {
