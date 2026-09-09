@@ -12,6 +12,15 @@
 .player[data-empty] .playhead,
 .player[data-empty] .scrub { display: none; }
 
+/* Sharing a transport column with the other deck leaves this one two columns:
+   the waveforms and the panel beside them. */
+.player[data-shared] {
+  grid-template-columns: 1fr var(--s-player-right-w);
+  /* Its height comes from the row it is in, which is half the pair's band. */
+  height: 100%;
+  min-height: 0;
+}
+
 .player {
   display: grid;
   grid-template-columns: var(--s-player-transport-w) 1fr var(--s-player-right-w);
@@ -26,6 +35,23 @@
 /* No flex `gap` here: every control sits at its own measured distance from
    the one above, and a shared gap plus per-item margins meant the two added
    up — which put PLAY 34pt below CUE instead of the measured 10.5. */
+/* Half a column each. The margins that space the one-deck transport are
+   measured from the top of a 279pt deck and do not fit half of a 420pt pair,
+   so the shared halves space themselves instead.
+
+   **The per-control spacing here is not measured.** The capture's own is, and
+   the arrangement below follows it — CUE and PLAY at the outside, the jump
+   controls towards the middle, no track skips — but the distances between
+   them in the two-deck column have not been scanned off it the way the
+   one-deck ones were. */
+.transport[data-shared] {
+  justify-content: space-evenly;
+  overflow: hidden;
+  min-height: 0;
+}
+.transport[data-shared] .pair,
+.transport[data-shared] .pair + .pair { margin: 0; }
+
 .transport {
   display: flex;
   flex-direction: column;

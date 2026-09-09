@@ -1561,6 +1561,46 @@ test("clicking the artwork ejects the track from the deck", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
 });
 
+test("dual control links what both decks are showing", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const dual = page.getByRole("button", { name: "Dual control" });
+  // One deck has nothing to link to, so the button is not drawn at all.
+  await expect(dual).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  await expect(dual).toBeVisible();
+  await expect(dual).toHaveAttribute("aria-pressed", "false");
+
+  // Both decks need a track for their zoom readouts to say anything.
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(1);
+  await cell.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+
+  const sizes = page.getByRole("button", { name: "Beat jump size" });
+  await expect(sizes).toHaveCount(2);
+  await expect(sizes.first()).toHaveText(/4Beats/);
+  await expect(sizes.last()).toHaveText(/4Beats/);
+
+  // Off: one deck's size moves and the other stays where it was.
+  await sizes.first().click();
+  await page.getByRole("menu", { name: "Beat jump size" }).getByRole("menuitemradio", { name: "16Beats" }).click();
+  await expect(sizes.first()).toHaveText(/16Beats/);
+  await expect(sizes.last()).toHaveText(/4Beats/);
+
+  // On: the pair share one, so setting either sets both.
+  await dual.click();
+  await expect(dual).toHaveAttribute("aria-pressed", "true");
+  await sizes.last().click();
+  await page.getByRole("menu", { name: "Beat jump size" }).getByRole("menuitemradio", { name: "8Bars" }).click();
+  await expect(sizes.first()).toHaveText(/8Bars/);
+  await expect(sizes.last()).toHaveText(/8Bars/);
+});
+
 test("the mixer belongs to the two-deck layouts and to nothing else", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

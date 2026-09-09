@@ -59,22 +59,57 @@
 /* The mixer strip runs down the left of both decks, spanning them: it is one
    strip for the pair, not one per deck. */
 .decks[data-mixer] {
-  grid-template-columns: auto 1fr;
-  grid-template-areas: "mixer a" "mixer b" "gutter gutter";
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas: "rail mixer a" "rail mixer b" "gutter gutter gutter";
+  /* The pair is shorter than two single decks: the capture measures the
+     two-deck band at 420pt against the 279 one deck gets, so each deck here is
+     210 and the waveforms are shorter with it. That is what rekordbox does —
+     the browser takes the vertical slack either way. */
+  grid-template-rows: 1fr 1fr auto;
+  height: calc(var(--s-player-dual-h) + var(--s-player-gutter-h));
 }
-.decks[data-mixer] > :nth-child(1) { grid-area: mixer; }
-.decks[data-mixer] > :nth-child(2) { grid-area: a; }
-.decks[data-mixer] > :nth-child(3) { grid-area: b; }
+.decks[data-mixer] > :nth-child(1) { grid-area: rail; }
+.decks[data-mixer] > :nth-child(2) { grid-area: mixer; }
+.decks[data-mixer] > :nth-child(3) { grid-area: a; }
+.decks[data-mixer] > :nth-child(4) { grid-area: b; }
 .decks[data-mixer] > .playerGutter { grid-area: gutter; }
+
+/* The shared transport column: deck A's half above deck B's, each taking half
+   the pair's height, at the width the two-player capture measures. */
+.deckRail {
+  width: var(--s-mixer-transport-w);
+  display: grid;
+  grid-template-rows: 1fr auto 1fr;
+  background: var(--c-panel);
+}
+.transportSlot { display: grid; min-height: 0; }
+
+/* DUAL CONTROL, on the centre line between the two halves of the column —
+   which is where the two-player capture draws it. */
+.dual {
+  display: grid;
+  place-items: center;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--c-icon-off);
+  cursor: pointer;
+}
+.dual[data-on] { color: var(--c-icon-on); }
+.dualGlyph { width: 20px; }
+/* The portalled transport fills its half rather than sitting at its own
+   height, so the two halves meet in the middle. */
+.transportSlot > * { height: 100%; }
 /* DUAL PLAYER: the two decks beside each other, which is the difference its
    icon draws against 2 PLAYER's stacked bars. */
 .decks[data-side-by-side] {
-  grid-template-columns: auto 1fr 1fr;
-  grid-template-areas: "mixer a b" "gutter gutter gutter";
+  grid-template-columns: auto auto 1fr 1fr;
+  grid-template-areas: "rail mixer a b" "gutter gutter gutter gutter";
 }
-.decks[data-side-by-side] > :nth-child(1) { grid-area: mixer; }
-.decks[data-side-by-side] > :nth-child(2) { grid-area: a; }
-.decks[data-side-by-side] > :nth-child(3) { grid-area: b; }
+.decks[data-side-by-side] > :nth-child(1) { grid-area: rail; }
+.decks[data-side-by-side] > :nth-child(2) { grid-area: mixer; }
+.decks[data-side-by-side] > :nth-child(3) { grid-area: a; }
+.decks[data-side-by-side] > :nth-child(4) { grid-area: b; }
 .decks[data-side-by-side] > .playerGutter { grid-area: gutter; }
 .playerGutter { height: var(--s-player-gutter-h); background: var(--c-black); }
 

@@ -30,6 +30,8 @@ import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
+import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
+import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { Settings } from "@/views/settings/Settings";
@@ -95,6 +97,27 @@ export function App() {
   // The one row the browser has selected, so an empty deck can be clicked to
   // take it. Selecting still loads nothing by itself.
   const [selectedRow, setSelectedRow] = useState<RowDto | null>(null);
+  // Where each deck's transport is drawn in the two-deck layouts. State rather
+  // than a ref, because the players have to re-render once the slots exist.
+  const [transportA, setTransportA] = useState<HTMLDivElement | null>(null);
+  const [transportB, setTransportB] = useState<HTMLDivElement | null>(null);
+  /**
+   * DUAL CONTROL: one zoom and one beat-jump size for both decks.
+   *
+   * Off, each deck keeps its own; on, the shell holds them and hands the same
+   * value to both, so a wheel over one waveform moves the other with it.
+   */
+  const [dual, setDual] = useState(false);
+  const [dualBars, setDualBars] = useState(DETAIL_BARS);
+  const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
+  const linked = dual
+    ? {
+        bars: dualBars,
+        onBars: setDualBars,
+        jumpSize: dualJump,
+        onJumpSize: setDualJump,
+      }
+    : {};
   const [query, setQuery] = useState("");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
@@ -706,6 +729,30 @@ export function App() {
           data-side-by-side={isSideBySide(layout) ? "" : undefined}
           data-mixer={deckCount(layout) > 1 ? "" : undefined}
         >
+          {/* One transport column for the pair, as rekordbox draws it: deck A
+              down from the top, deck B up from the bottom, and the mixer strip
+              beside it. Each deck still owns its own transport — it is
+              portalled into the half of the column that belongs to it. */}
+          {deckCount(layout) > 1 ? (
+            <div className={styles.deckRail}>
+              <div className={styles.transportSlot} ref={setTransportA} />
+              {/* DUAL CONTROL, on the centre line where the capture has it:
+                  it links what the two decks are showing rather than what
+                  they are playing, so it belongs between them. */}
+              <button
+                type="button"
+                className={styles.dual}
+                aria-label="Dual control"
+                aria-pressed={dual}
+                title="Link the waveform controls and beat jump across both decks."
+                data-on={dual || undefined}
+                onClick={() => setDual((was) => !was)}
+              >
+                <LayoutDualIcon className={styles.dualGlyph} />
+              </button>
+              <div className={styles.transportSlot} ref={setTransportB} />
+            </div>
+          ) : null}
           {/* Only with two decks. The one-player layout has no mixer and no
               crossfader, which is what rekordbox does — and what keeps a deck
               nobody has touched a fader for playing at the level of its file. */}
@@ -718,6 +765,8 @@ export function App() {
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
             onLoadSelected={loadSelectedInto.a}
+            transportSlot={deckCount(layout) > 1 ? transportA : null}
+            {...(deckCount(layout) > 1 ? linked : {})}
           />
           {deckCount(layout) > 1 ? (
             <Player
@@ -729,6 +778,9 @@ export function App() {
               dragging={draggedTracks !== null}
               onDropTrack={loadDroppedInto.b}
               onLoadSelected={loadSelectedInto.b}
+              transportSlot={transportB}
+              flipped
+              {...linked}
             />
           ) : null}
           <div className={styles.playerGutter} aria-hidden />

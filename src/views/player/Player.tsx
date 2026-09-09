@@ -13,6 +13,7 @@
  * the same way, for the same reason.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -95,6 +96,34 @@ export interface PlayerProps {
   onDropTrack?: () => void;
   /** A track is being dragged, so the deck can offer itself as a target. */
   dragging?: boolean;
+  /**
+   * Where the transport column is drawn, when it is not drawn here.
+   *
+   * The two-deck layouts share one transport column between the decks — deck A
+   * down from the top, deck B up from the bottom, with the mixer strip beside
+   * it — so the two halves are siblings in the shell's grid rather than each
+   * inside its own deck.
+   *
+   * A portal rather than lifted state: everything the transport touches — the
+   * playhead, the cue, the beat-jump size — belongs to this deck and is held
+   * here, and moving all of that up to the shell to move a column would be a
+   * great deal of state travelling for a layout change.
+   */
+  transportSlot?: HTMLElement | null;
+  /** Deck B's transport reads bottom-up, mirroring deck A's. */
+  flipped?: boolean;
+  /**
+   * The waveform zoom and the beat-jump size, when something outside is
+   * driving them.
+   *
+   * DUAL CONTROL: with it on the shell holds one of each and hands the same
+   * value to both decks, so zooming one zooms the other. Left out, the deck
+   * keeps its own — a deck on its own has nothing to link to.
+   */
+  bars?: number;
+  onBars?: (bars: number) => void;
+  jumpSize?: string;
+  onJumpSize?: (id: string) => void;
   /**
    * Load whatever the browser has selected.
    *
@@ -343,7 +372,8 @@ const PANELS = [
 
 export const Player = memo(function Player({
   track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
-  simple = false,
+  simple = false, transportSlot, flipped = false,
+  bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -359,7 +389,19 @@ export const Player = memo(function Player({
   const [cues, setCues] = useState<Cue[]>([]);
   const [grid, setGrid] = useState<BeatGridData>(NO_BEATS);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
-  const [bars, setBars] = useState<number>(DETAIL_BARS);
+  const [ownBars, setOwnBars] = useState<number>(DETAIL_BARS);
+  // Linked or its own, and the setter follows whichever it is: a controlled
+  // zoom that kept updating a local copy would fight the link on every change.
+  const bars = linkedBars ?? ownBars;
+  const setBars = useCallback(
+    (next: number | ((current: number) => number)) => {
+      const resolve = (current: number) =>
+        typeof next === "function" ? next(current) : next;
+      if (onBars) onBars(resolve(linkedBars ?? ownBars));
+      else setOwnBars(resolve);
+    },
+    [onBars, linkedBars, ownBars],
+  );
   const [padMode, setPadMode] = useState<PadMode>("cue");
   const [panel, setPanel] = useState<CuePanel>("memory");
   /**
@@ -375,7 +417,9 @@ export const Player = memo(function Player({
    */
   const [quantize, setQuantize] = useState(true);
   /** How far a jump moves, chosen from the size menu. */
-  const [jumpSizeId, setJumpSizeId] = useState<string>(JUMP_SIZE_ID);
+  const [ownJumpSizeId, setOwnJumpSizeId] = useState<string>(JUMP_SIZE_ID);
+  const jumpSizeId = linkedJump ?? ownJumpSizeId;
+  const setJumpSizeId = onJumpSize ?? setOwnJumpSizeId;
   /** Where the size menu is open, in client coordinates, or closed. */
   const [jumpMenu, setJumpMenu] = useState<{ x: number; y: number } | null>(null);
   const jumpButton = useRef<HTMLButtonElement>(null);
@@ -538,7 +582,7 @@ export const Player = memo(function Player({
     if (event.deltaY === 0) return;
     event.preventDefault();
     setBars((current) => zoomBy(current, event.deltaY > 0 ? 1 : -1));
-  }, []);
+  }, [setBars]);
 
   const zoom = useCallback((by: number) => {
     setBars((current) => {
@@ -548,7 +592,7 @@ export const Player = memo(function Player({
       const to = Math.min(Math.max(from + by, 0), ZOOM_STEPS.length - 1);
       return ZOOM_STEPS[to] ?? DETAIL_BARS;
     });
-  }, []);
+  }, [setBars]);
 
   /*
    * The deck takes the keyboard when it is clicked and gives it up when
@@ -720,29 +764,9 @@ export const Player = memo(function Player({
 
   const takesDrop = dragging && Boolean(onDropTrack);
 
-  return (
-    <section
-      ref={shell}
-      className={styles.player}
-      aria-label={deck === "b" ? "Preview player B" : "Preview player"}
-      data-armed={armed ? "" : undefined}
-      data-simple={simple ? "" : undefined}
-      data-empty={track ? undefined : ""}
-      data-droppable={takesDrop || undefined}
-      onDragOver={(event) => {
-        if (!takesDrop) return;
-        // Without the preventDefault the browser refuses the drop and the
-        // cursor says so, whatever the handler below would have done.
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-      }}
-      onDrop={(event) => {
-        if (!takesDrop) return;
-        event.preventDefault();
-        onDropTrack?.();
-      }}
-    >
-      <div className={styles.transport}>
+  // The track skips, which the two-deck column does not draw: rekordbox
+  // drops them there, and half a deck's height has no room for them.
+  const skips = (
         <div className={styles.pair}>
           {SKIPS.map((button) => (
             <button
@@ -758,6 +782,9 @@ export const Player = memo(function Player({
             </button>
           ))}
         </div>
+  );
+
+  const jumps = (
         <div className={styles.pair}>
           {JUMPS.map((button) => (
             <button
@@ -772,6 +799,9 @@ export const Player = memo(function Player({
             </button>
           ))}
         </div>
+  );
+
+  const beatSize = (
         <button
           ref={jumpButton}
           type="button"
@@ -792,6 +822,9 @@ export const Player = memo(function Player({
           {jumpSizeById(jumpSizeId).label}
           <span className={styles.chevron} aria-hidden />
         </button>
+  );
+
+  const cueButton = (
         <button
           type="button"
           className={styles.cue}
@@ -806,6 +839,9 @@ export const Player = memo(function Player({
         >
           CUE
         </button>
+  );
+
+  const playButton = (
         <button
           type="button"
           className={styles.play}
@@ -820,7 +856,72 @@ export const Player = memo(function Player({
           <span className={styles.playGlyph} aria-hidden />
           <span className={styles.pauseGlyph} aria-hidden />
         </button>
-      </div>
+  );
+
+  // The transport column, as a value: it is drawn here in the one-deck
+  // layouts and portalled into the column the two decks share in the others.
+  //
+  // The order differs between them, and follows the capture. One deck reads
+  // jumps, size, CUE, PLAY down the column. Two decks put CUE and PLAY at the
+  // outside of each half and the jump controls towards the middle, so the two
+  // halves mirror as groups — within a group the order is the same either way,
+  // which is what the capture shows.
+  const transport = (
+    <div
+      className={styles.transport}
+      data-flipped={flipped || undefined}
+      data-shared={transportSlot ? "" : undefined}
+      // Named, because in the two-deck layouts it is drawn outside the deck it
+      // belongs to: without this the CUE and PLAY of a deck would be a pair of
+      // unattached buttons to anything reading the page.
+      role="group"
+      aria-label={deck === "b" ? "Deck B transport" : "Deck A transport"}
+    >
+      {transportSlot ? null : skips}
+      {transportSlot && !flipped ? (
+        <>
+          {cueButton}
+          {playButton}
+          {jumps}
+          {beatSize}
+        </>
+      ) : (
+        <>
+          {jumps}
+          {beatSize}
+          {cueButton}
+          {playButton}
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <section
+      ref={shell}
+      className={styles.player}
+      aria-label={deck === "b" ? "Preview player B" : "Preview player"}
+      data-armed={armed ? "" : undefined}
+      data-simple={simple ? "" : undefined}
+      data-empty={track ? undefined : ""}
+      // The transport is drawn elsewhere, so the deck is two columns wide
+      // rather than three.
+      data-shared={transportSlot ? "" : undefined}
+      data-droppable={takesDrop || undefined}
+      onDragOver={(event) => {
+        if (!takesDrop) return;
+        // Without the preventDefault the browser refuses the drop and the
+        // cursor says so, whatever the handler below would have done.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        if (!takesDrop) return;
+        event.preventDefault();
+        onDropTrack?.();
+      }}
+    >
+      {transportSlot ? createPortal(transport, transportSlot) : transport}
 
       <div className={styles.main}>
         <div className={styles.head}>

@@ -62,8 +62,10 @@ test("two decks playing cost no more per frame than none at all", async ({ page 
   const menu = page.getByRole("menu", { name: "Track" });
   await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
   await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
-  for (const deck of await page.getByRole("region", { name: /^Preview player/ }).all()) {
-    await deck.getByRole("button", { name: "Play" }).click();
+  // The transport is drawn in the column the decks share, so it is found by
+  // its own name rather than inside the deck's region.
+  for (const name of ["Deck A transport", "Deck B transport"]) {
+    await page.getByRole("group", { name }).getByRole("button", { name: "Play" }).click();
   }
   const both = await medianFrame(page);
 
