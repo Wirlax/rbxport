@@ -149,6 +149,12 @@
      which is what the margin shows. */
   margin: var(--s-player-margin);
   background: var(--c-black);
+  /* Where every strip that starts past the sleeve begins: the overview, the
+     phrase bar, the detail waveform — and the title, which lines up with the
+     waveform rather than with the sleeve. */
+  --deck-strip-left: calc(
+    var(--s-player-inset) + var(--s-player-artwork-size) + var(--s-player-artwork-gap)
+  );
 }
 
 /* --------------------------------------------------------- the title row */
@@ -157,7 +163,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 var(--s-player-inset);
+  padding-right: var(--s-player-inset);
+  padding-left: var(--deck-strip-left);
   min-width: 0;
 }
 
@@ -336,9 +343,7 @@
 .phrase {
   position: relative;
   margin-right: var(--s-player-inset);
-  margin-left: calc(
-    var(--s-player-inset) + var(--s-player-artwork-size) + var(--s-player-artwork-gap)
-  );
+  margin-left: var(--deck-strip-left);
   overflow: hidden;
 }
 

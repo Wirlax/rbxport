@@ -175,15 +175,20 @@ test("every strip of the deck shares one inset", async ({ page }) => {
   // They disagreed: 16 on the left and 12 on the right for the title row and
   // the overview, 71 and 12 for the phrase, and nothing at all for the detail,
   // which therefore ran wider than everything above it.
+  // The title starts where the waveform does, not where the sleeve does: it is
+  // the strips that line up, and the sleeve sits to the left of all of them.
   const edges = await Promise.all(
-    ["player-overview", "player-phrase", "player-detail"].map(async (id) => {
+    ["player-title", "player-overview", "player-phrase", "player-detail"].map(async (id) => {
       const box = await page.getByTestId(id).boundingBox();
       return { left: Math.round(box?.x ?? 0), right: Math.round((box?.x ?? 0) + (box?.width ?? 0)) };
     }),
   );
   for (const edge of edges) {
     expect(edge.left).toBe(edges[0]?.left);
-    expect(edge.right).toBe(edges[0]?.right);
+  }
+  // Only the strips share a right edge; the title is as wide as its text.
+  for (const edge of edges.slice(1)) {
+    expect(edge.right).toBe(edges[1]?.right);
   }
 
   // And that inset is the token's, plus the black margin the deck column sits
@@ -193,7 +198,7 @@ test("every strip of the deck shares one inset", async ({ page }) => {
   const margin = await token(page, "--s-player-margin");
   const panel = await token(page, "--s-player-right-w");
   const right = (player?.x ?? 0) + (player?.width ?? 0) - panel;
-  expect(right - (edges[0]?.right ?? 0)).toBeCloseTo(inset + margin, 0);
+  expect(right - (edges[1]?.right ?? 0)).toBeCloseTo(inset + margin, 0);
 });
 
 test("a measured gap separates the player from the browser", async ({ page }) => {
