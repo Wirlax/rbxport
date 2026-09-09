@@ -27,9 +27,20 @@ fn build() {
         // lot of them; ours are still on for our code.
         .warnings(false);
 
-    build.compile("rubberband");
-
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        println!("cargo:rustc-link-lib=framework=Accelerate");
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("windows") => {
+            // `windows.h` defines `min` and `max` as macros, and Rubber Band
+            // calls `std::min`/`std::max` throughout: without this MSVC reports
+            // a hundred `C2589: '(': illegal token on right side of '::'`.
+            build.define("NOMINMAX", None);
+            build.define("WIN32_LEAN_AND_MEAN", None);
+        }
+        Ok("macos") => {
+            // The single-file build uses vDSP for its FFT on Apple platforms.
+            println!("cargo:rustc-link-lib=framework=Accelerate");
+        }
+        _ => {}
     }
+
+    build.compile("rubberband");
 }
