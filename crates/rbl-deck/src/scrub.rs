@@ -84,7 +84,66 @@ const MAX_LAG: f64 = 4096.0;
 /// A pointer emits about one move a screen frame and a block is 11.6 ms, so
 /// two or three blocks pass between moves during an ordinary drag. Settling
 /// any sooner than that silences a hand that is still moving.
-const SETTLE_BLOCKS: u32 = 4;
+///
+/// Added to `STOPPED_INTERVALS` rather than used alone: a mouse only reports
+/// once the cursor has crossed a whole pixel, so a slow hand reports far more
+/// slowly than a screen frame and a fixed threshold reads it as stopped.
+const SETTLE_BLOCKS: f64 = 4.0;
+
+/// How many of the hand's own reporting intervals count as it having stopped.
+///
+/// A hand crossing ten pixels a second on a waveform zoomed to twelve bars
+/// reports every 100 ms, and one crossing five hundred reports every other
+/// block. There is no one number of blocks that means "stopped" for both, so
+/// the hand is timed against itself: gone quiet for a couple of its own
+/// intervals, and it has stopped rather than merely being slow.
+const STOPPED_INTERVALS: f64 = 2.0;
+
+/// How sharply the hand's measured speed is followed, per report.
+///
+/// Reports are what carry the speed, and a slow hand sends few of them, so
+/// this cannot be as gentle as `SMOOTH`: filtering hard here is a head that
+/// takes half a second to notice the hand has sped up.
+///
+/// Swept against a pixel-crossing hand (`a_hand_crossing_pixels_slowly_still_
+/// turns_the_record`), reading the warble averaged over the speeds it covers
+/// and at the worst of them:
+///
+/// | speed | correct | warble, mean | worst |
+/// |-------|---------|--------------|-------|
+/// | 0.25  | 0.15    | 4.1%         | 9.2%  |
+/// | 0.40  | 0.10    | 3.9%         | 10.5% |
+/// | 0.40  | 0.15    | 4.0%         | 10.0% |
+/// | 0.60  | 0.15    | 4.3%         | 10.7% |
+/// | 0.80  | 0.15    | 4.8%         | 11.2% |
+///
+/// The surface is flat — nothing in that range is audibly better than the
+/// rest, and what is left is the beat between the hand's reporting rate and
+/// the block rate rather than anything these two can filter out.
+const SPEED_SMOOTH: f64 = 0.4;
+
+/// How sharply the measured gap between reports is followed.
+///
+/// Gentler than the speed: the interval decides when the hand counts as
+/// stopped, and a single late report must not be read as the hand slowing.
+const INTERVAL_SMOOTH: f64 = 0.2;
+
+/// What a report interval is taken to be before one has been measured.
+///
+/// A pointer coalesced to the screen's rate against an 11.6 ms block, which is
+/// what a hand moving at any speed worth hearing reports at.
+const INITIAL_INTERVAL: f64 = 2.0;
+
+/// How hard the head is pulled back onto the pointer, per block.
+///
+/// The speed alone would drift: a hand's measured speed is never exactly its
+/// real one, and the error accumulates into the head sitting further and
+/// further behind. This closes that gap — but gently, because the gap is also
+/// where the sprint came from. The old loop *was* this term with the strength
+/// at one: a pixel of a twelve-bar waveform is 1102 frames, about one `span`,
+/// so every pixel the cursor crossed commanded a full-speed sprint however
+/// long the hand had taken to cross it.
+const CORRECT: f64 = 0.15;
 
 /// Decoded audio around the cursor: interleaved stereo at the device rate.
 pub struct PcmWindow {
@@ -163,7 +222,35 @@ pub struct Scrubber {
     /// a move makes the second and third of every pass believe the hand has
     /// stopped. On a slow drag that is silence two blocks in three, which is
     /// heard as a stutter over the vinyl.
-    still: u32,
+    still: f64,
+    /// How fast the hand is moving, in frames of music per frame of output.
+    ///
+    /// Measured between reports and held between them, which is the whole of
+    /// the fix for a slow drag. A mouse reports a whole pixel at a time, so
+    /// how *far* the pointer has moved says nothing on its own about how fast
+    /// it was going to get there — a pixel is a pixel whether the hand took
+    /// ten milliseconds over it or a hundred. The time it took is what sets
+    /// the pitch, exactly as the speed of a hand on a record does.
+    speed: f64,
+    /// Blocks between the last two reports, smoothed.
+    ///
+    /// The hand's own clock: how far behind the pointer the head should sit,
+    /// and how long a silence means the hand has stopped.
+    interval: f64,
+    /// Reports the pointer has sent, up to the point where it stops mattering.
+    ///
+    /// The first one only says where the pointer is: there is nothing before
+    /// it to measure a speed against, and the distance from wherever the head
+    /// happened to be is not one. Until a second has arrived there is no
+    /// measured speed, so the distance is all the head has to go on and it is
+    /// followed at full strength — which is the old loop, kept for exactly as
+    /// long as it is the best available answer.
+    reports: u32,
+    /// Frames in a block, as the last one came in.
+    ///
+    /// The interval is counted in blocks and the speed is wanted per frame, so
+    /// one has to be converted into the other.
+    block: f64,
 }
 
 impl Scrubber {
@@ -172,7 +259,11 @@ impl Scrubber {
             cursor: at as f64,
             target: at as f64,
             rate: 0.0,
-            still: 0,
+            still: 0.0,
+            speed: 0.0,
+            interval: INITIAL_INTERVAL,
+            reports: 0,
+            block: 512.0,
             aimed: false,
             gain: Ramp::silent(),
         }
@@ -188,8 +279,19 @@ impl Scrubber {
         // comparison of exact values rather than of two computed floats: the
         // pointer either sent a new frame or repeated the last one.
         let to = frame as f64;
-        if (to - self.target).abs() >= 1.0 {
-            self.still = 0;
+        let moved = to - self.target;
+        if moved.abs() >= 1.0 {
+            // How long the hand took over that, in blocks. `still` is the
+            // count since the last report, so it is the gap being measured;
+            // a report arriving inside the same block reads as one block
+            // rather than as no time at all.
+            let over = self.still.max(1.0);
+            if self.reports > 0 {
+                self.speed += (moved / (over * self.block) - self.speed) * SPEED_SMOOTH;
+                self.interval += (over - self.interval) * INTERVAL_SMOOTH;
+            }
+            self.reports = self.reports.saturating_add(1);
+            self.still = 0.0;
         }
         self.target = to;
         self.aimed = true;
@@ -234,23 +336,42 @@ impl Scrubber {
     /// a second of music in the last block wants half a second of music played
     /// in the next one, which is what makes the pitch follow the drag.
     pub fn plan(&mut self, frames: usize) -> f64 {
-        // Arrived, and the hand has stopped. Snapping rather than converging
-        // is what makes the sound stop: an exponential approach spends half a
-        // second getting quiet, which is heard as the drag carrying on after
-        // the hand has. A pointer that is still moving is followed instead,
-        // however close it is — and "still moving" means a move has arrived
-        // within the last few blocks, not within the last one.
-        self.still = self.still.saturating_add(1);
-        if self.still > SETTLE_BLOCKS && (self.target - self.cursor).abs() < frames as f64 * LOOKAHEAD {
-            // The rate stops; the head does not move. Closing the last of the
-            // gap by jumping is a step in the waveform, and on bass that is a
-            // crack. What is left is under a block, and letting go lands on
-            // the pointer rather than on the head anyway.
-            self.rate = 0.0;
-            return 0.0;
+        self.block = (frames as f64).max(1.0);
+        self.still += 1.0;
+        let span = (self.block * LOOKAHEAD).max(1.0);
+        // Quiet for a couple of its own intervals: the hand has stopped rather
+        // than gone slow, so the speed it was carrying is no longer true.
+        let stopped = self.still > self.interval * STOPPED_INTERVALS + SETTLE_BLOCKS;
+        if stopped {
+            self.speed = 0.0;
+            // Arrived as well, so there is nothing left to play. Snapping
+            // rather than converging is what makes the sound stop: an
+            // exponential approach spends half a second getting quiet, which
+            // is heard as the drag carrying on after the hand has.
+            if (self.target - self.cursor).abs() < span {
+                // The rate stops; the head does not move. Closing the last of
+                // the gap by jumping is a step in the waveform, and on bass
+                // that is a crack. What is left is under a block, and letting
+                // go lands on the pointer rather than on the head anyway.
+                self.rate = 0.0;
+                return 0.0;
+            }
         }
-        let span = (frames as f64 * LOOKAHEAD).max(1.0);
-        let wanted = ((self.target - self.cursor) / span).clamp(-MAX_RATE, MAX_RATE);
+        // Where the head belongs: one report plus the ring's own lead behind
+        // the pointer, so that a hand reporting every hundred milliseconds
+        // still has a hundred milliseconds of music in hand to play.
+        let trail = self.speed * (self.interval + LOOKAHEAD) * self.block;
+        let drift = (self.target - self.cursor) - trail;
+        // The hand's speed, with a gentle pull back onto where the head ought
+        // to be by now. The pull is what keeps a measurement that is slightly
+        // off from becoming a head a second behind the pointer; it is weak
+        // because a strong one is the sprint this replaced.
+        // Full strength while there is no measured speed to lead with, and
+        // once the hand has stopped: the sprint this replaced was a problem
+        // only because more reports were coming behind it. A shove that has
+        // ended should be played out and finished, not crawled through.
+        let correct = if self.reports > 1 && !stopped { CORRECT } else { 1.0 };
+        let wanted = (self.speed + drift / span * correct).clamp(-MAX_RATE, MAX_RATE);
         self.rate += (wanted - self.rate) * SMOOTH;
         if self.rate.abs() < REST_RATE {
             self.rate = 0.0;
@@ -266,12 +387,18 @@ impl Scrubber {
     pub fn render(&mut self, window: &PcmWindow, out: &mut [f32]) -> usize {
         let frames = out.len() / 2;
         let rate = self.plan(frames);
-        // A moving head is heard, a resting one is faded out. The fade is what
-        // keeps a stop from being a step: the waveform is wherever it is when
-        // the hand pauses, and cutting it dead is a click.
-        let sounding = rate != 0.0;
         for i in 0..frames {
-            let gain = self.gain.step(sounding);
+            // The head cannot get in front of the hand. A record only turns
+            // as far as it has been pushed, and holding the head at the
+            // pointer is what brings a drag to rest the moment the hand does:
+            // it plays out the music it was trailing by and then has none
+            // left, rather than running on past where the pointer stopped.
+            let arrived = (rate > 0.0 && self.cursor >= self.target)
+                || (rate < 0.0 && self.cursor <= self.target);
+            // A moving head is heard, a resting one is faded out. The fade is
+            // what keeps a stop from being a step: the waveform is wherever it
+            // is when the hand pauses, and cutting it dead is a click.
+            let gain = self.gain.step(rate != 0.0 && !arrived);
             // Sampled even at rest, so the fade has the waveform to fade out
             // rather than an abrupt zero. A held sample reaching zero is a
             // decay; a held sample held is the hum `REST_RATE` guards against.
@@ -282,7 +409,9 @@ impl Scrubber {
             if let Some(slot) = out.get_mut(i * 2 + 1) {
                 *slot = right * gain;
             }
-            self.cursor = (self.cursor + rate).max(0.0);
+            if !arrived {
+                self.cursor = (self.cursor + rate).max(0.0);
+            }
         }
         frames
     }
@@ -531,6 +660,78 @@ mod tests {
         }
     }
 
+    /// A hand crossing pixels slowly still turns the record.
+    ///
+    /// The one the second report was about: dragging slowly sounded like the
+    /// track playing at its own pitch in bursts with gaps between. A mouse
+    /// only reports once the cursor has crossed a whole pixel, and a pixel of
+    /// the detail waveform at its default zoom is 1102 frames — about one
+    /// `span`. So under the old loop every pixel crossed commanded a full
+    /// speed sprint however long the hand had taken to cross it, and then the
+    /// settle timer expired before the next pixel arrived and cut the head to
+    /// silence. Below about 30 px/s it was quiet more than half the time.
+    ///
+    /// `a_steady_hand_turns_the_record_at_a_steady_speed` missed it because it
+    /// models a pointer reporting a fresh fractional position every screen
+    /// frame, which is a trackpad rather than a mouse.
+    #[test]
+    fn a_hand_crossing_pixels_slowly_still_turns_the_record() {
+        const RATE: f64 = 44_100.0;
+        const BLOCK: usize = 512;
+        const BLOCK_SECONDS: f64 = BLOCK as f64 / RATE;
+        const POINTER_HZ: f64 = 60.0;
+        /// Twelve bars at 128 BPM is 22.5 s, over a strip about 900 px wide.
+        const FRAMES_PER_PIXEL: f64 = 22.5 * RATE / 900.0;
+
+        for px_per_second in [10.0_f64, 20.0, 30.0, 50.0, 120.0] {
+            let start = 1_000_000.0_f64;
+            let window = ramp(0, 2_000_000);
+            let mut scrubber = Scrubber::new(start as u64);
+            let mut out = vec![0.0_f32; BLOCK * 2];
+            let mut rates = Vec::new();
+            let (mut reported, mut next_report) = (0.0_f64, 0.0_f64);
+            for block in 0..(2.0 / BLOCK_SECONDS) as usize {
+                let now = block as f64 * BLOCK_SECONDS;
+                while next_report <= now {
+                    let exact = (next_report * px_per_second).floor();
+                    // Whole pixels, and only once one has been crossed.
+                    if (exact - reported).abs() >= 1.0 {
+                        reported = exact;
+                        scrubber.aim((start + reported * FRAMES_PER_PIXEL) as u64);
+                    }
+                    next_report += 1.0 / POINTER_HZ;
+                }
+                scrubber.render(&window, &mut out);
+                // Past the quarter second the head takes to reach speed.
+                if now > 0.25 {
+                    rates.push(scrubber.rate());
+                }
+            }
+
+            let hand = px_per_second * FRAMES_PER_PIXEL / RATE;
+            assert!(
+                rates.iter().all(|r| *r != 0.0),
+                "at {px_per_second} px/s the head went quiet mid-drag",
+            );
+            let mean = rates.iter().sum::<f64>() / rates.len() as f64;
+            assert!(
+                (mean - hand).abs() < hand * 0.15,
+                "a {hand}x hand turned the record at {mean}x",
+            );
+            let sd = (rates.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
+                / rates.len() as f64)
+                .sqrt();
+            let warble = sd / mean * 100.0;
+            // Measured at 4.0% averaged over these speeds and 10.0% at the
+            // worst of them, against 117.7% at 10 px/s before. The bound is
+            // where a regression shows up, not where the ear gives out.
+            assert!(
+                warble < 15.0,
+                "at {px_per_second} px/s the rate wandered by {warble:.1}% of itself",
+            );
+        }
+    }
+
     #[test]
     fn the_head_still_settles_once_the_moves_stop() {
         // And the other half: a hand that has genuinely stopped goes quiet
@@ -539,7 +740,7 @@ mod tests {
         let mut scrubber = Scrubber::new(0);
         let mut out = vec![0.0_f32; 512 * 2];
         scrubber.aim(2_000);
-        for _ in 0..(SETTLE_BLOCKS + 6) {
+        for _ in 0..(SETTLE_BLOCKS as u32 + 6) {
             scrubber.render(&window, &mut out);
         }
         assert_eq!(scrubber.rate(), 0.0, "the record should have stopped");
