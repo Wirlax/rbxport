@@ -623,11 +623,28 @@ test("the waveform is a seek target", async ({ page }) => {
   await page.goto("/");
   await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
   const overview = page.getByTestId("player-overview");
-  await expect(overview).toHaveAttribute("role", "slider");
+  // A progressbar, not a slider: it scrubs with the pointer and takes no keys,
+  // so it is not a tab stop and never wears a focus ring.
+  await expect(overview).toHaveAttribute("role", "progressbar");
+  await expect(overview).not.toHaveAttribute("tabindex", /.*/);
   await expect(overview).toHaveAttribute("aria-valuenow", "0");
   // The maximum is the track's length, so the head has a scale to sit on.
   const max = await overview.getAttribute("aria-valuemax");
   expect(Number(max)).toBeGreaterThan(0);
+});
+
+test("play/pause leaves no focus ring behind on the waveform", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const overview = page.getByTestId("player-overview");
+  await overview.click();
+  // Clicking parks no focus, so the key that follows has nothing to ring. The
+  // pointer alone never shows one; :focus-visible only turns on once a key
+  // goes down, which is what made Space look like it drew the border.
+  await page.keyboard.press("Space");
+  await expect(overview).not.toBeFocused();
+  expect(await overview.evaluate((el) => el.matches(":focus-visible"))).toBe(false);
+  expect(await page.evaluate(() => document.querySelectorAll(":focus-visible").length)).toBe(0);
 });
 
 test("the gear opens settings, and Escape closes them", async ({ page }) => {

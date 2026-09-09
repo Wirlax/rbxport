@@ -1069,7 +1069,15 @@ export const Player = memo(function Player({
           <div className={styles.overviewStack}>
             {/* Where the vocals are, from the analysis. */}
             <VocalStrip trackId={track && track.analysed ? track.id : null} />
-            {/* Clicking either waveform seeks, which is what they are for. */}
+            {/*
+              Clicking either waveform seeks, which is what they are for.
+
+              Reported, not operated: the overview scrubs with the pointer and
+              has no keys of its own — the arrows already belong to the deck. A
+              tab stop here would only park the focus somewhere the keyboard can
+              do nothing, and then paint a ring around the waveform the next
+              time any key went down.
+            */}
             <div
               ref={overviewRef}
               className={styles.overview}
@@ -1078,12 +1086,11 @@ export const Player = memo(function Player({
               onPointerMove={dragOverview}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
-              role="slider"
+              role="progressbar"
               aria-label="Position"
               aria-valuemin={0}
               aria-valuemax={Math.round(total)}
               aria-valuenow={Math.round(playback.position)}
-              tabIndex={0}
             >
               {track && track.analysed ? (
                 <WaveformDetail
