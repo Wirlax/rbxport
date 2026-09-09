@@ -630,6 +630,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    // A browser has one output and no way to name it, so the list is empty
+    // and the picker says so rather than inventing devices.
+    audioDevices: () => wait({ devices: [], default: null, chosen: null }),
+    setAudioDevice: () => wait(undefined),
     // The mixer is the engine's; a browser has no audio to apply it to, so
     // these are accepted and dropped rather than pretended at.
     // The tempo is the engine's, but the mock keeps it so the readout and the

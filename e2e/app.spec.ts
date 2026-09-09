@@ -1561,6 +1561,21 @@ test("clicking the artwork ejects the track from the deck", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
 });
 
+test("the settings window offers the audio output, and says when there is none", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+
+  const section = page.getByRole("region", { name: "Audio output" });
+  await expect(section).toBeVisible();
+  // In a browser there is no engine and so nothing to choose between, and the
+  // panel says that rather than drawing an empty picker.
+  await expect(section).toContainText("no audio engine behind it");
+  await expect(section.getByRole("combobox")).toHaveCount(0);
+});
+
 test("beat sync belongs to two decks, and pulls the follower to the master", async ({
   page,
 }) => {

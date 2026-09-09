@@ -46,6 +46,27 @@ pub struct TreeNodeDto {
     pub child_count: Option<u32>,
 }
 
+/// One output the audio could go to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDeviceDto {
+    /// What to store and what to open by: stable across runs and reboots.
+    pub id: String,
+    /// What to show.
+    pub name: String,
+}
+
+/// The outputs, and which of them is in use.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevicesDto {
+    pub devices: Vec<AudioDeviceDto>,
+    /// The system's own choice, so the interface can say which one that is.
+    pub default: Option<String>,
+    /// What this app has been told to use, or `None` for the system's.
+    pub chosen: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySummaryDto {

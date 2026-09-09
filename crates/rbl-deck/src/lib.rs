@@ -46,7 +46,9 @@ use rtrb::Consumer;
 
 pub use clock::{DeckClock, DeckSnapshot};
 pub use fade::FADE_FRAMES;
-pub use sink::{CpalSink, NullSink, Render, Sink};
+pub use sink::{
+    default_output_device, output_devices, AudioDevice, CpalSink, NullSink, Render, Sink,
+};
 
 use block::{Block, RING_BLOCKS};
 use fade::Ramp;
@@ -221,7 +223,19 @@ pub struct Engine {
 impl Engine {
     /// Opens the default output device and starts both decks' threads.
     pub fn new(events: &EventSink) -> Result<Self> {
-        Self::with_sink(|render| Ok(Arc::new(CpalSink::open(render)?) as Arc<dyn Sink>), events)
+        Self::on_device(events, None)
+    }
+
+    /// The same, on a chosen output.
+    ///
+    /// `device` is an id from `output_devices`. One that is not there any more
+    /// falls back to the default, because an unplugged interface should not be
+    /// a silent app.
+    pub fn on_device(events: &EventSink, device: Option<String>) -> Result<Self> {
+        Self::with_sink(
+            move |render| Ok(Arc::new(CpalSink::open_named(render, device)?) as Arc<dyn Sink>),
+            events,
+        )
     }
 
     /// The same engine on a sink of the caller's choosing, which is how it is

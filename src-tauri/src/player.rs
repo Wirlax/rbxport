@@ -108,6 +108,13 @@ pub struct Player {
     engine: Mutex<Option<Arc<Engine>>>,
     /// Whether a ticker is already running, so play does not start a second.
     ticking: std::sync::atomic::AtomicBool,
+    /// The output the engine should open, as an id from `rbl_deck`.
+    ///
+    /// `None` is the system default. Changing it drops the engine so the next
+    /// thing played opens the new device: a stream cannot be moved between
+    /// devices, and rebuilding costs nothing anyone hears — the decks are
+    /// reloaded from where they were.
+    device: Mutex<Option<String>>,
 }
 
 impl Player {
@@ -125,13 +132,30 @@ impl Player {
         let events: rbl_deck::EventSink = Arc::new(move |event: DeckEvent| {
             emit_deck_event(&handle, &event);
         });
-        let engine = Engine::new(&events).map_err(|e| {
+        let device = self.device.lock().clone();
+        let engine = Engine::on_device(&events, device).map_err(|e| {
             AppError::new(ErrorKind::Internal, "The audio device could not be opened.")
                 .with_detail(e.to_string())
         })?;
         let engine = Arc::new(engine);
         *held = Some(Arc::clone(&engine));
         Ok(engine)
+    }
+
+    /// Which output to open. `None` is the system default.
+    ///
+    /// Takes effect on the next thing played: the engine is dropped here and
+    /// rebuilt then, because a running stream belongs to the device it was
+    /// opened on.
+    pub fn set_device(&self, device: Option<String>) {
+        *self.device.lock() = device;
+        // Dropped rather than replaced: whatever is playing is on the old
+        // device, and the next play opens the new one.
+        *self.engine.lock() = None;
+    }
+
+    pub fn device(&self) -> Option<String> {
+        self.device.lock().clone()
     }
 
     /// Already-built engine only — for a tick, which must not open a device.

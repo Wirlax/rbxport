@@ -5,7 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport, Phrase, ImportReport,
+  AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport,
+  Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
@@ -119,6 +120,8 @@ async function realBackend(): Promise<Backend> {
     deckScrubTo: (deck, positionMs) => invoke<void>("deck_scrub_to", { deck, positionMs }),
     deckScrubEnd: (deck) => invoke<void>("deck_scrub_end", { deck }),
     setMasterLevel: (level) => invoke<void>("set_master_level", { level }),
+    audioDevices: () => invoke<AudioDevices>("audio_devices"),
+    setAudioDevice: (device) => invoke<void>("set_audio_device", { device }),
     deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),
     deckMasterTempo: (deck, on) => invoke<void>("deck_master_tempo", { deck, on }),
     setChannelBand: (deck, band, position) =>

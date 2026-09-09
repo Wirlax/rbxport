@@ -61,12 +61,23 @@ pub struct CpalSink {
 impl CpalSink {
     /// Opens the default output device.
     pub fn open(render: Render) -> Result<Self> {
+        Self::open_named(render, None)
+    }
+
+    /// Opens one output by id, or the default when `wanted` is `None`.
+    ///
+    /// By id rather than by position: a device list renumbers whenever
+    /// something is plugged in, and a stored index would pick a different box
+    /// after a reboot. An id that is no longer there falls back to the default
+    /// rather than refusing to play — a missing interface should not be a
+    /// silent app.
+    pub fn open_named(render: Render, wanted: Option<String>) -> Result<Self> {
         let (ask_tx, ask_rx) = std::sync::mpsc::channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
 
         std::thread::Builder::new()
             .name("rbl-deck-device".to_owned())
-            .spawn(move || device_thread(render, &ask_rx, &ready_tx))
+            .spawn(move || device_thread(render, wanted.as_deref(), &ask_rx, &ready_tx))
             .map_err(DeckError::Io)?;
 
         // The rate decides what the decoders resample to, so opening is not
@@ -110,8 +121,13 @@ impl Drop for CpalSink {
 }
 
 /// Owns the stream and does as it is told.
-fn device_thread(render: Render, ask: &Receiver<Ask>, ready: &Sender<Result<u32>>) {
-    let stream = match build_stream(render) {
+fn device_thread(
+    render: Render,
+    wanted: Option<&str>,
+    ask: &Receiver<Ask>,
+    ready: &Sender<Result<u32>>,
+) {
+    let stream = match build_stream(render, wanted) {
         Ok((stream, rate)) => {
             if ready.send(Ok(rate)).is_err() {
                 return;
@@ -162,9 +178,59 @@ fn device_thread(render: Render, ask: &Receiver<Ask>, ready: &Sender<Result<u32>
 }
 
 /// Builds an output stream on the default device, in whatever format it wants.
-fn build_stream(render: Render) -> Result<(cpal::Stream, u32)> {
+/// One output the audio can go to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDevice {
+    /// What to store and what to open by: cpal's own id, which it documents as
+    /// stable across runs, disconnections and reboots. A position in a list is
+    /// not — plugging an interface in renumbers everything after it.
+    pub id: String,
+    /// What to show. The device's own name, which is what a person recognises.
+    pub name: String,
+}
+
+/// Every output the default host offers.
+///
+/// A device that will not give an id is skipped: it cannot be stored, so
+/// offering it would be offering a choice that does not survive a restart.
+#[must_use]
+pub fn output_devices() -> Vec<AudioDevice> {
     let host = cpal::default_host();
-    let device = host.default_output_device().ok_or(DeckError::NoDevice)?;
+    let Ok(devices) = host.output_devices() else { return Vec::new() };
+    devices
+        .filter_map(|device| {
+            let id = device.id().ok()?;
+            Some(AudioDevice { id: id.to_string(), name: device.to_string() })
+        })
+        .collect()
+}
+
+/// The one the engine opens when nothing has been chosen.
+#[must_use]
+pub fn default_output_device() -> Option<AudioDevice> {
+    let device = cpal::default_host().default_output_device()?;
+    let id = device.id().ok()?;
+    Some(AudioDevice { id: id.to_string(), name: device.to_string() })
+}
+
+fn build_stream(render: Render, wanted: Option<&str>) -> Result<(cpal::Stream, u32)> {
+    let host = cpal::default_host();
+    // The named one if it is there, and the default if it is not: a device
+    // that has been unplugged since it was chosen should not stop the app
+    // making a sound.
+    let device = wanted
+        .and_then(|id| {
+            host.output_devices().ok().and_then(|mut devices| {
+                devices.find(|device| device.id().is_ok_and(|found| found.to_string() == id))
+            })
+        })
+        .or_else(|| host.default_output_device())
+        .ok_or(DeckError::NoDevice)?;
+    if let (Some(wanted), Ok(opened)) = (wanted, device.id()) {
+        if wanted != opened.to_string() {
+            tracing::warn!(wanted, opened = %device, "that audio device is not here; using another");
+        }
+    }
     let supported = device
         .default_output_config()
         .map_err(|e| DeckError::Device(e.to_string()))?;

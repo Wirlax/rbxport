@@ -14,7 +14,8 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    CueDto, DeviceDto, DeviceExportDto, ExportReportDto, ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
+    AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
+    ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -915,6 +916,40 @@ pub async fn deck_master_tempo(
 ) -> AppResult<()> {
     let engine = player.engine(&app)?;
     engine.set_master_tempo(crate::player::deck_of(&deck), on);
+    Ok(())
+}
+
+/// The outputs the audio could go to, and which one is in use.
+///
+/// Read every time rather than cached: an interface is plugged in while the
+/// app is open more often than not, and a list that was right at launch is a
+/// list that does not have the thing somebody just connected.
+#[tauri::command]
+pub async fn audio_devices(
+    player: State<'_, Arc<crate::player::Player>>,
+) -> AppResult<AudioDevicesDto> {
+    let chosen = player.device();
+    Ok(AudioDevicesDto {
+        devices: rbl_deck::output_devices()
+            .into_iter()
+            .map(|device| AudioDeviceDto { id: device.id, name: device.name })
+            .collect(),
+        default: rbl_deck::default_output_device().map(|device| device.id),
+        chosen,
+    })
+}
+
+/// Chooses an output. `None` — an absent id — is the system default.
+///
+/// It takes effect on the next thing played: a running stream belongs to the
+/// device it was opened on, so the engine is dropped and rebuilt rather than
+/// moved.
+#[tauri::command]
+pub async fn set_audio_device(
+    player: State<'_, Arc<crate::player::Player>>,
+    device: Option<String>,
+) -> AppResult<()> {
+    player.set_device(device);
     Ok(())
 }
 

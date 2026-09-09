@@ -266,6 +266,15 @@ export interface Backend {
   /** The master output level, 0 to 1. It arrives back on the next tick. */
   setMasterLevel(level: number): Promise<void>;
   /**
+   * The outputs the audio could go to, and which is in use.
+   *
+   * Read on each call rather than cached: an interface is plugged in while the
+   * app is open more often than not.
+   */
+  audioDevices(): Promise<AudioDevices>;
+  /** Choose one, or `null` for the system's own. Takes effect on the next play. */
+  setAudioDevice(device: string | null): Promise<void>;
+  /**
    * How fast a deck plays, as a multiple of the file's own speed.
    *
    * A ratio rather than a BPM: what BPM that comes to depends on the track,
@@ -326,6 +335,22 @@ export interface Backend {
 export type DeckId = "a" | "b";
 
 /** One deck in a tick. */
+/** One output the audio could go to. */
+export interface AudioDevice {
+  /** What to store and open by: stable across runs and reboots. */
+  id: string;
+  /** What to show. */
+  name: string;
+}
+
+export interface AudioDevices {
+  devices: AudioDevice[];
+  /** The system's own choice, so the list can say which that is. */
+  default: string | null;
+  /** What this app has been told to use, or `null` for the system's. */
+  chosen: string | null;
+}
+
 /** The three bands of a channel strip, high to low as the strip is drawn. */
 export type EqBand = "high" | "mid" | "low";
 
