@@ -116,6 +116,24 @@
   min-height: 0;
 }
 
+/* Drawn rather than left to the platform. macOS hides its scrollbars until
+   something moves, so a list that is wider and longer than its pane gives no
+   sign of it — and the columns are always wider than the pane. */
+.scroll::-webkit-scrollbar {
+  width: var(--s-scrollbar-w);
+  height: var(--s-scrollbar-w);
+}
+.scroll::-webkit-scrollbar-track,
+.scroll::-webkit-scrollbar-corner {
+  background: var(--c-panel);
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--c-raised);
+  border: 2px solid var(--c-panel);
+  border-radius: calc(var(--s-scrollbar-w) / 2);
+}
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--c-scrub); }
+
 .inner { position: relative; min-width: var(--table-w); width: 100%; }
 
 .row {

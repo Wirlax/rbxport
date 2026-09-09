@@ -25,8 +25,41 @@ export const BEATS_PER_BAR = 4;
  */
 export const OVERDRAW = 2;
 
-/** Zoom levels, in bars across, that the +/- buttons step through. */
+/** Zoom levels, in bars across, that the +/- buttons and the wheel step through. */
 export const ZOOM_STEPS = [2, 4, 8, 12, 16, 32, 64] as const;
+
+/** Beat-jump sizes the size button cycles, as a CDJ offers them. */
+export const JUMP_SIZES = [1, 2, 4, 8, 16, 32] as const;
+
+/** The default, and what the button reads before anyone touches it. */
+export const JUMP_BEATS = 4;
+
+/** The next size along, wrapping — the button is a cycle, not a spinner. */
+export function nextJumpSize(current: number): number {
+  const at = JUMP_SIZES.indexOf(current as (typeof JUMP_SIZES)[number]);
+  return JUMP_SIZES[(at + 1) % JUMP_SIZES.length] ?? JUMP_BEATS;
+}
+
+/** How long a jump of `beats` lasts at a tempo. Zero when there is no tempo. */
+export function jumpSeconds(beats: number, bpmX100: number): number {
+  if (bpmX100 <= 0 || beats <= 0) return 0;
+  return (beats * 60) / (bpmX100 / 100);
+}
+
+/**
+ * The zoom a wheel gesture lands on.
+ *
+ * Wheels differ wildly — a mouse notch is 100-odd pixels and a trackpad emits
+ * a stream of ones — so this steps one level per call and lets the caller
+ * decide what counts as a gesture. Up zooms in, which is the direction every
+ * map and every waveform editor uses.
+ */
+export function zoomBy(bars: number, direction: number): number {
+  const at = ZOOM_STEPS.indexOf(bars as (typeof ZOOM_STEPS)[number]);
+  const from = at === -1 ? ZOOM_STEPS.indexOf(DETAIL_BARS) : at;
+  const to = Math.min(Math.max(from + direction, 0), ZOOM_STEPS.length - 1);
+  return ZOOM_STEPS[to] ?? DETAIL_BARS;
+}
 
 /**
  * What fraction of a track `bars` covers at a given tempo.

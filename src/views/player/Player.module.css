@@ -1,6 +1,17 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal.
    Every size was measured off a 2x capture of rekordbox 7.2.11 running — see
    the `source` on each token in design/tokens/tokens.json. */
+/* The simple player keeps the transport and the waveforms and drops the pad
+   row and the cue list, and is shorter by exactly the row it no longer draws. */
+.player[data-simple] { height: calc(var(--s-player-h) - var(--s-player-pad-h)); }
+.player[data-simple] .pads,
+.player[data-simple] .side { display: none; }
+
+/* Nothing loaded: no playhead and no position bar. A head at zero over an
+   empty strip reads as a track sitting at its start, which it is not. */
+.player[data-empty] .playhead,
+.player[data-empty] .scrub { display: none; }
+
 .player {
   display: grid;
   grid-template-columns: var(--s-player-transport-w) 1fr var(--s-player-right-w);
@@ -199,12 +210,30 @@
   min-width: 0;
 }
 
+/* The sleeve is the eject button, as it is on a CDJ. A button rather than a
+   div so it is reachable from the keyboard and announces itself; it keeps the
+   square it always was. */
 .artwork {
   width: var(--s-player-artwork-size);
   height: 100%;
   flex: none;
+  padding: 0;
+  border: 0;
   background: var(--c-raised);
   overflow: hidden;
+  cursor: pointer;
+}
+.artwork:disabled { cursor: default; }
+.artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* A record, drawn where the sleeve would be: no artwork, and no track at all,
+   both leave the square empty otherwise. */
+.disc {
+  width: 78%;
+  height: 78%;
+  margin: auto;
+  display: block;
+  color: var(--c-disc-placeholder);
 }
 .artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -367,6 +396,9 @@
   pointer-events: none;
   will-change: transform;
 }
+/* Red while the deck has the keyboard, so it is obvious which of the two
+   things the arrow keys are about to move. */
+.player[data-armed] .playhead { background: var(--c-playhead-armed); }
 
 /* Cues sit over the waveform, the grid and the bar count — a marker behind a
    downbeat line is a marker nobody can find. */

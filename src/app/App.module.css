@@ -1,20 +1,55 @@
+/* The window's own title bar, drawn here rather than by macOS.
+   `titleBarStyle: "Overlay"` puts the traffic lights over the top left of the
+   webview and hands us the strip; `hiddenTitle` stops macOS also drawing its
+   own name beside them, which `Overlay` on its own does not. Between them
+   this is the only way to set the name in our face and put it in the middle
+   of the window — the system draws its title beside the buttons, at its size.
+   The strip has to carry `data-tauri-drag-region` or the window cannot be
+   moved at all, because the native bar that used to move it is gone. */
+.titleBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-black);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  color: var(--c-text-dim);
+  /* The strip drags the window: `data-tauri-drag-region` on the element is how
+     that is asked for, not the `-webkit-app-region` a Chromium app would use.
+     Room at the left for the traffic lights, which float over the webview
+     under this title bar style. */
+  user-select: none;
+}
+
 .window {
   display: grid;
-  /* The gutter between the player and the browser is a real row, measured:
-     the pad bar ends at 335pt and the track list starts at 338pt. A border on
-     the player drew a line in the panel colour instead of the black gap the
-     capture has. */
+  /* One row for the decks, sized to what is in it: the layout switch draws one
+     deck, two, a short one, or none at all. */
   grid-template-rows:
+    var(--s-title-bar-h)
     var(--s-top-bar-h)
-    var(--s-player-h)
-    var(--s-player-gutter-h)
+    auto
     1fr
     var(--s-status-bar-h);
   height: 100%;
   background: var(--c-black);
 }
 
-.playerGutter { background: var(--c-black); }
+/* The decks and the measured black gap under them. The gap is real and
+   measured: the pad bar ends at 335pt and the track list starts at 338pt. A
+   border on the player drew a line in the panel colour instead. */
+.decks { display: grid; }
+/* DUAL PLAYER: the two decks beside each other, which is the difference its
+   icon draws against 2 PLAYER's stacked bars. */
+.decks[data-side-by-side] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas: "a b" "gutter gutter";
+}
+.decks[data-side-by-side] > :nth-child(1) { grid-area: a; }
+.decks[data-side-by-side] > :nth-child(2) { grid-area: b; }
+.decks[data-side-by-side] > .playerGutter { grid-area: gutter; }
+.playerGutter { height: var(--s-player-gutter-h); background: var(--c-black); }
 
 /* With a panel open the browser gives up width to it, at the width
    browseSetting.xml records, capped as a fraction of the window so a narrow

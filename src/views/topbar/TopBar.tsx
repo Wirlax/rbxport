@@ -11,6 +11,8 @@
  * 7.2.11.
  */
 import { GearIcon, HeadphonesIcon, InfoIcon } from "@/components/icons";
+import type { PlayerLayout } from "@/lib/layout";
+import { LayoutMenu } from "./LayoutMenu";
 import styles from "./TopBar.module.css";
 
 export interface TopBarProps {
@@ -26,6 +28,9 @@ export interface TopBarProps {
   /** Whether headphone monitoring is on. */
   monitoring?: boolean;
   onToggleMonitoring?: () => void;
+  /** How much of the window the deck takes. rekordbox puts this at the left. */
+  layout?: PlayerLayout;
+  onLayoutChange?: (layout: PlayerLayout) => void;
 }
 
 export function TopBar({
@@ -35,10 +40,14 @@ export function TopBar({
   level = 0,
   monitoring = false,
   onToggleMonitoring,
+  layout = "one",
+  onLayoutChange,
 }: TopBarProps) {
   const filled = Math.min(Math.max(Number.isFinite(level) ? level : 0, 0), 1);
   return (
     <header className={styles.topBar}>
+      <LayoutMenu layout={layout} onChange={onLayoutChange} />
+
       <span className={styles.spacer} />
 
       <button type="button" className={styles.icon} aria-label="Information">

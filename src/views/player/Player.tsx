@@ -14,11 +14,11 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { Cue, Phrase, RowDto } from "@/ipc/types";
+import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { artworkUrl } from "@/ipc/artwork";
-import { CutIcon, LockIcon, MetronomeIcon } from "@/components/icons";
+import { CutIcon, DiscIcon, LockIcon, MetronomeIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
@@ -28,6 +28,10 @@ import {
   cuesFor,
   detailSpan,
   dragSeconds,
+  JUMP_BEATS,
+  jumpSeconds,
+  nextJumpSize,
+  zoomBy,
   needsRedraw,
   OVERDRAW,
   scrollOffset,
@@ -51,6 +55,21 @@ import styles from "./Player.module.css";
 export interface PlayerProps {
   /** The row the browser has selected, or `null` when nothing is. */
   track: RowDto | null;
+  /** Which engine deck this drives. The 2-player layout adds a second. */
+  deck?: DeckId;
+  /**
+   * The simple player: the transport and the waveforms, without the pad row
+   * and the cue list beside them — what a track is read with rather than what
+   * it is set up with.
+   */
+  simple?: boolean;
+  /**
+   * Take the track out of the deck.
+   *
+   * The artwork is the eject button, as it is on a CDJ's screen: clicking the
+   * sleeve is how you get a track out without loading another over it.
+   */
+  onEject?: () => void;
 }
 
 /**
@@ -286,8 +305,10 @@ const PANELS = [
   { id: "info", label: "INFO" },
 ] as const;
 
-export const Player = memo(function Player({ track }: PlayerProps) {
-  const playback = usePlayback(track?.id ?? null);
+export const Player = memo(function Player({
+  track, onEject, deck = "a", simple = false,
+}: PlayerProps) {
+  const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
   // with the tree splitter — a fixed-width canvas stretched by CSS is blurry
   // on a wide window and wasted resolution on a narrow one.
@@ -316,6 +337,16 @@ export const Player = memo(function Player({ track }: PlayerProps) {
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
+  /** Beats a jump moves, cycled by the size button. */
+  const [jumpBeats, setJumpBeats] = useState<number>(JUMP_BEATS);
+  /**
+   * Whether the deck has the keyboard.
+   *
+   * Armed by clicking it and dropped by clicking anything else, which is how a
+   * CDJ's deck behaves and what makes the arrow keys unambiguous: the same
+   * keys move the browser's cursor when the browser has it.
+   */
+  const [armed, setArmed] = useState(false);
   /**
    * Where the scrolling layer is drawn from. Not the playhead: the layer is
    * drawn once across `OVERDRAW` spans and slid by a transform, and it is
@@ -448,6 +479,19 @@ export const Player = memo(function Player({ track }: PlayerProps) {
     }
   }, [anchor, span, total, detail.width, positionRef]);
 
+  /**
+   * The wheel zooms, over the waveform it is pointing at.
+   *
+   * One step per gesture whatever the device: a mouse notch arrives as about a
+   * hundred pixels and a trackpad as a stream of ones, so the size of the
+   * delta says nothing useful and only its sign is read.
+   */
+  const wheelZoom = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    setBars((current) => zoomBy(current, event.deltaY > 0 ? 1 : -1));
+  }, []);
+
   const zoom = useCallback((by: number) => {
     setBars((current) => {
       const at = ZOOM_STEPS.indexOf(current as (typeof ZOOM_STEPS)[number]);
@@ -457,6 +501,46 @@ export const Player = memo(function Player({ track }: PlayerProps) {
       return ZOOM_STEPS[to] ?? DETAIL_BARS;
     });
   }, []);
+
+  /*
+   * The deck takes the keyboard when it is clicked and gives it up when
+   * anything else is. A document listener rather than `onBlur`: the browser
+   * and the tree are not focusable containers, so there is nothing to blur to
+   * — what matters is that the pointer went down somewhere that is not here.
+   */
+  const shell = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const elsewhere = (event: PointerEvent) => {
+      const box = shell.current;
+      if (!box) return;
+      setArmed(box.contains(event.target as Node));
+    };
+    document.addEventListener("pointerdown", elsewhere, true);
+    return () => document.removeEventListener("pointerdown", elsewhere, true);
+  }, []);
+
+  /** Moves by the chosen number of beats. */
+  const jump = useCallback(
+    (direction: number) => {
+      const step = jumpSeconds(jumpBeats, track?.bpmX100 ?? 0);
+      if (step === 0) return;
+      playback.seek(playback.positionRef.current + step * direction);
+    },
+    [jumpBeats, track, playback],
+  );
+
+  useEffect(() => {
+    if (!armed) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      // Otherwise the browser scrolls its list under the deck at the same time.
+      event.preventDefault();
+      jump(event.key === "ArrowRight" ? 1 : -1);
+    };
+    // `globalThis`, because `window` here is the slice of the track on screen.
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, [armed, jump]);
 
   /*
    * CUE, as a CDJ does it: stop and rewind while playing, preview while held
@@ -542,7 +626,14 @@ export const Player = memo(function Player({ track }: PlayerProps) {
   const elapsed = splitTime(playback.position);
 
   return (
-    <section className={styles.player} aria-label="Preview player">
+    <section
+      ref={shell}
+      className={styles.player}
+      aria-label={deck === "b" ? "Preview player B" : "Preview player"}
+      data-armed={armed ? "" : undefined}
+      data-simple={simple ? "" : undefined}
+      data-empty={track ? undefined : ""}
+    >
       <div className={styles.transport}>
         <div className={styles.pair}>
           {SKIPS.map((button) => (
@@ -567,20 +658,19 @@ export const Player = memo(function Player({ track }: PlayerProps) {
               className={styles.square}
               aria-label={button.label}
               disabled={playback.idle}
-              onClick={() => {
-                // A beat jump is the beat length times the chosen count.
-                const bpm = (track?.bpmX100 ?? 0) / 100;
-                if (bpm <= 0) return;
-                const step = (4 * 60) / bpm;
-                playback.seek(playback.position + (button.id === "jump-back" ? -step : step));
-              }}
+              onClick={() => jump(button.id === "jump-back" ? -1 : 1)}
             >
               {button.glyph}
             </button>
           ))}
         </div>
-        <button type="button" className={styles.beats} aria-label="Beat jump size" disabled>
-          4Beats
+        <button
+          type="button"
+          className={styles.beats}
+          aria-label="Beat jump size"
+          onClick={() => setJumpBeats(nextJumpSize)}
+        >
+          {jumpBeats}Beats
           <span className={styles.chevron} aria-hidden />
         </button>
         <button
@@ -614,7 +704,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
       <div className={styles.main}>
         <div className={styles.head}>
           <span className={styles.title} data-testid="player-title">
-            {track ? track.title : "No track loaded"}
+            {track ? track.title : ""}
           </span>
           {track ? (
             <>
@@ -634,11 +724,20 @@ export const Player = memo(function Player({ track }: PlayerProps) {
         </div>
 
         <div className={styles.overviewRow}>
-          <div className={styles.artwork}>
+          <button
+            type="button"
+            className={styles.artwork}
+            aria-label="Eject"
+            title="Eject"
+            onClick={onEject}
+            disabled={!track || !onEject}
+          >
             {track?.hasArtwork ? (
               <img src={artworkUrl(track.id)} alt="" draggable={false} />
-            ) : null}
-          </div>
+            ) : (
+              <DiscIcon className={styles.disc} />
+            )}
+          </button>
           <div className={styles.overviewStack}>
             {/* Where the vocals are, from the analysis. */}
             <VocalStrip trackId={track && track.analysed ? track.id : null} />
@@ -695,6 +794,7 @@ export const Player = memo(function Player({ track }: PlayerProps) {
             ref={detailRef}
             className={styles.detail}
             data-testid="player-detail"
+            onWheel={wheelZoom}
             onPointerDown={startDrag}
             onPointerMove={dragDetail}
             onPointerUp={endDrag}

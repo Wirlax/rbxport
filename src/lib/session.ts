@@ -14,6 +14,7 @@
  * between runs, a stored width can come from a wider screen, and a hand-edited
  * value can be anything at all; none of those may produce a broken window.
  */
+import { asLayout, type PlayerLayout } from "./layout";
 import type { RowDto, SortColumn, TreeNode } from "@/ipc/types";
 import { DEFAULT_SORT, type SortState } from "./viewSpec";
 
@@ -52,6 +53,8 @@ export interface Session {
   count: number;
   /** What was loaded in the player. */
   player: RowDto | null;
+  /** How much of the window the deck took: 1 player, 2, simple, or none. */
+  layout: PlayerLayout;
 }
 
 export const DEFAULT_TREE_WIDTH = 305;
@@ -66,6 +69,7 @@ export const DEFAULT_SESSION: Session = {
   rows: [],
   count: 0,
   player: null,
+  layout: "one",
 };
 
 const SORT_COLUMNS: readonly string[] = [
@@ -120,6 +124,7 @@ export function sanitiseSession(value: unknown): Session {
       typeof (raw.player as RowDto).id === "string"
         ? (raw.player as RowDto)
         : null,
+    layout: asLayout(raw.layout),
   };
 }
 

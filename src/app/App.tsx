@@ -20,6 +20,8 @@ import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/session";
+import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
+import { deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -96,6 +98,8 @@ export function App() {
         : "collection";
   const cols = useColumns(columnContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** How much of the window the deck takes, kept across restarts. */
+  const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {
@@ -492,8 +496,9 @@ export function App() {
       rows: screen.rows.slice(0, SEEDED_ROWS),
       count: screen.count,
       player: playerTrack,
+      layout,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, playerTrack]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, playerTrack, layout]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement.
@@ -510,10 +515,32 @@ export function App() {
 
   return (
     <div className={styles.window}>
-      <TopBar clock={clock} onOpenSettings={() => setSettingsOpen(true)} />
-      <Player track={playerTrack} />
-      {/* The measured black gap between the deck and the browser. */}
-      <div className={styles.playerGutter} aria-hidden />
+      <div
+        className={styles.titleBar}
+        data-testid="title-bar"
+        onMouseDown={startWindowDrag}
+        onDoubleClick={toggleWindowMaximise}
+      >
+        rekordbox-lite
+      </div>
+      <TopBar
+        clock={clock}
+        onOpenSettings={() => setSettingsOpen(true)}
+        layout={layout}
+        onLayoutChange={setLayout}
+      />
+      {/* Full Browser draws no deck at all, and no gutter under one. */}
+      {deckCount(layout) > 0 ? (
+        <div className={styles.decks} data-side-by-side={isSideBySide(layout) ? "" : undefined}>
+          <Player
+            track={playerTrack}
+            onEject={() => setPlayerTrack(null)}
+            simple={!isFullDeck(layout)}
+          />
+          {deckCount(layout) > 1 ? <Player deck="b" track={null} /> : null}
+          <div className={styles.playerGutter} aria-hidden />
+        </div>
+      ) : null}
       <div
         data-testid="body"
         className={styles.body}

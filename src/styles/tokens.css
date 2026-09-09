@@ -22,6 +22,10 @@
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
   --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
+  --c-menu: #1A1A1A; /* the layout menu's panel in a capture of rekordbox 7.2.11 */
+  --c-menu-border: #8C8C8C; /* the light hairline around that panel */
+  --c-disc-placeholder: #2E2E2E; /* the record drawn where a sleeve is missing; a shade above the raised square it sits on */
+  --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
   --c-cue-e: #11B176;
   --c-cue-f: #FF8C00;
@@ -56,7 +60,8 @@
   --s-col-header-h: 23px;
   --s-browser-head-h: 23px;
   --s-top-bar-h: 30px;
-  --s-title-bar-h: 28px;
+  --s-scrollbar-w: 10px; /* UNMEASURED — no capture has the list overflowing; sized to the 7pt gutter the tree leaves beside it */
+  --s-title-bar-h: 28px; /* the macOS title bar the window's traffic lights sit in */
   --s-status-bar-h: 30px;
   --s-bottom-bar-h: 72px;
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */

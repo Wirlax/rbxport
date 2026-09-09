@@ -1,5 +1,4 @@
 .statusBar {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -10,17 +9,7 @@
   font-weight: 700;
   color: var(--c-text-dim);
 }
-/* Centred on the bar and out of the flow, so it stays put as the activity and
-   selection text either side of it change length. Smaller than the rest: it is
-   a mark, not a status. */
-.logo {
-  position: absolute;
-  left: 50%;
-  translate: -50% 0;
-  color: var(--c-text);
-  font-size: var(--f-size-xs);
-  pointer-events: none;
-}
+.logo { color: var(--c-text); }
 .readOnly {
   padding: 2px 6px;
   border-radius: 2px;

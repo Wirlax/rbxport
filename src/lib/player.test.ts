@@ -7,6 +7,10 @@ import {
   detailSpan,
   dragSeconds,
   headPercent,
+  JUMP_SIZES,
+  jumpSeconds,
+  nextJumpSize,
+  zoomBy,
   phraseKind,
   phraseSpans,
   splitTime,
@@ -440,5 +444,45 @@ describe("needsRedraw", () => {
 
   it("never asks when there is no span to cover", () => {
     expect(needsRedraw(0.9, 0.1, 0)).toBe(false);
+  });
+});
+
+describe("nextJumpSize", () => {
+  it("cycles the sizes a CDJ offers, and wraps", () => {
+    expect(nextJumpSize(1)).toBe(2);
+    expect(nextJumpSize(4)).toBe(8);
+    expect(nextJumpSize(32)).toBe(1);
+  });
+
+  it("snaps a size it does not know back to the default's neighbour", () => {
+    expect(JUMP_SIZES).toContain(nextJumpSize(7));
+  });
+});
+
+describe("jumpSeconds", () => {
+  it("is the beat length times the count", () => {
+    expect(jumpSeconds(4, 12_000)).toBeCloseTo(2, 6);
+    expect(jumpSeconds(16, 12_000)).toBeCloseTo(8, 6);
+  });
+
+  it("is nothing without a tempo, rather than an infinity", () => {
+    expect(jumpSeconds(4, 0)).toBe(0);
+    expect(jumpSeconds(0, 12_000)).toBe(0);
+  });
+});
+
+describe("zoomBy", () => {
+  it("steps one level at a time, in both directions", () => {
+    expect(zoomBy(12, -1)).toBe(8);
+    expect(zoomBy(12, 1)).toBe(16);
+  });
+
+  it("stops at the ends rather than wrapping round to the other extreme", () => {
+    expect(zoomBy(2, -1)).toBe(2);
+    expect(zoomBy(64, 1)).toBe(64);
+  });
+
+  it("snaps an unrecognised zoom back to the default", () => {
+    expect(zoomBy(9, 0)).toBe(DETAIL_BARS);
   });
 });

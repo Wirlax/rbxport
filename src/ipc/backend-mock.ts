@@ -586,6 +586,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    // A browser has no audio, so a drag is a seek that follows the pointer:
+    // the position moves, nothing is heard, and the visuals are the same.
+    deckScrubBegin: () => wait(undefined),
+    deckScrubTo: (_deck, positionMs) => {
+      deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      sendTick();
+      return wait(undefined);
+    },
+    deckScrubEnd: () => {
+      deckA.generation += 1;
+      sendTick();
+      return wait(undefined);
+    },
     deckState: () => wait(tick()),
     onDeckTick: (listener) => {
       deckTickListeners.add(listener);

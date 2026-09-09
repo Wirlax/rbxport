@@ -458,7 +458,7 @@ test("a device shows what is on it, and a second write only syncs the difference
 test("a track loads into the player on a double-click, not a click", async ({ page }) => {
   await page.goto("/");
   const title = page.getByTestId("player-title");
-  await expect(title).toHaveText("No track loaded");
+  await expect(title).toHaveText("");
 
   const firstTitle = page.locator('[role="gridcell"][data-col="title"]').first();
   const text = await firstTitle.innerText();
@@ -467,7 +467,7 @@ test("a track loads into the player on a double-click, not a click", async ({ pa
   // to see what is in it must not load every track on the way past.
   await firstTitle.click();
   await expect(page.locator('[role="row"][data-selected]')).toHaveCount(1);
-  await expect(title).toHaveText("No track loaded");
+  await expect(title).toHaveText("");
 
   await firstTitle.dblclick();
   await expect(title).toHaveText(text);
@@ -480,7 +480,7 @@ test("editing a comment does not also load the track", async ({ page }) => {
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="comment"]').first().dblclick();
   await expect(page.locator('[role="gridcell"][data-col="comment"] input')).toBeVisible();
-  await expect(page.getByTestId("player-title")).toHaveText("No track loaded");
+  await expect(page.getByTestId("player-title")).toHaveText("");
 });
 
 test("a playlist numbers its rows in the order they are in", async ({ page }) => {
@@ -1172,4 +1172,132 @@ test("the detail waveform scrolls by transform, not by a redraw a tick", async (
   // it never exposes an undrawn edge.
   const canvas = await layer.locator("canvas").boundingBox();
   expect(canvas?.width).toBeCloseTo(drawn?.width ?? 0, 0);
+});
+
+test("the deck takes the keyboard when it is clicked, and gives it back", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const player = page.getByRole("region", { name: "Preview player" });
+  const head = page.getByTestId("player-detail-head");
+  const colour = async () => head.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const white = await colour();
+
+  // Clicking the deck arms it: the playhead turns red, because the arrow keys
+  // are about to move the track rather than the browser's cursor.
+  await player.getByTestId("player-detail").click({ position: { x: 30, y: 10 } });
+  await expect(player).toHaveAttribute("data-armed", "");
+  expect(await colour()).not.toBe(white);
+
+  // The arrows then beat-jump by the chosen size.
+  const clock = page.getByTestId("player-time");
+  const before = await clock.textContent();
+  await page.keyboard.press("ArrowRight");
+  await expect(clock).not.toHaveText(before ?? "");
+
+  // Clicking the browser hands it back, and the playhead goes white again.
+  await page.locator('[role="gridcell"][data-col="title"]').nth(5).click();
+  await expect(player).not.toHaveAttribute("data-armed", "");
+  expect(await colour()).toBe(white);
+});
+
+test("the beat jump size cycles, and the jump follows it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  const size = page.getByRole("button", { name: "Beat jump size" });
+  await expect(size).toHaveText(/^4Beats/);
+  await size.click();
+  await expect(size).toHaveText(/^8Beats/);
+});
+
+test("the wheel over a waveform zooms it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+
+  // The layer is drawn across a fixed number of bars, so zooming changes how
+  // much of the track one strip covers — which is what the beat spacing shows.
+  const gaps = async () =>
+    page.getByTestId("player-detail").locator('[class*="downbeat"]').count();
+  const wide = await gaps();
+  await page.getByTestId("player-detail").hover();
+  await page.mouse.wheel(0, -120);
+  await expect.poll(gaps).toBeLessThan(wide);
+  // One step per gesture, whatever the delta: two events to pass the start.
+  await page.mouse.wheel(0, 120);
+  await page.mouse.wheel(0, 120);
+  await expect.poll(gaps).toBeGreaterThan(wide);
+});
+
+test("the title bar carries the name in the middle of the window", async ({ page }) => {
+  // macOS draws its own title beside the traffic lights at its own size; the
+  // window uses an overlay title bar so this one can sit in the middle.
+  await page.goto("/");
+  const bar = page.getByTestId("title-bar");
+  await expect(bar).toHaveText("rekordbox-lite");
+  const strip = await bar.boundingBox();
+  const text = await bar.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const box = range.getBoundingClientRect();
+    return { x: box.x, width: box.width };
+  });
+  const centre = (strip?.x ?? 0) + (strip?.width ?? 0) / 2;
+  expect(text.x + text.width / 2).toBeCloseTo(centre, 0);
+});
+
+test("clicking the artwork ejects the track from the deck", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  await expect(page.getByTestId("player-title")).not.toHaveText("");
+
+  // The sleeve is the eject button, as it is on a CDJ's screen.
+  await page.getByRole("button", { name: "Eject" }).click();
+  await expect(page.getByTestId("player-title")).toHaveText("");
+  // And the deck goes back to being a deck with nothing in it.
+  await expect(page.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
+});
+
+test("the layout switch draws one deck, two, a short one, or none", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const decks = page.getByRole("region", { name: /^Preview player/ });
+  const choose = async (label: string) => {
+    await page.getByRole("button", { name: "Layout" }).click();
+    await page.getByRole("menuitemradio", { name: label }).click();
+  };
+  await expect(decks).toHaveCount(1);
+
+  await choose("2 PLAYER");
+  await expect(decks).toHaveCount(2);
+
+  // DUAL is the other two-deck layout: side by side rather than stacked.
+  await choose("DUAL PLAYER");
+  await expect(decks).toHaveCount(2);
+  const boxes = await decks.all();
+  const left = await boxes[0]?.boundingBox();
+  const right = await boxes[1]?.boundingBox();
+  expect(right?.x).toBeGreaterThan(left?.x ?? 0);
+
+  // The simple player is the same deck without the pad row or the cue list.
+  await choose("SIMPLE PLAYER");
+  await expect(decks).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "CUE/LOOP" })).toBeHidden();
+  const short = await decks.first().boundingBox();
+
+  await choose("1 PLAYER");
+  await expect(page.getByRole("tab", { name: "CUE/LOOP" })).toBeVisible();
+  const full = await decks.first().boundingBox();
+  expect(short?.height).toBeLessThan(full?.height ?? 0);
+
+  await choose("FULL BROWSER");
+  await expect(decks).toHaveCount(0);
+  // And it survives a restart, like the rest of the screen.
+  await page.reload();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByRole("region", { name: /^Preview player/ })).toHaveCount(0);
 });

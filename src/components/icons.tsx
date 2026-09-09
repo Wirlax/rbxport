@@ -27,6 +27,12 @@ export const DeviceIcon = (props: IconProps) => (
   </svg>
 );
 
+export const DiscIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" fillRule="evenodd" d="M8 2.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6zm0 4.1a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/>
+  </svg>
+);
+
 export const FolderIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <path d="M0 2h5l1.5 1.5H14V11H0z" fill="currentColor"/>
@@ -54,6 +60,36 @@ export const HistoryIcon = (props: IconProps) => (
 export const InfoIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <circle cx="8" cy="8" r="6.4" fill="currentColor"/> <rect x="7.1" y="6.6" width="1.8" height="5.0" rx="0.6" fill="#000"/> <circle cx="8" cy="4.6" r="1.05" fill="#000"/>
+  </svg>
+);
+
+export const LayoutBrowserIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="1.5" y="3.4" width="13" height="9.2" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M1.5 6.6h13" stroke="currentColor" strokeWidth="1.4"/>
+  </svg>
+);
+
+export const LayoutDualIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="1.5" y="5.4" width="8.4" height="7.2" fill="none" stroke="currentColor" strokeWidth="1.4"/><rect x="6.1" y="3.4" width="8.4" height="7.2" fill="none" stroke="currentColor" strokeWidth="1.4"/>
+  </svg>
+);
+
+export const LayoutOneIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="1.5" y="4" width="13" height="8" fill="none" stroke="currentColor" strokeWidth="1.4"/><rect x="3.8" y="6.4" width="3.2" height="3.2" fill="currentColor"/>
+  </svg>
+);
+
+export const LayoutSimpleIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="1.5" y="5.6" width="13" height="4.8" fill="none" stroke="currentColor" strokeWidth="1.4"/>
+  </svg>
+);
+
+export const LayoutTwoIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="1.5" y="3" width="13" height="4.4" fill="none" stroke="currentColor" strokeWidth="1.4"/><rect x="1.5" y="8.6" width="13" height="4.4" fill="none" stroke="currentColor" strokeWidth="1.4"/>
   </svg>
 );
 

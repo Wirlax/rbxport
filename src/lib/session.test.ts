@@ -21,6 +21,7 @@ describe("sanitiseSession", () => {
       rows: [{ id: "100", title: "One" }],
       count: 14,
       player: { id: "100", title: "One" },
+      layout: "two",
     };
     expect(sanitiseSession(session)).toEqual(session);
   });
