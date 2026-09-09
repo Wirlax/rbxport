@@ -8,7 +8,13 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
-  retries: 0,
+  // Locally a failure is a failure. On a shared runner WebKit dies of its own
+  // accord — `page.goto: WebKit encountered an internal error`, a different
+  // test each run — and a retry is the difference between reporting that and
+  // reporting the app. Two, and `trace: "on-first-retry"` below finally has
+  // something to attach: a test that fails all three times is real, and comes
+  // with its trace.
+  retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
     baseURL: "http://localhost:1420",
