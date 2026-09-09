@@ -52,6 +52,9 @@ pub enum TrackSource {
     Collection,
     /// Index into `Library::playlists`, not a rekordbox id.
     Playlist(usize),
+    /// Index into `Library::histories`. A session, or a folder of them —
+    /// a folder has no members of its own, so it opens empty.
+    History(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +93,9 @@ impl Library {
             TrackSource::Collection => (0..u32::try_from(self.count).unwrap_or(u32::MAX)).collect(),
             TrackSource::Playlist(index) => {
                 self.playlists().members.get(*index).cloned().unwrap_or_default()
+            }
+            TrackSource::History(index) => {
+                self.histories().members.get(*index).cloned().unwrap_or_default()
             }
         };
 

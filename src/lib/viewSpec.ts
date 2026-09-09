@@ -33,9 +33,16 @@ export function specForNode(
 ): ViewSpec {
   const order = sort ?? DEFAULT_SORT;
   return {
-    // Only a playlist narrows the view. A folder holds playlists rather than
-    // tracks, and a device is not a track source at all.
-    source: node?.kind === "playlist" ? { kind: "playlist", id: node.id } : { kind: "collection" },
+    // A playlist or a history session narrows the view. A folder holds lists
+    // rather than tracks — including a history year or month, which opens
+    // empty because that is what it holds — and a device is not a track source
+    // at all.
+    source:
+      node?.kind === "playlist"
+        ? { kind: "playlist", id: node.id }
+        : node?.kind === "history"
+          ? { kind: "history", id: node.id }
+          : { kind: "collection" },
     sort: order.column,
     descending: order.descending,
     query,

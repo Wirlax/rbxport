@@ -77,6 +77,8 @@ pub struct Library {
     /// against 233 ms for a full reload, and a playlist edit is by far the
     /// most common one.
     playlists: RwLock<Playlists>,
+    /// The history tree, which is the same shape and read the same way.
+    histories: RwLock<Playlists>,
 
     /// Row index by track id. Built on first lookup, not at load.
     by_id: OnceLock<HashMap<u64, Row>>,
@@ -131,6 +133,11 @@ impl Cue {
     }
 }
 
+/// A tree of named lists of tracks.
+///
+/// Playlists and histories are both this: rekordbox stores each as a tree
+/// table plus a membership table, and nothing about reading one differs from
+/// the other. `parent` indexes into this same structure, `NO_ID` for a root.
 #[derive(Debug, Default, Clone)]
 pub struct Playlists {
     pub ids: Vec<u64>,
@@ -219,6 +226,15 @@ impl Library {
     /// Swaps in a freshly-read playlist tree, leaving the track columns alone.
     pub fn set_playlists(&self, playlists: Playlists) {
         *self.playlists.write() = playlists;
+    }
+
+    /// Reads the history tree: sessions, and the folders they are filed under.
+    pub fn histories(&self) -> parking_lot::RwLockReadGuard<'_, Playlists> {
+        self.histories.read()
+    }
+
+    pub fn set_histories(&self, histories: Playlists) {
+        *self.histories.write() = histories;
     }
 
     pub fn len(&self) -> usize {

@@ -61,7 +61,7 @@ export interface ViewHandle {
 export interface TreeNode {
   id: string;
   name: string;
-  kind: "collection" | "folder" | "playlist" | "history" | "allTracks" | "device";
+  kind: "collection" | "histories" | "folder" | "playlist" | "history" | "allTracks" | "device";
   depth: number;
   /** Undefined for leaves. */
   expanded?: boolean;

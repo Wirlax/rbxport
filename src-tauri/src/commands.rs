@@ -78,6 +78,7 @@ pub async fn playlist_tree(state: State<'_, Arc<AppState>>) -> AppResult<Vec<Tre
 
 fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
     let playlists = library.playlists();
+    let histories = library.histories();
     let mut nodes = vec![
         TreeNodeDto {
             id: "all".into(),
@@ -97,11 +98,52 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
         },
     ];
 
-    let mut children: Vec<Vec<usize>> = vec![Vec::new(); playlists.len()];
+    push_lists(&mut nodes, &playlists, ListKinds { folder: "folder", leaf: "playlist" }, 2);
+
+    // Histories only when there are some: an empty section is a heading that
+    // leads nowhere, and the rail already dims what has nothing in it.
+    if !histories.is_empty() {
+        nodes.push(TreeNodeDto {
+            id: "histories".into(),
+            name: "Histories".into(),
+            kind: "histories",
+            depth: 0,
+            // Closed. Sessions are filed under a folder per year and per month
+            // and there are 187 of them in the reference library, which would
+            // otherwise open over the playlists.
+            expanded: Some(false),
+            child_count: Some(u32::try_from(histories.len()).unwrap_or(u32::MAX)),
+        });
+        // A year folder and a session are both "history": they are one
+        // section, and what tells them apart in the tree is whether anything
+        // sits under them.
+        push_lists(&mut nodes, &histories, ListKinds { folder: "history", leaf: "history" }, 0);
+    }
+    nodes
+}
+
+/// What to call a list with children, and one without.
+#[derive(Debug, Clone, Copy)]
+struct ListKinds {
+    folder: &'static str,
+    leaf: &'static str,
+}
+
+/// Flattens one list tree onto `nodes`, depth-first, in `Seq` order.
+///
+/// `open_to` is the depth below which branches arrive expanded: the tree opens
+/// on the playlists, and closed on everything filed by date.
+fn push_lists(
+    nodes: &mut Vec<TreeNodeDto>,
+    lists: &rbl_index::Playlists,
+    kinds: ListKinds,
+    open_to: u32,
+) {
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); lists.len()];
     let mut roots: Vec<usize> = Vec::new();
-    for index in 0..playlists.len() {
-        match playlists.parent.get(index).copied() {
-            Some(parent) if parent != rbl_index::NO_ID && (parent as usize) < playlists.len() => {
+    for index in 0..lists.len() {
+        match lists.parent.get(index).copied() {
+            Some(parent) if parent != rbl_index::NO_ID && (parent as usize) < lists.len() => {
                 if let Some(bucket) = children.get_mut(parent as usize) {
                     bucket.push(index);
                 }
@@ -113,7 +155,7 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
     // Iterative, with a visited set: a corrupt parent cycle must not recurse
     // forever or blow the stack.
     let mut stack: Vec<(usize, u32)> = roots.iter().rev().map(|&i| (i, 1_u32)).collect();
-    let mut visited = vec![false; playlists.len()];
+    let mut visited = vec![false; lists.len()];
     while let Some((index, depth)) = stack.pop() {
         if visited.get(index).copied().unwrap_or(true) {
             continue;
@@ -121,25 +163,24 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
         if let Some(slot) = visited.get_mut(index) {
             *slot = true;
         }
-        let kids = children.get(index).map_or(0, Vec::len);
-        let members = playlists.members.get(index).map_or(0, Vec::len);
+        let under = children.get(index).map_or(0, Vec::len);
+        let members = lists.members.get(index).map_or(0, Vec::len);
         nodes.push(TreeNodeDto {
-            id: playlists.ids.get(index).copied().unwrap_or(0).to_string(),
-            name: playlists.name(index).to_owned(),
-            kind: if kids > 0 { "folder" } else { "playlist" },
+            id: lists.ids.get(index).copied().unwrap_or(0).to_string(),
+            name: lists.name(index).to_owned(),
+            kind: if under > 0 { kinds.folder } else { kinds.leaf },
             depth,
-            expanded: if kids > 0 { Some(depth < 2) } else { None },
+            expanded: if under > 0 { Some(depth < open_to) } else { None },
             child_count: Some(
-                u32::try_from(if kids > 0 { kids } else { members }).unwrap_or(u32::MAX),
+                u32::try_from(if under > 0 { under } else { members }).unwrap_or(u32::MAX),
             ),
         });
-        if let Some(kids) = children.get(index) {
-            for &child in kids.iter().rev() {
+        if let Some(below) = children.get(index) {
+            for &child in below.iter().rev() {
                 stack.push((child, depth + 1));
             }
         }
     }
-    nodes
 }
 
 #[tauri::command]

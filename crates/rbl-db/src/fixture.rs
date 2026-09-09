@@ -23,6 +23,8 @@ const SCHEMA: &[&str] = &[
     "CREATE TABLE `djmdContent` (`ID` VARCHAR(255) PRIMARY KEY, `FolderPath` VARCHAR(255) DEFAULT NULL, `FileNameL` VARCHAR(255) DEFAULT NULL, `FileNameS` VARCHAR(255) DEFAULT NULL, `Title` VARCHAR(255) DEFAULT NULL, `ArtistID` VARCHAR(255) DEFAULT NULL, `AlbumID` VARCHAR(255) DEFAULT NULL, `GenreID` VARCHAR(255) DEFAULT NULL, `BPM` INTEGER DEFAULT NULL, `Length` INTEGER DEFAULT NULL, `TrackNo` INTEGER DEFAULT NULL, `BitRate` INTEGER DEFAULT NULL, `BitDepth` INTEGER DEFAULT NULL, `Commnt` TEXT DEFAULT NULL, `FileType` INTEGER DEFAULT NULL, `Rating` INTEGER DEFAULT NULL, `ReleaseYear` INTEGER DEFAULT NULL, `RemixerID` VARCHAR(255) DEFAULT NULL, `LabelID` VARCHAR(255) DEFAULT NULL, `OrgArtistID` VARCHAR(255) DEFAULT NULL, `KeyID` VARCHAR(255) DEFAULT NULL, `StockDate` VARCHAR(255) DEFAULT NULL, `ColorID` VARCHAR(255) DEFAULT NULL, `DJPlayCount` INTEGER DEFAULT NULL, `ImagePath` VARCHAR(255) DEFAULT NULL, `MasterDBID` VARCHAR(255) DEFAULT NULL, `MasterSongID` VARCHAR(255) DEFAULT NULL, `AnalysisDataPath` VARCHAR(255) DEFAULT NULL, `SearchStr` VARCHAR(255) DEFAULT NULL, `FileSize` INTEGER DEFAULT NULL, `DiscNo` INTEGER DEFAULT NULL, `ComposerID` VARCHAR(255) DEFAULT NULL, `Subtitle` VARCHAR(255) DEFAULT NULL, `SampleRate` INTEGER DEFAULT NULL, `DisableQuantize` INTEGER DEFAULT NULL, `Analysed` INTEGER DEFAULT NULL, `ReleaseDate` VARCHAR(255) DEFAULT NULL, `DateCreated` VARCHAR(255) DEFAULT NULL, `ContentLink` INTEGER DEFAULT NULL, `Tag` VARCHAR(255) DEFAULT NULL, `ModifiedByRBM` VARCHAR(255) DEFAULT NULL, `HotCueAutoLoad` VARCHAR(255) DEFAULT NULL, `DeliveryControl` VARCHAR(255) DEFAULT NULL, `DeliveryComment` VARCHAR(255) DEFAULT NULL, `CueUpdated` VARCHAR(255) DEFAULT NULL, `AnalysisUpdated` VARCHAR(255) DEFAULT NULL, `TrackInfoUpdated` VARCHAR(255) DEFAULT NULL, `Lyricist` VARCHAR(255) DEFAULT NULL, `ISRC` VARCHAR(255) DEFAULT NULL, `SamplerTrackInfo` INTEGER DEFAULT NULL, `SamplerPlayOffset` INTEGER DEFAULT NULL, `SamplerGain` FLOAT DEFAULT NULL, `VideoAssociate` VARCHAR(255) DEFAULT NULL, `LyricStatus` INTEGER DEFAULT NULL, `ServiceID` INTEGER DEFAULT NULL, `OrgFolderPath` VARCHAR(255) DEFAULT NULL, `Reserved1` TEXT DEFAULT NULL, `Reserved2` TEXT DEFAULT NULL, `Reserved3` TEXT DEFAULT NULL, `Reserved4` TEXT DEFAULT NULL, `ExtInfo` TEXT DEFAULT NULL, `rb_file_id` VARCHAR(255) DEFAULT NULL, `DeviceID` VARCHAR(255) DEFAULT NULL, `rb_LocalFolderPath` VARCHAR(255) DEFAULT NULL, `SrcID` VARCHAR(255) DEFAULT NULL, `SrcTitle` VARCHAR(255) DEFAULT NULL, `SrcArtistName` VARCHAR(255) DEFAULT NULL, `SrcAlbumName` VARCHAR(255) DEFAULT NULL, `SrcLength` INTEGER DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
     "CREATE TABLE `djmdPlaylist` (`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER DEFAULT NULL, `Name` VARCHAR(255) DEFAULT NULL, `ImagePath` VARCHAR(255) DEFAULT NULL, `Attribute` INTEGER DEFAULT NULL, `ParentID` VARCHAR(255) DEFAULT NULL, `SmartList` TEXT DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
     "CREATE TABLE `djmdSongPlaylist` (`ID` VARCHAR(255) PRIMARY KEY, `PlaylistID` VARCHAR(255) DEFAULT NULL, `ContentID` VARCHAR(255) DEFAULT NULL, `TrackNo` INTEGER DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
+    "CREATE TABLE `djmdHistory` (`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER DEFAULT NULL, `Name` VARCHAR(255) DEFAULT NULL, `Attribute` INTEGER DEFAULT NULL, `ParentID` VARCHAR(255) DEFAULT NULL, `DateCreated` VARCHAR(255) DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
+    "CREATE TABLE `djmdSongHistory` (`ID` VARCHAR(255) PRIMARY KEY, `HistoryID` VARCHAR(255) DEFAULT NULL, `ContentID` VARCHAR(255) DEFAULT NULL, `TrackNo` INTEGER DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
     "CREATE TABLE `djmdArtist` (`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255) DEFAULT NULL, `SearchStr` VARCHAR(255) DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
     "CREATE TABLE `djmdAlbum` (`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255) DEFAULT NULL, `AlbumArtistID` VARCHAR(255) DEFAULT NULL, `ImagePath` VARCHAR(255) DEFAULT NULL, `Compilation` INTEGER DEFAULT NULL, `SearchStr` VARCHAR(255) DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
     "CREATE TABLE `djmdGenre` (`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255) DEFAULT NULL, `UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` INTEGER DEFAULT 0, `rb_local_data_status` INTEGER DEFAULT 0, `rb_local_deleted` TINYINT(1) DEFAULT 0, `rb_local_synced` TINYINT(1) DEFAULT 0, `usn` BIGINT DEFAULT NULL, `rb_local_usn` BIGINT DEFAULT NULL, `created_at` DATETIME NOT NULL, `updated_at` DATETIME NOT NULL)",
@@ -42,13 +44,22 @@ pub struct Shape {
     pub playlists: usize,
     /// Tracks placed in each playlist.
     pub tracks_per_playlist: usize,
+    /// History sessions, filed under one year folder and one month folder —
+    /// which is how rekordbox files them in the real library.
+    pub history_sessions: usize,
     /// The starting value of `agentRegistry.localUpdateCount`.
     pub start_usn: i64,
 }
 
 impl Default for Shape {
     fn default() -> Self {
-        Self { tracks: 40, playlists: 3, tracks_per_playlist: 5, start_usn: 1000 }
+        Self {
+            tracks: 40,
+            playlists: 3,
+            tracks_per_playlist: 5,
+            history_sessions: 2,
+            start_usn: 1000,
+        }
     }
 }
 
@@ -138,6 +149,7 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
         }
     }
 
+    add_histories(&conn, shape, &stamp)?;
     drop(conn);
     Ok(LibraryLocation {
         master_db,
@@ -147,6 +159,78 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
         // so opening it read-write is allowed even under RB_LITE_TEST.
         is_real_install: false,
     })
+}
+
+/// A year folder, a month inside it, and the sessions filed under that.
+///
+/// Which is how rekordbox files them: `djmdHistory` holds all three, told
+/// apart by `Attribute` — 1 for a folder, 0 for a session — and the tracks
+/// played are in `djmdSongHistory` in `TrackNo` order.
+fn add_histories(conn: &Connection, shape: Shape, stamp: &str) -> Result<()> {
+    if shape.history_sessions == 0 {
+        return Ok(());
+    }
+    let folder = |id: &str, name: &str, seq: i64, parent: &str| -> Result<()> {
+        conn.execute(
+            "INSERT INTO djmdHistory
+                (ID, Seq, Name, Attribute, ParentID, DateCreated, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 0, 0, 0, 0, NULL, ?7, ?8, ?8)",
+            params![
+                id,
+                seq,
+                name,
+                parent,
+                "2026-09-04 20:38:59",
+                format!("fixture-{id}"),
+                shape.start_usn,
+                stamp
+            ],
+        )?;
+        Ok(())
+    };
+    folder("2026", "2026", 1, "root")?;
+    folder("202609", "9", 9, "2026")?;
+
+    for h in 0..shape.history_sessions {
+        conn.execute(
+            "INSERT INTO djmdHistory
+                (ID, Seq, Name, Attribute, ParentID, DateCreated, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, '202609', ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+            params![
+                history_id(h),
+                i64::try_from(h + 1).unwrap_or(1),
+                format!("HISTORY 2026-09-0{}", h + 1),
+                format!("2026-09-0{} 20:38:59", h + 1),
+                format!("fixture-history-{h:08}-0000-4000-8000-000000000000"),
+                shape.start_usn,
+                stamp
+            ],
+        )?;
+        for t in 0..shape.tracks_per_playlist {
+            let track = (h * shape.tracks_per_playlist + t) % shape.tracks.max(1);
+            conn.execute(
+                "INSERT INTO djmdSongHistory
+                    (ID, HistoryID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                params![
+                    format!("fixture-play-{h:04}-{t:04}-4000-8000-000000000000"),
+                    history_id(h),
+                    track_id(track),
+                    i64::try_from(t + 1).unwrap_or(1),
+                    format!("fixture-shuuid-{h:04}-{t:04}-4000-8000-00000000"),
+                    shape.start_usn,
+                    stamp
+                ],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// The id of the nth fixture track.
@@ -159,4 +243,10 @@ pub fn track_id(index: usize) -> String {
 #[must_use]
 pub fn playlist_id(index: usize) -> String {
     format!("{}", 900_000 + index)
+}
+
+/// The id of the nth fixture history session.
+#[must_use]
+pub fn history_id(index: usize) -> String {
+    format!("{}", 800_000 + index)
 }

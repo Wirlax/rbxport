@@ -107,6 +107,15 @@ function makeTree(): TreeNode[] {
       nodes.push({ id: `pl-${fi}-${i}`, name, kind: "playlist", depth: 2 });
     }
   }
+  // Histories, filed as rekordbox files them: a folder per year, one per month
+  // inside it, and the sessions under that. Closed, because the real library
+  // has 187 of them and they would otherwise open over the playlists.
+  nodes.push({ id: "histories", name: "Histories", kind: "histories", depth: 0, expanded: false });
+  nodes.push({ id: "hist-2026", name: "2026", kind: "history", depth: 1, expanded: false });
+  nodes.push({ id: "hist-202609", name: "9", kind: "history", depth: 2, expanded: false });
+  for (const day of ["2026-09-04", "2026-08-30", "2026-08-23"]) {
+    nodes.push({ id: `hist-${day}`, name: `LINK HISTORY ${day}`, kind: "history", depth: 3 });
+  }
   return nodes;
 }
 
@@ -360,9 +369,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // answer before the library is up. A mock that served rows while the
       // summary was still failing would not be standing in for anything.
       if (!ready) return notReady();
-      // Playlists show a deterministic slice so the mock stays stable across runs.
+      // A playlist or a history session shows a deterministic slice, so the
+      // mock stays stable across runs.
       let candidates: number[];
-      if (spec.source.kind === "playlist") {
+      if (spec.source.kind === "playlist" || spec.source.kind === "history") {
         const seed = [...spec.source.id].reduce((a, c) => a + c.charCodeAt(0), 0);
         const size = 14 + (seed % 30);
         candidates = Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);

@@ -45,6 +45,10 @@ pub struct LoadStats {
     pub tracks: usize,
     pub playlists: usize,
     pub memberships: usize,
+    /// History sessions, and the folders they are filed under.
+    pub histories: usize,
+    /// Tracks played across every session.
+    pub plays: usize,
     pub read_ms: u128,
     pub index_ms: u128,
     pub heap_bytes: usize,
@@ -213,6 +217,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
 
     load_cues(conn, &mut lib, &content_row)?;
     load_playlists(conn, &mut lib, &content_row, &mut stats)?;
+    load_histories(conn, &mut lib, &content_row, &mut stats)?;
     stats.read_ms = t0.elapsed().as_millis();
 
     let t1 = Instant::now();
@@ -278,6 +283,24 @@ fn load_playlists(
     Ok(())
 }
 
+/// Reads the history tree: the sessions rekordbox recorded, and their tracks.
+///
+/// Read-only. Nothing in this application records a session, so unlike the
+/// playlist tree there is no reload path — what is here is what rekordbox
+/// wrote before the library was opened.
+fn load_histories(
+    conn: &Connection,
+    lib: &mut Library,
+    content_row: &HashMap<u64, Row>,
+    stats: &mut LoadStats,
+) -> rusqlite::Result<()> {
+    let (histories, plays) = read_lists(conn, content_row, HISTORY_TABLES)?;
+    stats.histories = histories.ids.len();
+    stats.plays = plays;
+    lib.set_histories(histories);
+    Ok(())
+}
+
 /// Re-reads only the playlist tree, reusing the track columns already indexed.
 ///
 /// A playlist edit changes nothing about the tracks, and re-reading everything
@@ -296,17 +319,69 @@ pub fn reload_playlists(db: &Db, library: &Library) -> rusqlite::Result<Playlist
     Ok(playlists)
 }
 
+/// Which pair of tables a list tree is read from.
+///
+/// Playlists and histories are the same shape in the schema — a tree of named
+/// rows with a parent, and a membership table naming the tracks in `TrackNo`
+/// order. One reader serves both rather than two that drift apart.
+#[derive(Debug, Clone, Copy)]
+pub struct ListTables {
+    /// The tree table: `ID`, `Name`, `ParentID`, `Seq`.
+    pub lists: &'static str,
+    /// The membership table: `ContentID`, `TrackNo`, and the column below.
+    pub members: &'static str,
+    /// What the membership table calls its list: `PlaylistID` or `HistoryID`.
+    pub list_key: &'static str,
+}
+
+pub const PLAYLIST_TABLES: ListTables =
+    ListTables { lists: "djmdPlaylist", members: "djmdSongPlaylist", list_key: "PlaylistID" };
+
+/// Sessions, filed under a folder per year and per month.
+///
+/// The same two-table shape, and the same `Attribute` convention: 0 is a
+/// session, 1 a folder. Read read-only against the live library — 187 rows in
+/// `djmdHistory`, 8,258 in `djmdSongHistory`.
+pub const HISTORY_TABLES: ListTables =
+    ListTables { lists: "djmdHistory", members: "djmdSongHistory", list_key: "HistoryID" };
+
 fn read_playlists(
     conn: &Connection,
     content_row: &HashMap<u64, Row>,
 ) -> rusqlite::Result<(Playlists, usize)> {
+    read_lists(conn, content_row, PLAYLIST_TABLES)
+}
+
+/// Whether a table exists, so a schema without it degrades to an empty tree.
+///
+/// Histories are read from tables the required-column probe does not insist
+/// on: a library that has never recorded one still opens, and opens with an
+/// empty Histories section rather than an error.
+fn has_table(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |r| r.get::<_, i64>(0),
+    )
+    .is_ok_and(|n| n > 0)
+}
+
+fn read_lists(
+    conn: &Connection,
+    content_row: &HashMap<u64, Row>,
+    tables: ListTables,
+) -> rusqlite::Result<(Playlists, usize)> {
     let mut playlists = Playlists::default();
     let mut index_by_id: HashMap<String, usize> = HashMap::new();
+    if !has_table(conn, tables.lists) || !has_table(conn, tables.members) {
+        return Ok((playlists, 0));
+    }
 
-    let mut stmt = conn.prepare(
-        "SELECT ID, Name, ParentID, Seq FROM djmdPlaylist
+    let mut stmt = conn.prepare(&format!(
+        "SELECT ID, Name, ParentID, Seq FROM `{}`
          WHERE rb_local_deleted = 0 ORDER BY Seq",
-    )?;
+        tables.lists,
+    ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let Some(id): Option<String> = r.get(0)? else { continue };
@@ -321,9 +396,10 @@ fn read_playlists(
     }
 
     // Second pass for parents, now that every id has an index.
-    let mut stmt = conn.prepare(
-        "SELECT ID, ParentID FROM djmdPlaylist WHERE rb_local_deleted = 0",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT ID, ParentID FROM `{}` WHERE rb_local_deleted = 0",
+        tables.lists,
+    ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let id: Option<String> = r.get(0)?;
@@ -340,10 +416,12 @@ fn read_playlists(
         }
     }
 
-    let mut stmt = conn.prepare(
-        "SELECT PlaylistID, ContentID FROM djmdSongPlaylist
-         WHERE rb_local_deleted = 0 ORDER BY PlaylistID, TrackNo",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT `{key}`, ContentID FROM `{members}`
+         WHERE rb_local_deleted = 0 ORDER BY `{key}`, TrackNo",
+        key = tables.list_key,
+        members = tables.members,
+    ))?;
     let mut rows = stmt.query([])?;
     let mut memberships = 0usize;
     while let Some(r) = rows.next()? {

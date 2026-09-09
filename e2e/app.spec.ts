@@ -473,6 +473,34 @@ test("the source rail switches which part of the library the tree shows", async 
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 });
 
+test("the Histories section opens on the sessions rekordbox recorded", async ({ page }) => {
+  await page.goto("/");
+  const tree = page.getByRole("navigation", { name: "Library" });
+  const rail = page.getByRole("tablist", { name: "Library sources" });
+
+  // Something to jump to, so the button is live rather than dimmed.
+  const histories = rail.getByRole("tab", { name: "Histories" });
+  await expect(histories).not.toHaveAttribute("data-empty", "true");
+
+  // Closed on arrival: the real library files 187 sessions under a folder per
+  // year and per month, and they would otherwise open over the playlists.
+  const session = tree.getByRole("treeitem").filter({ hasText: "LINK HISTORY 2026-09-04" });
+  await expect(session).toHaveCount(0);
+
+  await histories.click();
+  const heading = tree.getByRole("treeitem").filter({ hasText: /^Histories$/ });
+  await expect(heading).toHaveAttribute("aria-selected", "true");
+
+  // Year, then month, then the session itself.
+  await heading.getByRole("button").click();
+  await tree.getByRole("treeitem").filter({ hasText: /^2026$/ }).getByRole("button").click();
+  await tree.getByRole("treeitem").filter({ hasText: /^9$/ }).getByRole("button").click();
+
+  await session.click();
+  // A session is a track source of its own, not the whole collection.
+  await expect(page.getByTestId("browser-title")).toContainText("LINK HISTORY 2026-09-04");
+});
+
 test("a connected device appears under Devices", async ({ page }) => {
   // A missing Devices button reads as a broken app, and a dimmed one reads as
   // nothing plugged in — so with a stick connected it must be neither.

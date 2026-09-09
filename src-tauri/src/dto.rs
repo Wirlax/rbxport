@@ -73,11 +73,7 @@ pub enum TrackSourceDto {
     #[serde(rename = "playlist")]
     Playlist { id: String },
     #[serde(rename = "history")]
-    // The id is accepted for forward compatibility; histories are not indexed yet.
-    History {
-        #[allow(dead_code, reason = "accepted from the wire, used once histories are indexed")]
-        id: String,
-    },
+    History { id: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]

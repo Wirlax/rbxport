@@ -27,6 +27,7 @@ fn main() {
     println!("  TOTAL         {total_ms:>5} ms   (budget {budget_open_ms} ms)  {}",
              if total_ms <= budget_open_ms { "PASS" } else { "FAIL" });
     println!("  tracks {}  playlists {}  memberships {}", stats.tracks, stats.playlists, stats.memberships);
+    println!("  histories {}  plays {}", stats.histories, stats.plays);
     println!("  heap  {:.1} MB", stats.heap_bytes as f64 / 1_048_576.0);
     println!("  interners: artists {} albums {} genres {} labels {} keys {}",
              lib.artists.len(), lib.albums.len(), lib.genres.len(), lib.labels.len(), lib.keys.len());

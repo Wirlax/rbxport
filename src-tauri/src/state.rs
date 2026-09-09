@@ -157,11 +157,16 @@ pub fn sort_from_wire(name: &str) -> SortColumn {
 }
 
 pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
-    #[allow(clippy::match_same_arms, reason = "history will diverge once it is indexed")]
+    // An id that names nothing falls back to the collection rather than
+    // erroring: a tree node can outlive what it points at, and a window of the
+    // whole library is a better answer to that than a red bar.
     let source = match &dto.source {
         TrackSourceDto::Collection => TrackSource::Collection,
-        // History is not indexed yet; showing the collection beats an error.
-        TrackSourceDto::History { .. } => TrackSource::Collection,
+        TrackSourceDto::History { id } => id
+            .parse::<u64>()
+            .ok()
+            .and_then(|numeric| library.histories().index_of(numeric))
+            .map_or(TrackSource::Collection, TrackSource::History),
         TrackSourceDto::Playlist { id } => id
             .parse::<u64>()
             .ok()

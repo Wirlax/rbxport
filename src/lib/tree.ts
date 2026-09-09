@@ -88,7 +88,9 @@ export type Source = "playlists" | "histories" | "devices";
 export function nodesForSource(nodes: readonly TreeNode[], source: Source): TreeNode[] {
   switch (source) {
     case "histories":
-      return nodes.filter((n) => n.kind === "history");
+      // The section's own heading first, so jumping there lands on it rather
+      // than inside a year that may be closed.
+      return nodes.filter((n) => n.kind === "histories" || n.kind === "history");
     case "devices":
       return nodes.filter((n) => n.kind === "device");
     case "playlists":
@@ -116,6 +118,7 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
   const node = nodes.find((n) => n.id === selectedId);
   switch (node?.kind) {
     case "history":
+    case "histories":
       return "histories";
     case "device":
       return "devices";

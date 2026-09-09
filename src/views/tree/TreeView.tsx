@@ -4,10 +4,10 @@
  * Flattened to a single array of visible nodes so it virtualizes the same way
  * the track table does; thousands of playlists cost the same as ten.
  */
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
-import { DeviceIcon, FolderIcon, ListIcon, NoteIcon } from "@/components/icons";
+import { DeviceIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
 import { treeMenu } from "@/lib/contextMenus";
 import {
@@ -30,14 +30,18 @@ const Row = memo(function Row({
   onSelect: (node: TreeNode) => void;
   onToggle: (id: string) => void;
 }) {
+  // A history node is a session, or the year or month one is filed under —
+  // one kind, told apart by whether anything sits beneath it.
   const Icon =
-    node.kind === "folder"
+    node.kind === "folder" || (node.kind === "history" && branch)
       ? FolderIcon
-      : node.kind === "allTracks"
-        ? NoteIcon
-        : node.kind === "device"
-          ? DeviceIcon
-          : ListIcon;
+      : node.kind === "history"
+        ? HistoryIcon
+        : node.kind === "allTracks"
+          ? NoteIcon
+          : node.kind === "device"
+            ? DeviceIcon
+            : ListIcon;
   return (
     <div
       className={styles.node}
@@ -84,7 +88,9 @@ const Row = memo(function Row({
         role={branch ? "button" : undefined}
         aria-label={branch ? `${open ? "Collapse" : "Expand"} ${node.name}` : undefined}
       />
-      {node.kind === "collection" ? null : <Icon className={styles.icon} />}
+      {node.kind === "collection" || node.kind === "histories" ? null : (
+        <Icon className={styles.icon} />
+      )}
       <span className={styles.label}>{node.name}</span>
     </div>
   );
@@ -114,9 +120,19 @@ export function TreeView({
 }: TreeViewProps) {
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
-  // Which nodes the user has closed. Absent means open, so a freshly-loaded
-  // tree renders exactly as the backend sent it.
+  // Which nodes are closed. Seeded from the tree the backend sent — it marks
+  // what should open, and 187 history sessions filed by year and month would
+  // otherwise arrive on top of the playlists — and the user's own toggles take
+  // over from there.
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const seeded = useRef(false);
+  useEffect(() => {
+    // Once, when the tree first arrives. Re-seeding on every later tree would
+    // shut whatever the user had opened each time a playlist changed.
+    if (seeded.current || nodes.length === 0) return;
+    seeded.current = true;
+    setCollapsed(new Set(nodes.filter((n) => n.expanded === false).map((n) => n.id)));
+  }, [nodes]);
 
   const onToggle = useCallback((id: string) => {
     setCollapsed((c) => toggle(c, id));
