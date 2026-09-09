@@ -197,9 +197,15 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* A broken or missing file must leave the tint showing, not an icon. */
-  color: transparent;
+  /* Hidden until it has decoded. `color: transparent` hides the alt text but
+     not WebKit's broken-file glyph, which is what the first screen was full
+     of while the library was still opening. */
+  visibility: hidden;
 }
+.artworkImage[data-state="shown"] { visibility: visible; }
+/* Nothing at all while it decodes — not a tint that is about to be covered by
+   the sleeve anyway. The tint comes back only once the image has given up. */
+.artwork:has(.artworkImage[data-state="pending"]) > span { visibility: hidden; }
 
 .preview {
   padding: 0 3px;

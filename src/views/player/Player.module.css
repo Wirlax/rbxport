@@ -284,7 +284,16 @@
   .artwork::after,
   .eject { transition: none; }
 }
-.artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Hidden until it has decoded, so the square is empty rather than carrying
+   WebKit's broken-file glyph while the library is still opening. */
+.sleeve {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  visibility: hidden;
+}
+.sleeve[data-state="shown"] { visibility: visible; }
 
 /* A record, drawn where the sleeve would be: no artwork, and no track at all,
    both leave the square empty otherwise. */
@@ -295,7 +304,6 @@
   display: block;
   color: var(--c-disc-placeholder);
 }
-.artwork img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* The band is not one waveform stretched to fill it. In the capture it is the
    vocal strip, then a 30pt waveform, then the position bar, with the rest of

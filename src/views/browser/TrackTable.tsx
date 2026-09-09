@@ -19,7 +19,7 @@ import { visibleWindow } from "@/lib/virtual";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { SortDownIcon, SortUpIcon } from "@/components/icons";
-import { artworkUrl } from "@/ipc/artwork";
+import { Artwork } from "@/components/Artwork";
 import type { ColumnKey, ColumnSpec } from "@/lib/columns";
 import { ColumnMenu } from "./ColumnMenu";
 
@@ -250,14 +250,7 @@ const TrackRow = memo(function TrackRow({
                 }}
               />
               {row.hasArtwork ? (
-                <img
-                  className={styles.artworkImage}
-                  src={artworkUrl(row.id)}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  draggable={false}
-                />
+                <Artwork trackId={row.id} className={styles.artworkImage} lazy />
               ) : null}
             </div>
           );

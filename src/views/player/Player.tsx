@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
-import { artworkUrl } from "@/ipc/artwork";
+import { Artwork } from "@/components/Artwork";
 import { CutIcon, DiscIcon, EjectIcon, LockIcon, MetronomeIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
@@ -816,7 +816,7 @@ export const Player = memo(function Player({
             disabled={!track || !onEject}
           >
             {track?.hasArtwork ? (
-              <img src={artworkUrl(track.id)} alt="" draggable={false} />
+              <Artwork trackId={track.id} className={styles.sleeve} />
             ) : (
               <DiscIcon className={styles.disc} />
             )}

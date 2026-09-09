@@ -62,9 +62,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* A missing file leaves the tint showing rather than a broken-image icon. */
-  color: transparent;
+  /* Hidden until it has decoded: a missing file leaves the tint showing
+     rather than WebKit's broken-file glyph over it. */
+  visibility: hidden;
 }
+.image[data-state="shown"] { visibility: visible; }
 
 .track {
   margin: 0;

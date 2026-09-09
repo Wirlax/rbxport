@@ -11,6 +11,7 @@
  * from the column catalogue transcribed from its header menu rather than from
  * a screenshot. Recorded in TODO.md; a capture would change it.
  */
+import { Artwork } from "@/components/Artwork";
 import type { RowDto } from "@/ipc/types";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import { toCamelot } from "@/lib/camelot";
@@ -62,7 +63,7 @@ export function InfoPanel({ track, onClose }: InfoPanelProps) {
         <div className={styles.body}>
           <div className={styles.artwork} style={{ ["--hue" as string]: `${track.artworkHue}deg` }}>
             {track.hasArtwork ? (
-              <img className={styles.image} src={`rbl://artwork/${track.id}`} alt="" />
+              <Artwork trackId={track.id} className={styles.image} />
             ) : null}
           </div>
           <h3 className={styles.track}>{track.title}</h3>
