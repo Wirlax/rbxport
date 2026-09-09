@@ -4,9 +4,10 @@
 //! null sink pulls the same callback the real one does, on the calling thread,
 //! so a test can ask for exactly 512 frames and look at them.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -23,6 +24,20 @@ pub trait Sink: Send + Sync {
     fn start(&self) -> Result<()>;
     /// Stops pulling, so an idle app costs nothing.
     fn stop(&self) -> Result<()>;
+}
+
+/// How long the stream runs on after the last deck has stopped.
+///
+/// A stop is a fade, and a fade needs callbacks to happen in: pausing the
+/// stream the instant the transport asks cuts the last two milliseconds off,
+/// which is the click the fade exists to prevent. Sixty milliseconds is
+/// several callbacks at any buffer size a device is likely to choose, and a
+/// stream that lives that much longer costs nothing anyone can measure.
+pub const LINGER: Duration = Duration::from_millis(60);
+
+/// The same wait, in frames, for a sink that is pulled by hand.
+pub const fn linger_frames(sample_rate: u32) -> usize {
+    (sample_rate as usize * LINGER.as_millis() as usize) / 1000
 }
 
 /// What the thread that owns the cpal stream is asked to do.
@@ -109,18 +124,36 @@ fn device_thread(render: Render, ask: &Receiver<Ask>, ready: &Sender<Result<u32>
         }
     };
 
-    while let Ok(next) = ask.recv() {
+    // A stop is not taken at once: see `LINGER`. Until it is due, the thread
+    // waits on the channel rather than on the clock, so a start that arrives
+    // in the meantime simply cancels it.
+    let mut due: Option<Instant> = None;
+    loop {
+        let next = match due {
+            Some(at) => match ask.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                Ok(next) => next,
+                Err(RecvTimeoutError::Timeout) => {
+                    due = None;
+                    if let Err(e) = stream.pause() {
+                        tracing::error!(error = %e, "the audio device would not stop");
+                    }
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
+            None => match ask.recv() {
+                Ok(next) => next,
+                Err(_) => break,
+            },
+        };
         match next {
             Ask::Start => {
+                due = None;
                 if let Err(e) = stream.play() {
                     tracing::error!(error = %e, "the audio device would not start");
                 }
             }
-            Ask::Stop => {
-                if let Err(e) = stream.pause() {
-                    tracing::error!(error = %e, "the audio device would not stop");
-                }
-            }
+            Ask::Stop => due = Some(Instant::now() + LINGER),
             Ask::Quit => break,
         }
     }
@@ -207,20 +240,34 @@ pub struct NullSink {
     render: Mutex<Render>,
     sample_rate: u32,
     running: AtomicBool,
+    /// Frames still to be pulled after a stop, so a fade has somewhere to
+    /// happen. The device does the same thing: see `LINGER`.
+    linger: AtomicUsize,
 }
 
 impl NullSink {
     pub fn new(sample_rate: u32, render: Render) -> Self {
-        Self { render: Mutex::new(render), sample_rate, running: AtomicBool::new(false) }
+        Self {
+            render: Mutex::new(render),
+            sample_rate,
+            running: AtomicBool::new(false),
+            linger: AtomicUsize::new(0),
+        }
     }
 
     /// Pulls `frames` stereo frames, as a device callback would.
     ///
-    /// Returns silence while stopped, which is what a paused stream produces.
+    /// Silence once the stream is down. A stream that was just stopped is
+    /// still pulled for `LINGER`, which is where the decks fade themselves
+    /// out; the real device behaves the same way.
     pub fn pull(&self, frames: usize) -> Vec<f32> {
         let mut out = vec![0.0_f32; frames * 2];
         if !self.running.load(Ordering::SeqCst) {
-            return out;
+            let left = self.linger.load(Ordering::SeqCst);
+            if left == 0 {
+                return out;
+            }
+            self.linger.store(left.saturating_sub(frames), Ordering::SeqCst);
         }
         if let Ok(mut render) = self.render.lock() {
             render(&mut out);
@@ -239,12 +286,15 @@ impl Sink for NullSink {
     }
 
     fn start(&self) -> Result<()> {
+        self.linger.store(0, Ordering::SeqCst);
         self.running.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     fn stop(&self) -> Result<()> {
-        self.running.store(false, Ordering::SeqCst);
+        if self.running.swap(false, Ordering::SeqCst) {
+            self.linger.store(linger_frames(self.sample_rate), Ordering::SeqCst);
+        }
         Ok(())
     }
 }

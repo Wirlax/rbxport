@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rbl_deck::{Deck, DeckEvent, Engine, NullSink, Sink};
+use rbl_deck::{Deck, DeckEvent, Engine, NullSink, Sink, FADE_FRAMES};
 
 const RATE: u32 = 44_100;
 
@@ -65,6 +65,39 @@ fn ramp_at(path: &Path, rate: u32, frames: usize) {
 
 fn ramp(path: &Path, frames: usize) {
     ramp_at(path, RATE, frames);
+}
+
+/// A track that is one steady loud value, so any step in the output came from
+/// the transport rather than from the music.
+///
+/// 0.8 is most of full scale: it is what a kick drum is doing at the moment
+/// somebody presses pause, and a cut from 0.8 to silence in one sample is the
+/// click all of this exists to prevent.
+const FLAT: f32 = 0.8;
+
+fn flat(path: &Path, frames: usize) {
+    write_wav(path, RATE, 2, &vec![FLAT; frames * 2]);
+}
+
+/// The largest jump between neighbouring output samples, on the left channel.
+///
+/// A click is a discontinuity and nothing else, so this is the whole of what
+/// "does it click" means. A fade over `FADE_FRAMES` moves at most one
+/// eighty-eighth of full scale a frame, so anything much above that is a step
+/// somebody would hear.
+fn worst_step(out: &[f32]) -> f32 {
+    out.chunks_exact(2)
+        .map(|frame| frame[0])
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0_f32, f32::max)
+}
+
+/// The most a fade is allowed to move in one frame, with room for the sample
+/// rate conversion and the 16-bit quantisation of the fixture.
+fn step_limit() -> f32 {
+    FLAT / f32::from(FADE_FRAMES) + 0.005
 }
 
 struct Harness {
@@ -193,9 +226,23 @@ fn pausing_stops_the_clock_and_the_device() {
     h.engine.pause(Deck::A);
     let at = h.position(Deck::A);
     assert!(!h.sink.running(), "pausing must stop the device");
-    // Pulling a stopped sink is silence, and the playhead stays where it was.
-    assert!(h.sink.pull(1_024).iter().all(|s| *s == 0.0));
-    assert_eq!(h.position(Deck::A), at);
+
+    // The stream is pulled a moment longer so the deck can fade out — see
+    // `LINGER` — and what comes out of it is the fade and then silence.
+    let tail = h.sink.pull(1_024);
+    let fade = usize::from(FADE_FRAMES) * 2;
+    assert!(
+        tail.get(fade..).is_some_and(|rest| rest.iter().all(|s| *s == 0.0)),
+        "the deck was still sounding after the fade",
+    );
+    // The playhead moved by the fade and no further.
+    assert!(
+        h.position(Deck::A) - at <= u64::from(FADE_FRAMES),
+        "the playhead ran on to {} from {at}",
+        h.position(Deck::A),
+    );
+    // And it stays down: the linger is a fade, not a reprieve.
+    assert!(h.sink.pull(4_096).iter().all(|s| *s == 0.0));
 }
 
 #[test]
@@ -400,4 +447,200 @@ fn a_seek_is_honoured_at_once_even_while_the_decoder_runs_flat_out() {
     // jumping — which is what happened while the decode loop could starve its
     // own command channel.
     assert!(stale < u64::from(RATE) / 2, "played {stale} frames from the old position");
+}
+
+#[test]
+fn starting_opens_from_silence_rather_than_stepping_into_the_music() {
+    // Press play on a loud passage and the first sample handed to the device
+    // is whatever the waveform was doing. Straight from silence, that is a
+    // click; this is the fade that makes it a start.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.wav");
+    flat(&path, RATE as usize);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+
+    // The silence the device was putting out before play was pressed. Without
+    // it the measurement starts at the first sample of music and has nothing
+    // to compare it to, which is the one thing this test is about.
+    let mut audio = h.sink.pull(64);
+    assert!(audio.iter().all(|s| *s == 0.0), "a stopped deck must be silent");
+    h.engine.play(Deck::A);
+    audio.extend(h.play_until(Deck::A, 4_096));
+
+    let peak = audio.iter().fold(0.0_f32, |acc, s| acc.max(s.abs()));
+    assert!(peak > FLAT - 0.05, "the deck never reached full level: {peak}");
+    let worst = worst_step(&audio);
+    assert!(worst <= step_limit(), "starting stepped by {worst}");
+}
+
+#[test]
+fn stopping_closes_to_silence_rather_than_cutting_the_waveform() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.wav");
+    flat(&path, RATE as usize * 2);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    let mut audio = h.play_until(Deck::A, 8_192);
+
+    h.engine.pause(Deck::A);
+    audio.extend(h.sink.pull(2_048));
+
+    let worst = worst_step(&audio);
+    assert!(worst <= step_limit(), "stopping stepped by {worst}");
+    // And it ends at zero, which is the only place silence can start from.
+    assert_eq!(audio.last().copied(), Some(0.0));
+}
+
+#[test]
+fn a_seek_neither_cuts_what_was_playing_nor_opens_on_the_new_position() {
+    // Cueing, jumping a beat and dragging the overview are all this seek. Both
+    // ends of it are a step in the waveform without the fade: the old position
+    // is cut wherever it was, and the new one opens wherever it starts.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.wav");
+    flat(&path, RATE as usize * 8);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    let mut audio = h.play_until(Deck::A, 8_192);
+
+    // Far past anything the ring holds, so the deck really does jump.
+    h.engine.seek_frames(Deck::A, u64::from(RATE) * 5);
+    let landed = h.play_until(Deck::A, u64::from(RATE) * 5 + 8_192);
+    audio.extend(landed);
+
+    let worst = worst_step(&audio);
+    assert!(worst <= step_limit(), "the seek stepped by {worst}");
+    // The music did come back, rather than the deck simply going quiet.
+    let peak = audio
+        .chunks_exact(2)
+        .skip(8_192)
+        .map(|frame| frame[0].abs())
+        .fold(0.0_f32, f32::max);
+    assert!(peak > FLAT - 0.05, "nothing was heard after the seek: {peak}");
+}
+
+#[test]
+fn several_seeks_in_a_row_still_do_not_click() {
+    // A beat jump held down is a seek every few milliseconds, arriving while
+    // the last one is still fading. Each one has to wait its turn rather than
+    // cutting the fade in front of it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.wav");
+    flat(&path, RATE as usize * 8);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+    let mut audio = h.play_until(Deck::A, 4_096);
+
+    for beat in 1..=6_u64 {
+        h.engine.seek_frames(Deck::A, u64::from(RATE) * beat / 2);
+        audio.extend(h.sink.pull(256));
+    }
+    audio.extend(h.play_until(Deck::A, u64::from(RATE) * 3 + 4_096));
+
+    let worst = worst_step(&audio);
+    assert!(worst <= step_limit(), "a run of seeks stepped by {worst}");
+}
+
+#[test]
+fn the_end_of_a_track_fades_rather_than_being_cut_off() {
+    // The last sample of a file is wherever the music was, and the silence
+    // after it is a step down from there.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("short.wav");
+    flat(&path, 8_000);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.play(Deck::A);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut audio = Vec::new();
+    while h.engine.snapshot().a.playing && Instant::now() < deadline {
+        audio.extend(h.sink.pull(512));
+    }
+    assert!(!h.engine.snapshot().a.playing, "the deck never stopped at the end");
+    let worst = worst_step(&audio);
+    assert!(worst <= step_limit(), "the end of the track stepped by {worst}");
+}
+
+/// A 220 Hz sine, which steps between neighbouring samples all by itself.
+fn tone(path: &Path, frames: usize) {
+    let mut samples = Vec::with_capacity(frames * 2);
+    for frame in 0..frames {
+        let t = frame as f32 / RATE as f32;
+        let value = 0.8 * (t * 220.0 * std::f32::consts::TAU).sin();
+        samples.push(value);
+        samples.push(value);
+    }
+    write_wav(path, RATE, 2, &samples);
+}
+
+/// How far a step has to stand out from its neighbours to be a click.
+///
+/// An absolute threshold says nothing about music: a loud high note steps by
+/// most of full scale between samples all by itself. A click is a step that
+/// does not belong to what is around it. The same measure `scrubcheck` uses.
+const CLICK_RATIO: f32 = 12.0;
+
+/// Samples either side a step is compared against: about two milliseconds.
+const NEIGHBOURHOOD: usize = 96;
+
+/// Steps that stand out from the music around them.
+fn clicks(out: &[f32]) -> usize {
+    let frames: Vec<f32> = out.chunks_exact(2).map(|frame| frame[0]).collect();
+    let steps: Vec<f32> = frames.windows(2).map(|pair| (pair[1] - pair[0]).abs()).collect();
+    let mut found = 0;
+    for i in NEIGHBOURHOOD..steps.len().saturating_sub(NEIGHBOURHOOD) {
+        let around: f32 = steps[i - NEIGHBOURHOOD..i]
+            .iter()
+            .chain(&steps[i + 1..i + 1 + NEIGHBOURHOOD])
+            .sum::<f32>()
+            / (NEIGHBOURHOOD * 2) as f32;
+        // A silent neighbourhood has nothing to stand out from.
+        if around > 1e-4 && steps[i] > around * CLICK_RATIO {
+            found += 1;
+        }
+    }
+    found
+}
+
+#[test]
+fn no_transport_move_stands_out_from_the_music_around_it() {
+    // The flat-track tests measure the step exactly; this one asks the
+    // question the way an ear does, on a signal that is stepping anyway.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.wav");
+    tone(&path, RATE as usize * 8);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+
+    let mut audio = h.sink.pull(64);
+    h.engine.play(Deck::A);
+    audio.extend(h.play_until(Deck::A, 8_192));
+    // A cue, then a beat jump, then the overview dropped somewhere else.
+    for at in [u64::from(RATE) * 4, u64::from(RATE) * 2, u64::from(RATE) * 6] {
+        h.engine.seek_frames(Deck::A, at);
+        audio.extend(h.play_until(Deck::A, at + 8_192));
+    }
+    h.engine.pause(Deck::A);
+    audio.extend(h.sink.pull(2_048));
+
+    let found = clicks(&audio);
+    assert_eq!(found, 0, "{found} steps stood out from the music");
+    assert_eq!(audio.last().copied(), Some(0.0), "the stream must end at silence");
 }

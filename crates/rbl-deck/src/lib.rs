@@ -31,6 +31,7 @@ mod block;
 mod clock;
 mod deck;
 mod decode;
+mod fade;
 mod scrub;
 mod sink;
 
@@ -41,9 +42,11 @@ use std::sync::Arc;
 use rtrb::Consumer;
 
 pub use clock::{DeckClock, DeckSnapshot};
+pub use fade::FADE_FRAMES;
 pub use sink::{CpalSink, NullSink, Render, Sink};
 
 use block::{Block, RING_BLOCKS};
+use fade::Ramp;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeckError {
@@ -205,7 +208,15 @@ impl Engine {
         for clock in &clocks {
             let (producer, consumer) = rtrb::RingBuffer::<Block>::new(RING_BLOCKS);
             producers.push(producer);
-            readers.push(DeckReader { consumer, clock: Arc::clone(clock), current: None, offset: 0 });
+            readers.push(DeckReader {
+                consumer,
+                clock: Arc::clone(clock),
+                current: None,
+                offset: 0,
+                ramp: Ramp::silent(),
+                last: (0.0, 0.0),
+                generation: 0,
+            });
         }
 
         // The callback owns the readers outright: nothing else touches them,
@@ -412,50 +423,91 @@ struct DeckReader {
     /// The block being played, and how far into it.
     current: Option<Block>,
     offset: usize,
+    /// The envelope every frame this deck contributes goes through.
+    ///
+    /// Sound is only ever started or cut where this reads zero, which is what
+    /// makes play, pause, cue, a beat jump and a seek silent at the join
+    /// rather than a click. See `fade`.
+    ramp: Ramp,
+    /// The last frame actually played, held so that running dry can be faded
+    /// rather than cut. See the underrun in `mix_into`.
+    last: (f32, f32),
+    /// The generation being rendered, which trails the clock's across a seek.
+    ///
+    /// The clock moves the moment a seek is asked for. The reader keeps
+    /// playing what it was playing until the ramp has taken it to zero, and
+    /// only then takes the new one up: without that the jump lands in the
+    /// middle of a waveform, at whatever height the old one was cut at.
+    generation: u32,
 }
 
 impl DeckReader {
     fn mix_into(&mut self, out: &mut [f32]) {
-        let generation = self.clock.generation();
-        if !self.clock.sounding() {
-            self.discard_stale(generation);
+        let target = self.clock.generation();
+        let sounding = self.clock.sounding();
+        // Silent and asked for nothing. Whatever a seek left behind is dropped
+        // here rather than handed back when the deck starts again.
+        if !sounding && self.ramp.silent_now() {
+            self.adopt(target);
             return;
         }
 
         let frames = out.len() / 2;
-        let mut done = 0;
         let mut position = self.clock.position();
-
+        let mut done = 0;
         while done < frames {
-            if !self.holds_playable(generation) {
-                self.current = None;
-                self.offset = 0;
-                // Blocks from before the last seek are dropped rather than
-                // played: that is what makes the seek exact.
-                while let Ok(block) = self.consumer.pop() {
-                    if block.generation >= generation {
-                        self.current = Some(block);
-                        break;
+            // Faded out and the clock has moved on: this is where a seek, a
+            // cue or a beat jump actually takes effect, with nothing sounding
+            // across the join.
+            if self.generation != target && self.ramp.silent_now() {
+                self.adopt(target);
+            }
+            let changing = self.generation != target;
+            // Down for a stop, for a seek that has not landed yet, and for the
+            // last frames of a track; up for anything else.
+            let open = sounding && !changing && !self.ending();
+            // Mid-changeover the ring holds where the deck is *going*, so only
+            // what is already in hand may be faded out; taking a new block
+            // would fade out audio from the seek target and lose it.
+            let Some((left, right, at)) = self.next_frame(!changing) else {
+                // Nothing to play: the decode thread has not kept up, or the
+                // file has ended somewhere the fade did not see coming. The
+                // last frame is held and faded down rather than cut — two
+                // milliseconds of a held sample decaying is inaudible, and the
+                // step it replaces is not. The playhead does not move for it:
+                // no audio from the track was played.
+                if self.ramp.silent_now() {
+                    if changing {
+                        self.adopt(target);
+                        continue;
                     }
+                    break;
                 }
-            }
-            let Some(block) = self.current.as_ref() else { break };
-            let available = (block.frames as usize).saturating_sub(self.offset);
-            if available == 0 {
-                self.current = None;
-                self.offset = 0;
+                let gain = self.ramp.step(false);
+                if let Some(slot) = out.get_mut(done * 2) {
+                    *slot += self.last.0 * gain;
+                }
+                if let Some(slot) = out.get_mut(done * 2 + 1) {
+                    *slot += self.last.1 * gain;
+                }
+                done += 1;
                 continue;
+            };
+            self.last = (left, right);
+            let gain = self.ramp.step(open);
+            if let Some(slot) = out.get_mut(done * 2) {
+                *slot += left * gain;
             }
-            let take = available.min(frames - done);
-            let from = block.filled().get(self.offset * 2..(self.offset + take) * 2);
-            if let (Some(from), Some(into)) = (from, out.get_mut(done * 2..(done + take) * 2)) {
-                for (sample, add) in into.iter_mut().zip(from.iter()) {
-                    *sample += *add;
-                }
+            if let Some(slot) = out.get_mut(done * 2 + 1) {
+                *slot += right * gain;
             }
-            position = block.position + (self.offset + take) as u64;
-            self.offset += take;
-            done += take;
+            position = at;
+            done += 1;
+            // A stop that has finished fading stops consuming: the frames past
+            // it belong to wherever the deck is resumed from.
+            if !sounding && self.ramp.silent_now() {
+                break;
+            }
         }
 
         self.clock.set_position(position);
@@ -472,19 +524,66 @@ impl DeckReader {
         }
     }
 
-    fn holds_playable(&self, generation: u32) -> bool {
-        self.current.as_ref().is_some_and(|block| {
-            block.generation >= generation && self.offset < block.frames as usize
-        })
-    }
-
-    /// Drops what a paused deck is holding once it has been seeked away from,
-    /// so the ring does not hand back stale audio when it starts again.
-    fn discard_stale(&mut self, generation: u32) {
+    /// Takes `generation` as the one being rendered, dropping what is older.
+    ///
+    /// Only ever called with the ramp at zero, which is what makes the change
+    /// silent: the audio before the seek has already been faded out and the
+    /// audio after it is faded in from nothing.
+    fn adopt(&mut self, generation: u32) {
+        self.generation = generation;
         if self.current.as_ref().is_some_and(|block| block.generation < generation) {
             self.current = None;
             self.offset = 0;
         }
+    }
+
+    /// The next frame of this deck's audio, and where it leaves the playhead.
+    ///
+    /// `pop` says whether the ring may be drawn on. Blocks decoded before the
+    /// last seek are dropped rather than played: that is what makes a seek
+    /// exact.
+    fn next_frame(&mut self, pop: bool) -> Option<(f32, f32, u64)> {
+        loop {
+            if let Some(block) = self.current.as_ref() {
+                if self.offset < block.frames as usize {
+                    let i = self.offset * 2;
+                    let filled = block.filled();
+                    let left = filled.get(i).copied().unwrap_or(0.0);
+                    let right = filled.get(i + 1).copied().unwrap_or(0.0);
+                    self.offset += 1;
+                    return Some((left, right, block.position + self.offset as u64));
+                }
+                self.current = None;
+                self.offset = 0;
+            }
+            if !pop {
+                return None;
+            }
+            match self.consumer.pop() {
+                Ok(block) if block.generation >= self.generation => {
+                    self.current = Some(block);
+                    self.offset = 0;
+                }
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// Whether what is left in hand is the last of the track, and short enough
+    /// that the fade has to start now to reach zero by the end of it.
+    ///
+    /// The end of a file is a cut like any other: the last sample is wherever
+    /// the music was, and the silence after it is a step down from there.
+    fn ending(&self) -> bool {
+        if !self.clock.end_of_stream() || !self.consumer.is_empty() {
+            return false;
+        }
+        let left = self
+            .current
+            .as_ref()
+            .map_or(0, |block| (block.frames as usize).saturating_sub(self.offset));
+        left <= usize::from(FADE_FRAMES)
     }
 }
 
