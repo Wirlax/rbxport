@@ -326,3 +326,88 @@ fn a_file_with_no_grid_gains_one_after_its_path() {
     assert_eq!(grown.sections[1].tag.as_str(), "PQTZ");
     assert!(!grown.has_extended_grid());
 }
+
+/// One `PCP2` entry, built the way rekordbox writes it: the fixed part, a
+/// UTF-16BE comment with its length, then the colour index and its RGB.
+fn cue_entry(hot_cue: u32, kind: u8, time_ms: u32, comment: &str, colour: Option<(u8, [u8; 3])>) -> Vec<u8> {
+    let mut comment_bytes = Vec::new();
+    for unit in comment.encode_utf16() {
+        comment_bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    if !comment.is_empty() {
+        comment_bytes.extend_from_slice(&[0, 0]); // the trailing NUL rekordbox writes
+    }
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&hot_cue.to_be_bytes());
+    body.push(kind);
+    body.extend_from_slice(&[0, 0, 0]);
+    body.extend_from_slice(&time_ms.to_be_bytes());
+    body.extend_from_slice(&0_u32.to_be_bytes()); // loop time
+    body.push(0); // colour row, for memory cues
+    body.extend_from_slice(&[0_u8; 11]);
+    body.extend_from_slice(&(comment_bytes.len() as u32).to_be_bytes());
+    body.extend_from_slice(&comment_bytes);
+    if let Some((code, rgb)) = colour {
+        body.push(code);
+        body.extend_from_slice(&rgb);
+    }
+
+    let len_entry = 12 + body.len();
+    let mut out = Vec::new();
+    out.extend_from_slice(b"PCP2");
+    out.extend_from_slice(&12_u32.to_be_bytes());
+    out.extend_from_slice(&(len_entry as u32).to_be_bytes());
+    out.extend_from_slice(&body);
+    out
+}
+
+#[test]
+fn extended_cues_carry_their_colour() {
+    let mut payload = cue_entry(1, 1, 4321, "intro", Some((21, [0x00, 0xFF, 0x00])));
+    payload.extend(cue_entry(2, 2, 90_000, "", Some((36, [0xFF, 0x8C, 0x00]))));
+    let file = build(&[(b"PCO2", vec![0, 0, 0, 1, 0, 2, 0, 0], payload)]);
+
+    let entries = parse(&file).unwrap().cue_entries();
+    assert_eq!(entries.len(), 2);
+
+    assert_eq!(entries[0].hot_cue, 1);
+    assert_eq!(entries[0].kind, 1);
+    assert_eq!(entries[0].time_ms, 4321);
+    assert_eq!(entries[0].comment.as_deref(), Some("intro"));
+    assert_eq!(entries[0].color_code, Some(21));
+    assert_eq!(entries[0].rgb, Some([0x00, 0xFF, 0x00]));
+
+    // A cue with no comment still has a colour: it sits after the comment,
+    // wherever that leaves it.
+    assert_eq!(entries[1].hot_cue, 2);
+    assert_eq!(entries[1].comment, None);
+    assert_eq!(entries[1].color_code, Some(36));
+}
+
+/// The share tree's cue lists are headers with nothing in them, and that is
+/// not a parse failure.
+#[test]
+fn an_empty_cue_list_reads_as_no_cues() {
+    let file = build(&[(b"PCO2", vec![0, 0, 0, 1, 0, 0, 0, 0], Vec::new())]);
+    assert!(parse(&file).unwrap().cue_entries().is_empty());
+}
+
+/// A truncated entry stops the list rather than reading past it.
+#[test]
+fn a_truncated_cue_entry_does_not_run_off_the_end() {
+    let mut payload = cue_entry(1, 1, 100, "a", Some((21, [1, 2, 3])));
+    payload.truncate(payload.len() - 6);
+    let file = build(&[(b"PCO2", vec![0, 0, 0, 1, 0, 1, 0, 0], payload)]);
+    assert!(parse(&file).unwrap().cue_entries().is_empty());
+}
+
+/// The palette is a lookup of what has been read, and silent about what has
+/// not — an unread index must fall back, never take a neighbour's colour.
+#[test]
+fn the_cue_palette_only_answers_for_measured_indices() {
+    assert_eq!(rbl_anlz::cue_colour(21), Some([0x00, 0xFF, 0x00]));
+    assert_eq!(rbl_anlz::cue_colour(36), Some([0xFF, 0x8C, 0x00]));
+    assert_eq!(rbl_anlz::cue_colour(41), None);
+    assert_eq!(rbl_anlz::cue_colour(0), None);
+}

@@ -134,6 +134,135 @@ impl Section {
     pub fn is_cue_list(&self) -> bool {
         matches!(&self.tag.0, b"PCOB" | b"PCO2")
     }
+
+    /// `PCO2` — the extended cue list, entry by entry.
+    ///
+    /// Empty in the share tree, where the cue list is a header and nothing
+    /// else, and populated in an export, where rekordbox writes the cues it
+    /// wants a player to draw. Only the extended list is read: the older
+    /// `PCOB`/`PCPT` form carries no colour, which is the only reason to read
+    /// one of these at all.
+    pub fn as_cue_entries(&self) -> Option<Vec<CueEntry>> {
+        if self.tag != FourCc::new(b"PCO2") {
+            return None;
+        }
+        let b = &self.payload;
+        let mut entries = Vec::new();
+        let mut at = 0usize;
+        while at + CUE_ENTRY_MIN <= b.len() {
+            if b.get(at..at + 4) != Some(b"PCP2") {
+                break;
+            }
+            let len_entry = be32(b, at + 8) as usize;
+            if len_entry < CUE_ENTRY_MIN || at + len_entry > b.len() {
+                break;
+            }
+            let e = b.get(at..at + len_entry).unwrap_or_default();
+            entries.push(cue_entry(e, len_entry));
+            at += len_entry;
+        }
+        Some(entries)
+    }
+}
+
+/// One entry of an extended cue list.
+///
+/// The colour is the point: an entry rekordbox wrote carries both the index it
+/// stores in `djmdCue.ColorTableIndex` and the RGB it paints for that index,
+/// which is the only place the two have been seen side by side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CueEntry {
+    /// Zero for a memory cue, otherwise the hot cue's slot — 1 is A.
+    pub hot_cue: u32,
+    /// 1 is a cue, 2 a loop.
+    pub kind: u8,
+    pub time_ms: u32,
+    /// Where a loop returns to. Only meaningful on a loop.
+    pub loop_time_ms: u32,
+    /// The colour a *memory* cue or loop was given, as a row of the colour
+    /// table. Hot cues use `color_code` instead.
+    pub color_id: u8,
+    pub comment: Option<String>,
+    /// `djmdCue.ColorTableIndex`.
+    pub color_code: Option<u8>,
+    /// What rekordbox paints for that index.
+    pub rgb: Option<[u8; 3]>,
+}
+
+/// Magic, the two lengths, the hot cue, the kind, the two times, the colour
+/// row and its eleven trailing bytes: an entry cannot be shorter than this.
+const CUE_ENTRY_MIN: usize = 40;
+
+/// What `djmdCue.ColorTableIndex` paints, where it has been read.
+///
+/// Measured, not guessed: rekordbox writes the index and the RGB side by side
+/// in the `PCO2` entries of an export, and these are the pairs a real export
+/// of 77 tracks carried. The same export cross-checks against `djmdCue` — 76
+/// of the 77 tracks store exactly the indices the export drew — which is what
+/// makes `color_code` and `ColorTableIndex` the same number rather than two
+/// that happen to look alike. `cargo run -p rbl-db --example cue_colours` is
+/// the probe.
+///
+/// **Incomplete, deliberately.** Eight more indices are in use in the
+/// reference library and are not here, because no exported track carried one;
+/// the probe names a track for each. An index that is not in this table has
+/// not been read, and must not be guessed — `cue_colour` returns `None` for it
+/// so a caller falls back rather than paints a wrong colour.
+///
+/// Note that this is what rekordbox *stores*, not always what it *draws*: the
+/// hot-cue badge measured off a screenshot for index 21 is `#77E866`, a
+/// lightened version of the `#00FF00` here.
+pub const MEASURED_CUE_COLOURS: &[(u8, [u8; 3])] = &[
+    (1, [0x00, 0x00, 0xFF]),
+    (6, [0x00, 0x8C, 0xFF]),
+    (18, [0x00, 0xFF, 0x47]),
+    (21, [0x00, 0xFF, 0x00]),
+    (25, [0x66, 0xFF, 0x00]),
+    (33, [0xFF, 0xD1, 0x00]),
+    (36, [0xFF, 0x8C, 0x00]),
+    (46, [0xFF, 0x00, 0x5C]),
+    (60, [0x4D, 0x00, 0xFF]),
+];
+
+/// The RGB for a `ColorTableIndex`, or `None` where it has not been read.
+pub fn cue_colour(index: u8) -> Option<[u8; 3]> {
+    MEASURED_CUE_COLOURS.iter().find(|&&(i, _)| i == index).map(|&(_, rgb)| rgb)
+}
+
+fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
+    let mut entry = CueEntry {
+        hot_cue: be32(e, 12),
+        kind: e.get(16).copied().unwrap_or(0),
+        time_ms: be32(e, 20),
+        loop_time_ms: be32(e, 24),
+        color_id: e.get(28).copied().unwrap_or(0),
+        comment: None,
+        color_code: None,
+        rgb: None,
+    };
+    // A comment is what pushes the entry past the fixed part, and the colour
+    // sits after the comment rather than at a fixed offset — so an entry with
+    // no room for a comment length has no colour either.
+    if len_entry <= CUE_ENTRY_MIN + 3 {
+        return entry;
+    }
+    let len_comment = be32(e, CUE_ENTRY_MIN) as usize;
+    let start = CUE_ENTRY_MIN + 4;
+    let Some(end) = start.checked_add(len_comment).filter(|&end| end <= len_entry) else {
+        return entry;
+    };
+    if len_comment > 0 {
+        entry.comment = Some(utf16be_to_string(e.get(start..end).unwrap_or_default()));
+    }
+    if let Some(colour) = e.get(end..end + 4) {
+        entry.color_code = colour.first().copied();
+        entry.rgb = Some([
+            colour.get(1).copied().unwrap_or(0),
+            colour.get(2).copied().unwrap_or(0),
+            colour.get(3).copied().unwrap_or(0),
+        ]);
+    }
+    entry
 }
 
 #[derive(Debug, Clone, Default)]
@@ -219,6 +348,11 @@ impl Anlz {
 
     pub fn beat_grid(&self) -> Option<Vec<Beat>> {
         self.sections.iter().find_map(Section::as_beat_grid)
+    }
+
+    /// Every extended cue entry in the file, across every `PCO2` section.
+    pub fn cue_entries(&self) -> Vec<CueEntry> {
+        self.sections.iter().filter_map(Section::as_cue_entries).flatten().collect()
     }
 
     pub fn path(&self) -> Option<String> {

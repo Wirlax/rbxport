@@ -27,4 +27,6 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 lofty = { version = "0.22", default-features = false }
 
 [dev-dependencies]
+# The cue-colour probe reads an export's analysis files beside the library.
+rbl-anlz = { path = "../rbl-anlz" }
 tempfile = "3"
