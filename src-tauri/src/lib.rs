@@ -289,6 +289,17 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(|app, event| crate::menu::on_event(app, event.id().as_ref()))
+        // Closing the main window is quitting, as it is in rekordbox. The
+        // Preferences window is a window of its own, and with it still open
+        // the process stayed alive showing nothing but Preferences (0.5.1 on
+        // Windows, where the main window's close box is the way out).
+        .on_window_event(|window, event| {
+            if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Some(preferences) = window.app_handle().get_webview_window(crate::preferences::WINDOW) {
+                    let _ = preferences.close();
+                }
+            }
+        })
         // Asynchronous, not the plain form. `wry` calls a synchronous handler
         // straight from the `WKURLSchemeHandler` callback, which is the main
         // thread on macOS, so every artwork read and every audio range would
