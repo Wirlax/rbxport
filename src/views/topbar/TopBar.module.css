@@ -8,11 +8,6 @@
 }
 .spacer { flex: 1; }
 
-.plan {
-  height: 20px; line-height: 20px; padding: 0 9px; border-radius: 2px;
-  background: var(--c-button); color: var(--c-icon-on);
-  font-size: var(--f-size-sm); font-weight: 700;
-}
 .clock { font-size: var(--f-size-sm); font-weight: 700; color: var(--c-icon-on); font-variant-numeric: tabular-nums; }
 
 /* The level meter: a thin horizontal track with a filled left portion, which

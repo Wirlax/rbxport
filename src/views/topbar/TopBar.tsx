@@ -1,25 +1,25 @@
 /**
- * Top strip: information, plan badge, settings, level, meters, clock.
+ * Top strip: settings, level, meters, clock.
  *
  * The order and the parts are rekordbox's own, read off a capture of 7.2.11
- * running: an info button, the "Professional" badge, the settings gear, the
- * master level knob, a two-channel output meter, a processor meter, then the
- * clock at the far right. The headphone button that stood where the knob is
- * now was ours, not rekordbox's.
+ * running: the settings gear, the master level knob, a two-channel output
+ * meter, a processor meter, then the clock at the far right. The headphone
+ * button that stood where the knob is now was ours, not rekordbox's.
  *
  * Deliberately not rekordbox's: its EXPORT mode dropdown and the layout and
- * record buttons at the left are gone by request. Recorded in TODO.md under
- * "Deliberate divergences" so nobody restores them in the name of matching
- * 7.2.11.
+ * record buttons at the left, and the info button and "Professional" plan
+ * badge before the gear, are gone by request. The gear and everything after
+ * it keep their places: they hang off the right edge, so nothing slides into
+ * the room the two left. Recorded in TODO.md under "Deliberate divergences"
+ * so nobody restores them in the name of matching 7.2.11.
  */
-import { GearIcon, InfoIcon } from "@/components/icons";
+import { GearIcon } from "@/components/icons";
 import { VolumeKnob } from "./VolumeKnob";
 import type { PlayerLayout } from "@/lib/layout";
 import { LayoutMenu } from "./LayoutMenu";
 import styles from "./TopBar.module.css";
 
 export interface TopBarProps {
-  plan?: string;
   clock: string;
   onOpenSettings?: () => void;
   /**
@@ -46,7 +46,6 @@ function clamp(value: number): number {
 }
 
 export function TopBar({
-  plan = "Professional",
   clock,
   onOpenSettings,
   level = 1,
@@ -63,12 +62,6 @@ export function TopBar({
       <LayoutMenu layout={layout} onChange={onLayoutChange} />
 
       <span className={styles.spacer} />
-
-      <button type="button" className={styles.icon} aria-label="Information">
-        <InfoIcon className={styles.glyph} />
-      </button>
-
-      <span className={styles.plan}>{plan}</span>
 
       <button
         type="button"

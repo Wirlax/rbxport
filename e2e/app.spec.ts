@@ -246,28 +246,26 @@ test("collapsing a folder does not change the selected playlist", async ({ page 
 });
 
 test("the top bar carries what rekordbox's does, in its order", async ({ page }) => {
-  // Read off a capture of 7.2.11 running: information, the plan badge, the
-  // gear, the level knob, the two-channel output meter, the processor meter,
-  // then the clock. The knob replaced a headphone button that rekordbox does
-  // not have there.
+  // Read off a capture of 7.2.11 running: the gear, the level knob, the
+  // two-channel output meter, the processor meter, then the clock. The knob
+  // replaced a headphone button that rekordbox does not have there.
   await page.goto("/");
   const bar = page.getByRole("banner");
-  await expect(bar.getByRole("button", { name: "Information" })).toBeVisible();
-  await expect(bar.getByText("Professional")).toBeVisible();
   await expect(bar.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
   await expect(bar.getByRole("slider", { name: "Master level" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Master output L" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Master output R" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Processor" })).toBeVisible();
 
-  // A deliberate divergence: no EXPORT dropdown, no layout or record buttons.
+  // Deliberate divergences: no EXPORT dropdown, no layout or record buttons,
+  // and neither the info button nor the "Professional" badge before the gear.
   await expect(page.getByText("EXPORT", { exact: true })).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Information" })).toHaveCount(0);
+  await expect(bar.getByText("Professional")).toHaveCount(0);
 
   // Left to right in that order, with the clock last.
   const xs: number[] = [];
   for (const item of [
-    bar.getByRole("button", { name: "Information" }),
-    bar.getByText("Professional"),
     bar.getByRole("button", { name: "Settings", exact: true }),
     bar.getByRole("slider", { name: "Master level" }),
     bar.getByRole("meter", { name: "Master output L" }),
