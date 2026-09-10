@@ -469,10 +469,10 @@ test("the column layout survives a reload", async ({ page }) => {
 test("the source rail switches which part of the library the tree shows", async ({ page }) => {
   await page.goto("/");
   const rail = page.getByRole("tablist", { name: "Library sources" });
-  // Three: Playlists, Histories, Devices. No Collection — All Tracks is at the
-  // top of the tree and always in sight, so a button that scrolls to it is a
-  // shortcut to where you already are.
-  await expect(rail.getByRole("tab")).toHaveCount(3);
+  // Four: Playlists, Histories, Explorer, Devices. No Collection — All Tracks
+  // is at the top of the tree and always in sight, so a button that scrolls
+  // to it is a shortcut to where you already are.
+  await expect(rail.getByRole("tab")).toHaveCount(4);
   await expect(rail.getByRole("tab", { name: "Collection" })).toHaveCount(0);
 
   // A shortcut, not a filter: the tree keeps showing everything and the rail
