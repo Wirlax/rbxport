@@ -995,3 +995,51 @@ fn a_release_onto_the_cue_lands_on_it_or_after_it_but_never_before() {
         );
     }
 }
+
+/// Drags the head from `from` to `to` over `steps` pointer moves a frame's
+/// worth apart, pulling the sink as a device would, and returns what came out.
+fn drag(h: &Harness, deck: Deck, from: u64, to: u64, steps: u64) -> Vec<f32> {
+    let ms = |frames: u64| frames as f64 * 1000.0 / f64::from(RATE);
+    h.engine.scrub_begin(deck);
+    let mut out = Vec::new();
+    for step in 0..=steps {
+        let at = from + (to - from) * step / steps;
+        h.engine.scrub_to_ms(deck, ms(at));
+        // A pointer move every ~12 ms, the way a trackpad delivers them, and
+        // the callback draining between them.
+        let until = Instant::now() + Duration::from_millis(12);
+        while Instant::now() < until {
+            out.extend(h.sink.pull(512));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    h.engine.scrub_end(deck);
+    out
+}
+
+#[test]
+fn a_drag_sounds_on_a_deck_that_has_only_been_loaded_never_played() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.wav");
+    tone(&path, RATE as usize * 4);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    assert!(!h.sink.running());
+
+    // Straight from the load: no play, no pause, a hand on the overview.
+    let audio = drag(&h, Deck::A, u64::from(RATE), u64::from(RATE) * 2, 40);
+    assert!(h.sink.running() || !audio.is_empty(), "the drag never started the device");
+    let peak = audio.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
+    assert!(peak > 0.1, "a drag on a loaded deck made no sound: peak {peak}");
+    let landed = h.position(Deck::A);
+    let target = u64::from(RATE) * 2;
+    assert!(
+        landed.abs_diff(target) < u64::from(RATE) / 10,
+        "the drag left the head at {landed}, not near {target}"
+    );
+    // Letting go leaves the transport as it was found: stopped, and the
+    // device released.
+    assert!(!h.engine.snapshot().a.playing);
+}
