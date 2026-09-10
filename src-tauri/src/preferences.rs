@@ -49,7 +49,13 @@ pub fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<()> {
         .resizable(true)
         .accept_first_mouse(true)
         .build()
-        .map(|_| ())
+        .map(|window| {
+            // On Windows and Linux the application menu is a bar on every
+            // window it is set on, and it was set on this one too (0.5.1):
+            // File › Import at the top of Preferences. macOS has one menu
+            // bar for the app, and there this is documented as doing nothing.
+            let _ = window.hide_menu();
+        })
         .map_err(|e| {
             AppError::new(ErrorKind::Internal, format!("the Preferences window could not open: {e}"))
         })
