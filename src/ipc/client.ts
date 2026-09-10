@@ -148,6 +148,7 @@ async function realBackend(): Promise<Backend> {
     },
     onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
+    onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
     onMenu: (listener) => subscribe<string>("menu", listener),
     startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
     stopLinkListening: () => invoke<void>("stop_link_listening"),
@@ -213,6 +214,11 @@ async function realBackend(): Promise<Backend> {
       setTrackRating: (track, stars) => invoke<number>("set_track_rating", { track, stars }),
       setTrackComment: (track, comment) => invoke<number>("set_track_comment", { track, comment }),
       setTrackColor: (track, color) => invoke<number>("set_track_color", { track, color }),
+      addCue: (track, kind, positionMs) => invoke<string>("add_cue", { track, kind, positionMs }),
+      addLoop: (track, kind, inMs, outMs, beats) =>
+        invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
+      moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
+      deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
     },
   };
 }

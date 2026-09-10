@@ -10,8 +10,8 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  Backend, DeckEvent, Device, Edits, LibrarySummary, RowDto, SortColumn, Tick, TreeNode,
-  ViewHandle, ViewSpec, WaveformKind,
+  AppErrorDto, Backend, Cue, DeckEvent, Device, Edits, LibrarySummary, RowDto, SortColumn, Tick,
+  TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 
@@ -147,11 +147,19 @@ export interface MockOptions {
   trackCount?: number;
   /** Simulated IPC latency in ms; 0 keeps tests fast. */
   latencyMs?: number;
+  /**
+   * Whether the library reports itself writable. Off by default — the mock
+   * stands in for a library rekordbox is holding, which is what the menus
+   * and the deck's editing controls are tested against — and `?writable=1`
+   * turns it on for the tests that exercise an edit.
+   */
+  writable?: boolean;
 }
 
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
+  const writable = options.writable ?? readWritableFromUrl();
   const all = makeRows(trackCount);
   const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
   const tree = makeTree();
@@ -285,7 +293,85 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (row) row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
       return bump();
     },
+    addCue: (track, kind, positionMs) => {
+      if (!all.some((r) => r.id === track)) return refuse(`no track ${track}`);
+      if (kind !== "memory" && !/^[A-P]$/.test(kind.hot)) {
+        return refuse(`${JSON.stringify(kind.hot)} is not a hot cue slot rekordbox has`);
+      }
+      const id = `cue-${nextCueId++}`;
+      cuesOf(track).push({
+        id, positionMs, outMs: 0, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",
+      });
+      return cuesChanged(track, id);
+    },
+    addLoop: (track, kind, inMs, outMs) => {
+      if (!all.some((r) => r.id === track)) return refuse(`no track ${track}`);
+      if (outMs <= inMs) return refuse("a loop has to end after it starts");
+      const id = `cue-${nextCueId++}`;
+      cuesOf(track).push({
+        id, positionMs: inMs, outMs, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",
+      });
+      return cuesChanged(track, id);
+    },
+    moveCue: (cue, positionMs) => {
+      const found = findCue(cue);
+      if (!found) return notFound(`no cue ${cue}`);
+      found.cue.positionMs = positionMs;
+      return cuesChanged(found.track, undefined);
+    },
+    deleteCue: (cue) => {
+      const found = findCue(cue);
+      if (!found) return notFound(`no cue ${cue}`);
+      const list = cuesOf(found.track);
+      list.splice(list.indexOf(found.cue), 1);
+      return cuesChanged(found.track, undefined);
+    },
   };
+
+  /*
+   * Cues, per track, made up on first ask the way `trackCues` always did and
+   * held from then on so an edit sticks. The same shape the real backend
+   * keeps: the listeners hear which track changed, not a generation.
+   */
+  const cueStore = new Map<string, Cue[]>();
+  let nextCueId = 1;
+  const cueListeners = new Set<(trackId: string) => void>();
+  const cuesOf = (trackId: string): Cue[] => {
+    const held = cueStore.get(trackId);
+    if (held) return held;
+    const index = Number.parseInt(trackId, 10) - 100000;
+    const row = all[index];
+    const made: Cue[] = [];
+    if (row && row.analysed !== 0) {
+      const total = row.durationSec * 1000;
+      made.push(
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.12), outMs: 0, letter: "A", memory: false },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.34), outMs: 0, letter: "B", memory: false },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.61), outMs: 0, letter: "C", memory: false },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.83), outMs: 0, letter: "D", memory: false },
+      );
+    }
+    cueStore.set(trackId, made);
+    return made;
+  };
+  const findCue = (id: string): { track: string; cue: Cue } | null => {
+    for (const [track, list] of cueStore) {
+      const cue = list.find((c) => c.id === id);
+      if (cue) return { track, cue };
+    }
+    return null;
+  };
+  const cuesChanged = <T>(track: string, value: T): Promise<T> => {
+    for (const listener of cueListeners) listener(track);
+    return wait(value);
+  };
+  // The shape a refused command arrives in: an `Error` whose `kind` is the
+  // `AppErrorDto` kind, so a caller can tell a read-only refusal from a bug.
+  const failed = (kind: AppErrorDto["kind"], message: string) =>
+    Promise.reject(Object.assign(new Error(message), { kind }));
+  const refuse = (message: string) => failed("readOnly", message);
+  const notFound = (message: string) => failed("notFound", message);
 
   /*
    * The mock deck.
@@ -363,7 +449,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         ? wait<LibrarySummary>({
             trackCount,
             playlistCount: tree.filter((n) => n.kind === "playlist").length,
-            readOnly: true,
+            readOnly: !writable,
             dbVersion: null,
           })
         : notReady(),
@@ -484,20 +570,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
 
     // A memory cue and four hot cues, so the player's markers and list have
-    // something to draw without a database behind them.
-    trackCues: (trackId) => {
-      const index = Number.parseInt(trackId, 10) - 100000;
-      const row = all[index];
-      if (!row || row.analysed === 0) return wait([]);
-      const total = row.durationSec * 1000;
-      return wait([
-        { positionMs: Math.round(total * 0.02), letter: "", memory: true },
-        { positionMs: Math.round(total * 0.12), letter: "A", memory: false },
-        { positionMs: Math.round(total * 0.34), letter: "B", memory: false },
-        { positionMs: Math.round(total * 0.61), letter: "C", memory: false },
-        { positionMs: Math.round(total * 0.83), letter: "D", memory: false },
-      ]);
-    },
+    // something to draw without a database behind them. A copy, ordered by
+    // position as the index orders them, so an edit cannot reach the store.
+    trackCues: (trackId) =>
+      wait(cuesOf(trackId).map((cue) => ({ ...cue })).sort((a, b) => a.positionMs - b.positionMs)),
 
     // A plausible structure, so the phrase bar can be driven without an
     // analysis file: a real track's phrases tile it end to end.
@@ -751,6 +827,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    onCuesChanged: (listener) => {
+      cueListeners.add(listener);
+      return () => cueListeners.delete(listener);
+    },
   };
 }
 
@@ -770,6 +850,12 @@ function readCountFromUrl(): number | null {
  * moving window and a landing page cannot happen at zero. This is how a scroll
  * is tested against a backend that takes any time at all.
  */
+/** Whether the mock's library reports itself writable, from `?writable=1`. */
+function readWritableFromUrl(): boolean {
+  if (typeof location === "undefined") return false;
+  return new URLSearchParams(location.search).get("writable") === "1";
+}
+
 function readLatencyFromUrl(): number | null {
   if (typeof location === "undefined") return null;
   const raw = new URLSearchParams(location.search).get("latency");

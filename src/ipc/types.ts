@@ -163,6 +163,12 @@ export interface Backend {
   onLibraryError(listener: (message: string) => void): () => void;
 
   /**
+   * Fires after a cue edit with the id of the track whose cues changed.
+   * A deck showing that track refetches its cues; nothing else has to move.
+   */
+  onCuesChanged(listener: (trackId: string) => void): () => void;
+
+  /**
    * Tracks whose file has gone. The count is exact; the list is a first page,
    * because a library can lose thousands when a drive is unplugged and a list
    * that long is neither useful nor small enough for the IPC cap.
@@ -406,11 +412,22 @@ export interface DeckEvent {
  * rather than a guessed one.
  */
 export interface Cue {
+  /**
+   * `djmdCue.ID`, which `moveCue` and `deleteCue` take. Empty for a cue the
+   * backend cannot edit — one whose id is not a number under 2^32, of which
+   * the reference library has none — and the interface offers no ✕ for it.
+   */
+  id: string;
   positionMs: number;
+  /** Where a loop ends, or 0 for a plain cue. */
+  outMs: number;
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
 }
+
+/** Which slot a new cue goes in: a memory cue, or a hot cue by its letter. */
+export type CueKind = "memory" | { hot: string };
 
 /** A volume an export could be written to. */
 export interface Device {
@@ -538,6 +555,23 @@ export interface Edits {
   setTrackRating(track: string, stars: number): Promise<number>;
   setTrackComment(track: string, comment: string): Promise<number>;
   setTrackColor(track: string, color: string | null): Promise<number>;
+
+  /**
+   * Cues. Unlike the edits above these do not return a generation: a cue
+   * edit changes one track's cues and nothing else, so the backend re-reads
+   * only that track and says so through `onCuesChanged` rather than
+   * reloading the library and dropping every cached page.
+   */
+  /** Adds a cue and resolves to its id. */
+  addCue(track: string, kind: CueKind, positionMs: number): Promise<string>;
+  /**
+   * Adds a loop: a cue with an out point. `beats` is the loop's length in
+   * beats when known; left out, In and Out are all that is recorded, which
+   * is what most of the library's loops do.
+   */
+  addLoop(track: string, kind: CueKind, inMs: number, outMs: number, beats?: number): Promise<string>;
+  moveCue(cue: string, positionMs: number): Promise<void>;
+  deleteCue(cue: string): Promise<void>;
 }
 
 /** `ParentID` of a playlist or folder at the top of the tree. */
