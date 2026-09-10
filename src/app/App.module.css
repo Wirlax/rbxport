@@ -112,19 +112,21 @@
 .transportSlot > * { height: 100%; }
 .playerGutter { height: var(--s-player-gutter-h); background: var(--c-black); }
 
-/* With a panel open the browser gives up width to it, at the width
+/* With a panel open the browser gives up width to it. The sub-browser sizes
+   itself — it clamps its own width to this row the way the tree splitter
+   does, so its column is `auto` — and the information panel takes the width
    browseSetting.xml records, capped as a fraction of the window so a narrow
    one still leaves a usable track list. */
 .body[data-sub] {
   grid-template-columns:
     var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
-    min(var(--s-sub-browse-w), 45%);
+    auto;
 }
 
 .body[data-sub][data-info] {
   grid-template-columns:
     var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr
-    min(var(--s-sub-browse-w), 35%)
+    auto
     min(var(--s-info-w), 25%);
 }
 
@@ -138,9 +140,17 @@
   display: grid;
   /* --tree-w is set by the splitter drag; the token is the starting width. */
   grid-template-columns: var(--tree-w, var(--s-tree-w)) var(--s-tree-gutter-w) 1fr;
+  /* The icon column at the right edge is placed past the last explicit
+     column whichever panels are open, in an implicit column of its own
+     measured width, rather than each of those rules naming it. */
+  grid-auto-columns: var(--s-right-rail-w);
   min-width: 0;
   min-height: 0; /* let the browser scroll instead of the page */
 }
+
+/* Past the explicit columns, on the one row: without this the rail would be
+   auto-placed into a second row under everything else. */
+.rightRail { grid-row: 1; grid-column: -1; }
 
 /* The gutter between the tree and the browser, which is also the drag handle.
    Black, and narrower than the capture's seven points by request. Painting it

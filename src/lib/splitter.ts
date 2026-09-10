@@ -45,3 +45,28 @@ export function clampWidth(requested: number, bounds: SplitterBounds): number {
 export function fit(current: number, bounds: SplitterBounds): number {
   return clampWidth(current, bounds);
 }
+
+/**
+ * The sub-browser's outer splitter, between the main track list and the
+ * sub-browser's own rail.
+ *
+ * `available` is what the two lists share: the row, less the main tree and
+ * whatever other panels are open. The floor is a rail, a tree at its own
+ * floor and a list with room for a title: below that the panel is two
+ * scrollbars. The other side keeps the same floor the tree splitter keeps
+ * for the main list, so opening the sub-browser in a narrow window shrinks
+ * it rather than the list it sits beside.
+ */
+export function subBounds(available: number): SplitterBounds {
+  return {
+    available,
+    min: 360,
+    maxFraction: 0.65,
+    minOther: TREE_BOUNDS.minOther,
+  };
+}
+
+/** The splitter inside the sub-browser, between its tree and its list. */
+export function subTreeBounds(available: number): SplitterBounds {
+  return { ...TREE_BOUNDS, available };
+}

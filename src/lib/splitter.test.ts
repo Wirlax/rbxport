@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampWidth, fit, TREE_BOUNDS, type SplitterBounds } from "./splitter";
+import { clampWidth, fit, subBounds, subTreeBounds, TREE_BOUNDS, type SplitterBounds } from "./splitter";
 
 const wide: SplitterBounds = { ...TREE_BOUNDS, available: 1800 };
 
@@ -61,5 +61,32 @@ describe("fit", () => {
 
   it("leaves a width that still fits", () => {
     expect(fit(305, wide)).toBe(305);
+  });
+});
+
+describe("subBounds", () => {
+  it("keeps a list beside the sub-browser", () => {
+    const bounds = subBounds(1462);
+    const got = clampWidth(5000, bounds);
+    expect(1462 - got).toBeGreaterThanOrEqual(TREE_BOUNDS.minOther);
+    expect(got).toBeLessThanOrEqual(1462 * 0.65);
+  });
+
+  it("opens at the measured width in the reference window", () => {
+    // 878pt of the 1462 the two lists share at 1800 wide with the tree at
+    // its default: fits, unchanged.
+    expect(clampWidth(878, subBounds(1462))).toBe(878);
+  });
+
+  it("gives the sub-browser its floor in a window too narrow for both", () => {
+    expect(clampWidth(878, subBounds(500))).toBe(360);
+  });
+});
+
+describe("subTreeBounds", () => {
+  it("is the tree rule applied to the sub-browser's own width", () => {
+    const bounds = subTreeBounds(878);
+    expect(clampWidth(298, bounds)).toBe(298);
+    expect(clampWidth(2000, bounds)).toBeLessThanOrEqual(878 * 0.5);
   });
 });

@@ -21,13 +21,16 @@ import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
 import { resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
-import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/session";
+import {
+  DEFAULT_SUB_TREE_WIDTH, DEFAULT_SUB_WIDTH, loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS,
+} from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
 import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
+import { RightRail } from "@/views/browser/RightRail";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
@@ -71,6 +74,10 @@ export function App() {
   // Closed unless it was open at exit; browseSetting.xml records
   // `SubBrowse open="0"` for a first run.
   const [subOpen, setSubOpen] = useState(restored.subOpen);
+  // The sub-browser's width and its tree's, as last dragged. Clamped to the
+  // window by the panel itself, so these are what was asked for.
+  const [subWidth, setSubWidth] = useState(restored.subWidth);
+  const [subTreeWidth, setSubTreeWidth] = useState(restored.subTreeWidth);
   // Why the library is not there, when it is not. Shown instead of "Loading…",
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -707,8 +714,10 @@ export function App() {
       rows: screen.rows.slice(0, SEEDED_ROWS),
       count: screen.count,
       layout,
+      subWidth,
+      subTreeWidth,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, layout]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, layout, subWidth, subTreeWidth]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement.
@@ -906,16 +915,52 @@ export function App() {
           <SubBrowser
             nodes={tree}
             libraryGeneration={libraryGeneration}
-            onClose={() => setSubOpen(false)}
+            width={subWidth}
+            treeWidth={subTreeWidth}
+            onWidthChange={setSubWidth}
+            onTreeWidthChange={setSubTreeWidth}
+            // Its tree and list take part in everything the main pair does:
+            // a drag from either list lands on either tree, and its rows
+            // load decks and take edits the same way.
+            tree={{
+              dragging: draggedTracks !== null,
+              onDropTracks: addDraggedTo,
+              onExport: exportPlaylist,
+              onCreatePlaylist: createPlaylistIn,
+              onCreateFolder: createFolderIn,
+              onDeleteNode: deleteNode,
+              readOnly: summary?.readOnly ?? false,
+            }}
+            list={{
+              onDragTracks: setDraggedTracks,
+              players: deckCount(layout),
+              onLoadTrack: loadTrack,
+              onShowInFinder: revealTrack,
+              onRate: rateTrack,
+              onComment: commentTrack,
+              pendingEdits,
+              readOnly: summary?.readOnly ?? false,
+            }}
           />
         ) : null}
         {infoOpen ? <InfoPanel track={playerTrack} onClose={() => setInfoOpen(false)} /> : null}
+        <RightRail
+          className={styles.rightRail}
+          infoOpen={infoOpen}
+          onToggleInfo={() => setInfoOpen((open) => !open)}
+          subOpen={subOpen}
+          onToggleSub={() => setSubOpen((open) => !open)}
+        />
       </div>
       {settingsOpen ? (
         <Settings
           summary={summary}
           onResetColumns={cols.reset}
-          onResetLayout={() => setTreeWidth(clampWidth(305, bounds()))}
+          onResetLayout={() => {
+            setTreeWidth(clampWidth(305, bounds()));
+            setSubWidth(DEFAULT_SUB_WIDTH);
+            setSubTreeWidth(DEFAULT_SUB_TREE_WIDTH);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}

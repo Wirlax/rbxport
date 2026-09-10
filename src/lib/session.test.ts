@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SESSION,
+  DEFAULT_SUB_TREE_WIDTH,
+  DEFAULT_SUB_WIDTH,
   DEFAULT_TREE_WIDTH,
   sanitiseSession,
   SEEDED_NODES,
@@ -21,8 +23,16 @@ describe("sanitiseSession", () => {
       rows: [{ id: "100", title: "One" }],
       count: 14,
       layout: "two",
+      subWidth: 700,
+      subTreeWidth: 240,
     };
     expect(sanitiseSession(session)).toEqual(session);
+  });
+
+  it("gives a session from before the sub-browser had widths the measured ones", () => {
+    const session = sanitiseSession({ treeWidth: 300, subWidth: "wide" });
+    expect(session.subWidth).toBe(DEFAULT_SUB_WIDTH);
+    expect(session.subTreeWidth).toBe(DEFAULT_SUB_TREE_WIDTH);
   });
 
   it("keeps only records that could be drawn", () => {

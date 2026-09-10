@@ -55,9 +55,15 @@ export interface Session {
   count: number;
   /** How much of the window the deck took: 1 player, 2, simple, or none. */
   layout: PlayerLayout;
+  /** The sub-browser's width, and its own tree's, both before clamping. */
+  subWidth: number;
+  subTreeWidth: number;
 }
 
 export const DEFAULT_TREE_WIDTH = 305;
+/** Measured from the 2026-09-09 capture: --s-sub-browse-w and --s-sub-tree-w. */
+export const DEFAULT_SUB_WIDTH = 878;
+export const DEFAULT_SUB_TREE_WIDTH = 298;
 
 export const DEFAULT_SESSION: Session = {
   treeWidth: DEFAULT_TREE_WIDTH,
@@ -69,6 +75,8 @@ export const DEFAULT_SESSION: Session = {
   rows: [],
   count: 0,
   layout: "one",
+  subWidth: DEFAULT_SUB_WIDTH,
+  subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
 };
 
 const SORT_COLUMNS: readonly string[] = [
@@ -83,6 +91,14 @@ function sortOrDefault(value: unknown): SortState {
     return DEFAULT_SORT;
   }
   return { column: raw.column as SortColumn, descending: raw.descending === true };
+}
+
+/** A stored pane width, or the default when it is not a usable number. */
+function widthOrDefault(value: unknown, fallback: number): number {
+  // Clamped again against the window at use; this only rejects nonsense.
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : fallback;
 }
 
 /** Keeps only entries that are objects carrying a string id. */
@@ -100,13 +116,8 @@ function records<T extends { id: string }>(value: unknown, limit: number): T[] {
 export function sanitiseSession(value: unknown): Session {
   if (typeof value !== "object" || value === null) return DEFAULT_SESSION;
   const raw = value as Partial<Record<keyof Session, unknown>>;
-  const width = raw.treeWidth;
   return {
-    // Clamped again against the window at use; this only rejects nonsense.
-    treeWidth:
-      typeof width === "number" && Number.isFinite(width) && width > 0
-        ? Math.round(width)
-        : DEFAULT_TREE_WIDTH,
+    treeWidth: widthOrDefault(raw.treeWidth, DEFAULT_TREE_WIDTH),
     selectedNodeId: typeof raw.selectedNodeId === "string" ? raw.selectedNodeId : null,
     sort: sortOrDefault(raw.sort),
     infoOpen: raw.infoOpen === true,
@@ -118,6 +129,8 @@ export function sanitiseSession(value: unknown): Session {
         ? Math.round(raw.count)
         : 0,
     layout: asLayout(raw.layout),
+    subWidth: widthOrDefault(raw.subWidth, DEFAULT_SUB_WIDTH),
+    subTreeWidth: widthOrDefault(raw.subTreeWidth, DEFAULT_SUB_TREE_WIDTH),
   };
 }
 
