@@ -5,7 +5,39 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] — 2026-09-10
+## [0.4.0] — 2026-09-10
+
+Everything tagged as 0.3.0 plus the work below. 0.3.0's build was cancelled
+before it published — its tag missed fourteen commits that had not reached
+the remote — so this is the release that ships both.
+
+### Added
+- The settings gear opens rekordbox's Preferences — View, Audio, Analysis,
+  DJ System, Keyboard and Advanced — as a window of its own that can be
+  moved, and its choices change the app and are kept between runs. The master
+  limiter lives in Audio.
+- BEAT SYNC holds a deck to the master's tempo until RST or MASTER ends it;
+  it can take a double or half BPM as a match, or match the tempo alone. With
+  Q on, play starts a deck on the master's beat, and a synced deck waits for
+  the master's next beat before it sounds.
+- A quantized cue can snap to a half, quarter or eighth of a beat.
+- The Traffic Light lights the keys that go with the loaded track's, and the
+  # column sorts a playlist by its own order.
+- The 2 PLAYER details are half waveforms that meet at the line between the
+  decks.
+- A fresh stick takes the DJ System defaults on export; missing tracks can be
+  relocated from search folders; an import says which tracks landed.
+
+### Fixed
+- A track dragged to a player carries a faded copy of its row, every time,
+  in the shell as well as the browser; the sleeve no longer gets a dashed
+  border.
+- Dragging the waveform of a freshly loaded track sounds right without
+  pressing play first.
+
+## [0.3.0] — 2026-09-10 — not published
+
+The build was cancelled before it reached the bucket; see 0.4.0.
 
 ### Added
 - A master limiter on the mix bus, so two decks at full level no longer
@@ -142,6 +174,7 @@ Pro DJ Link and writes USB exports. Everything below landed between
 - Signed builds for macOS (opens without Gatekeeper refusing it) and Windows,
   published with readable download URLs.
 
+[0.4.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/chrisle/rekordbox-lite/releases/tag/v0.1.0
