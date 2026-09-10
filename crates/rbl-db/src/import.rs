@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::ItemKey;
 use lofty::probe::Probe;
@@ -73,7 +74,13 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
         });
     }
 
+    // Without the cover art. Nothing here stores a picture, and a picture is
+    // most of a tag by size: reading it made one probe cost 15 ms on a local
+    // disk and 56 ms cold from an SD card against under a millisecond
+    // without [OBS], which is the difference between an Explorer page that
+    // lands and one that stalls.
     let tagged = Probe::open(path)
+        .map(|probe| probe.options(ParseOptions::new().read_cover_art(false)))
         .and_then(lofty::probe::Probe::read)
         .map_err(|e| ImportError::Unreadable {
             path: path.display().to_string(),
