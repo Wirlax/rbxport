@@ -108,6 +108,13 @@
 }
 .artwork:disabled { cursor: default; }
 
+/* A track is being dragged and this strip would take it. The sleeve is what
+   is marked, as on the full deck: it is where the track lands. */
+.strip[data-droppable] .artwork {
+  outline: 1px dashed var(--c-accent);
+  outline-offset: -1px;
+}
+
 /* The record on the empty sleeve: a 43pt disc with an 11pt hole, both
    measured, in the panel colour on the well. */
 .disc {
