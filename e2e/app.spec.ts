@@ -1119,7 +1119,9 @@ test("the sub-browser keeps its own selection, separate from the main one", asyn
   await expect(page.getByTestId("browser-title").first()).toContainText("Melodic Vox");
   await expect(sub.getByTestId("browser-title")).toContainText("All Tracks");
 
-  await sub.getByRole("button", { name: "Close" }).click();
+  // Closed from the icon column at the right edge, which is where rekordbox
+  // keeps the toggle; the panel has no close button of its own.
+  await page.getByRole("button", { name: "Sub-Browser Window" }).click();
   await expect(sub).toBeHidden();
 });
 
