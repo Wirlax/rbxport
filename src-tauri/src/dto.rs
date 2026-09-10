@@ -194,6 +194,17 @@ pub struct ImportReportDto {
     pub imported: u32,
     /// One line per file that was not imported, saying why.
     pub skipped: Vec<String>,
+    /// The tracks that landed, so they can be queued for analysis.
+    pub tracks: Vec<ImportedTrackDto>,
+}
+
+/// One track an import added.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedTrackDto {
+    pub id: String,
+    /// The file's name, for the analysis queue's readout.
+    pub title: String,
 }
 
 /// A volume an export could be written to.

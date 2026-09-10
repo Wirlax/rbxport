@@ -8,7 +8,7 @@ import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
-  LinkStatus, MissingTracks, RowDto, Tick,
+  LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
 } from "./types";
@@ -93,7 +93,7 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
-    exportPlaylist: async (playlistId, destination) => {
+    exportPlaylist: async (playlistId, destination, defaults) => {
       let target = destination;
       if (target === undefined) {
         const { open } = await import("@tauri-apps/plugin-dialog");
@@ -109,8 +109,10 @@ async function realBackend(): Promise<Backend> {
       return invoke<ExportReport>("export_playlist", {
         playlist: playlistId,
         destination: target,
+        defaults: defaults ?? null,
       });
     },
+    referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     deckLoad: (deck, trackId) => invoke<void>("deck_load", { deck, track: trackId }),
     deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
@@ -186,6 +188,13 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       await invoke<number>("relocate_track", { track: trackId, path: picked });
       return picked;
+    },
+    autoRelocate: (folders) => invoke<RelocateReport>("auto_relocate", { folders }),
+    pickFolder: async (title) => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ multiple: false, directory: true, title });
+      // Cancelling is a normal outcome, not an error.
+      return typeof picked === "string" ? picked : null;
     },
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
     saveDeviceSettings: (path, settings) =>

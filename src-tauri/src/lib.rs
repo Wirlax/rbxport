@@ -11,6 +11,7 @@ mod link;
 pub mod menu;
 mod player;
 mod protocol;
+mod relocate;
 mod device_settings;
 mod dto;
 mod error;
@@ -257,6 +258,7 @@ fn install_tracing() {
     }));
 }
 
+#[allow(clippy::too_many_lines, reason = "the command list is one line per command, and that is the whole function")]
 pub fn run() {
     install_tracing();
 
@@ -345,6 +347,8 @@ pub fn run() {
             commands::missing_tracks,
             commands::import_files,
             commands::relocate_track,
+            relocate::auto_relocate,
+            device_settings::reference_stick_settings,
             commands::create_playlist,
             commands::create_folder,
             commands::rename_playlist,

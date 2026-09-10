@@ -290,11 +290,24 @@ fn remove_under(destination: &Path, relative: &str, directory: bool) {
 /// and only what changed is copied. Tracks that have left the selection are
 /// removed. Without a manifest — a fresh stick, or one rekordbox wrote —
 /// everything is written.
-#[allow(clippy::too_many_lines, reason = "one linear pipeline; splitting it would hide the order writes happen in")]
 pub fn export(
     destination: &Path,
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
+) -> Result<ExportReport> {
+    export_with(destination, tracks, playlists, None)
+}
+
+/// [`export`], with what a stick that holds no `exportLibrary.db` yet
+/// starts from in place of the reference rows: the Preferences window's
+/// DJ System choices. A stick that already has a library keeps its own
+/// settings, and `defaults` is not looked at.
+#[allow(clippy::too_many_lines, reason = "one linear pipeline; splitting it would hide the order writes happen in")]
+pub fn export_with(
+    destination: &Path,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<ExportReport> {
     if tracks.is_empty() {
         return Err(ExportError::Empty);
@@ -539,7 +552,7 @@ pub fn export(
     std::fs::write(db_dir.join("export.pdb"), &pdb)?;
 
     // A player never opens this; rekordbox does, to read the stick back.
-    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids)?;
+    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, defaults)?;
     report.one_library = true;
 
     // Last, so a run that fails part way leaves the older record standing and
@@ -580,6 +593,7 @@ fn write_one_library(
     tracks: &[OneLibraryTrack],
     playlists: &[SourcePlaylist],
     export_ids: &[Option<u32>],
+    defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<()> {
     use rbl_onelibrary::build::{Builder, LookupTable, Track};
     use rbl_onelibrary::settings::StickSettings;
@@ -588,11 +602,13 @@ fn write_one_library(
     // The database is rebuilt from scratch, but the settings the stick already
     // carries — its name, which browse categories and sorts are on, the colour
     // comments — are the user's and survive the rebuild. A stick that holds
-    // none, or one that cannot be read, starts from the reference rows.
+    // none, or one that cannot be read, starts from the defaults it was
+    // given, or from the reference rows.
+    let fresh = || defaults.cloned().unwrap_or_default();
     let settings = if path.exists() {
-        StickSettings::read(&path).unwrap_or_default()
+        StickSettings::read(&path).unwrap_or_else(|_| fresh())
     } else {
-        StickSettings::default()
+        fresh()
     };
     // An export is written into a fresh directory, but a resumed one may find
     // the previous attempt's file; replacing it is correct, keeping it is not.

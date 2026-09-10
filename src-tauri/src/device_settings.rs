@@ -181,6 +181,94 @@ pub fn apply(current: &DeviceSettings, dto: &DeviceSettingsDto) -> AppResult<Dev
     })
 }
 
+/// What a stick with no settings of its own is given on export: the
+/// Preferences window's DJ System pane. Null rows mean the reference rows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickDefaultsDto {
+    pub waveform_color: String,
+    pub waveform_position: String,
+    pub overview_waveform: String,
+    pub key_display: String,
+    pub categories: Option<Vec<MenuSlotDto>>,
+    pub sorts: Option<Vec<MenuSlotDto>>,
+    pub sub_column: Option<i64>,
+}
+
+/// The reference rows a fresh `exportLibrary.db` starts from.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceStickSettingsDto {
+    pub categories: Vec<MenuSlotDto>,
+    pub sorts: Vec<MenuSlotDto>,
+}
+
+/// rekordbox's reference browse categories and sort options: what the DJ
+/// System pane edits against when nothing has been stored.
+#[tauri::command]
+pub fn reference_stick_settings() -> ReferenceStickSettingsDto {
+    let reference = StickSettings::default();
+    ReferenceStickSettingsDto {
+        categories: reference.categories.iter().map(slot_dto).collect(),
+        sorts: reference.sorts.iter().map(slot_dto).collect(),
+    }
+}
+
+/// The library rows a fresh stick's export starts from, given the defaults.
+pub fn library_defaults(dto: &StickDefaultsDto) -> StickSettings {
+    let mut settings = StickSettings::default();
+    if let Some(categories) = &dto.categories {
+        settings.categories = categories.iter().map(slot_from).collect();
+    }
+    if let Some(sorts) = &dto.sorts {
+        settings.sorts = sorts.iter().map(slot_from).collect();
+    }
+    settings.sub_column = dto.sub_column;
+    settings
+}
+
+/// The `DEVSETTING.DAT` a fresh stick is given: rekordbox's file at the
+/// defaults, with the four choices applied over it.
+pub fn dev_defaults(dto: &StickDefaultsDto) -> AppResult<DevSetting> {
+    let mut dev = DevSetting::default();
+    dev.color = match dto.waveform_color.as_str() {
+        "blue" => WaveformColor::Blue,
+        "rgb" => WaveformColor::Rgb,
+        "3band" => WaveformColor::TriBand,
+        other => return Err(bad_value("Waveform color", other)),
+    };
+    dev.position = match dto.waveform_position.as_str() {
+        "center" => WaveformPosition::Center,
+        "left" => WaveformPosition::Left,
+        other => return Err(bad_value("Waveform Current Position", other)),
+    };
+    dev.overview = match dto.overview_waveform.as_str() {
+        "half" => OverviewWaveform::Half,
+        "full" => OverviewWaveform::Full,
+        other => return Err(bad_value("Type of the Overview Waveform", other)),
+    };
+    dev.key_display = match dto.key_display.as_str() {
+        "classic" => KeyDisplay::Classic,
+        "alphanumeric" => KeyDisplay::Alphanumeric,
+        other => return Err(bad_value("Key display format", other)),
+    };
+    Ok(dev)
+}
+
+/// Gives a stick that has no `DEVSETTING.DAT` the defaults, after an export
+/// has put the rest of the layout there. A stick that has one keeps it.
+/// Called from inside `export_playlist`'s `blocking` closure, which is
+/// `spawn_blocking` with a name; never from the async thread.
+pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()> {
+    let current = rbl_devices::settings::read(mount);
+    if current.dev.is_some() {
+        return Ok(());
+    }
+    let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current };
+    rbl_devices::settings::write(mount, &next)
+        .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
+}
+
 fn bad_value(field: &str, value: &str) -> AppError {
     AppError::new(ErrorKind::Malformed, format!("{field}: {value:?} is not a choice."))
 }
@@ -281,5 +369,55 @@ mod tests {
         let mut dto = to_dto(&stick);
         dto.waveform_color = "plaid".to_owned();
         assert!(apply(&stick, &dto).is_err());
+    }
+
+    fn defaults() -> StickDefaultsDto {
+        StickDefaultsDto {
+            waveform_color: "rgb".to_owned(),
+            waveform_position: "left".to_owned(),
+            overview_waveform: "full".to_owned(),
+            key_display: "alphanumeric".to_owned(),
+            categories: None,
+            sorts: None,
+            sub_column: Some(5),
+        }
+    }
+
+    #[test]
+    fn a_fresh_stick_is_given_a_devsetting_and_a_stick_with_one_keeps_it() {
+        let stick = tempfile::tempdir().unwrap();
+        // perf-ok: a test's fixture, not a command.
+        std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
+
+        write_dev_defaults(stick.path(), &defaults()).unwrap();
+        let read = rbl_devices::settings::read(stick.path());
+        let dev = read.dev.expect("the file was written");
+        assert_eq!(dev.color, WaveformColor::Rgb);
+        assert_eq!(dev.position, WaveformPosition::Left);
+        assert_eq!(dev.overview, OverviewWaveform::Full);
+        assert_eq!(dev.key_display, KeyDisplay::Alphanumeric);
+
+        // A second export with other choices leaves the stick's own file alone.
+        let mut other = defaults();
+        other.waveform_color = "blue".to_owned();
+        write_dev_defaults(stick.path(), &other).unwrap();
+        assert_eq!(rbl_devices::settings::read(stick.path()).dev.unwrap().color, WaveformColor::Rgb);
+    }
+
+    #[test]
+    fn the_library_defaults_start_from_the_reference_rows() {
+        let library = library_defaults(&defaults());
+        assert_eq!(library.categories.len(), StickSettings::default().categories.len());
+        assert_eq!(library.sub_column, Some(5));
+
+        let mut with_rows = defaults();
+        with_rows.categories = Some(vec![MenuSlotDto {
+            id: 1, menu_item: 1, name: "GENRE".to_owned(), seq: 1, visible: true,
+        }]);
+        assert_eq!(library_defaults(&with_rows).categories.len(), 1);
+
+        let mut bad = defaults();
+        bad.key_display = "roman".to_owned();
+        assert!(dev_defaults(&bad).is_err());
     }
 }

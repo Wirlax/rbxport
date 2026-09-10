@@ -238,7 +238,18 @@ export interface Backend {
    * destination that already holds one of our exports is synced rather than
    * rewritten.
    */
-  exportPlaylist(playlistId: string, destination?: string): Promise<ExportReport | null>;
+  exportPlaylist(
+    playlistId: string,
+    destination?: string,
+    /** What a stick with no settings of its own is given; see `StickDefaults`. */
+    defaults?: StickDefaults,
+  ): Promise<ExportReport | null>;
+
+  /**
+   * rekordbox's reference browse categories and sort options: what a
+   * fresh export writes when the Preferences window has not changed them.
+   */
+  referenceStickSettings(): Promise<ReferenceStickSettings>;
 
   /** A track's phrase structure, empty when it has no `PSSI` tag. */
   trackPhrases(trackId: string): Promise<Phrase[]>;
@@ -367,6 +378,16 @@ export interface Backend {
    * there is no picker, so it resolves to `null` immediately.
    */
   relocateTrack(trackId: string): Promise<string | null>;
+
+  /**
+   * Points every missing track at a file of the same name found under one
+   * of `folders`, searched in order. A track whose name is found nowhere
+   * is left missing.
+   */
+  autoRelocate(folders: string[]): Promise<RelocateReport>;
+
+  /** Opens a folder picker; null when it is cancelled. */
+  pickFolder(title: string): Promise<string | null>;
 
   /**
    * The values the track filter bar can offer for a list: which whole BPMs
@@ -624,6 +645,15 @@ export interface ImportReport {
   imported: number;
   /** One line per file that was not imported, saying why. */
   skipped: string[];
+  /** The tracks that landed, so they can be queued for analysis. */
+  tracks: { id: string; title: string }[];
+}
+
+/** What an automatic relocate did. */
+export interface RelocateReport {
+  relocated: number;
+  /** Missing tracks whose file name was found in none of the folders. */
+  unresolved: number;
 }
 
 /** A track whose audio file is no longer where the library says. */
@@ -825,6 +855,27 @@ export type WaveformColor = "blue" | "rgb" | "3band";
 export type WaveformPosition = "center" | "left";
 export type OverviewWaveform = "half" | "full";
 export type KeyDisplay = "classic" | "alphanumeric";
+
+/** The reference rows a fresh stick's `exportLibrary.db` starts from. */
+export interface ReferenceStickSettings {
+  categories: MenuSlot[];
+  sorts: MenuSlot[];
+}
+
+/**
+ * What a stick gets on its first export: the Preferences window's DJ System
+ * pane. `categories` and `sorts` replace the reference rows; `subColumn`
+ * is the sort option shown beside the track name, or null for none.
+ */
+export interface StickDefaults {
+  waveformColor: WaveformColor;
+  waveformPosition: WaveformPosition;
+  overviewWaveform: OverviewWaveform;
+  keyDisplay: KeyDisplay;
+  categories: MenuSlot[] | null;
+  sorts: MenuSlot[] | null;
+  subColumn: number | null;
+}
 
 /** Everything the device tabs read and write. A few kilobytes. */
 export interface DeviceSettings {

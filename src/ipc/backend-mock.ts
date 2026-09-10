@@ -231,6 +231,12 @@ const PLAYLISTS = [
   "Special", "HOUSE CLASSIC", "TRIODE",
 ];
 
+/** How many tracks a mock playlist holds, from its id, so every path agrees. */
+function mockPlaylistSize(id: string): number {
+  const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return 14 + (seed % 30);
+}
+
 function makeTree(): TreeNode[] {
   const nodes: TreeNode[] = [
     { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
@@ -243,7 +249,9 @@ function makeTree(): TreeNode[] {
     const take = fi === 0 ? 3 : PLAYLISTS.length - 3;
     for (let i = 0; i < take; i++) {
       const name = PLAYLISTS[n++ % PLAYLISTS.length] ?? "";
-      nodes.push({ id: `pl-${fi}-${i}`, name, kind: "playlist", depth: 2 });
+      const id = `pl-${fi}-${i}`;
+      // The count the real tree carries, from the same seed `openView` uses.
+      nodes.push({ id, name, kind: "playlist", depth: 2, childCount: mockPlaylistSize(id) });
     }
   }
   // Histories, filed as rekordbox files them: a folder per year, one per month
@@ -422,10 +430,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   /** How many tracks a playlist holds — the same count `openView` shows. */
-  const playlistSize = (id: string): number => {
-    const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
-    return 14 + (seed % 30);
-  };
+  const playlistSize = mockPlaylistSize;
 
   const edits: Edits = {
     createPlaylist: (name, parent) => {
@@ -942,7 +947,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No filesystem in a browser, so nothing is written — but the counts are
     // answered so the device panel's reporting can be driven end to end.
-    exportPlaylist: (playlistId, destination) => {
+    exportPlaylist: (playlistId, destination, defaults) => {
       if (destination === undefined) return wait(null);
       const device = devices.find((d) => d.path === destination);
       const tracks = playlistSize(playlistId);
@@ -955,10 +960,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           ours: true,
           written: "2026-09-08 00:30:00.000 +00:00",
         };
-        // The export writes a library, which is what the tabs need.
+        // The export writes a library, which is what the tabs need. A stick
+        // that had none takes the Preferences window's defaults, as the
+        // real export does; one that had its own keeps them.
         const settings = settingsOf(device.path);
+        const fresh = !settings.hasLibrarySettings && defaults !== undefined;
         deviceSettings.set(device.path, {
           ...settings,
+          ...(fresh
+            ? {
+                hasDevSetting: true,
+                waveformColor: defaults.waveformColor,
+                waveformPosition: defaults.waveformPosition,
+                overviewWaveform: defaults.overviewWaveform,
+                keyDisplay: defaults.keyDisplay,
+                categories: defaults.categories ?? settings.categories,
+                sorts: defaults.sorts ?? settings.sorts,
+                subColumn: defaults.subColumn,
+              }
+            : {}),
           hasDeviceLibrary: true,
           hasOneLibrary: true,
           hasLibrarySettings: true,
@@ -1177,6 +1197,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),
     relocateTrack: () => wait(null),
+    // No files behind the rows, so nothing is missing and nothing moves.
+    autoRelocate: () => wait({ relocated: 0, unresolved: 0 }),
+    // No dialogs in a browser: the folder is a fixed one, so the search
+    // folders list can be driven end to end.
+    pickFolder: () => wait("/Users/mock/Music/Moved"),
+    referenceStickSettings: () => {
+      const reference = referenceDeviceSettings("", false);
+      return wait({ categories: reference.categories, sorts: reference.sorts });
+    },
 
     // The device tabs. Held per stick so a change survives switching tabs
     // and devices, the way a written file would.

@@ -217,3 +217,35 @@ fn an_export_carries_a_readable_export_library_beside_the_pdb() {
     assert!(audio.starts_with("/Contents/"), "{audio}");
     assert!(dir.path().join(audio.trim_start_matches('/')).exists(), "{audio} is not on the stick");
 }
+
+#[test]
+fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
+    use rbl_onelibrary::settings::StickSettings;
+
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
+
+    // The Preferences window's choices: GENRE turned on as the first
+    // category, and BPM as the column beside the title.
+    let mut defaults = StickSettings::default();
+    let genre = defaults.categories.iter_mut().find(|c| c.name == "GENRE").unwrap();
+    genre.visible = true;
+    genre.seq = 1;
+    defaults.sub_column = Some(5);
+
+    rbl_export::export_with(dest.path(), &tracks, &[], Some(&defaults)).unwrap();
+    let db = dest.path().join("PIONEER/rekordbox/exportLibrary.db");
+    let written = StickSettings::read(&db).unwrap();
+    assert!(written.categories.iter().find(|c| c.name == "GENRE").unwrap().visible);
+    assert_eq!(written.sub_column, Some(5));
+
+    // A second export with different defaults changes nothing: the stick's
+    // settings are its own now.
+    let mut other = StickSettings::default();
+    other.sub_column = Some(2);
+    rbl_export::export_with(dest.path(), &tracks, &[], Some(&other)).unwrap();
+    let kept = StickSettings::read(&db).unwrap();
+    assert_eq!(kept.sub_column, Some(5));
+    assert!(kept.categories.iter().find(|c| c.name == "GENRE").unwrap().visible);
+}

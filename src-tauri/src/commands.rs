@@ -479,7 +479,7 @@ pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
 }
 
 /// Re-reads the library and returns the new generation.
-async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
+pub(crate) async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
     let generation = blocking("reload", move || {
         let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
         let db_version = db.schema().db_version;
@@ -545,6 +545,9 @@ pub async fn export_playlist(
     state: State<'_, Arc<AppState>>,
     playlist: String,
     destination: String,
+    // What a stick with no settings of its own is given; see the DJ System
+    // pane. A stick that has settings keeps them.
+    defaults: Option<crate::device_settings::StickDefaultsDto>,
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
@@ -599,12 +602,17 @@ pub async fn export_playlist(
             name,
             track_indices: (0..tracks.len()).collect(),
         };
-        let report = rbl_export::export(
+        let library_defaults = defaults.as_ref().map(crate::device_settings::library_defaults);
+        let report = rbl_export::export_with(
             std::path::Path::new(&destination),
             &tracks,
             std::slice::from_ref(&source_playlist),
+            library_defaults.as_ref(),
         )
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        if let Some(defaults) = &defaults {
+            crate::device_settings::write_dev_defaults(std::path::Path::new(&destination), defaults)?;
+        }
 
         // Re-read what was written with the independent parser: an export that
         // cannot be read back is not an export.
@@ -1251,16 +1259,27 @@ pub async fn import_files(
         let mut writer = rbl_db::write::Writer::open(location, backup_dir()).map_err(write_error)?;
         let mut imported = 0_u32;
         let mut skipped = Vec::new();
+        let mut tracks = Vec::new();
         for path in &paths {
-            match writer.import_file(std::path::Path::new(path)) {
-                Ok(_) => imported += 1,
+            let file = std::path::Path::new(path);
+            match writer.import_file(file) {
+                Ok(id) => {
+                    imported += 1;
+                    tracks.push(crate::dto::ImportedTrackDto {
+                        id,
+                        title: file
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    });
+                }
                 Err(rbl_db::DbError::WriteRefused(reason)) => {
                     skipped.push(format!("{path}: {reason}"));
                 }
                 Err(other) => return Err(write_error(other)),
             }
         }
-        Ok(ImportReportDto { imported, skipped })
+        Ok(ImportReportDto { imported, skipped, tracks })
     })
     .await?;
 
