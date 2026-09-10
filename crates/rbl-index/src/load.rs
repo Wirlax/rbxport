@@ -10,7 +10,7 @@ use std::time::Instant;
 use rbl_db::Library as Db;
 use rusqlite::Connection;
 
-use crate::{Cue, strings::StrColumn, Library, Playlists, Row, NO_ID};
+use crate::{strings::StrColumn, Cue, Cues, Library, Playlists, Row, NO_ID};
 
 /// Converts a REAL to an integer without a lossy cast: NaN becomes 0 and
 /// out-of-range values saturate.
@@ -243,30 +243,56 @@ fn load_cues(
     // the index wants each track's cues contiguous.
     let mut per_track: Vec<Vec<Cue>> = vec![Vec::new(); tracks];
 
-    let mut stmt = conn.prepare(
-        "SELECT ContentID, Kind, InMsec FROM djmdCue WHERE rb_local_deleted = 0",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT ContentID, {CUE_COLUMNS} FROM djmdCue WHERE rb_local_deleted = 0"
+    ))?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let Some(content): Option<String> = r.get(0)? else { continue };
         let Ok(key) = content.parse::<u64>() else { continue };
         let Some(&row) = content_row.get(&key) else { continue };
-        let kind = u8::try_from(num(r, 1)?).unwrap_or(0);
-        let position_ms = u32::try_from(num(r, 2)?.max(0)).unwrap_or(0);
         if let Some(list) = per_track.get_mut(row as usize) {
-            list.push(Cue { position_ms, kind });
+            list.push(read_cue(r, 1)?);
         }
     }
+    lib.set_cues(Cues::from_per_track(per_track));
+    Ok(())
+}
 
-    lib.cue_index = Vec::with_capacity(tracks + 1);
-    lib.cues = Vec::with_capacity(per_track.iter().map(Vec::len).sum());
-    for list in &mut per_track {
-        lib.cue_index.push(u32::try_from(lib.cues.len()).unwrap_or(u32::MAX));
-        list.sort_by_key(|c| (c.position_ms, c.kind));
-        lib.cues.append(list);
-    }
-    // One past the end, so the last track's slice has a bound.
-    lib.cue_index.push(u32::try_from(lib.cues.len()).unwrap_or(u32::MAX));
+/// The columns a cue is read from, after whatever names its track.
+const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec";
+
+/// One cue from a row whose [`CUE_COLUMNS`] start at `first`.
+fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
+    // An id that is not a number under 2^32 — none in the reference library
+    // is — reads as 0, which the interface shows but will not edit.
+    let id = r
+        .get::<_, Option<String>>(first)?
+        .and_then(|text| text.parse::<u32>().ok())
+        .unwrap_or(0);
+    let kind = u8::try_from(num(r, first + 1)?).unwrap_or(0);
+    let position_ms = u32::try_from(num(r, first + 2)?.max(0)).unwrap_or(0);
+    // -1 or NULL on a plain cue; `num` reads NULL as 0 and the max folds -1
+    // into it.
+    let out_ms = u32::try_from(num(r, first + 3)?.max(0)).unwrap_or(0);
+    Ok(Cue { id, position_ms, out_ms, kind })
+}
+
+/// Re-reads one track's cues after an edit, leaving everything else in place.
+///
+/// One indexed query — `djmdCue` carries an index on `(ContentID,
+/// rb_local_deleted)` in the reference library [OBS], and the read measured
+/// 0.6 ms there against 233 ms for a full reload. A track the index does not
+/// hold is left alone rather than reported: its cues have nowhere to go.
+pub fn reload_cues_of(db: &Db, library: &Library, track_id: &str) -> rusqlite::Result<()> {
+    let Some(row) = library.row_of(track_id) else { return Ok(()) };
+    let mut stmt = db.connection().prepare(&format!(
+        "SELECT {CUE_COLUMNS} FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0"
+    ))?;
+    let cues = stmt
+        .query_map([track_id], |r| read_cue(r, 0))?
+        .collect::<rusqlite::Result<Vec<Cue>>>()?;
+    library.set_cues_of(row, cues);
     Ok(())
 }
 

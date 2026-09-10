@@ -4,6 +4,8 @@
 //!
 //! - `djmdContent.ID` — a decimal string, largest seen 268,438,243.
 //! - `djmdPlaylist.ID` — a decimal string, largest seen 4,290,236,987.
+//! - `djmdCue.ID` — a decimal string too, largest seen 4,294,966,064 [OBS]
+//!   across all 1,041,056 rows; not one is a UUID.
 //! - `djmdSongPlaylist.ID` and every `UUID` column — a version 4 UUID.
 //!
 //! A generated id is always checked against the table before it is used, so
@@ -27,6 +29,10 @@ pub const MAX_CONTENT_ID: u64 = 1 << 28;
 
 /// `djmdPlaylist.ID` values run to just under 2^32.
 pub const MAX_PLAYLIST_ID: u64 = 1 << 32;
+
+/// `djmdCue.ID` values run to just under 2^32 as well, and the index keeps a
+/// cue's id as a `u32` on the strength of it.
+pub const MAX_CUE_ID: u64 = 1 << 32;
 
 /// xorshift64*, seeded from the clock. Small, fast, and adequate: every id it
 /// produces is checked for collision before use.

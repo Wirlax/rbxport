@@ -192,7 +192,7 @@ fn hot_cue_letters_follow_rekordbox_s_kind_numbering() {
     use rbl_index::Cue;
     // 1,2,3 then 5 — kind 4 is unused, which is why D is 5. Counted across all
     // 1,040,598 cues in the reference library.
-    let letter = |kind: u8| Cue { position_ms: 0, kind }.hot_letter();
+    let letter = |kind: u8| Cue { kind, ..Cue::default() }.hot_letter();
     assert_eq!(letter(0), None, "kind 0 is a memory cue");
     assert_eq!(letter(1), Some('A'));
     assert_eq!(letter(2), Some('B'));
@@ -209,10 +209,24 @@ fn hot_cue_letters_follow_rekordbox_s_kind_numbering() {
 }
 
 #[test]
+fn a_letter_round_trips_through_the_kind_it_is_stored_as() {
+    use rbl_index::Cue;
+    for letter in 'A'..='P' {
+        let kind = Cue::kind_of_letter(letter).expect("a slot rekordbox has");
+        assert_ne!(kind, 4, "kind 4 is unused");
+        assert_eq!(Cue { kind, ..Cue::default() }.hot_letter(), Some(letter));
+    }
+    assert_eq!(Cue::kind_of_letter('a'), Some(1), "case does not matter");
+    assert_eq!(Cue::kind_of_letter('Q'), None, "rekordbox 7 stops at P");
+    assert_eq!(Cue::kind_of_letter('1'), None);
+    assert_eq!(Cue::kind_of_letter('é'), None);
+}
+
+#[test]
 fn a_memory_cue_is_distinguishable_from_a_hot_one() {
     use rbl_index::Cue;
-    assert!(Cue { position_ms: 0, kind: 0 }.is_memory());
-    assert!(!Cue { position_ms: 0, kind: 1 }.is_memory());
+    assert!(Cue { kind: 0, ..Cue::default() }.is_memory());
+    assert!(!Cue { kind: 1, ..Cue::default() }.is_memory());
 }
 
 #[test]

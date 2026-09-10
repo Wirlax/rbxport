@@ -45,14 +45,14 @@
 //!
 //! # What this deliberately will not do
 //!
-//! Analysis registration (`Analysed`, `AnalysisUpdated`), loop cues, custom
-//! cue colours, and `contentCue`/`contentFile` are **not implemented**. Their
+//! Analysis registration (`Analysed`, `AnalysisUpdated`), custom cue
+//! colours, and `contentCue`/`contentFile` are **not implemented**. Their
 //! values are still unexplained, and a wrong one in a 38,681-track collection
 //! is not recoverable by undo. See [`Unsupported`].
 
 use std::path::{Path, PathBuf};
 
-use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_PLAYLIST_ID};
+use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_CUE_ID, MAX_PLAYLIST_ID};
 use rbl_core::time;
 use rusqlite::types::Value;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -542,7 +542,10 @@ impl Writer {
             )));
         }
         self.prepare()?;
-        let id = self.rng.uuid4();
+        // A decimal id like rekordbox's own, not a UUID: every one of the
+        // library's 1,041,056 cue ids is a number under 2^32, and the index
+        // holds them as such.
+        let id = self.unused_id_below("djmdCue", MAX_CUE_ID)?;
         let uuid = self.rng.uuid4();
         let stamp = time::now();
         let memory = kind == 0;
@@ -647,6 +650,27 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    /// The track a live cue belongs to, or `None` for a cue that is not there.
+    ///
+    /// A read, so nothing is prepared or gated: a caller that is about to move
+    /// or delete a cue needs to know whose cues to re-read afterwards, and the
+    /// cue's own id is all the interface holds.
+    pub fn cue_owner(&self, cue: &str) -> Result<Option<String>> {
+        let owner = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT ContentID FROM djmdCue WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![cue],
+                |r| r.get::<_, Option<String>>(0),
+            );
+        match owner {
+            Ok(content) => Ok(content),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Soft-deletes a cue.

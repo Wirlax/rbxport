@@ -18,7 +18,7 @@ pub mod testing;
 mod load;
 mod view;
 
-pub use load::{content_version, load, reload_playlists, LoadStats};
+pub use load::{content_version, load, reload_cues_of, reload_playlists, LoadStats};
 pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};
@@ -83,11 +83,13 @@ pub struct Library {
     /// Row index by track id. Built on first lookup, not at load.
     by_id: OnceLock<HashMap<u64, Row>>,
 
-    /// Every cue, grouped by track and ordered by position.
-    pub(crate) cues: Vec<Cue>,
-    /// Where each track's cues start in `cues`; one longer than the track
-    /// count, so a track's slice is `[cue_index[row], cue_index[row + 1])`.
-    pub(crate) cue_index: Vec<u32>,
+    /// Every cue, grouped by track.
+    ///
+    /// Behind a lock for the same reason the playlists are: a cue edit changes
+    /// one track's cues and nothing else, and re-reading one track's rows
+    /// costs 0.6 ms on the reference library [OBS] — `djmdCue` is indexed on
+    /// `(ContentID, rb_local_deleted)` — against 233 ms for a full reload.
+    cues: RwLock<Cues>,
 
     /// Per-column collation ranks; `ranks[col][row]` orders rows without
     /// touching strings during a sort.
@@ -103,12 +105,87 @@ pub struct Library {
 /// to H, and 10 to 17 are I to P — rekordbox 7 has sixteen. Kind 4 is unused,
 /// which is why D is 5. Counted across all 1,040,598 cues in the reference
 /// library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Cue {
+    /// `djmdCue.ID` parsed. Every id in the reference library is a decimal
+    /// under 2^32 [OBS], so a `u32` holds them all; one that does not parse
+    /// is kept as 0, which the interface treats as a cue it cannot edit.
+    pub id: u32,
     /// Milliseconds from the start of the track.
     pub position_ms: u32,
+    /// Where a loop ends, or 0 for a plain cue. `OutMsec` is -1 or NULL on
+    /// every cue that is not a loop [OBS], and a loop cannot end at 0.
+    pub out_ms: u32,
     /// `djmdCue.Kind`, raw. Use [`Cue::hot_letter`] to read it.
     pub kind: u8,
+}
+
+/// Every cue, grouped by track and ordered by position within each.
+#[derive(Debug, Default)]
+pub struct Cues {
+    cues: Vec<Cue>,
+    /// Where each track's cues start in `cues`; one longer than the track
+    /// count, so a track's slice is `[index[row], index[row + 1])`. Empty
+    /// until the first track's cues are set, and `of` reads that as none.
+    index: Vec<u32>,
+}
+
+impl Cues {
+    /// Builds the table from one list per track, in row order.
+    pub(crate) fn from_per_track(mut per_track: Vec<Vec<Cue>>) -> Self {
+        let mut index = Vec::with_capacity(per_track.len() + 1);
+        let mut cues = Vec::with_capacity(per_track.iter().map(Vec::len).sum());
+        for list in &mut per_track {
+            index.push(u32::try_from(cues.len()).unwrap_or(u32::MAX));
+            list.sort_by_key(|c| (c.position_ms, c.kind));
+            cues.append(list);
+        }
+        // One past the end, so the last track's slice has a bound.
+        index.push(u32::try_from(cues.len()).unwrap_or(u32::MAX));
+        Self { cues, index }
+    }
+
+    /// A track's cues, ordered by position.
+    pub fn of(&self, row: Row) -> &[Cue] {
+        let start = self.index.get(row as usize).copied().unwrap_or(0) as usize;
+        let end = self.index.get(row as usize + 1).copied().unwrap_or(0) as usize;
+        self.cues.get(start..end).unwrap_or(&[])
+    }
+
+    /// Replaces one track's cues, leaving every other track's where they are.
+    ///
+    /// A splice rather than a rebuild: the tail moves by the difference in
+    /// length, which for 308,628 cues of 16 bytes is a memmove of at most 5
+    /// MB — well under a millisecond, and far less than re-reading the table.
+    /// `tracks` sizes the index the first time a library built without cues
+    /// gets one.
+    pub fn replace(&mut self, row: Row, tracks: usize, mut cues: Vec<Cue>) {
+        if self.index.len() < tracks + 1 {
+            let end = u32::try_from(self.cues.len()).unwrap_or(u32::MAX);
+            self.index.resize(tracks + 1, end);
+        }
+        let Some(&start) = self.index.get(row as usize) else { return };
+        let Some(&end) = self.index.get(row as usize + 1) else { return };
+        let (start, end) = (start as usize, end as usize);
+        if end < start || end > self.cues.len() {
+            return;
+        }
+        cues.sort_by_key(|c| (c.position_ms, c.kind));
+        let grew = i64::try_from(cues.len()).unwrap_or(0) - i64::try_from(end - start).unwrap_or(0);
+        self.cues.splice(start..end, cues);
+        for later in self.index.iter_mut().skip(row as usize + 1) {
+            let shifted = i64::from(*later) + grew;
+            *later = u32::try_from(shifted).unwrap_or(u32::MAX);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.cues.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cues.is_empty()
+    }
 }
 
 impl Cue {
@@ -131,6 +208,23 @@ impl Cue {
     pub const fn is_memory(&self) -> bool {
         self.kind == 0
     }
+
+    /// The `Kind` a hot-cue letter is stored as: the inverse of
+    /// [`Cue::hot_letter`]. `None` for anything past `P`, or not a letter.
+    #[must_use]
+    pub fn kind_of_letter(letter: char) -> Option<u8> {
+        let slot = u8::try_from(u32::from(letter.to_ascii_uppercase()).checked_sub(u32::from(b'A'))?).ok()?;
+        match slot {
+            // A to C are 1 to 3; 4 is unused, so D and everything after it
+            // sit one higher.
+            0..=2 => Some(slot + 1),
+            3..=15 => Some(slot + 2),
+            _ => None,
+        }
+    }
+
+    /// `Kind` 0: a memory cue.
+    pub const MEMORY: u8 = 0;
 }
 
 /// A tree of named lists of tracks.
@@ -188,10 +282,27 @@ impl Library {
     }
 
     /// A track's cues, ordered by position.
-    pub fn cues_of(&self, row: Row) -> &[Cue] {
-        let start = self.cue_index.get(row as usize).copied().unwrap_or(0) as usize;
-        let end = self.cue_index.get(row as usize + 1).copied().unwrap_or(0) as usize;
-        self.cues.get(start..end).unwrap_or(&[])
+    ///
+    /// A copy, because the table is behind a lock and a track's cues are a
+    /// handful of 16-byte values: copying them is cheaper than holding a
+    /// guard across whatever the caller does next.
+    pub fn cues_of(&self, row: Row) -> Vec<Cue> {
+        self.cues.read().of(row).to_vec()
+    }
+
+    /// Reads the cue table. The guard is held only for the read.
+    pub fn cues(&self) -> parking_lot::RwLockReadGuard<'_, Cues> {
+        self.cues.read()
+    }
+
+    /// Swaps in one track's freshly-read cues, leaving every other track's
+    /// and all the track columns alone.
+    pub fn set_cues_of(&self, row: Row, cues: Vec<Cue>) {
+        self.cues.write().replace(row, self.count, cues);
+    }
+
+    pub(crate) fn set_cues(&mut self, cues: Cues) {
+        *self.cues.write() = cues;
     }
 
     /// The share-relative artwork path for a track's display id, if it has one.
@@ -291,9 +402,13 @@ impl Library {
         let interners = self.artists.heap_bytes() + self.albums.heap_bytes()
             + self.genres.heap_bytes() + self.labels.heap_bytes() + self.keys.heap_bytes();
         let ranks: usize = self.ranks.iter().map(|r| r.capacity() * 4).sum();
+        let cues = {
+            let table = self.cues();
+            table.cues.capacity() * std::mem::size_of::<Cue>() + table.index.capacity() * 4
+        };
         let playlists = self.playlists().ids.capacity() * 8
             + self.playlists().names.heap_bytes()
             + self.playlists().members.iter().map(|m| m.capacity() * 4).sum::<usize>();
-        vecs + strings + interners + ranks + playlists
+        vecs + strings + interners + ranks + cues + playlists
     }
 }

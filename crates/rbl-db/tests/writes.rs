@@ -788,6 +788,29 @@ fn every_hot_cue_slot_rekordbox_uses_can_be_written() {
 }
 
 #[test]
+fn a_cue_id_is_a_number_under_2_to_the_32_like_rekordbox_s_own() {
+    // Every one of the reference library's 1,041,056 cue ids is a decimal
+    // string, the largest 4,294,966,064, and not one is a UUID. The index
+    // keeps them as u32, so a UUID here would be a cue that cannot be edited.
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(0), 0, 1_000).unwrap();
+    let value: u64 = id.parse().expect("a decimal id");
+    assert!(value > 0 && value < (1 << 32), "{id}");
+    let looped = f.writer.add_loop(&track_id(0), 0, 2_000, 4_000, 4).unwrap();
+    assert!(looped.parse::<u32>().is_ok(), "{looped}");
+}
+
+#[test]
+fn a_cue_knows_its_track_until_it_is_deleted() {
+    let mut f = fixture();
+    let id = f.writer.add_cue(&track_id(4), 0, 1_000).unwrap();
+    assert_eq!(f.writer.cue_owner(&id).unwrap(), Some(track_id(4)));
+    assert_eq!(f.writer.cue_owner("no-such-cue").unwrap(), None);
+    f.writer.delete_cue(&id).unwrap();
+    assert_eq!(f.writer.cue_owner(&id).unwrap(), None, "a deleted cue has no owner to report");
+}
+
+#[test]
 fn a_custom_cue_colour_is_still_refused() {
     // What RGB an index past the default means is unknown.
     let DbError::WriteRefused(reason) = Writer::refuse(Unsupported::CueColour) else {
