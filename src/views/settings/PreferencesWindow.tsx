@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { LibrarySummary } from "@/ipc/types";
+import { useLimiter } from "@/store/useLimiter";
+import { useMaster } from "@/store/useMaster";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { asPane, Preferences, type Pane } from "./Preferences";
 
@@ -23,6 +25,10 @@ export function PreferencesWindow() {
   const store = usePreferencesStore();
   const [pane, setPane] = useState<Pane>(() => paneFromHash(window.location.hash));
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
+  // The limiter is the engine's, so this window reads and sets it the same
+  // way the shell does, and its meter ticks arrive here as they do there.
+  const limiter = useLimiter();
+  const master = useMaster();
 
   // Turned to another pane by the shell while open: it sets the hash.
   useEffect(() => {
@@ -60,6 +66,9 @@ export function PreferencesWindow() {
       <Preferences
         windowed
         summary={summary}
+        limiter={limiter.limiter}
+        onLimiterChange={limiter.set}
+        reduction={master.reduction}
         initialPane={pane}
         onResetColumns={() => ask("columns")}
         onResetLayout={() => ask("layout")}
