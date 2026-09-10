@@ -13,6 +13,7 @@
 //!   into `sort_unstable_by_key` over `u32`s.
 
 pub mod cache;
+pub mod folder;
 pub mod strings;
 pub mod testing;
 mod filter;
@@ -86,6 +87,9 @@ pub struct Library {
 
     /// Row index by track id. Built on first lookup, not at load.
     by_id: OnceLock<HashMap<u64, Row>>,
+    /// Rows by a hash of the file path, for the Explorer. Built on the first
+    /// folder opened, so a session that never opens one never pays for it.
+    by_path: OnceLock<HashMap<u64, Vec<Row>>>,
 
     /// Every cue, grouped by track.
     ///
@@ -349,7 +353,14 @@ impl Library {
     ///
     /// `folder_path` is already absolute in the reference library — it is the
     /// file's own location, not a share-relative one like the artwork.
-    pub fn audio_path_of(&self, display_id: &str) -> Option<&str> {
+    ///
+    /// A loose file's id — the Explorer's `file:` prefix on a path — answers
+    /// with that path, so a deck can play a file the library does not hold
+    /// through the same call it plays everything else with.
+    pub fn audio_path_of<'a>(&'a self, display_id: &'a str) -> Option<&'a str> {
+        if let Some(loose) = display_id.strip_prefix(folder::LOOSE_PREFIX) {
+            return Some(loose);
+        }
         let wanted: u64 = display_id.parse().ok()?;
         let row = *self.row_by_id().get(&wanted)?;
         Some(self.folder_path.get(row as usize))

@@ -134,7 +134,7 @@ impl Library {
         }
     }
 
-    fn row_matches(&self, row: Row, folded_query: &str) -> bool {
+    pub(crate) fn row_matches(&self, row: Row, folded_query: &str) -> bool {
         let hay = self.search.get(row as usize);
         // Every token must appear, so "artbat 128" narrows as a user expects.
         folded_query.split_whitespace().all(|token| {

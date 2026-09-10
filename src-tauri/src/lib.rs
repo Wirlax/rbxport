@@ -5,6 +5,7 @@ mod windowfit;
 mod commands;
 mod cues;
 mod diagnostics;
+mod explorer;
 mod link;
 pub mod menu;
 mod player;
@@ -353,6 +354,8 @@ pub fn run() {
             commands::filter_values,
             device_settings::device_settings,
             device_settings::save_device_settings,
+            explorer::explorer_roots,
+            explorer::explorer_children,
         ])
         .build(tauri::generate_context!());
 

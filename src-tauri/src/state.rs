@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use rbl_index::folder::FolderView;
 use rbl_index::{BpmFilter, Library, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES};
 
 use crate::dto::{cue_colour_css, RowCueDto, RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
@@ -30,6 +31,8 @@ struct Inner {
     db_version: Option<i64>,
     load_ms: u64,
     views: HashMap<u32, Arc<View>>,
+    /// The Explorer's views, under the same ids and the same eviction.
+    folders: HashMap<u32, Arc<FolderView>>,
     /// Insertion order, for eviction.
     view_order: Vec<u32>,
     next_view_id: u32,
@@ -65,6 +68,7 @@ impl AppState {
         inner.db_version = db_version;
         inner.load_ms = load_ms;
         inner.views.clear();
+        inner.folders.clear();
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
     }
@@ -77,6 +81,7 @@ impl AppState {
     pub fn invalidate_views(&self) -> u32 {
         let mut inner = self.inner.write();
         inner.views.clear();
+        inner.folders.clear();
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
         inner.generation
@@ -117,16 +122,23 @@ impl AppState {
         let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
 
         let mut inner = self.inner.write();
-        let id = inner.next_view_id;
-        inner.next_view_id = inner.next_view_id.wrapping_add(1).max(1);
-        inner.views.insert(id, Arc::new(view));
-        inner.view_order.push(id);
-        while inner.view_order.len() > MAX_VIEWS {
-            let oldest = inner.view_order.remove(0);
-            inner.views.remove(&oldest);
-        }
+        let id = inner.register(Registered::Library(Arc::new(view)));
         let generation = inner.generation;
         Ok((id, len, generation))
+    }
+
+    /// Opens the Explorer's view of one folder; the same handle shape.
+    pub fn open_folder_view(&self, view: FolderView) -> (u32, u32, u32) {
+        let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
+        let mut inner = self.inner.write();
+        let id = inner.register(Registered::Folder(Arc::new(view)));
+        (id, len, inner.generation)
+    }
+
+    /// The folder view behind an id, or `None` when the id is a library view
+    /// or nothing at all.
+    pub fn folder_view(&self, view_id: u32) -> Option<Arc<FolderView>> {
+        self.inner.read().folders.get(&view_id).cloned()
     }
 
     pub fn view(&self, view_id: u32) -> AppResult<Arc<View>> {
@@ -134,6 +146,36 @@ impl AppState {
             AppError::new(ErrorKind::NotFound, "That list is no longer open. Reselect it to continue.")
                 .with_detail(format!("view {view_id} was evicted or never existed"))
         })
+    }
+}
+
+/// A view of either kind, on its way into the table.
+enum Registered {
+    Library(Arc<View>),
+    Folder(Arc<FolderView>),
+}
+
+impl Inner {
+    /// Hands out the next id and evicts the oldest view past the cap, whichever
+    /// kind it is.
+    fn register(&mut self, view: Registered) -> u32 {
+        let id = self.next_view_id;
+        self.next_view_id = self.next_view_id.wrapping_add(1).max(1);
+        match view {
+            Registered::Library(view) => {
+                self.views.insert(id, view);
+            }
+            Registered::Folder(view) => {
+                self.folders.insert(id, view);
+            }
+        }
+        self.view_order.push(id);
+        while self.view_order.len() > MAX_VIEWS {
+            let oldest = self.view_order.remove(0);
+            self.views.remove(&oldest);
+            self.folders.remove(&oldest);
+        }
+        id
     }
 }
 
@@ -161,7 +203,10 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
     // erroring: a tree node can outlive what it points at, and a window of the
     // whole library is a better answer to that than a red bar.
     let source = match &dto.source {
-        TrackSourceDto::Collection => TrackSource::Collection,
+        // A folder never reaches the index: `open_view` opens one through
+        // `explorer::open_folder` before translating. The collection is what
+        // the sort and query here would apply to if it ever did.
+        TrackSourceDto::Collection | TrackSourceDto::Folder { .. } => TrackSource::Collection,
         TrackSourceDto::History { id } => id
             .parse::<u64>()
             .ok()
@@ -263,6 +308,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                     library.ids.get(index).copied().unwrap_or(0) % 360,
                 )
                 .unwrap_or(0),
+                file_name: library.file_name.get(index).to_owned(),
             }
         })
         .collect()

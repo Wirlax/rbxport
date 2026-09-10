@@ -3280,6 +3280,7 @@ dependencies = [
 name = "rbl-devices"
 version = "0.1.0"
 dependencies = [
+ "dirs 5.0.1",
  "rbl-anlz",
  "rbl-export",
  "rbl-onelibrary",

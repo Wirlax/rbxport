@@ -8,6 +8,7 @@
 //!   over USB, so it happens per device, on request, never in a loop.
 
 pub mod settings;
+pub mod explorer;
 
 use std::path::{Path, PathBuf};
 
@@ -60,7 +61,15 @@ pub fn list() -> Vec<Device> {
             .collect();
     }
 
-    let disks = sysinfo::Disks::new_with_refreshed_list();
+    devices_from(&sysinfo::Disks::new_with_refreshed_list())
+}
+
+/// The offerable volumes among what one refresh of the disk list found.
+///
+/// Split from [`list`] so the Explorer can name the system volume from the
+/// same refresh: one costs tens of milliseconds, and up to seconds while a
+/// card reader wakes [OBS].
+fn devices_from(disks: &sysinfo::Disks) -> Vec<Device> {
     let mut devices: Vec<Device> = disks
         .list()
         .iter()

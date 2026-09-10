@@ -36,6 +36,8 @@ pub struct RowDto {
     pub artwork_hue: u16,
     /// Whether `rbl://artwork/<id>` will serve anything for this track.
     pub has_artwork: bool,
+    /// The file's own name, for the Explorer's File Name column.
+    pub file_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +102,10 @@ pub enum TrackSourceDto {
     Playlist { id: String },
     #[serde(rename = "history")]
     History { id: String },
+    /// A folder on disk, for the Explorer. Empty for the section heading,
+    /// which lists nothing.
+    #[serde(rename = "folder")]
+    Folder { path: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -292,4 +298,26 @@ pub struct FilterValuesDto {
     pub bpms: Vec<CountedDto<u32>>,
     pub keys: Vec<CountedDto<String>>,
     pub tags: Vec<TagCategoryDto>,
+}
+
+/// One of the folders the Explorer starts from.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerRootDto {
+    /// What to show: `Music`, the user's name, `Macintosh HD`, a stick's name.
+    pub name: String,
+    pub path: String,
+}
+
+/// The folders directly under one folder.
+///
+/// Names only: the caller has the parent's path, and a thousand paths of a
+/// hundred bytes each would be past the response cap where a thousand names
+/// are not.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerChildrenDto {
+    pub names: Vec<String>,
+    /// True when the folder held more than the cap and the rest were left out.
+    pub truncated: bool,
 }

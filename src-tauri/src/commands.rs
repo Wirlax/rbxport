@@ -24,7 +24,7 @@ use crate::state::{rows_to_dto, spec_from_wire, AppState};
 
 /// Rows per request. The frontend asks a page at a time; this bound is what
 /// keeps a response inside the 64 KB cap.
-const MAX_ROWS: u32 = 128;
+pub(crate) const MAX_ROWS: u32 = 128;
 
 /// Beats returned for one track. A four-minute track at 128 BPM has about 500
 /// and a three-hour mix around 23,000; this bounds the response without
@@ -189,6 +189,11 @@ fn push_lists(
 #[tauri::command]
 pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> AppResult<ViewHandleDto> {
     let library = state.library()?;
+    // A folder is read from disk, not from the index, so it takes its own
+    // path before the source is translated.
+    if let crate::dto::TrackSourceDto::Folder { path } = &spec.source {
+        return crate::explorer::open_folder(&state, path.clone(), &spec).await;
+    }
     let parsed = spec_from_wire(&library, &spec);
     // Sorting and filtering happen here, so this is the one that must not run
     // on the async thread.
@@ -214,6 +219,9 @@ pub async fn fetch_rows(
         );
     }
     let library = state.library()?;
+    if let Some(folder) = state.folder_view(view_id) {
+        return crate::explorer::fetch_rows(library, folder, offset, len).await;
+    }
     let view = state.view(view_id)?;
     blocking("fetch_rows", move || {
         let offset = offset as usize;
@@ -231,6 +239,9 @@ pub async fn view_ids_in_range(
     to: u32,
 ) -> AppResult<Vec<String>> {
     let library = state.library()?;
+    if let Some(folder) = state.folder_view(view_id) {
+        return crate::explorer::ids_in_range(library, folder, from, to).await;
+    }
     let view = state.view(view_id)?;
     blocking("view_ids_in_range", move || {
         Ok(library
