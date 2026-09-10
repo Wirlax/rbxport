@@ -104,20 +104,22 @@ function Progress({ downloaded, total }: { downloaded: number; total: number | n
 export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateManagerProps) {
   const panel = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    panel.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const check = state.phase === "available" || state.phase === "downloading" ||
     state.phase === "installing" || (state.phase === "failed" && state.check)
     ? state.check
     : null;
   const busy = state.phase === "downloading" || state.phase === "installing";
+
+  // Escape closes as the close button does, so it is held back while the
+  // close button is: a download or install runs on with the window open.
+  useEffect(() => {
+    panel.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
 
   return (
     <div className={styles.backdrop} onMouseDown={busy ? undefined : onClose} role="presentation">
