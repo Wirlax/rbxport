@@ -28,6 +28,7 @@ import type { TrafficLightSource } from "@/lib/session";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
+import { setRowDragImage } from "./dragGhost";
 
 const ROW_H = 25; // --s-row-height
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
@@ -264,6 +265,10 @@ const TrackRow = memo(function TrackRow({
         e.dataTransfer.effectAllowed = "copy";
         // Firefox will not start a drag without payload.
         e.dataTransfer.setData("text/plain", row.id);
+        // A faded copy of the row travels with the hand, every time: the
+        // browser's own snapshot of a virtualised row does not — see
+        // `dragGhost.ts`.
+        setRowDragImage(e.currentTarget, e.dataTransfer, { x: e.clientX, y: e.clientY });
       }}
       // A drag that is let go over nothing still ends. Without this the tree
       // kept offering its playlists as targets afterwards.
