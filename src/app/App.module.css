@@ -51,6 +51,16 @@
   height: 100%;
   background: var(--c-black);
 }
+/* Each region on its own row, named rather than taken in turn. Full Browser
+   draws no deck block at all, and auto-placement then slid the body up into
+   the deck row — sized to its content — and the status bar into the body's,
+   leaving a status-bar-high black strip under it. Pinning the rows keeps the
+   deck row empty, and so zero, and the browser takes the whole of `1fr`. */
+.window > .decks { grid-row: 3; }
+.window > .body { grid-row: 4; }
+/* The status bar is the last child; Settings between them is fixed, so it
+   takes no row. */
+.window > :last-child { grid-row: 5; }
 
 /* The decks and the measured black gap under them. The gap is real and
    measured: the pad bar ends at 335pt and the track list starts at 338pt. A
