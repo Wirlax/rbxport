@@ -39,6 +39,12 @@ export const EjectIcon = (props: IconProps) => (
   </svg>
 );
 
+export const ExplorerIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <rect x="2.4" y="2.2" width="11.2" height="8.2" rx="1" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M0.4 11.7h15.2l-1.3 2.4H1.7z" fill="currentColor"/>
+  </svg>
+);
+
 export const FilterIcon = (props: IconProps) => (
   <svg viewBox="0 0 11 11" aria-hidden focusable="false" {...props}>
     <rect x="0.5" y="0" width="2" height="11" fill="currentColor"/><rect x="4.5" y="0" width="6" height="11" fill="currentColor"/>

@@ -1,0 +1,9 @@
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!-- A laptop, open: the screen outlined, the base a solid wedge under it.
+       Proportions measured from the Explorer button in the 9.10.55 PM
+       capture — the screen is roughly four wide to three high, the base a
+       little wider than the screen. -->
+  <rect x="2.4" y="2.2" width="11.2" height="8.2" rx="1" fill="none"
+        stroke="currentColor" stroke-width="1.4"/>
+  <path d="M0.4 11.7h15.2l-1.3 2.4H1.7z" fill="currentColor"/>
+</svg>

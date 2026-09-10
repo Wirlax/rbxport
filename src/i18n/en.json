@@ -95,7 +95,8 @@
     "Explorer": "Explorer",
     "Full Browser": "Full Browser",
     "Sub-Browser Window": "Sub-Browser Window",
-    "Tree View": "Tree View"
+    "Tree View": "Tree View",
+    "Display Explorer": "Display Explorer"
   },
   "rail": {
     "$comment": "The icon column at the right of the browser, top to bottom, with the tooltips german.lang gives them.",
