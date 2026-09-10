@@ -118,7 +118,10 @@
     "Call Next Memory Cue": "Call Next Memory Cue",
     "Delete Memory Cue": "Delete Memory Cue",
     "Show Memory Cues": "Show Memory Cues",
-    "Show Hot Cues": "Show Hot Cues"
+    "Show Hot Cues": "Show Hot Cues",
+    "Show INFO Panel": "Show INFO Panel",
+    "Switch MEMORY/HOT CUE/INFO.": "Switch MEMORY/HOT CUE/INFO.",
+    "INFO screen": "INFO screen"
   },
   "filter": {
     "Display/Hide Track Filter": "Display/Hide Track Filter",

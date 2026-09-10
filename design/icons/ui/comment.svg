@@ -1,0 +1,5 @@
+<svg viewBox="0 0 12 10" xmlns="http://www.w3.org/2000/svg">
+  <!-- A speech bubble: a rounded 12x7 body with the tail hanging from its
+       left, the proportions the deck's INFO tab draws its comment line with. -->
+  <path fill="currentColor" d="M2.2 0h7.6A2.2 2.2 0 0 1 12 2.2v2.6A2.2 2.2 0 0 1 9.8 7H6.1L2 10V7A2.2 2.2 0 0 1 0 4.8V2.2A2.2 2.2 0 0 1 2.2 0Z"/>
+</svg>

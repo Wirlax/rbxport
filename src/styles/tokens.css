@@ -320,6 +320,20 @@
   --s-info-date-clear-w: 11px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Release Date's clear disc is 21px at 2x across, 11px right of the boxes and 18px short of the form's right edge */
   --s-info-spinner-right: 8px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the chevrons' right edge is 16px at 2x inside the box */
   --s-info-check-label-w: 165px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Allow to auto load HotCue on' wraps after 'on' at 322px at 2x, with the box 62pt further right */
+  --s-deck-info-inset-x: 8px; /* docs/screenshots 9.08.22 PM (rekordbox 7.2.11, 2x): the MEMORY rows sit x 3310..3689 inside the side panel's 3294..3705, 8pt in from each side; the INFO tab fills the same box */
+  --s-deck-info-inset-top: 5px; /* docs/screenshots 9.08.22 PM (rekordbox 7.2.11, 2x): the first MEMORY row starts y 200 in a panel that starts at 190 */
+  --s-deck-info-pad-x: 9px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (485px standing for the 209pt panel, 2.32px/pt): text and hairlines start 21px inside the list box. No 7.2.11 capture shows the tab; the manual is the only picture of it */
+  --s-deck-info-rating-h: 29px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the stars' block, list top to the first hairline, 68px */
+  --s-deck-info-color-h: 30px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the colour block between the first and second hairlines, 69px */
+  --s-deck-info-comment-h: 46px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the comment block between the second and third hairlines, 106px */
+  --s-deck-info-line-h: 15.5px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the four file lines' centres 36px apart */
+  --s-deck-info-facts-pad-top: 9px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the first file line's centre 39.5px under the third hairline, less half a line */
+  --s-deck-info-star-pitch: 15.3px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the five stars' left edges at x 654, 689, 725, 760, 796 */
+  --s-deck-info-star-h: 9.5px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): a star spans 22px */
+  --s-deck-info-dot: 7px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the Aqua dot is 16px across, its name 19px to its right */
+  --s-deck-info-dot-gap: 8px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): from the dot's right edge to the colour's name */
+  --s-deck-info-comment-icon-w: 12px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the speech bubble is 28px wide and 23px tall, the 12x10 of Pioneer's own comment.svg; ours is redrawn at that size */
+  --s-deck-info-comment-icon-top: 9px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the bubble's top 21px under the second hairline */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -336,6 +350,7 @@
   --f-size-info: 14px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Summary' 120px wide and 'Age of Love' 151px at 2x, which Arial gives at 14px; the Summary values, the tab labels and the Info tab's field text all fit it */
   --f-size-info-label: 12px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Date Created' 144px and 'Release Date' 148px wide at 2x, Arial at 12px; every label on both tabs fits it */
   --f-size-info-title: 12.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's Track Title value is 551px wide at 2x where 14px would give 618 — a smaller face than the artist beneath it, Arial at 12.5px */
+  --f-size-deck-info: 11px; /* docs/screenshots 9.08.22 PM (rekordbox 7.2.11, 2x): the MEMORY list beside the deck, whose face the INFO tab is assumed to share since no capture shows it: '00:00:434' is 94px wide with a 16px digit height at 2x, Arial at 11px. The 6.0.0 manual's graphic of the tab fits 10px */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than

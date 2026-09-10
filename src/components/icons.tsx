@@ -33,6 +33,12 @@ export const CollectionIcon = (props: IconProps) => (
   </svg>
 );
 
+export const CommentIcon = (props: IconProps) => (
+  <svg viewBox="0 0 12 10" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" d="M2.2 0h7.6A2.2 2.2 0 0 1 12 2.2v2.6A2.2 2.2 0 0 1 9.8 7H6.1L2 10V7A2.2 2.2 0 0 1 0 4.8V2.2A2.2 2.2 0 0 1 2.2 0Z"/>
+  </svg>
+);
+
 export const CutIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <path d="M4.2 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M11.8 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M13.4 3.4L2.6 12.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
