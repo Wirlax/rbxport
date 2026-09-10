@@ -11,8 +11,8 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, RowDto, SortColumn, Tick, TrackFilter, TreeNode, ViewHandle,
-  ViewSpec, WaveformKind,
+  FilterValues, LibrarySummary, RowDto, SortColumn, Tick, TrackDetails, TrackField,
+  TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 import { toCamelot } from "@/lib/camelot";
@@ -298,9 +298,11 @@ export interface MockOptions {
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
-  const writable = options.writable ?? readWritableFromUrl();
+  const writable = options.writable ?? readFlagFromUrl("writable");
   const all = makeRows(trackCount);
   const colors = makeColors(trackCount);
+  // What the row DTO does not carry, made up per track and edited in place.
+  const details = new Map<string, TrackDetails>();
   const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
 
   /** The rows a source and query leave, before sorting and before the filter. */
@@ -490,6 +492,42 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
         colors[at] = color === null ? 0 : Number.parseInt(color, 10);
       }
+      const d = details.get(track);
+      if (d) d.color = color ?? "0";
+      return bump();
+    },
+    setTrackField: (track, field, value) => {
+      const row = all.find((r) => r.id === track);
+      if (!row) return bump();
+      const d = detailsOf(row);
+      // The same refusals the writer makes: a number that is not one, and a
+      // key the library does not hold.
+      const numeric: Partial<Record<TrackField, "year" | "trackNumber" | "discNumber" | "playCount">> = {
+        year: "year", trackNumber: "trackNumber", discNumber: "discNumber", playCount: "playCount",
+      };
+      const which = numeric[field];
+      if (which) {
+        const n = /^\s*\d+\s*$/.test(value) ? Number.parseInt(value, 10) : NaN;
+        if (!Number.isFinite(n)) {
+          return Promise.reject(new Error(`${JSON.stringify(value)} is not a whole number`));
+        }
+        d[which] = n;
+        return bump();
+      }
+      if (field === "key" && value !== "" && !KEYS.includes(value)) {
+        return Promise.reject(new Error(`${JSON.stringify(value)} is not a key the library knows`));
+      }
+      // Narrowed by hand: what is left after the numeric fields is text.
+      const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount">;
+      d[text] = value.trim();
+      // The row carries some of the same columns; keep the two in step the
+      // way a reload of the index would.
+      if (field === "title") row.title = d.title;
+      else if (field === "artist") row.artist = d.artist;
+      else if (field === "album") row.album = d.album;
+      else if (field === "genre") row.genre = d.genre;
+      else if (field === "label") row.label = d.label;
+      else if (field === "key") row.key = d.key;
       return bump();
     },
     addCue: (track, kind, positionMs) => {
@@ -527,6 +565,59 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       list.splice(list.indexOf(found.cue), 1);
       return cuesChanged(found.track, undefined);
     },
+  };
+
+  /**
+   * The rest of a track's record, invented once per track from its row.
+   *
+   * Deterministic so a test can name what it expects: the size follows the
+   * duration at a constant bitrate, the sample rate is the common one, and
+   * the path is where the mock says its files live.
+   */
+  const detailsOf = (row: RowDto): TrackDetails => {
+    let d = details.get(row.id);
+    if (d) return d;
+    const seed = Number.parseInt(row.id, 10);
+    const wav = seed % 7 === 0;
+    const bitrate = wav ? 1411 : 320;
+    d = {
+      id: row.id,
+      title: row.title,
+      artist: row.artist,
+      album: row.album,
+      albumArtist: row.album ? row.artist : "",
+      originalArtist: "",
+      composer: seed % 5 === 0 ? row.artist : "",
+      remixer: row.title.includes("Remix") ? "Someone" : "",
+      lyricist: "",
+      genre: row.genre,
+      label: row.label,
+      key: row.key,
+      comment: row.comment,
+      mixName: "",
+      message: "",
+      color: "0",
+      rating: row.rating,
+      bpmX100: row.bpmX100,
+      durationSec: row.durationSec,
+      year: row.releaseDate ? Number.parseInt(row.releaseDate.slice(0, 4), 10) : 0,
+      trackNumber: seed % 12,
+      discNumber: 0,
+      playCount: seed % 9,
+      fileType: wav ? 11 : 1,
+      fileSize: Math.round((row.durationSec * bitrate * 1000) / 8),
+      bitrate,
+      sampleRate: 44_100,
+      bitDepth: wav ? 16 : 0,
+      dateCreated: row.dateAdded.slice(0, 10),
+      releaseDate: row.releaseDate,
+      path: `/Volumes/MUSIC/${row.artist || "Unknown Artist"}/${row.title}.${wav ? "wav" : "mp3"}`,
+      hotCueAutoLoad: true,
+      publish: false,
+      hasArtwork: false,
+    };
+    details.set(row.id, d);
+    return d;
   };
 
   /*
@@ -1145,7 +1236,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // backend keeps the first two thousand of a 14,503-folder card.
       return wait({ names, total: path === "/Volumes/SD/PIONEER" ? 14_503 : names.length });
     },
+    trackDetails: (trackId) => {
+      if (!ready) return notReady();
+      const row = all.find((r) => r.id === trackId);
+      if (!row) return Promise.reject(new Error("That track is no longer in the library."));
+      // A copy: the panel must not be able to edit the backend's own record.
+      return wait({ ...detailsOf(row) });
+    },
+    trackLookups: () => wait({ keys: [...KEYS], genres: GENRES.filter((g) => g !== "") }),
   };
+}
+
+/** A bare `?name` flag in the URL. */
+function readFlagFromUrl(name: string): boolean {
+  if (typeof location === "undefined") return false;
+  return new URLSearchParams(location.search).has(name);
 }
 
 /** `?tracks=40000` lets the perf spec load a full-size library into the mock. */
@@ -1164,12 +1269,6 @@ function readCountFromUrl(): number | null {
  * moving window and a landing page cannot happen at zero. This is how a scroll
  * is tested against a backend that takes any time at all.
  */
-/** Whether the mock's library reports itself writable, from `?writable=1`. */
-function readWritableFromUrl(): boolean {
-  if (typeof location === "undefined") return false;
-  return new URLSearchParams(location.search).get("writable") === "1";
-}
-
 function readLatencyFromUrl(): number | null {
   if (typeof location === "undefined") return null;
   const raw = new URLSearchParams(location.search).get("latency");

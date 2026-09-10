@@ -393,6 +393,18 @@ export interface Backend {
    */
   explorerRoots(): Promise<ExplorerRoot[]>;
   explorerChildren(path: string): Promise<ExplorerChildren>;
+
+  /**
+   * One track's full record: what the information panel's Summary and Info
+   * tabs show and the row DTO does not carry.
+   *
+   * A point read by id, not a widening of the index — the twenty-odd columns
+   * are wanted for one track at a time. About 1 KB.
+   */
+  trackDetails(trackId: string): Promise<TrackDetails>;
+
+  /** What the Info tab's Key and Genre dropdowns offer: what the library holds. */
+  trackLookups(): Promise<TrackLookups>;
 }
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
@@ -619,6 +631,12 @@ export interface Edits {
   setTrackRating(track: string, stars: number): Promise<number>;
   setTrackComment(track: string, comment: string): Promise<number>;
   setTrackColor(track: string, color: string | null): Promise<number>;
+  /**
+   * One of the Info tab's editable fields, by wire name. The backend keeps
+   * the list of what may be written; a name it does not know is refused as
+   * `readOnly` rather than mapped onto a guess.
+   */
+  setTrackField(track: string, field: TrackField, value: string): Promise<number>;
 
   /**
    * Cues. Unlike the edits above these do not return a generation: a cue
@@ -655,6 +673,66 @@ export interface ExplorerChildren {
 
 /** `ParentID` of a playlist or folder at the top of the tree. */
 export const TREE_ROOT = "root";
+
+/**
+ * One track, in full — the information panel's record.
+ *
+ * Numbers the library leaves NULL arrive as 0 and text as empty, so nothing
+ * here is optional; rekordbox's own Info tab prints 0 in an empty Year box.
+ */
+export interface TrackDetails {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumArtist: string;
+  originalArtist: string;
+  composer: string;
+  remixer: string;
+  lyricist: string;
+  genre: string;
+  label: string;
+  key: string;
+  comment: string;
+  mixName: string;
+  message: string;
+  /** `"0"` or empty for none, `"1"` to `"8"` for rekordbox's eight colours. */
+  color: string;
+  rating: number;
+  bpmX100: number;
+  durationSec: number;
+  year: number;
+  trackNumber: number;
+  discNumber: number;
+  playCount: number;
+  /** rekordbox's own code: 1 MP3, 4 M4A, 5 FLAC, 11 WAV, 12 AIFF. */
+  fileType: number;
+  fileSize: number;
+  /** kbps. */
+  bitrate: number;
+  /** Hz. */
+  sampleRate: number;
+  bitDepth: number;
+  /** `YYYY-MM-DD`. */
+  dateCreated: string;
+  releaseDate: string;
+  /** The audio file's absolute path. */
+  path: string;
+  hotCueAutoLoad: boolean;
+  publish: boolean;
+  hasArtwork: boolean;
+}
+
+export interface TrackLookups {
+  keys: string[];
+  genres: string[];
+}
+
+/** The fields the backend will write. Everything else on the Info tab is shown read-only. */
+export type TrackField =
+  | "title" | "artist" | "album" | "year" | "trackNumber" | "discNumber"
+  | "originalArtist" | "composer" | "remixer" | "lyricist" | "playCount"
+  | "genre" | "label" | "key";
 
 /**
  * The BPM column of the track filter bar.

@@ -10,6 +10,7 @@ import type {
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
+  TrackDetails, TrackLookups,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -224,8 +225,12 @@ async function realBackend(): Promise<Backend> {
         invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
       moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
+      setTrackField: (track, field, value) =>
+        invoke<number>("set_track_field", { track, field, value }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
+    trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),
+    trackLookups: () => invoke<TrackLookups>("track_lookups"),
   };
 }
 

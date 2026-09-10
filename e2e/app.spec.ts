@@ -1084,13 +1084,15 @@ test("the information window shows the focused track and closes again", async ({
   await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
   await expect(panel).toBeVisible();
   await expect(panel).toContainText(title);
-  await expect(panel).toContainText("BPM");
+  await expect(panel).toContainText("File Type");
 
   // It gives up its width to the browser rather than overlaying it.
   const browser = page.getByTestId("browser-title");
   await expect(browser).toBeVisible();
 
-  await panel.getByRole("button", { name: "Close" }).click();
+  // No close button: rekordbox's Information Window has none, and the menu
+  // item that opened it toggles it shut.
+  await page.evaluate(() => (window as unknown as { __menu: (id: string) => void }).__menu("info"));
   await expect(panel).toBeHidden();
 });
 

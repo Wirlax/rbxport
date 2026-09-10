@@ -114,6 +114,7 @@
   --c-info-spinner: #646464; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the up/down chevrons in the Key, Genre, Color and Release Date boxes, (100,100,100) */
   --c-info-check-off: #282828; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the unticked Publish box, (40,40,40); the ticked one is the active-tab blue with a white tick */
   --c-info-button: #7D7D7D; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's import and delete buttons, (125,125,125) with a black glyph */
+  --c-info-disc: #1E1E1E; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the record drawn in the Summary sleeve where there is no artwork, (30,30,30) on the (15,15,15) sleeve; its diameter is 89% of the sleeve's side */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -299,7 +300,7 @@
   --s-info-value-x: 174px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's title/artist/album text and every table value start 348px at 2x from the panel's left; the table's divider is 10px before that */
   --s-info-head-row-h: 39px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): Track Title, Artist and Album repeat on a 78px pitch at 2x — label, value 34px lower, a 2px rule 67px down */
   --s-info-row-h: 24px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary table's rows are 48px apart at 2x, each closed by a 2px rule */
-  --s-info-form-top: 20px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's first label sits 40px at 2x below the tabs */
+  --s-info-form-top: 17px; /* docs/screenshots 9.09.36 PM (rekordbox 7.2.11, 2x, the Information Window's Info tab): the first box's top is 121px at 2x below the panel's top, which after the 13px above the tabs, the 40px tabs and the 34px label line leaves 34px */
   --s-info-form-inset: 12px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info form starts 24px at 2x from the panel's left edge and ends 18px from its right */
   --s-info-form-inset-right: 9px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
   --s-info-form-gap: 10.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 21px at 2x between boxes on one row, every row */
@@ -315,6 +316,10 @@
   --s-info-artwork-btn-w: 40px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each button is 80x68px at 2x */
   --s-info-artwork-btn-h: 34px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
   --s-info-artwork-btn-gap: 52.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 105px at 2x between the two buttons */
+  --s-info-label-h: 17px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 28px at 2x from a label's cap top to its box, i.e. a 14px line plus 3px; the row's 48px pitch is that, the 22px box and 9px to the next label */
+  --s-info-date-clear-w: 11px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Release Date's clear disc is 21px at 2x across, 11px right of the boxes and 18px short of the form's right edge */
+  --s-info-spinner-right: 8px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the chevrons' right edge is 16px at 2x inside the box */
+  --s-info-check-label-w: 165px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Allow to auto load HotCue on' wraps after 'on' at 322px at 2x, with the box 62pt further right */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

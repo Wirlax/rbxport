@@ -1019,7 +1019,18 @@ export function App() {
             }}
           />
         ) : null}
-        {infoOpen ? <InfoPanel track={playerTrack} onClose={() => setInfoOpen(false)} /> : null}
+        {infoOpen ? (
+          <InfoPanel
+            // The browser's selection, as rekordbox's Information Window
+            // follows it; the deck's track only when nothing is selected.
+            track={selectedRow ?? playerTrack}
+            readOnly={summary?.readOnly ?? false}
+            libraryGeneration={libraryGeneration}
+            onRate={rateTrack}
+            onComment={commentTrack}
+            onEdit={runEdit}
+          />
+        ) : null}
         <RightRail
           className={styles.rightRail}
           infoOpen={infoOpen}
