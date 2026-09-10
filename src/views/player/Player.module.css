@@ -638,12 +638,14 @@
 }
 /* A beat marker is a line with a small triangle at each end, and it does not
    span the band: measured, the head starts 26pt below the band's top and the
-   foot ends 6.5pt above its bottom. Every fourth is white with red heads. */
+   foot ends 6.5pt above its bottom, with the line between them a point's gap
+   inside each — 31pt to 11.5pt, which the user's crop has too. Every fourth
+   is white with red heads. */
 .beat,
 .downbeat {
   position: absolute;
-  top: var(--s-beat-marker-top);
-  bottom: var(--s-beat-marker-bottom);
+  top: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 1px);
+  bottom: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 1px);
   width: 1px;
   background: var(--c-beat);
   pointer-events: none;
