@@ -51,11 +51,20 @@ export function menuCommand(id: string): MenuCommand | null {
 export function resolveMenu(
   id: string,
   readOnly: boolean,
+  /** Library Protection is on in Preferences: the refusal says so instead. */
+  protectedLibrary = false,
 ): { action: MenuAction } | { refused: string } | null {
   const command = menuCommand(id);
   if (!command) return null;
   if (command.writes && readOnly) {
-    return { refused: "rekordbox is running, so the library is open read-only." };
+    return { refused: refusal(protectedLibrary) };
   }
   return { action: command.action };
+}
+
+/** Why a write was refused, in the words the status bar shows. */
+export function refusal(protectedLibrary: boolean): string {
+  return protectedLibrary
+    ? "Library Protection is on in Preferences, so the library is read-only."
+    : "rekordbox is running, so the library is open read-only.";
 }

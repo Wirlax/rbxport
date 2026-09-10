@@ -224,6 +224,83 @@ export function dispatch(
   return action;
 }
 
+/**
+ * The bindings, for the Preferences window's Keyboard pane.
+ *
+ * The same map as `actionFor`, written out: what each key does, in
+ * rekordbox's own wording and grouping (Browse, Player A) from the Export
+ * preset, plus the menu accelerators the shell binds. Read-only — the
+ * preset is transcribed, not edited.
+ */
+export interface Binding {
+  group: "Browse" | "Player A" | "Menu";
+  /** rekordbox's description of the command. */
+  label: string;
+  chord: KeyChord;
+}
+
+export const BINDINGS: readonly Binding[] = [
+  { group: "Browse", label: "Search", chord: { key: "f", metaKey: true } },
+  { group: "Browse", label: "Select All", chord: { key: "a", metaKey: true } },
+  { group: "Browse", label: "Cursor to Top", chord: { key: "Home" } },
+  { group: "Browse", label: "Cursor to Bottom", chord: { key: "End" } },
+  { group: "Browse", label: "Analyze Track", chord: { key: "a" } },
+  { group: "Player A", label: "Play/Pause", chord: { key: " " } },
+  { group: "Player A", label: "Quantize", chord: { key: "q" } },
+  { group: "Player A", label: "Cue", chord: { key: "c" } },
+  { group: "Player A", label: "Jump Reverse", chord: { key: "ArrowLeft" } },
+  { group: "Player A", label: "Jump Forward", chord: { key: "ArrowRight" } },
+  { group: "Player A", label: "Memory Cue", chord: { key: "m" } },
+  { group: "Player A", label: "Call Previous Memory Cue", chord: { key: "b" } },
+  { group: "Player A", label: "Call Next Memory Cue", chord: { key: "n" } },
+  { group: "Player A", label: "Delete Memory Cue", chord: { key: "x" } },
+  { group: "Player A", label: "Set Hot Cue A", chord: { key: "1" } },
+  { group: "Player A", label: "Set Hot Cue B", chord: { key: "2" } },
+  { group: "Player A", label: "Set Hot Cue C", chord: { key: "3" } },
+  { group: "Player A", label: "Clear Hot Cue A", chord: { key: "1", metaKey: true } },
+  { group: "Player A", label: "Clear Hot Cue B", chord: { key: "2", metaKey: true } },
+  { group: "Player A", label: "Clear Hot Cue C", chord: { key: "3", metaKey: true } },
+  { group: "Player A", label: "Show Memory Cues", chord: { key: "F10" } },
+  { group: "Player A", label: "Show Hot Cues", chord: { key: "F11" } },
+  { group: "Player A", label: "Show Information", chord: { key: "F12" } },
+  { group: "Menu", label: "Import File", chord: { key: "o", metaKey: true } },
+  { group: "Menu", label: "Preferences", chord: { key: ",", metaKey: true } },
+  { group: "Menu", label: "Information Window", chord: { key: "i", metaKey: true } },
+  { group: "Menu", label: "Sub Browser", chord: { key: "b", metaKey: true } },
+  { group: "Menu", label: "1 Player", chord: { key: "7", metaKey: true } },
+  { group: "Menu", label: "2 Players", chord: { key: "8", metaKey: true } },
+  { group: "Menu", label: "Simple Player", chord: { key: "9", metaKey: true } },
+  { group: "Menu", label: "Full Browser", chord: { key: "0", metaKey: true } },
+  { group: "Menu", label: "Full Screen", chord: { key: "f", metaKey: true, shiftKey: true } },
+];
+
+/** The names rekordbox prints in a key badge for keys that are not letters. */
+const KEY_NAMES: Record<string, string> = {
+  " ": "spacebar",
+  ArrowLeft: "cursor left",
+  ArrowRight: "cursor right",
+  ArrowUp: "cursor up",
+  ArrowDown: "cursor down",
+  Home: "home",
+  End: "end",
+  Escape: "esc",
+};
+
+/**
+ * A chord as rekordbox's Keyboard pane prints it: `spacebar`,
+ * `command + cursor down`, `shift + command + F`. `metaKey` in a binding
+ * means the platform's primary modifier, so it reads `ctrl` on Windows.
+ */
+export function describeChord(chord: KeyChord, platform: Platform): string {
+  const parts: string[] = [];
+  if (chord.shiftKey) parts.push("shift");
+  if (chord.altKey) parts.push(platform.mac ? "option" : "alt");
+  if (chord.metaKey || chord.ctrlKey) parts.push(platform.mac ? "command" : "ctrl");
+  const name = KEY_NAMES[chord.key] ?? (chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+  parts.push(name);
+  return parts.join(" + ");
+}
+
 /** The running platform, read once. */
 export function detectPlatform(): Platform {
   if (typeof navigator === "undefined") return { mac: false };

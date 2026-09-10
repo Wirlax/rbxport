@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { actionFor, dispatch, hotCuePad, isTyping, type Platform } from "./shortcuts";
+import {
+  actionFor, BINDINGS, describeChord, dispatch, hotCuePad, isTyping, type Platform,
+} from "./shortcuts";
 
 const MAC: Platform = { mac: true };
 const WIN: Platform = { mac: false };
@@ -160,5 +162,29 @@ describe("rekordbox's own Export key map", () => {
   it("does not fire the deck's letters into a search box", () => {
     expect(dispatch({ key: "c" }, mac, { tagName: "INPUT" })).toBeNull();
     expect(dispatch({ key: " " }, mac, { tagName: "INPUT" })).toBeNull();
+  });
+});
+
+describe("the Keyboard pane's bindings", () => {
+  const mac: Platform = { mac: true };
+  const windows: Platform = { mac: false };
+
+  it("prints a chord the way rekordbox's badges do", () => {
+    expect(describeChord({ key: " " }, mac)).toBe("spacebar");
+    expect(describeChord({ key: "q" }, mac)).toBe("Q");
+    expect(describeChord({ key: "ArrowDown", metaKey: true }, mac)).toBe("command + cursor down");
+    expect(describeChord({ key: "ArrowDown", metaKey: true }, windows)).toBe("ctrl + cursor down");
+    expect(describeChord({ key: "f", metaKey: true, shiftKey: true }, mac)).toBe("shift + command + F");
+    expect(describeChord({ key: "F10" }, mac)).toBe("F10");
+  });
+
+  it("lists only chords the map actually answers to, under the deck and the browser", () => {
+    // The menu accelerators are the shell's, and A is the track list's own
+    // key for analysis; neither goes through the map.
+    const mapped = BINDINGS.filter((b) => b.group !== "Menu" && b.label !== "Analyze Track");
+    for (const binding of mapped) {
+      const chord = { ...binding.chord, metaKey: binding.chord.metaKey ?? false };
+      expect(actionFor(chord, mac), binding.label).not.toBeNull();
+    }
   });
 });
