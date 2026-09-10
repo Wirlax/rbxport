@@ -596,7 +596,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       comment: row.comment,
       mixName: "",
       message: "",
-      color: "0",
+      // The colour the filter bar matches this row by, so the deck's INFO
+      // tab and the bar agree.
+      color: String(colors[all.indexOf(row)] ?? 0),
       rating: row.rating,
       bpmX100: row.bpmX100,
       durationSec: row.durationSec,
@@ -1238,6 +1240,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     trackDetails: (trackId) => {
       if (!ready) return notReady();
+      // Counted for the deck's test: its INFO tab must not fetch a record
+      // for every load when the tab is not showing.
+      if (typeof window !== "undefined") {
+        const w = window as unknown as { __detailsFetches?: number };
+        w.__detailsFetches = (w.__detailsFetches ?? 0) + 1;
+      }
       const row = all.find((r) => r.id === trackId);
       if (!row) return Promise.reject(new Error("That track is no longer in the library."));
       // A copy: the panel must not be able to edit the backend's own record.

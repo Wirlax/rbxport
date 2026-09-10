@@ -960,35 +960,7 @@ button.cueDelete {
 button.cueDelete:disabled { color: var(--c-icon-off); }
 .cueRow[role="button"] { cursor: default; text-align: left; }
 
-/* INFO is a stack of lines with hairlines between the blocks, not a
-   label/value grid. */
-.info {
-  overflow: auto;
-  min-height: 0;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-}
-
-.infoBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-  min-height: 18px;
-  border-bottom: 1px solid var(--c-panel);
-}
-.infoBlock:last-child { border-bottom: 0; }
-
-.infoStars { color: var(--c-text-dim); letter-spacing: 3px; font-size: var(--f-size-ui); }
-.infoIcon { color: var(--c-text-dim); font-size: var(--f-size-xs); }
-.infoLine {
-  font-size: var(--f-size-sm);
-  color: var(--c-text-dim);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+/* The INFO tab is DeckInfo.module.css. */
 
 /* Three equal tabs: the selected one is a lighter blue than the pad buttons,
    the others are outlined. */

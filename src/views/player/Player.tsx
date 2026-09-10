@@ -57,6 +57,8 @@ import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
+import { useTrackDetails } from "./useTrackDetails";
+import { DeckInfo } from "./DeckInfo";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
 import { useHotCues } from "./useHotCues";
 import styles from "./Player.module.css";
@@ -402,12 +404,6 @@ const PHRASE_EDITS = [
   { id: "phrase-clear", label: "Clear the phrase", text: "CLEAR" },
 ] as const;
 
-/** The file's kind, from its name. Nothing else about the file is indexed. */
-function fileKind(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? `${name.slice(dot + 1).toUpperCase()} File` : "Audio File";
-}
-
 /** The panel tabs beside the deck. */
 const PANELS = [
   { id: "memory", label: "MEMORY" },
@@ -461,6 +457,9 @@ export const Player = memo(function Player({
     const first = cuesFor(loaded, "memory")[0];
     setCuePoint(first ? first.positionMs / 1000 : 0);
   });
+  // The INFO tab's record, fetched only while that tab is showing — see
+  // `useTrackDetails` for why not on every load.
+  const details = useTrackDetails(track?.id ?? null, panel === "info");
   /**
    * Quantize — the Q button at the end of the pad row. On by default, as a CDJ
    * ships: a cue set by hand lands tens of milliseconds off the beat, and every
@@ -1505,31 +1504,7 @@ export const Player = memo(function Player({
 
       <aside className={styles.side} aria-label="Cue list">
         {panel === "info" ? (
-          <div className={styles.info}>
-            <div className={styles.infoBlock}>
-              <span className={styles.infoStars}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <span key={star}>{(track?.rating ?? 0) >= star ? "★" : "☆"}</span>
-                ))}
-              </span>
-            </div>
-            <div className={styles.infoBlock} />
-            <div className={styles.infoBlock}>
-              <span className={styles.infoIcon} aria-hidden>▬</span>
-              <span className={styles.infoLine}>{track?.comment || "—"}</span>
-            </div>
-            <div className={styles.infoBlock}>
-              {/*
-                Only what the index actually holds. rekordbox also lists the
-                file's size, sample rate and bit rate; those columns are not
-                read yet, and inventing them would be worse than their absence.
-              */}
-              <span className={styles.infoLine}>{track ? fileKind(track.title) : "—"}</span>
-              <span className={styles.infoLine}>{track ? formatBpm(track.bpmX100) : "—"} BPM</span>
-              <span className={styles.infoLine}>{track?.key || "—"}</span>
-              <span className={styles.infoLine}>{track ? splitTime(track.durationSec).main : "—"}</span>
-            </div>
-          </div>
+          <DeckInfo track={track} details={details} />
         ) : panel === "hotCue" ? (
           /* Eight slots, always: an empty one is a slot you can fill, and
              hiding it makes the list read as a shorter track. A row rather
