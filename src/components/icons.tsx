@@ -165,6 +165,12 @@ export const NoteIcon = (props: IconProps) => (
   </svg>
 );
 
+export const RecordIcon = (props: IconProps) => (
+  <svg viewBox="0 0 100 100" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" fillRule="evenodd" d="M50 7a43 43 0 1 0 0 86 43 43 0 0 0 0-86zm0 31a12 12 0 1 0 0 24 12 12 0 0 0 0-24z"/>
+  </svg>
+);
+
 export const RelatedIcon = (props: IconProps) => (
   <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
     <circle cx="12" cy="6" r="2" fill="currentColor"/> <circle cx="6" cy="12" r="2" fill="currentColor"/> <path d="M6 12 12 6" stroke="currentColor" strokeWidth="1"/>
