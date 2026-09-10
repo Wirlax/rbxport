@@ -47,11 +47,28 @@ export const MAX_TEMPO = 2.0;
  * nothing, and pretending otherwise would silently play it at some ratio of
  * two numbers that mean nothing.
  */
-export function tempoFor(leader: Deck, follower: Deck): number {
+export function tempoFor(leader: Deck, follower: Deck, options?: SyncOptions): number {
   if (leader.bpmX100 <= 0 || follower.bpmX100 <= 0) return 1;
-  const ratio = leader.bpmX100 / follower.bpmX100;
+  let ratio = leader.bpmX100 / follower.bpmX100;
   if (!Number.isFinite(ratio)) return 1;
+  // "Allow BEAT/BPM SYNC with double/half BPM": a 140 next to a 70 is a
+  // match at twice the leader's tempo, not a track slowed to half speed.
+  // Whichever of the ratio, its double and its half is nearest to the
+  // follower's own speed is the one taken.
+  if (options?.doubleHalf ?? true) {
+    for (const candidate of [ratio * 2, ratio / 2]) {
+      if (Math.abs(Math.log(candidate)) < Math.abs(Math.log(ratio))) ratio = candidate;
+    }
+  }
   return Math.min(Math.max(ratio, MIN_TEMPO), MAX_TEMPO);
+}
+
+/** The Preferences window's BEAT/BPM SYNC choices. */
+export interface SyncOptions {
+  /** BPM SYNC matches the tempo alone and leaves the playhead where it is. */
+  type?: "beat" | "bpm";
+  /** Whether a track at twice or half the leader's BPM counts as matching. Default on. */
+  doubleHalf?: boolean;
 }
 
 /**
@@ -124,6 +141,9 @@ export function nudgeFor(leader: Deck, follower: Deck): number {
  * a guess — sync acting on a track nobody has analysed is sync putting it in
  * the wrong place with confidence.
  */
-export function syncTo(leader: Deck, follower: Deck): Sync {
-  return { tempo: tempoFor(leader, follower), nudge: nudgeFor(leader, follower) };
+export function syncTo(leader: Deck, follower: Deck, options?: SyncOptions): Sync {
+  return {
+    tempo: tempoFor(leader, follower, options),
+    nudge: options?.type === "bpm" ? 0 : nudgeFor(leader, follower),
+  };
 }

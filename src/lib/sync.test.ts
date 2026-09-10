@@ -37,9 +37,32 @@ describe("tempoFor", () => {
   it("will not pull a deck further than it can go", () => {
     // Half time and double time are the ends of the stretcher's range, so a
     // 70 to 174 match comes back clamped rather than as a ratio nothing can
-    // play.
-    expect(tempoFor(deck(174, 0), deck(70, 0))).toBe(MAX_TEMPO);
-    expect(tempoFor(deck(70, 0), deck(174, 0))).toBe(MIN_TEMPO);
+    // play — once the double/half match is turned off in Preferences.
+    const off = { doubleHalf: false };
+    expect(tempoFor(deck(174, 0), deck(70, 0), off)).toBe(MAX_TEMPO);
+    expect(tempoFor(deck(70, 0), deck(174, 0), off)).toBe(MIN_TEMPO);
+  });
+
+  it("takes a double or half BPM as the same tempo, unless told not to", () => {
+    // 140 beside 70 is a match at twice the leader's tempo — the follower
+    // stays at its own speed rather than being slowed to half.
+    expect(tempoFor(deck(70, 0), deck(140, 0))).toBe(1);
+    expect(tempoFor(deck(140, 0), deck(70, 0))).toBe(1);
+    // 174 beside 70: the half, 1.24, is nearer to its own speed than 2.49.
+    expect(tempoFor(deck(174, 0), deck(70, 0))).toBeCloseTo(1.2428, 3);
+    // Two tempos a few percent apart are pulled the short way as before.
+    expect(tempoFor(deck(128, 0), deck(126, 0))).toBeCloseTo(128 / 126, 6);
+    expect(tempoFor(deck(70, 0), deck(140, 0), { doubleHalf: false })).toBe(MIN_TEMPO);
+  });
+});
+
+describe("syncTo", () => {
+  it("BPM SYNC matches the tempo and leaves the playhead where it is", () => {
+    const grid = { times: Uint32Array.from([0, 500, 1000, 1500, 2000]), numbers: Uint8Array.from([1, 2, 3, 4, 1]) };
+    const leader: Deck = { bpmX100: 12000, position: 0, grid };
+    const follower: Deck = { bpmX100: 12800, position: 0.25, grid };
+    expect(syncTo(leader, follower, { type: "beat" }).nudge).not.toBe(0);
+    expect(syncTo(leader, follower, { type: "bpm" })).toEqual({ tempo: 12000 / 12800, nudge: 0 });
   });
 });
 
