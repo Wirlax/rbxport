@@ -52,7 +52,11 @@ jobs:
             # Apple Silicon; the x86_64 half is a cross-compile against the
             # same SDK, which is all pure Rust here.
             target: universal-apple-darwin
-            bundles: dmg
+            # `app` as well as `dmg`: the updater's tarball and its signature
+            # are products of the `app` bundle step, and a `dmg`-only build
+            # produces neither — the first 0.5.0 attempt shipped a DMG and no
+            # update anyone could take.
+            bundles: app,dmg
             # The platform segment of the published filename, so a URL says
             # which build it serves without anything having to be opened.
             slug: darwin-universal
@@ -426,14 +430,20 @@ jobs:
             [ "$f" = "$want" ] || mv "$f" "$want"
           done
 
-          # An installer without its updater signature is a release the app
-          # cannot take; better to find that here than in the feed.
-          case "${{ matrix.slug }}" in
-            darwin-*)  test -s "out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
-            windows-*) test -s "out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
-          esac
-
           ls -l out
+
+          # An installer without its updater signature is a release the app
+          # cannot take; better to find that here than in the feed. Said out
+          # loud: a bare `test -s` failed the first 0.5.0 build with nothing
+          # in the log but an exit code.
+          case "${{ matrix.slug }}" in
+            darwin-*)  sig="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
+            windows-*) sig="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+          esac
+          if [ ! -s "$sig" ]; then
+            echo "::error::no updater signature at $sig — was the updater artifact bundled and TAURI_SIGNING_PRIVATE_KEY set?"
+            exit 1
+          fi
           # A release that uploads nothing is worse than one that fails: it
           # looks like it worked.
           test "$(find out -type f | wc -l)" -gt 0
