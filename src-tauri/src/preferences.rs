@@ -20,9 +20,16 @@ const HEIGHT: f64 = 800.0;
 /// Opens the window on `pane`, or brings the open one to the front and turns
 /// it to that pane.
 #[tauri::command]
+// `async`, and not for anything it awaits: a synchronous command runs on
+// the main thread, and on Windows WebView2 finishes creating a webview by
+// posting back to that same thread — which is blocked, so the control never
+// comes up and the window stays a bare white frame. That was 0.5.1's blank
+// Preferences on Windows (no navigation was ever logged; the menu bar could
+// not be hidden because there was no webview under it). An async command
+// runs on a worker instead, and the main thread is free to finish the job.
 // Tauri hands the handle and the argument over by value; the command owns both.
 #[allow(clippy::needless_pass_by_value)]
-pub fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<()> {
+pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<()> {
     // Only a pane name reaches the URL: anything else is not one.
     let pane: String = pane.chars().filter(char::is_ascii_alphanumeric).collect();
     if let Some(window) = app.get_webview_window(WINDOW) {
