@@ -358,6 +358,16 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # The in-app updater's own signature, over and above the OS ones:
+          # the bundler writes `.sig` beside each updater artifact (the
+          # `.app.tar.gz` on macOS, the setup .exe on Windows) with this
+          # minisign key, and the app refuses a download whose signature
+          # does not match the public key in tauri.conf.json. The key pair
+          # is the 1Password item "rekordbox-lite updater signing key" in
+          # the Code vault; lose it and no shipped app can take another
+          # update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # artifact-signing-cli logs in with `az`, and on Windows `az` keeps
           # its token cache DPAPI-encrypted — a key that exists only for a
           # console logon with a password behind it. The runner is started
@@ -387,8 +397,14 @@ jobs:
           # run leaves `rw.NNNNN.<name>.dmg` scratch images beside the real
           # one, and a plain *.dmg glob picks those up. Found locally, with
           # two of them sitting in the bundle directory.
+          # The updater's payloads come along: on macOS the app as a
+          # tarball (the DMG is for people, the tarball is what the app
+          # swaps itself for), on Windows the same setup .exe — and the
+          # `.sig` the bundler wrote beside each.
           find "${CARGO_TARGET_DIR:-target}" src-tauri/target -type f ! -name 'rw.*' \
-            \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \) \
+            \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
+               -o -path '*/bundle/nsis/*-setup.exe.sig' \
+               -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \) \
             -exec cp {} out/ \; 2>/dev/null || true
 
           # Renamed here, not at upload time, so the artifact and the object in
@@ -400,12 +416,22 @@ jobs:
           # the leading `v` belongs to the tag and nothing else.
           for f in out/*; do
             case "$f" in
-              *.dmg)       want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.dmg" ;;
-              *-setup.exe) want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
+              *.dmg)            want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.dmg" ;;
+              *.app.tar.gz)     want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz" ;;
+              *.app.tar.gz.sig) want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
+              *-setup.exe)      want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
+              *-setup.exe.sig)  want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
               *) echo "::error::unexpected bundle $f"; exit 1 ;;
             esac
             [ "$f" = "$want" ] || mv "$f" "$want"
           done
+
+          # An installer without its updater signature is a release the app
+          # cannot take; better to find that here than in the feed.
+          case "${{ matrix.slug }}" in
+            darwin-*)  test -s "out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
+            windows-*) test -s "out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+          esac
 
           ls -l out
           # A release that uploads nothing is worse than one that fails: it
@@ -451,6 +477,14 @@ jobs:
             # The notarisation ticket, not just the signature. `open` is the
             # right policy for a downloaded disk image; `install` is for pkgs.
             spctl --assess --type open --context context:primary-signature -vv "$dmg"
+          done
+          # The updater's tarball is what an installed app swaps itself for,
+          # so the app inside it must carry the same signature as the DMG's.
+          for tarball in out/*.app.tar.gz; do
+            unpacked="$(mktemp -d)"
+            tar -xzf "$tarball" -C "$unpacked"
+            codesign --verify --strict --deep --verbose=2 "$unpacked"/*.app
+            rm -rf "$unpacked"
           done
 
       - name: The Windows signature is checked, not assumed
@@ -522,9 +556,17 @@ jobs:
           merge-multiple: true
           path: out
 
-      # The steps below build and read latest.json with node. There is no
-      # checkout in this job, so nothing else would put node on PATH, and the
-      # arc Linux host's own node is not something a job should depend on.
+      # For CHANGELOG.md, which rides along in the feed as the release
+      # notes: the app shows the sections between the version it is and the
+      # version on offer. Nothing else here needs the tree.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      # The steps below build and read latest.json with node. The checkout
+      # above puts nothing on PATH, and the arc Linux host's own node is not
+      # something a job should depend on.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -580,25 +622,51 @@ jobs:
           done
 
           # The one fixed path in the bucket, and what replaces the `latest/`
-          # folder: something a page or a script can read to find the newest
-          # version without a folder listing. `url` appears only once
-          # CDN_BASE_URL names how the bucket is served publicly.
+          # folder. Two readers: the app's updater, which wants `platforms`
+          # in its own shape — one entry per `{os}-{arch}` it runs as, each
+          # a signed URL, and `notes` for what changed — and a person or a
+          # page, which wants `downloads`: the installers by the platform
+          # names the files carry. They are separate because the updater
+          # refuses a `platforms` entry without a signature, and a DMG has
+          # none. A universal macOS build runs as one of two arches, so the
+          # same tarball is listed under both; `darwin-universal` is not a
+          # key the updater ever looks for.
+          test -s CHANGELOG.md
           node -e '
             const fs = require("fs");
             const [, version, base] = process.argv;
             const files = fs.readdirSync("out");
+            const url = (file) => (base ? base + "/" + file : undefined);
+            const signed = (payload) => {
+              const file = files.find(payload);
+              if (!file) return null;
+              const sig = file + ".sig";
+              if (!files.includes(sig)) throw new Error("no updater signature beside " + file);
+              return { url: url(file), signature: fs.readFileSync("out/" + sig, "utf8").trim() };
+            };
+            const mac = signed((f) => f.endsWith(".app.tar.gz"));
+            const win = signed((f) => f.endsWith("-setup.exe"));
             const platforms = {};
+            if (mac) { platforms["darwin-aarch64"] = mac; platforms["darwin-x86_64"] = mac; }
+            if (win) platforms["windows-x86_64"] = win;
+            const downloads = {};
             for (const [slug, match] of [
               ["darwin-universal", (f) => f.endsWith(".dmg")],
               ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
             ]) {
               const file = files.find(match);
-              if (!file) continue;
-              platforms[slug] = base ? { file, url: base + "/" + file } : { file };
+              if (file) downloads[slug] = { file, url: url(file) };
             }
-            const feed = { version, pub_date: new Date().toISOString(), platforms };
+            const feed = {
+              version,
+              pub_date: new Date().toISOString(),
+              notes: fs.readFileSync("CHANGELOG.md", "utf8"),
+              platforms,
+              downloads,
+            };
             fs.writeFileSync("latest.json", JSON.stringify(feed, null, 2) + "\n");
-            console.log(JSON.stringify(feed, null, 2));
+            const { notes, ...shown } = feed;
+            console.log(JSON.stringify({ ...shown, notes: notes.length + " bytes" }, null, 2));
           ' "$version" "${CDN_BASE_URL:-}"
 
           # Short TTL: this is the file anything checking for a new version
@@ -626,7 +694,8 @@ jobs:
           cat published.json
           test "$(node -p 'require("./published.json").version')" = "$version"
           for url in $(node -p '
-            Object.values(require("./published.json").platforms).map((p) => p.url).join("\n")
+            const feed = require("./published.json");
+            [...Object.values(feed.platforms), ...Object.values(feed.downloads)].map((p) => p.url).join("\n")
           '); do
             curl -fsI --retry 5 --retry-all-errors --retry-delay 5 "$url" > /dev/null
           done
