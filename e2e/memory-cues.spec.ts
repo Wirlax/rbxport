@@ -143,3 +143,25 @@ test("◀ and ▶ call the memory cue either side of the playhead", async ({ pag
   await page.waitForTimeout(200);
   await expect(memoryRows(page)).toHaveCount(2);
 });
+
+test("the MEMORY list is ten boxes whether the track has cues or none", async ({ page }) => {
+  await load(page);
+  const list = page.getByRole("complementary", { name: "Cue list" });
+  const boxes = list.locator('[class*="cueRow"]');
+  // A track with cues: its rows, then blank boxes to make ten. The blanks
+  // carry a dimmed ✕ that is drawn, not a control.
+  const withCues = await memoryRows(page).count();
+  expect(withCues).toBeGreaterThan(0);
+  await expect(boxes).toHaveCount(10);
+  await expect(list.locator("[data-blank]")).toHaveCount(10 - withCues);
+  await expect(list.locator("[data-blank] button")).toHaveCount(0);
+
+  // A track with none: the same ten boxes, all blank, not an empty panel.
+  for (let i = 0; i < 12 && (await memoryRows(page).count()) > 0; i++) {
+    await page.locator('[role="gridcell"][data-col="title"]').nth(i).dblclick();
+    await page.waitForTimeout(100);
+  }
+  await expect(memoryRows(page)).toHaveCount(0);
+  await expect(boxes).toHaveCount(10);
+  await expect(list.locator("[data-blank]")).toHaveCount(10);
+});
