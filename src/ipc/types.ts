@@ -295,6 +295,11 @@ export interface Backend {
   deckLoad(deck: DeckId, trackId: string): Promise<void>;
   deckUnload(deck: DeckId): Promise<void>;
   deckPlay(deck: DeckId): Promise<void>;
+  /**
+   * Starts a deck after `delayMs` of silence, counted by the audio callback:
+   * quantized play on a synced deck, held for the master's next beat.
+   */
+  deckPlayAfter(deck: DeckId, delayMs: number): Promise<void>;
   deckPause(deck: DeckId): Promise<void>;
   deckSeek(deck: DeckId, positionMs: number): Promise<void>;
   /**
@@ -500,6 +505,8 @@ export interface DeckTick {
   tempo: number;
   /** Whether the pitch is held while that speed changes. */
   masterTempo: boolean;
+  /** Output frames until a started deck sounds: a play held for the beat. */
+  startInFrames: number;
 }
 
 /** Both decks at one instant. About 200 bytes, well inside the event cap. */

@@ -36,7 +36,7 @@ let clock: number;
 
 const idle: Tick["a"] = {
   frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-  tempo: 1, masterTempo: false,
+  tempo: 1, masterTempo: false, startInFrames: 0,
 };
 
 function stubBackend(): Backend {

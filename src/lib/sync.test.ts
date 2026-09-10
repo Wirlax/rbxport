@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BEATS_PER_BAR, NO_BEATS } from "./player";
 import {
-  barAt, beatNudgeFor, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck,
+  barAt, beatNudgeFor, beatWait, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck,
 } from "./sync";
 
 /** A grid at a steady `bpm`, starting `offsetMs` in. */
@@ -170,6 +170,18 @@ describe("beatNudgeFor", () => {
     }
     const unknown: Deck = { bpmX100: 0, position: 1, grid: NO_BEATS };
     expect(beatNudgeFor(unknown, deck(128, 4))).toBe(0);
+  });
+});
+
+describe("beatWait", () => {
+  it("is the time to the leader's next beat at the tempo it is playing", () => {
+    // 120 BPM, a half-second beat, a quarter beat past one: a quarter second.
+    expect(beatWait(deck(120, 4.125))).toBeCloseTo(0.375, 3);
+    // Played at 1.25 times, that quarter of a beat passes in less time.
+    expect(beatWait({ ...deck(120, 4.125), tempo: 1.25 })).toBeCloseTo(0.375 / 1.25, 3);
+    // On the beat already: the whole of the next one.
+    expect(beatWait(deck(120, 4.0))).toBeCloseTo(0.5, 3);
+    expect(beatWait({ bpmX100: 0, position: 1, grid: NO_BEATS })).toBeNull();
   });
 });
 

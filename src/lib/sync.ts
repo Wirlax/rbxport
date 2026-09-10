@@ -22,6 +22,8 @@ export interface Deck {
    * not the one printed on its file.
    */
   tempo?: number;
+  /** Whether the deck is running; a leader that is not has no next beat to wait for. */
+  playing?: boolean;
   /** Where the playhead is, in seconds. */
   position: number;
   /** The analysed grid, or an empty one. */
@@ -164,6 +166,25 @@ export function beatNudgeFor(leader: Deck, follower: Deck): number {
   const wrapped = gap - Math.round(gap);
   return wrapped * followBeat.beat;
 }
+
+/**
+ * How long until the leader's next beat, in real seconds — its file's time
+ * to the beat divided by the tempo it is playing at — or null when it has
+ * no grid and no BPM to say. A leader already on a beat, within a few
+ * milliseconds, answers a whole beat: the press came too late for that one.
+ */
+export function beatWait(leader: Deck): number | null {
+  const bar = barAt(leader, leader.position);
+  if (!bar || bar.length <= 0) return null;
+  const beat = bar.length / BEATS_PER_BAR;
+  const into = (leader.position - bar.start) % beat;
+  let left = beat - into;
+  if (left < ON_THE_BEAT) left += beat;
+  return left / (leader.tempo ?? 1);
+}
+
+/** Closer than this to a beat is on it, in seconds: about a callback. */
+const ON_THE_BEAT = 0.005;
 
 /**
  * Both halves: what the follower's tempo becomes and how far it moves.

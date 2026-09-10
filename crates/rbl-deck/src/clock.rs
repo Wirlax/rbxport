@@ -33,6 +33,14 @@ pub struct DeckClock {
     /// anything extrapolating the playhead between ticks.
     tempo: AtomicU32,
     master_tempo: AtomicBool,
+    /// Output frames still to pass before a started deck makes a sound.
+    ///
+    /// Quantized play on a synced deck: the deck is playing as far as the
+    /// transport is concerned, but the callback lets this many frames go by
+    /// in silence first, so the first sound lands on the master's beat. Set
+    /// with the start, counted down by the callback, and cleared by a pause,
+    /// a seek or a load.
+    start_in: AtomicU64,
 }
 
 /// A deck's state at one instant, for the tick the interface extrapolates from.
@@ -48,6 +56,8 @@ pub struct DeckSnapshot {
     pub tempo: f32,
     /// Whether the pitch is held while the speed changes.
     pub master_tempo: bool,
+    /// Output frames until a started deck sounds; 0 once it is under way.
+    pub start_in_frames: u64,
 }
 
 impl DeckClock {
@@ -61,7 +71,28 @@ impl DeckClock {
             loaded: self.loaded.load(Ordering::Relaxed),
             tempo: self.tempo(),
             master_tempo: self.master_tempo(),
+            start_in_frames: self.start_in.load(Ordering::Relaxed),
         }
+    }
+
+    /// Frames of silence the callback has still to let pass before the deck
+    /// sounds.
+    pub fn start_in(&self) -> u64 {
+        self.start_in.load(Ordering::Relaxed)
+    }
+
+    pub fn set_start_in(&self, frames: u64) {
+        self.start_in.store(frames, Ordering::Relaxed);
+    }
+
+    /// Lets up to `frames` of the wait pass; returns how many did.
+    pub fn pass_start(&self, frames: u64) -> u64 {
+        let waiting = self.start_in.load(Ordering::Relaxed);
+        let passed = waiting.min(frames);
+        if passed > 0 {
+            self.start_in.store(waiting - passed, Ordering::Relaxed);
+        }
+        passed
     }
 
     /// A tempo of zero means nothing has set one; a fresh clock plays a track

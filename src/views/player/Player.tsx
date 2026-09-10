@@ -24,6 +24,7 @@ import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
   NO_BEATS,
+  nearestBeatMs,
   subdivideGrid,
   ZOOM_STEPS,
   showsEveryBeat,
@@ -53,7 +54,7 @@ import {
 import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
-import { beatNudgeFor, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
+import { beatNudgeFor, beatWait, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
@@ -772,30 +773,45 @@ export const Player = memo(function Player({
   const syncState = useRef<() => SyncDeck | null>(() => null);
   syncState.current = () =>
     track
-      ? { bpmX100: track.bpmX100, tempo: playback.tempo, position: playback.positionNow(), grid }
+      ? {
+          bpmX100: track.bpmX100,
+          tempo: playback.tempo,
+          playing: playback.playing,
+          position: playback.positionNow(),
+          grid,
+        }
       : null;
   useEffect(() => {
     publishSync?.(() => syncState.current());
   }, [publishSync]);
 
   /**
-   * PLAY. With BEAT SYNC lit and Q on, a stopped deck starts on the beat: it
-   * is moved to where its beat falls on the master's before it goes, as a
-   * CDJ with SYNC and QUANTIZE does, so the two are on the beat together
-   * from the first sound. A deck already playing, or one following nothing,
-   * simply toggles.
+   * PLAY. With BEAT SYNC lit and Q on, a stopped deck starts on the beat, as
+   * a CDJ with SYNC and QUANTIZE does: it is put on its own nearest beat and
+   * held until the master's next one lands, so the two are on the beat
+   * together from the first sound. The wait is the engine's, counted in
+   * output frames. A master that is not running has no next beat to wait
+   * for, so the deck is lined up with it and started at once. A deck already
+   * playing, or one following nothing, simply toggles.
    */
   const togglePlay = useCallback(() => {
     if (!playback.playing && synced && quantize) {
       const leader = peerSync?.();
       const follower = syncState.current();
       if (leader && follower) {
+        const wait = leader.playing ? beatWait(leader) : null;
+        if (wait !== null && grid.times.length > 0) {
+          const onBeat = nearestBeatMs(grid, follower.position * 1000) / 1000;
+          if (Math.abs(onBeat - follower.position) > 0.001) playback.seek(onBeat);
+          playback.playAfter(wait * 1000);
+          return;
+        }
         const nudge = beatNudgeFor(leader, follower);
         if (Math.abs(nudge) > 0.001) playback.seek(follower.position + nudge);
       }
     }
     playback.toggle();
-  }, [playback, synced, quantize, peerSync]);
+  }, [playback, synced, quantize, peerSync, grid]);
 
   /*
    * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.

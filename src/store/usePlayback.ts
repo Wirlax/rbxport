@@ -51,6 +51,12 @@ export interface Playback {
   idle: boolean;
   error: string | null;
   toggle: () => void;
+  /**
+   * Starts a stopped deck after `delayMs` of silence: quantized play on a
+   * synced deck, held for the master's next beat. The engine counts the wait
+   * in its own output frames; the playhead here waits the same time.
+   */
+  playAfter: (delayMs: number) => void;
   seek: (seconds: number) => void;
   /** Seek by fraction, for clicking the waveform. */
   seekFraction: (fraction: number) => void;
@@ -234,7 +240,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       }
       anchor.current = {
         frames: deck.frames,
-        at: now,
+        // A start held for the beat: the engine's frames say how much of the
+        // wait is left, and the head stands still for that long from now.
+        at: rate > 0 && deck.startInFrames > 0 ? now + (deck.startInFrames / rate) * 1000 : now,
         sampleRate: rate,
         playing: deck.playing,
         generation: deck.generation,
@@ -370,6 +378,26 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       }
     })();
   }, [idle, playing, DECK]);
+
+  const playAfter = useCallback(
+    (delayMs: number) => {
+      if (idle || playing) return;
+      const wait = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+      setPlaying(true);
+      // Anchored in the future: `extrapolate` holds the head still until then.
+      anchor.current = { ...anchor.current, playing: true, at: performance.now() + wait };
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          await backend.deckPlayAfter(DECK, wait);
+        } catch (failure) {
+          setPlaying(false);
+          setError(reasonFrom(failure));
+        }
+      })();
+    },
+    [idle, playing, DECK],
+  );
 
   const seek = useCallback(
     (seconds: number) => {
@@ -567,7 +595,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   );
 
   return {
-    playing, position, duration, idle, error, toggle, seek, seekFraction,
+    playing, position, duration, idle, error, toggle, playAfter, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, setTempo, nudgeTempo, setMasterTempo,
   };

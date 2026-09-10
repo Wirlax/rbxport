@@ -242,8 +242,7 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
 
     // A second export with different defaults changes nothing: the stick's
     // settings are its own now.
-    let mut other = StickSettings::default();
-    other.sub_column = Some(2);
+    let other = StickSettings { sub_column: Some(2), ..StickSettings::default() };
     rbl_export::export_with(dest.path(), &tracks, &[], Some(&other)).unwrap();
     let kept = StickSettings::read(&db).unwrap();
     assert_eq!(kept.sub_column, Some(5));

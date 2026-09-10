@@ -232,6 +232,7 @@ impl Worker {
     }
 
     fn load(&mut self, path: &std::path::Path) {
+        self.clock.set_start_in(0);
         self.clock.set_playing(false);
         self.streamer = None;
         self.clock.set_loaded(false);
@@ -316,6 +317,7 @@ impl Worker {
         self.scrubber = None;
         self.window = PcmWindow::empty();
         self.clock.set_scrubbing(false);
+        self.clock.set_start_in(0);
         self.clock.set_playing(false);
         self.streamer = None;
         self.generation = self.clock.bump_generation();
@@ -452,7 +454,7 @@ impl Worker {
         if (self.tempo - 1.0).abs() > f32::EPSILON {
             return self.produce_stretched(generation);
         }
-        let mut block = Block::empty(generation, streamer.position());
+        let mut block = Block::empty(generation, 0);
         let frames = match streamer.fill(&mut block.samples) {
             Ok(frames) => frames,
             Err(e) => {
@@ -469,7 +471,13 @@ impl Worker {
             }
             return false;
         }
-        self.head = streamer.position() as f64 + frames as f64;
+        // Stamped after the fill, not before: the first fill after a seek
+        // starts by discarding what the demuxer overshot by, so the position
+        // beforehand is the packet boundary it landed on, not the frame the
+        // block's audio begins at. Stamping that put the playhead a few
+        // hundred frames early for one block after every seek.
+        block.position = streamer.position() - frames as u64;
+        self.head = streamer.position() as f64;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
         self.producer.push(block).is_ok()
     }

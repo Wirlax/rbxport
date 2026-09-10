@@ -322,6 +322,7 @@ pub fn run() {
             commands::deck_load,
             commands::deck_unload,
             commands::deck_play,
+            commands::deck_play_after,
             commands::deck_pause,
             commands::deck_seek,
             commands::deck_scrub_begin,

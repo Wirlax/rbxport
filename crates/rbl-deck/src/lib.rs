@@ -479,6 +479,28 @@ impl Engine {
         if handle.clock().end_of_stream() && handle.clock().position() >= handle.clock().total() {
             handle.send(deck::Command::Seek(0));
         }
+        handle.clock().set_start_in(0);
+        handle.clock().set_playing(true);
+        handle.send(deck::Command::Wake);
+        self.settle_device();
+    }
+
+    /// Starts a deck after `frames` of output have passed in silence.
+    ///
+    /// Quantized play on a synced deck: the press comes when it comes, and
+    /// the first sound is held until the master's next beat. Counted in
+    /// output frames by the callback, which is the only clock that lands a
+    /// sound where it says it will; a timer on any other thread would be
+    /// out by a callback or two, and a beat is only a few of those.
+    pub fn play_after(&self, deck: Deck, frames: u64) {
+        let Some(handle) = self.deck(deck) else { return };
+        if !handle.clock().loaded() {
+            return;
+        }
+        if handle.clock().end_of_stream() && handle.clock().position() >= handle.clock().total() {
+            handle.send(deck::Command::Seek(0));
+        }
+        handle.clock().set_start_in(frames);
         handle.clock().set_playing(true);
         handle.send(deck::Command::Wake);
         self.settle_device();
@@ -486,6 +508,7 @@ impl Engine {
 
     pub fn pause(&self, deck: Deck) {
         let Some(handle) = self.deck(deck) else { return };
+        handle.clock().set_start_in(0);
         handle.clock().set_playing(false);
         handle.send(deck::Command::Wake);
         self.settle_device();
@@ -497,6 +520,9 @@ impl Engine {
         // The clock moves now rather than when the first block after the seek
         // is played: a seek while paused must show where it landed.
         handle.clock().set_position(frame.min(handle.clock().total().max(frame)));
+        // A head moved by hand is no longer where the beat was worked out
+        // from; whatever wait was pending is over.
+        handle.clock().set_start_in(0);
         // And the generation with it, here rather than on the deck thread.
         //
         // The callback treats "the clock's generation is ahead of mine" as
@@ -612,6 +638,7 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             loaded: false,
             tempo: 1.0,
             master_tempo: false,
+            start_in_frames: 0,
         })
     }
 }
@@ -646,6 +673,21 @@ struct DeckReader {
 
 impl DeckReader {
     fn mix_into(&mut self, out: &mut [f32]) {
+        // A start held for the beat: the frames of the wait pass in silence
+        // — nothing is added to `out` — and the rest of the callback, if
+        // any, is played as usual. The wait is counted here, in the output's
+        // own frames, so the first sound lands where the wait was measured
+        // to. A drag is heard regardless: the hand is not waiting for a beat.
+        let out = if self.clock.playing() && !self.clock.scrubbing() && self.clock.start_in() > 0 {
+            let frames = out.len() / 2;
+            let passed = usize::try_from(self.clock.pass_start(frames as u64)).unwrap_or(frames);
+            if passed >= frames {
+                return;
+            }
+            out.get_mut(passed * 2..).unwrap_or(&mut [])
+        } else {
+            out
+        };
         let target = self.clock.generation();
         let sounding = self.clock.sounding();
         // Silent and asked for nothing. Whatever a seek left behind is dropped

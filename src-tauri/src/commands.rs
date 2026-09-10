@@ -782,6 +782,29 @@ pub async fn deck_play(
     Ok(())
 }
 
+/// Starts a deck after `delay_ms` of silence, counted by the audio callback:
+/// quantized play on a synced deck, held for the master's next beat.
+#[tauri::command]
+pub async fn deck_play_after(
+    app: tauri::AppHandle,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    delay_ms: f64,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    // Clamped to a positive number first: a delay is at most a beat, and a
+    // negative or absurd one is zero rather than a wrapped count.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let frames = if delay_ms.is_finite() && delay_ms > 0.0 {
+        (delay_ms.min(60_000.0) * f64::from(engine.sample_rate()) / 1000.0).round() as u64
+    } else {
+        0
+    };
+    engine.play_after(crate::player::deck_of(&deck), frames);
+    crate::player::start_ticker(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn deck_pause(
     player: State<'_, Arc<crate::player::Player>>,

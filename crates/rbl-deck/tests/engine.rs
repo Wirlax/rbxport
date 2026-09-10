@@ -258,6 +258,62 @@ fn playing_moves_the_clock_and_produces_the_files_own_audio() {
 }
 
 #[test]
+fn a_start_held_for_the_beat_is_silent_for_exactly_that_long_and_then_sounds() {
+    // Quantized play on a synced deck: the first sound lands the asked-for
+    // number of output frames after the press, to the frame, and the clock
+    // stands still until then.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    ramp(&path, RATE as usize);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    // Off the start of the file, so the first frame played is not itself 0.
+    h.engine.seek_frames(Deck::A, 2_048);
+    std::thread::sleep(Duration::from_millis(50));
+    h.engine.play_after(Deck::A, 1_300);
+    assert!(h.sink.running(), "a held start still needs the device");
+    assert!(h.engine.snapshot().a.playing, "the transport is playing, on hold");
+    assert_eq!(h.engine.snapshot().a.start_in_frames, 1_300);
+
+    // Three callbacks of 512: the first two and 276 frames of the third are
+    // silence, and the clock has not moved.
+    let mut out = Vec::new();
+    for _ in 0..2 {
+        out.extend(h.sink.pull(512));
+    }
+    assert!(out.iter().all(|s| *s == 0.0), "sound before the wait was over");
+    assert_eq!(h.position(Deck::A), 2_048, "the clock moved during the wait");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut third = h.sink.pull(512);
+    let mut retried = false;
+    while third.iter().all(|s| *s == 0.0) && Instant::now() < deadline {
+        // The ring may not have filled yet after the seek; the wait is over
+        // either way, so what comes next is the first sound.
+        retried = true;
+        std::thread::sleep(Duration::from_millis(2));
+        third = h.sink.pull(512);
+    }
+    assert_eq!(h.engine.snapshot().a.start_in_frames, 0);
+    let first_sound = third.chunks_exact(2).position(|f| f[0] != 0.0);
+    assert!(first_sound.is_some(), "no sound after the wait: {:?}", h.events());
+    // When the third pull was the one the wait ran out in, the sound starts
+    // 276 frames into it, give or take the first step of the fade from
+    // silence over the join.
+    if !retried {
+        let at = first_sound.unwrap();
+        assert!((276..=278).contains(&at), "the first sound was {at} frames in, not 276");
+    }
+    assert!(h.position(Deck::A) > 2_048, "the clock did not move once the wait was over");
+
+    // A pause clears a wait that has not run out.
+    h.engine.play_after(Deck::A, 100_000);
+    h.engine.pause(Deck::A);
+    assert_eq!(h.engine.snapshot().a.start_in_frames, 0);
+}
+
+#[test]
 fn pausing_stops_the_clock_and_the_device() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ramp.wav");

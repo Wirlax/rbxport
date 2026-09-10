@@ -45,6 +45,8 @@ pub struct DeckTickDto {
     pub tempo: f32,
     /// Whether the pitch is held while that speed changes.
     pub master_tempo: bool,
+    /// Output frames until a started deck sounds: a play held for the beat.
+    pub start_in_frames: u64,
 }
 
 /// Both decks, which is what one tick carries: about 200 bytes, well inside
@@ -77,6 +79,7 @@ impl TickDto {
             loaded: false,
             tempo: 1.0,
             master_tempo: false,
+            start_in_frames: 0,
         };
         Self {
             a: empty,
@@ -331,6 +334,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         loaded: s.loaded,
         tempo: s.tempo,
         master_tempo: s.master_tempo,
+        start_in_frames: s.start_in_frames,
     };
     let (peak_left, peak_right) = master.peaks();
     TickDto {
