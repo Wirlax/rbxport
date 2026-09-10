@@ -1,5 +1,7 @@
-/* Measured off a capture of rekordbox's own layout menu: a bordered panel of
-   five rows, each a tick column, an icon and a name in capitals. */
+/* Measured off a capture of rekordbox's own layout menu at 2x: a bordered
+   panel 184pt wide, rows on a 25pt pitch, each a tick column, an icon and a
+   name in capitals. The panel opens a point left of the trigger's glyph and
+   overlaps the bottom of the bar rather than hanging under it. */
 .box { position: relative; flex: none; }
 
 .trigger {
@@ -30,12 +32,12 @@
 
 .menu {
   position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  top: calc(100% - 2px);
+  left: 7px;
   z-index: 40;
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  padding: 1px 0;
   border: 1px solid var(--c-menu-border);
   background: var(--c-menu);
   box-shadow: 0 6px 18px rgb(0 0 0 / 55%);
@@ -44,19 +46,21 @@
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 18px 0 8px;
+  height: var(--s-menu-row-h);
+  padding: 0 14px 0 0;
   border: 0;
   background: transparent;
   color: var(--c-text);
-  font-size: var(--f-size-ui);
+  font-size: var(--f-size-menu);
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
 }
 .item:hover { background: var(--c-raised); }
 
-.tick { width: 18px; flex: none; text-align: center; }
-.itemGlyph { width: 22px; height: 16px; flex: none; }
-.label { flex: 1; }
+/* Columns at the capture's offsets: the tick centred 13pt in, the icon's
+   drawn edge at 41pt, the name at 71pt. */
+.tick { display: grid; place-items: center; width: 26px; flex: none; }
+.tickGlyph { width: 12px; height: 8px; }
+.itemGlyph { width: 22px; height: 16px; flex: none; margin-left: 13px; }
+.label { flex: 1; margin-left: 10px; }

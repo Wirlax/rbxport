@@ -146,6 +146,7 @@
   --s-mixer-fader-handle-w: 28px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the handle x 82.5..110.5pt */
   --s-mixer-fader-handle-h: 3px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the handle y 265..268pt */
   --s-player-dual-h: 420px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the two-deck band y 56.5..476.5pt, mirrored about its own centre at 266.5 */
+  --s-menu-row-h: 25px; /* the layout menu open in a capture of rekordbox 7.2.11 at 2x: five rows on a 50px pitch inside a 258px panel */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -153,6 +154,7 @@
   --f-size-bars: 14px; /* docs/screenshots at 2x: the bar count reads 20px tall over the detail band, which is a 14px face */
   --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
+  --f-size-menu: 12.5px; /* the layout menu's 'SIMPLE PLAYER' in the same 2x capture: 194px wide with an 18px cap height, which Arial gives at 12.5px */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than

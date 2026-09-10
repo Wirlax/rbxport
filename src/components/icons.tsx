@@ -135,6 +135,12 @@ export const SortUpIcon = (props: IconProps) => (
   </svg>
 );
 
+export const TickIcon = (props: IconProps) => (
+  <svg viewBox="0 0 12 8" aria-hidden focusable="false" {...props}>
+    <path d="M1 4.1L4.1 7 11 1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
 export const TwistyIcon = (props: IconProps) => (
   <svg viewBox="0 0 8 8" aria-hidden focusable="false" {...props}>
     <path d="m2.6 1.4 3 2.6-3 2.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>

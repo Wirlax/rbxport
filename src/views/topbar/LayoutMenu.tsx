@@ -13,6 +13,7 @@ import {
   LayoutOneIcon,
   LayoutSimpleIcon,
   LayoutTwoIcon,
+  TickIcon,
 } from "@/components/icons";
 import { LAYOUTS, type PlayerLayout } from "@/lib/layout";
 import styles from "./LayoutMenu.module.css";
@@ -84,7 +85,7 @@ export function LayoutMenu({ layout, onChange }: LayoutMenuProps) {
                 }}
               >
                 <span className={styles.tick} aria-hidden>
-                  {entry.id === layout ? "✓" : ""}
+                  {entry.id === layout ? <TickIcon className={styles.tickGlyph} /> : null}
                 </span>
                 <Glyph className={styles.itemGlyph} />
                 <span className={styles.label}>{entry.label}</span>
