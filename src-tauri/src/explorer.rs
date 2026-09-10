@@ -18,15 +18,26 @@ use crate::dto::{ExplorerChildrenDto, ExplorerRootDto, RowDto, ViewHandleDto, Vi
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, sort_from_wire, AppState};
 
-/// Subfolders sent for one folder. A thousand names is under 30 KB; a
-/// folder with more shows the first thousand and says it was cut.
-const MAX_CHILDREN: usize = 1000;
+/// Subfolders sent for one folder: the first two thousand by name, which is
+/// about 42 KB of names for the reference card's 14,503-folder `RB` [OBS]
+/// and inside the response cap. A folder with more shows these and says how
+/// many were left out.
+const MAX_CHILDREN: usize = 2000;
 
 /// Audio files listed for one folder. The list itself stays in Rust and is
 /// paged out through `fetch_rows`, so the cap bounds the directory read and
 /// the sort, not the response: the largest folder in the reference library
 /// holds 2,911 tracks [OBS] and opens well inside this.
 const MAX_FILES: usize = 5000;
+
+/// How long one page may spend reading loose files' tags.
+///
+/// Past `interaction.fetchRowsMs` in `perf-budgets.json`, knowingly: that
+/// budget is for the index, which is in memory, and a loose file's tags are
+/// on a disk that may be a card in a USB reader. A page of such files costs
+/// its reads once; what the budget does not reach shows its name and is read
+/// on the page's next fetch.
+const TAG_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Where the Explorer starts: the music folder, the home folder, the system
 /// volume, and every other mounted volume.
@@ -51,8 +62,8 @@ pub async fn explorer_children(path: String) -> AppResult<ExplorerChildrenDto> {
     blocking("explorer_children", move || {
         let listing = rbl_devices::explorer::subfolders(&PathBuf::from(path), MAX_CHILDREN);
         Ok(ExplorerChildrenDto {
+            total: u32::try_from(listing.total).unwrap_or(u32::MAX),
             names: listing.entries.into_iter().map(|entry| entry.name).collect(),
-            truncated: listing.truncated,
         })
     })
     .await
@@ -81,9 +92,10 @@ pub async fn open_folder(
         } else {
             rbl_devices::explorer::audio_files(&PathBuf::from(path), MAX_FILES)
         };
+        let truncated = listing.truncated();
         let files = listing.entries.into_iter().map(|entry| (entry.name, entry.path)).collect();
         let mut view = library.open_folder(files, &parsed);
-        view.truncated = listing.truncated;
+        view.truncated = truncated;
         let (view_id, len, generation) = handle.open_folder_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation })
     })
@@ -110,6 +122,7 @@ pub async fn fetch_rows(
     }
     blocking("fetch_rows", move || {
         let offset = offset as usize;
+        folder.read_tags_in(offset, len as usize, TAG_BUDGET);
         Ok(folder
             .window(offset, len as usize)
             .iter()
@@ -122,7 +135,7 @@ pub async fn fetch_rows(
                         .unwrap_or_else(|| loose_row(position, "", "", None)),
                     FolderEntry::File(index) => match folder.file(index) {
                         Some(file) => {
-                            loose_row(position, &file.name, &loose_id(&file.path), Some(file.tags()))
+                            loose_row(position, &file.name, &loose_id(&file.path), file.tags_if_read())
                         }
                         None => loose_row(position, "", "", None),
                     },
@@ -158,12 +171,16 @@ pub async fn ids_in_range(
 }
 
 /// A row for a file the library does not hold. Unanalysed, unrated, no
-/// artwork: what there is to say about it is its name and its tags.
+/// artwork: what there is to say about it is its name and its tags — and
+/// its name alone, as the title, until the tags have been read.
 fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::folder::LooseTags>) -> RowDto {
     RowDto {
         id: id.to_owned(),
         track_no: u32::try_from(position + 1).unwrap_or(u32::MAX),
-        title: tags.map_or_else(String::new, |t| t.title.clone()),
+        title: tags.map_or_else(
+            || name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned(),
+            |t| t.title.clone(),
+        ),
         artist: tags.map_or_else(String::new, |t| t.artist.clone()),
         album: tags.map_or_else(String::new, |t| t.album.clone()),
         genre: tags.map_or_else(String::new, |t| t.genre.clone()),

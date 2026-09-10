@@ -20,4 +20,6 @@ parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
+# For the Explorer example, which lists a real folder against the real library.
+rbl-devices = { path = "../rbl-devices" }
 tempfile = "3"

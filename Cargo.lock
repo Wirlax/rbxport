@@ -3343,6 +3343,7 @@ dependencies = [
  "parking_lot",
  "rbl-core",
  "rbl-db",
+ "rbl-devices",
  "rusqlite",
  "serde",
  "tempfile",

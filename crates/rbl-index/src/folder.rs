@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use crate::{strings::fold, Library, Row, SortColumn, ViewSpec};
 
@@ -53,13 +55,28 @@ pub struct LooseFile {
     tags: OnceLock<LooseTags>,
 }
 
+/// Readers a window's tags are spread over.
+///
+/// A tag read is a few small reads and seeks, and on a card in a USB reader
+/// each one waits on the reader rather than on the data — 14 ms a file
+/// there against under a millisecond from the local disk [OBS]. Eight at a
+/// time turns a page of a slow card from seconds into a fraction of one.
+const TAG_READERS: usize = 8;
+
 impl LooseFile {
+    /// The file's tags, if they have been read. The name is what there is
+    /// to show until then.
+    pub fn tags_if_read(&self) -> Option<&LooseTags> {
+        self.tags.get()
+    }
+
     /// The file's tags, read on the first call and kept.
     ///
-    /// One `lofty` probe per file, header only — a few hundred microseconds
-    /// from a local disk. It is here rather than at open so a folder of five
-    /// thousand tracks opens on the directory read alone, and a window of
-    /// rows pays for its own files when it is fetched.
+    /// One `lofty` probe per file, header only and without the cover art —
+    /// a few hundred microseconds from a local disk. It is here rather than
+    /// at open so a folder of five thousand tracks opens on the directory
+    /// read alone, and a window of rows pays for its own files when it is
+    /// fetched.
     pub fn tags(&self) -> &LooseTags {
         self.tags.get_or_init(|| match rbl_db::import::read_tags(&self.path) {
             Ok(read) => LooseTags {
@@ -116,6 +133,40 @@ impl FolderView {
     /// The loose file an entry points at.
     pub fn file(&self, index: usize) -> Option<&LooseFile> {
         self.files.get(index)
+    }
+
+    /// Reads the tags of the window's loose files that have none yet,
+    /// several at a time, and stops taking new ones once `budget` is spent.
+    ///
+    /// Bounded so a page always lands: a file whose tags were not reached
+    /// shows its name, and is read on the next fetch of its page. Files
+    /// already read cost nothing here, so scrolling back is free.
+    pub fn read_tags_in(&self, offset: usize, len: usize, budget: Duration) {
+        let pending: Vec<&LooseFile> = self
+            .window(offset, len)
+            .iter()
+            .filter_map(|entry| match *entry {
+                FolderEntry::File(index) => self.files.get(index).filter(|f| f.tags.get().is_none()),
+                FolderEntry::Track(_) => None,
+            })
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        let deadline = Instant::now() + budget;
+        let next = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..pending.len().min(TAG_READERS) {
+                scope.spawn(|| {
+                    while Instant::now() < deadline {
+                        let Some(file) = pending.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                            break;
+                        };
+                        let _ = file.tags();
+                    }
+                });
+            }
+        });
     }
 }
 
@@ -347,6 +398,33 @@ mod tests {
         let view = lib.open_folder(files, &spec(SortColumn::TrackNo, false, "SUMMER"));
         assert_eq!(view.entries, [FolderEntry::File(0)]);
         assert_eq!(view.file(0).unwrap().name, "summer mix.mp3");
+    }
+
+    #[test]
+    fn a_windows_tags_are_read_together_and_a_spent_budget_leaves_the_rest_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = Vec::new();
+        for i in 0..20 {
+            let path = dir.path().join(format!("{i:02}.mp3"));
+            std::fs::write(&path, b"not audio").unwrap();
+            files.push((format!("{i:02}.mp3"), path));
+        }
+        let lib = library();
+        let view = lib.open_folder(files, &spec(SortColumn::TrackNo, false, ""));
+        assert!(view.file(0).unwrap().tags_if_read().is_none());
+
+        view.read_tags_in(0, 10, Duration::from_secs(5));
+        for i in 0..10 {
+            assert!(view.file(i).unwrap().tags_if_read().is_some(), "{i}");
+        }
+        for i in 10..20 {
+            assert!(view.file(i).unwrap().tags_if_read().is_none(), "{i}");
+        }
+
+        // No budget at all: nothing new is read, and nothing already read is lost.
+        view.read_tags_in(0, 20, Duration::ZERO);
+        assert!(view.file(5).unwrap().tags_if_read().is_some());
+        assert!(view.file(15).unwrap().tags_if_read().is_none());
     }
 
     #[test]
