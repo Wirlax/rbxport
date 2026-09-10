@@ -68,6 +68,37 @@ export class RowCache<T> {
     return out;
   }
 
+  /** Whether any cached row satisfies a predicate. The same scan as `patch`. */
+  holds(pick: (row: T) => boolean): boolean {
+    for (const entry of this.#pages.values()) {
+      if (entry.rows.some(pick)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Rewrites the cached rows a predicate picks, in place, and says whether
+   * any were. For a change the backend made to one row without a reload —
+   * a cue edit — where dropping every page to pick up one field would
+   * blank the table. A scan of at most `maxPages` pages, once per edit.
+   */
+  patch(pick: (row: T) => boolean, change: (row: T) => T): boolean {
+    let touched = false;
+    for (const [page, entry] of this.#pages) {
+      let rows: T[] | null = null;
+      entry.rows.forEach((row, i) => {
+        if (!pick(row)) return;
+        rows ??= [...entry.rows];
+        rows[i] = change(row);
+      });
+      if (rows) {
+        this.#pages.set(page, { token: entry.token, rows });
+        touched = true;
+      }
+    }
+    return touched;
+  }
+
   clear(): void {
     this.#pages.clear();
   }

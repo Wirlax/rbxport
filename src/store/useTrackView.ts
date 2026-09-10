@@ -6,7 +6,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import type { Backend, RowDto, ViewSpec } from "@/ipc/types";
+import type { Backend, RowCue, RowDto, ViewSpec } from "@/ipc/types";
+import { rowCuesOf } from "@/lib/cues";
 import { RowCache, PAGE_SIZE, type CacheToken } from "@/lib/rowCache";
 import { planFetches } from "@/lib/virtual";
 
@@ -142,6 +143,42 @@ export function useTrackView(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specKey]);
 
+  /*
+   * A cue edit changes one row's letters and nothing else, and the backend
+   * re-reads only that track rather than reloading the library — so no new
+   * generation arrives to drop the pages. The row is patched where it is
+   * cached instead: one fetch of the track's cues, which is what the backend
+   * built the column from. A row not on a cached page needs nothing; the
+   * page it is on will be fetched fresh.
+   */
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onCuesChanged((trackId) => {
+        // Only a row the cache holds is worth the fetch.
+        if (!cache.current.holds((row) => row.id === trackId)) return;
+        void backend.trackCues(trackId).then((cues) => {
+          if (!live) return;
+          const hotCues = rowCuesOf(cues);
+          const changed = cache.current.patch(
+            (row) => row.id === trackId && !sameRowCues(row.hotCues, hotCues),
+            (row) => ({ ...row, hotCues }),
+          );
+          if (changed) setPagesLoaded((n) => n + 1);
+        }).catch(() => {
+          // Leave the row as it was; the next fetch of its page is current.
+        });
+      });
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+
   const ensureRange = useCallback(
     (start: number, end: number) => {
       const { viewId, count } = state;
@@ -225,4 +262,12 @@ export function useTrackView(
     }),
     [rows, seedCount, state.count, state.specKey, state.error, token, specKey, rowAt, ensureRange, idsInRange],
   );
+}
+
+/** Whether two rows' hot-cue tuples read the same, so an unchanged row is not re-rendered. */
+function sameRowCues(a: readonly RowCue[], b: readonly RowCue[]): boolean {
+  return a.length === b.length && a.every((x, i) => {
+    const y = b[i];
+    return y !== undefined && x[0] === y[0] && x[1] === y[1] && x[2] === y[2];
+  });
 }

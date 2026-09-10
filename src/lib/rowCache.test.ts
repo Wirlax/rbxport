@@ -59,3 +59,21 @@ describe("view identity", () => {
     expect(c.missingPages(0, 4, "2:1")).toEqual([0]);
   });
 });
+
+describe("patch", () => {
+  it("rewrites the rows it picks in place and leaves the pages' identity alone", () => {
+    const c = new RowCache<{ id: string; cues: string }>(2, 10);
+    const rows = (ids: string[]) => ids.map((id) => ({ id, cues: "" }));
+    c.setPage(0, "1:1", rows(["a", "b"]));
+    c.setPage(1, "1:1", rows(["c", "d"]));
+    expect(c.patch((r) => r.id === "c", (r) => ({ ...r, cues: "AB" }))).toBe(true);
+    expect(c.get(2, "1:1")).toEqual({ id: "c", cues: "AB" });
+    expect(c.get(0, "1:1")).toEqual({ id: "a", cues: "" });
+    expect(c.hasPage(1, "1:1")).toBe(true);
+    // A row the cache does not hold is nothing to do.
+    expect(c.holds((r) => r.id === "d")).toBe(true);
+    expect(c.holds((r) => r.id === "zz")).toBe(false);
+    expect(c.patch((r) => r.id === "zz", (r) => ({ ...r, cues: "X" }))).toBe(false);
+    expect(c.size).toBe(2);
+  });
+});

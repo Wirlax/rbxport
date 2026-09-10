@@ -8,7 +8,7 @@
  * here, where it can be tested without a deck. The hot cue pads are simpler:
  * a slot is a letter, and a letter is set or it is not.
  */
-import type { Cue } from "@/ipc/types";
+import type { Cue, RowCue } from "@/ipc/types";
 
 /**
  * How close to a memory cue the playhead has to be to count as on it, in
@@ -94,10 +94,22 @@ export function hotCue(cues: readonly Cue[], letter: string): Cue | null {
  * reads exactly as one fetched afresh would.
  */
 export function hotLetters(cues: readonly Cue[]): string {
-  const letters: string[] = [];
+  return rowCuesOf(cues).map(([letter]) => letter).join("");
+}
+
+/**
+ * A track's hot cues as its browser row carries them: one per slot, in
+ * letter order, with the colour the deck was handed. The same shape the
+ * backend builds a row from, so a row patched with this reads as if it had
+ * been fetched after the edit.
+ */
+export function rowCuesOf(cues: readonly Cue[]): RowCue[] {
+  const seen = new Set<string>();
+  const out: RowCue[] = [];
   for (const cue of cues) {
-    if (cue.memory || cue.letter === "" || letters.includes(cue.letter)) continue;
-    letters.push(cue.letter);
+    if (cue.memory || cue.letter === "" || seen.has(cue.letter)) continue;
+    seen.add(cue.letter);
+    out.push([cue.letter, cue.positionMs, cue.colour]);
   }
-  return letters.sort().join("");
+  return out.sort((a, b) => a[0].localeCompare(b[0]));
 }
