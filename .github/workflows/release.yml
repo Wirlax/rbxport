@@ -1,9 +1,10 @@
 name: Release
 
 # A tag is the release. `v1.2.3` builds macOS and Windows, signs them where the
-# signing secrets exist, and publishes the installers to the R2 bucket under
-# that version — plus a `latest/` copy, so a download link does not have to
-# name a version.
+# signing secrets exist, and publishes the installers to the R2 bucket as
+# `rekordbox-lite-1.2.3-<platform>.<ext>` — flat keys, the version in the
+# name — plus `latest.json`, so a page can find the newest version without
+# a folder listing.
 #
 # R2 is the only place a release is published. No GitHub Release is created:
 # this repository is private and release assets inherit that, so a download
