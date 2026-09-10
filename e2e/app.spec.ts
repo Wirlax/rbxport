@@ -1376,6 +1376,36 @@ test("dragging the detail waveform scrubs, and dragging the overview seeks", asy
   expect((head?.x ?? 0) - (ovw?.x ?? 0)).toBeCloseTo((ovw?.width ?? 0) * 0.75, -1);
 });
 
+test("a track can be scrubbed as soon as it is loaded, before it has ever played", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  const player = page.getByRole("region", { name: "Preview player", exact: true });
+  await expect(player.getByRole("button", { name: "Play", exact: true })).toBeEnabled();
+
+  // No Play. The hand goes straight to the overview, then to the detail.
+  const clock = page.getByTestId("player-time");
+  const start = await clock.textContent();
+  const ovw = await page.getByTestId("player-overview").boundingBox();
+  await page.mouse.move((ovw?.x ?? 0) + (ovw?.width ?? 0) * 0.5, (ovw?.y ?? 0) + 5);
+  await page.mouse.down();
+  await page.mouse.move((ovw?.x ?? 0) + (ovw?.width ?? 0) * 0.6, (ovw?.y ?? 0) + 5, { steps: 5 });
+  await page.mouse.up();
+  await expect(clock).not.toHaveText(start ?? "");
+  const head = await page.getByTestId("player-head").boundingBox();
+  expect((head?.x ?? 0) - (ovw?.x ?? 0)).toBeCloseTo((ovw?.width ?? 0) * 0.6, -1);
+
+  const mid = await clock.textContent();
+  const detail = await page.getByTestId("player-detail").boundingBox();
+  await page.mouse.move((detail?.x ?? 0) + 200, (detail?.y ?? 0) + 20);
+  await page.mouse.down();
+  await page.mouse.move((detail?.x ?? 0) + 600, (detail?.y ?? 0) + 20, { steps: 10 });
+  await page.mouse.up();
+  await expect(clock).not.toHaveText(mid ?? "");
+  // Still not playing: a drag is not a transport control.
+  await expect(player.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+});
+
 test("the waveform actually scrolls while a track plays", async ({ page }) => {
   // The thing that was broken: the layer moved ten times a second because it
   // was drawn from the tick. What it must do is move every frame.
