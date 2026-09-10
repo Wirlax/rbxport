@@ -1532,7 +1532,11 @@ export const Player = memo(function Player({
                 }}
               >
                 <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
-                <span className={styles.cueName}>{cue.outMs > 0 ? "LOOP(Auto)" : "CUE(Auto)"}</span>
+                {/* A loop is listed the same way as a cue. [UNKNOWN] How
+                    rekordbox labels a loop row — no capture holds one, and
+                    german.lang has only "CUE(Auto)" — so nothing is invented;
+                    `data-loop` marks the row for when one is measured. */}
+                <span className={styles.cueName}>CUE(Auto)</span>
                 <button
                   type="button"
                   className={styles.cueDelete}
