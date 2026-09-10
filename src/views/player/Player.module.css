@@ -542,7 +542,9 @@
 .player[data-armed] .playhead { background: var(--c-playhead-armed); }
 
 /* Cues sit over the waveform, the grid and the bar count — a marker behind a
-   downbeat line is a marker nobody can find. */
+   downbeat line is a marker nobody can find. A hot cue sits over a memory cue:
+   rekordbox keeps one beside each hot cue, and the user's crop shows the badge
+   covering the red triangle's point. */
 .memoryCue,
 .hotCue {
   position: absolute;
@@ -552,6 +554,7 @@
   pointer-events: none;
   z-index: 2;
 }
+.hotCue { z-index: 3; }
 
 /* In the overview a memory cue is a small red head at its position, widest at
    the top and tapering to a point, and no line at all: measured beside each
@@ -566,39 +569,42 @@
   clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
-/* In the detail every cue is a small red triangle at the very top of the band,
-   hard against the phrase blocks above it, pointing down at what it marks.
-   Sized from the beat marker's own head so the two read as one family. */
-.cueTriangle {
+/* In the detail a memory cue is a red triangle pointing down at what it marks,
+   16pt across and 11pt tall, centred on the cue and 8.25pt under the band's
+   top: measured off the user's crop, where it shows over the hot cue's badge.
+   No line under it — the only line in the crop is the downbeat's, and a memory
+   cue on its own is in no capture. */
+.cueMarker {
   position: absolute;
-  top: 0;
+  top: var(--s-cue-marker-top);
   left: 0;
   translate: -50% 0;
-  width: 0;
-  height: 0;
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
-  border-top: var(--s-beat-head-h) solid var(--c-cue-head);
+  width: var(--s-cue-marker-w);
+  height: var(--s-cue-marker-h);
+  background: var(--c-cue-head);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-/* The line under that triangle keeps the cue placeable while the grid is being
-   edited: green for a hot cue, grey for a memory cue, and that grey is still
-   unmeasured. */
-.memoryCue[data-band="detail"]::before,
+/* The line under a hot cue's badge keeps the cue placeable while the grid is
+   being edited. It spans the rows a beat line does and is the downbeat's white:
+   the crop's cue sits on a downbeat, and what shows there is one 1pt white
+   line. [ASSUME] a cue off the grid draws the same; the crop cannot say. */
 .hotCue[data-band="detail"]::before {
   content: "";
   position: absolute;
-  top: var(--s-beat-head-h);
-  bottom: 0;
-  width: 1px;
-  background: var(--c-cue-memory);
+  top: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 1px);
+  bottom: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 1px);
+  left: 0;
+  translate: -50% 0;
+  width: var(--s-cue-line-w);
+  background: var(--c-cue-line);
 }
-.hotCue[data-band="detail"]::before { background: var(--cue-colour, var(--c-cue-hot)); }
 
-/* The overview's badge: 11pt square, the letter inside, its left edge on the
-   cue so the marker overhangs the position rather than nudging it. Its colour
-   is the cue's own where one was measured for its ColorTableIndex — set on
-   the marker as --cue-colour — and the default green otherwise. */
+/* The badge: 11pt square, the letter inside. Its colour is the cue's own where
+   one was measured for its ColorTableIndex — set on the marker as --cue-colour
+   — and the default green otherwise. The overview hangs it from the top of the
+   strip with its left edge on the cue, so the marker overhangs the position
+   rather than nudging it. */
 .hotCueBadge {
   position: absolute;
   top: 0;
@@ -612,6 +618,14 @@
   font-size: var(--f-size-xs);
   font-weight: 700;
   line-height: 1;
+}
+/* The detail centres the same badge on the cue, 15pt under the band's top:
+   measured off the user's crop, where its last row is the one before the beat
+   head's first. */
+.hotCue[data-band="detail"] .hotCueBadge {
+  top: var(--s-cue-badge-top);
+  left: 0;
+  translate: -50% 0;
 }
 
 .beat,

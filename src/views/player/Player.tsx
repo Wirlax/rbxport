@@ -186,6 +186,12 @@ export function cueStyle(left: string | undefined, colour: string | null | undef
  * `djmdCue` says otherwise — the measured track carries a `Kind` 0 cue at the
  * same `InMsec` as each of its four hot cues, so the red belongs to those.
  *
+ * The detail draws the same two things larger, measured off the user's crop of
+ * a hot cue there: a 16pt red triangle pointing down from 8.25pt under the
+ * band's top for the memory cue, and the 11pt badge centred on the cue 15pt
+ * down for the hot cue, over the triangle's point, with a 1pt white line under
+ * it through the waveform.
+ *
  * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`,
  * which arrives with the cue from the nine indices measured off the captures.
  * An index outside those arrives without one and draws the token green —
@@ -202,10 +208,9 @@ export const CueMarkers = memo(function CueMarkers({
   /**
    * Which waveform this is drawn over.
    *
-   * The overview hangs its badges from the top of the strip. No export-mode
-   * capture has a cue inside the detail's twelve-bar window, so the detail
-   * follows the performance deck, which sits its badge at the foot of the band
-   * and keeps a line up through the waveform — the thing that makes a cue
+   * The overview hangs its badges from the top of the strip, left edge on the
+   * cue. The detail centres them on the cue under the memory cue's triangle,
+   * and keeps a line down through the waveform — the thing that makes a cue
    * placeable while the grid is being edited.
    */
   band?: "overview" | "detail";
@@ -224,16 +229,16 @@ export const CueMarkers = memo(function CueMarkers({
         // to the edge reads as a cue that is there.
         if (at < from || at > to) return null;
         const left = `${((at - from) / span) * 100}%`;
-        // The detail marks every cue the same way: a red triangle at the top
-        // of the band. The overview tells them apart, because there is room to.
-        const head =
-          band === "detail" ? (
-            <i className={styles.cueTriangle} />
-          ) : cue.memory ? (
-            <i className={styles.cueHead} />
-          ) : (
-            <b className={styles.hotCueBadge}>{cue.letter}</b>
-          );
+        // A hot cue is its lettered badge on both waveforms; the stylesheet
+        // places it by band. A memory cue's red head is the overview's small
+        // one or the detail's 16pt triangle.
+        const head = !cue.memory ? (
+          <b className={styles.hotCueBadge}>{cue.letter}</b>
+        ) : band === "detail" ? (
+          <i className={styles.cueMarker} />
+        ) : (
+          <i className={styles.cueHead} />
+        );
         return (
           <span
             key={cue.id || (cue.memory ? `m-${cue.positionMs}` : `h-${cue.letter}-${cue.positionMs}`)}
