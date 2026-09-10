@@ -29,22 +29,49 @@
 /* No flex `gap` here: every control sits at its own measured distance from
    the one above, and a shared gap plus per-item margins meant the two added
    up — which put PLAY 34pt below CUE instead of the measured 10.5. */
-/* Half a column each. The margins that space the one-deck transport are
-   measured from the top of a 279pt deck and do not fit half of a 420pt pair,
-   so the shared halves space themselves instead.
-
-   **The per-control spacing here is not measured.** The capture's own is, and
-   the arrangement below follows it — CUE and PLAY at the outside, the jump
-   controls towards the middle, no track skips — but the distances between
-   them in the two-deck column have not been scanned off it the way the
-   one-deck ones were. */
+/* Half a column each, every control at its measured distance from the half's
+   outer edge — deck A's from the top of the pair, deck B's from the bottom.
+   Scanned off the two-player capture: the rings are 32 across, not 40, the
+   jump buttons 24.5x22 with a 4.5 gap, the size box 54x27. Deck B's groups
+   mirror deck A's — the rings at the outside, the jump controls towards the
+   middle — but the order inside each group is kept, CUE over PLAY and the
+   jumps over the size box; the `*-bottom` tokens are its own measurements. */
 .transport[data-shared] {
-  justify-content: space-evenly;
+  position: relative;
   overflow: hidden;
   min-height: 0;
+  padding: 0;
 }
-.transport[data-shared] .pair,
-.transport[data-shared] .pair + .pair { margin: 0; }
+.transport[data-shared] > * {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  margin: 0;
+}
+.transport[data-shared] .cue,
+.transport[data-shared] .play {
+  width: var(--s-mixer-jog-w);
+  height: var(--s-mixer-jog-w);
+  border-width: 1.5px;
+}
+.transport[data-shared] .pair { gap: var(--s-mixer-btn-gap); }
+.transport[data-shared] .square {
+  width: var(--s-mixer-btn-w);
+  height: var(--s-mixer-btn-h);
+}
+.transport[data-shared] .beats {
+  width: var(--s-mixer-size-w);
+  height: var(--s-mixer-size-h);
+}
+.transport[data-shared] .cue { top: var(--s-mixer-cue-top); }
+.transport[data-shared] .play { top: var(--s-mixer-play-top); }
+.transport[data-shared] .pair { top: var(--s-mixer-jump-top); }
+.transport[data-shared] .beats { top: var(--s-mixer-size-top); }
+.transport[data-shared][data-flipped] > * { top: auto; }
+.transport[data-shared][data-flipped] .play { bottom: var(--s-mixer-play-bottom); }
+.transport[data-shared][data-flipped] .cue { bottom: var(--s-mixer-cue-bottom); }
+.transport[data-shared][data-flipped] .beats { bottom: var(--s-mixer-size-bottom); }
+.transport[data-shared][data-flipped] .pair { bottom: var(--s-mixer-jump-bottom); }
 
 .transport {
   display: flex;
@@ -168,40 +195,127 @@
 
 /* ------------------------------------------------------------------ deck */
 
-/* Deck B reads bottom-up: the pads at the top, the title at the bottom, and
-   the two decks' waveforms meeting at the centre line between them. The rows
-   are reversed rather than the whole panel being flipped, because everything
-   in them is text or a control and a mirrored one of those is unreadable.
-
-   The waveforms themselves *are* mirrored, in `.player[data-flipped] canvas`
-   below: they are the only thing in the deck with no up or down of its own.
-
-   **Not mirrored yet:** the overlays over the waveforms — the playhead, the
-   hot-cue badges, the phrase bar — still hang from the top of their band. In
-   the capture deck B's hang from the bottom. */
-.player[data-flipped] .main {
+/* The two-deck body, whose rows are DualDeck's and whose heights are the
+   `--s-player-dual-*` tokens: the title row with the sleeve in it, the
+   overview band the deck's full width, the phrase bar, a black point, the
+   control row, and the detail taking the rest of the 210 — 76pt, against the
+   62 the one-deck rows left it at half height. No margin: the deck's panel is
+   black to its edges in the capture, and the control row insets itself. */
+.player[data-dual] .main {
+  margin: 0;
   grid-template-rows:
-    var(--s-player-pad-h)
-    1fr
+    var(--s-player-dual-title-h)
+    var(--s-player-dual-overview-h)
     var(--s-player-phrase-h)
-    var(--s-player-overview-h)
-    var(--s-player-title-h);
+    calc(var(--s-player-dual-control-h) + var(--s-player-dual-phrase-gap))
+    1fr;
+  /* The overview, the phrase bar and the position bar all start the same
+     12pt in from the deck's edge and end 12pt short of the other. */
+  --deck-strip-left: var(--s-player-inset);
 }
-.player[data-flipped] .head { grid-row: 5; }
-.player[data-flipped] .overviewRow { grid-row: 4; }
-.player[data-flipped] .phrase { grid-row: 3; }
-.player[data-flipped] .detailRow { grid-row: 2; }
-.player[data-flipped] .pads { grid-row: 1; }
 
-/* The waveform bitmaps, upside down. A transform on the canvas rather than a
+/* Deck B reads detail, control row, overview, phrase bar, title down the
+   panel. Not the mirror of deck A's order: the overview stays over its phrase
+   bar, as measured, and the title row goes to the bottom with the sleeve
+   hanging from the panel's edge. Its overview band is 5 shorter than deck
+   A's, the 5 going between the phrase bar and the title instead. */
+.player[data-dual][data-flipped] .main {
+  grid-template-rows:
+    1fr
+    var(--s-player-dual-control-h)
+    var(--s-player-dual-overview-hb)
+    var(--s-player-phrase-h)
+    calc(var(--s-player-dual-title-hb) + var(--s-player-dual-phrase-gap-b));
+}
+.player[data-dual][data-flipped] .main > :nth-child(1) { grid-row: 5; }
+.player[data-dual][data-flipped] .overviewRow { grid-row: 3; }
+.player[data-dual][data-flipped] .phrase { grid-row: 4; }
+.player[data-dual][data-flipped] .main > [data-testid="player-controls"] { grid-row: 2; }
+.player[data-dual][data-flipped] .detailRow { grid-row: 1; }
+
+/* The control row sits at the bottom of its track in deck A, the black point
+   above it; in deck B the title row does, under its 6pt of black. */
+.player[data-dual] .main > [data-testid="player-controls"] { align-self: end; }
+.player[data-dual][data-flipped] .main > [data-testid="player-head-row"] { align-self: end; }
+
+/* The sleeve is in the title row here, at its own measured size. */
+.player[data-dual] .artwork {
+  width: var(--s-player-dual-sleeve);
+  height: var(--s-player-dual-sleeve);
+}
+
+/* The overview band: black over the vocal strip, the strip, the waveform
+   directly under it, a gap, the position bar, and the rest dark. Deck B's
+   starts closer under the control row than deck A's does under the title. */
+.player[data-dual] .overviewRow { padding: 0 var(--s-player-inset); }
+.player[data-dual] .overviewStack {
+  grid-template-rows:
+    var(--s-player-dual-overview-top)
+    var(--s-player-vocal-h)
+    var(--s-player-dual-overview-wave-h)
+    var(--s-player-dual-scrub-gap)
+    var(--s-player-scrub-h)
+    1fr;
+}
+.player[data-dual][data-flipped] .overviewStack {
+  grid-template-rows:
+    var(--s-player-dual-overview-top-b)
+    var(--s-player-vocal-h)
+    var(--s-player-dual-overview-wave-h)
+    var(--s-player-dual-scrub-gap)
+    var(--s-player-scrub-h)
+    1fr;
+}
+.player[data-dual] .overviewStack > .vocal { grid-row: 2; }
+.player[data-dual] .overviewStack > .overview { grid-row: 3; }
+.player[data-dual] .overviewStack > .scrub { grid-row: 5; }
+
+.player[data-dual] .phrase { margin-right: var(--s-player-inset); }
+
+/* The detail runs edge to edge and to the line between the decks: no zoom
+   column, no inset, nothing under it. */
+.player[data-dual] .detailRow { padding: 0; }
+
+/* Deck B reads bottom-up — its rows are reordered under `[data-dual]` above,
+   rather than the whole panel being flipped, because everything in them is
+   text or a control and a mirrored one of those is unreadable.
+
+   Only the detail waveform is mirrored, below, so the two details meet at the
+   line between the decks. The overview is not: the capture draws deck B's
+   overview the same way up as deck A's, peaks rising from a baseline at the
+   bottom, with the vocal strip over it and the position bar under it. The
+   overlays over the detail — the beat heads, the cue markers, the bar count
+   — hang from the bottom of deck B's band, further below. */
+/* The detail bitmap, upside down. A transform on the canvas rather than a
    scale inside every draw call: the drawing is where the pixel alignment work
    lives — a fractional offset splits every one-pixel bar across two columns —
    and flipping the finished bitmap cannot disturb any of it. Nothing painted
-   into these canvases has an up or a down; the labels and badges over them are
-   DOM, and stay the right way up. */
-.player[data-flipped] .overview canvas,
-.player[data-flipped] .detail canvas,
-.player[data-flipped] .vocal canvas { transform: scaleY(-1); }
+   into the canvas has an up or a down; the labels and badges over it are DOM,
+   and stay the right way up. */
+.player[data-flipped] .detail canvas { transform: scaleY(-1); }
+
+/* The overlays over deck B's detail hang from the bottom of the band, as the
+   capture has them: the beat lines' heads start the measured distance above
+   the band's bottom edge, the memory cue's triangle points up from it, the
+   hot cue's badge sits the measured distance above it, and the bar count
+   prints along the bottom. The beat lines keep a head at each end, so only
+   their extents swap. */
+.player[data-flipped] .beat,
+.player[data-flipped] .downbeat,
+.player[data-flipped] .hotCue[data-band="detail"]::before {
+  top: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 1px);
+  bottom: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 1px);
+}
+.player[data-flipped] .cueMarker {
+  top: auto;
+  bottom: var(--s-cue-marker-top);
+  clip-path: polygon(0 100%, 100% 100%, 50% 0);
+}
+.player[data-flipped] .hotCue[data-band="detail"] .hotCueBadge {
+  top: auto;
+  bottom: var(--s-cue-badge-top);
+}
+.player[data-flipped] .bars { top: auto; bottom: 0; }
 
 .main {
   display: grid;

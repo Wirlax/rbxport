@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15 6">
+  <!-- Loop In, measured off the 2 PLAYER capture's control row: a 15x3 bar
+       with a 45-degree triangle rising 3 above its left end. -->
+  <path fill="currentColor" d="M0 3h3l3-3v3h9v3H0z"/>
+</svg>

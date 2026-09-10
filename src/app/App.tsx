@@ -40,6 +40,7 @@ import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
+import { DualZoom } from "@/views/player/DualDeck";
 import { Settings } from "@/views/settings/Settings";
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
@@ -158,6 +159,29 @@ export function App() {
     () => ({ a: () => syncB.current(), b: () => syncA.current() }),
     [],
   );
+  /**
+   * The zoom cluster the two-deck layout shares, registered the same way:
+   * one + RST − over the line where the two details meet, and a press
+   * zooms both decks. DUAL CONTROL off, each deck still keeps its own zoom
+   * for the wheel; the cluster is simply pressed on both.
+   */
+  const zoomA = useRef<(by: number) => void>(() => {});
+  const zoomB = useRef<(by: number) => void>(() => {});
+  const publishZoom = useMemo(
+    () => ({
+      a: (zoom: (by: number) => void) => {
+        zoomA.current = zoom;
+      },
+      b: (zoom: (by: number) => void) => {
+        zoomB.current = zoom;
+      },
+    }),
+    [],
+  );
+  const zoomBoth = useCallback((by: number) => {
+    zoomA.current(by);
+    zoomB.current(by);
+  }, []);
   const [dual, setDual] = useState(false);
   const [dualBars, setDualBars] = useState(DETAIL_BARS);
   const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
@@ -870,6 +894,8 @@ export function App() {
             onDropTrack={loadDroppedInto.a}
             onLoadSelected={loadSelectedInto.a}
             transportSlot={deckCount(layout) > 1 ? transportA : null}
+            dual={deckCount(layout) > 1}
+            publishZoom={deckCount(layout) > 1 ? publishZoom.a : undefined}
             {...(deckCount(layout) > 1 ? linked : {})}
             publishSync={publishSync.a}
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
@@ -889,6 +915,8 @@ export function App() {
               onLoadSelected={loadSelectedInto.b}
               transportSlot={transportB}
               flipped
+              dual
+              publishZoom={publishZoom.b}
               {...linked}
               publishSync={publishSync.b}
               peerSync={peerSync.b}
@@ -896,6 +924,13 @@ export function App() {
               onMaster={() => setSyncMaster("b")}
               readOnly={summary?.readOnly ?? false}
             />
+          ) : null}
+          {/* Over the line between the decks, where the capture floats it.
+              After the decks, so it paints over both. */}
+          {deckCount(layout) > 1 ? (
+            <div className={styles.zoomSlot}>
+              <DualZoom onZoom={zoomBoth} />
+            </div>
           ) : null}
           <div className={styles.playerGutter} aria-hidden />
         </div>

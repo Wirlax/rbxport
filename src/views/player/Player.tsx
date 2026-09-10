@@ -59,6 +59,7 @@ import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
 import { useTrackDetails } from "./useTrackDetails";
 import { DeckInfo } from "./DeckInfo";
+import { DualControls, DualHead } from "./DualDeck";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
 import { useHotCues } from "./useHotCues";
 import styles from "./Player.module.css";
@@ -119,6 +120,21 @@ export interface PlayerProps {
   transportSlot?: HTMLElement | null;
   /** Deck B's transport reads bottom-up, mirroring deck A's. */
   flipped?: boolean;
+  /**
+   * The two-deck body: rekordbox's 2 PLAYER deck is a different arrangement
+   * from its 1 PLAYER deck, not the same one at half height — see `DualDeck`.
+   * Its own prop rather than inferred from `transportSlot`, which is null for
+   * a render before the slot has mounted.
+   */
+  dual?: boolean;
+  /**
+   * The zoom, when the shell draws the cluster.
+   *
+   * The two-deck layout has one zoom cluster for the pair, over the line
+   * where the two detail waveforms meet; pressing it zooms both decks.
+   * Registered the way `publishSync` is, for the same reason.
+   */
+  publishZoom?: ((zoom: (by: number) => void) => void) | undefined;
   /**
    * The waveform zoom and the beat-jump size, when something outside is
    * driving them.
@@ -428,7 +444,7 @@ const PANELS = [
 
 export const Player = memo(function Player({
   track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
-  simple = false, transportSlot, flipped = false,
+  simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, readOnly = false,
 }: PlayerProps) {
@@ -890,6 +906,9 @@ export const Player = memo(function Player({
   useEffect(() => {
     publishSync?.(() => syncState.current());
   }, [publishSync]);
+  useEffect(() => {
+    publishZoom?.(zoom);
+  }, [publishZoom, zoom]);
 
   /** Match this deck to the other one: its tempo, then its bar. */
   const beatSync = useCallback(() => {
@@ -1083,6 +1102,83 @@ export const Player = memo(function Player({
     </div>
   );
 
+  // The sleeve: the eject button loaded and the load button empty, and the
+  // record where there is no artwork. Both bodies draw it, at their own size.
+  const sleeve = (
+          <button
+            type="button"
+            className={styles.artwork}
+            // Loaded, the sleeve ejects — as it does on a CDJ's screen. Empty,
+            // it takes whatever the browser has selected, which is the third
+            // way a track reaches a deck alongside the drop and the menu.
+            aria-label={track ? "Eject" : "Load the selected track"}
+            title={track ? "Eject" : "Load the selected track"}
+            onClick={track ? onEject : onLoadSelected}
+            disabled={track ? !onEject : !onLoadSelected}
+          >
+            {track?.hasArtwork ? (
+              <Artwork trackId={track.id} className={styles.sleeve} />
+            ) : (
+              <DiscIcon className={styles.disc} />
+            )}
+            {/* Shown on hover, over a scrim: what the sleeve does when clicked
+                is not otherwise guessable from a sleeve. */}
+            {track ? <EjectIcon className={styles.eject} /> : null}
+          </button>
+  );
+
+  const overviewStack = (
+          <div className={styles.overviewStack}>
+            {/* Where the vocals are, from the analysis. */}
+            <VocalStrip trackId={track && track.analysed ? track.id : null} />
+            {/*
+              Clicking either waveform seeks, which is what they are for.
+
+              Reported, not operated: the overview scrubs with the pointer and
+              has no keys of its own — the arrows already belong to the deck. A
+              tab stop here would only park the focus somewhere the keyboard can
+              do nothing, and then paint a ring around the waveform the next
+              time any key went down.
+            */}
+            <div
+              ref={overviewRef}
+              className={styles.overview}
+              data-testid="player-overview"
+              onPointerDown={scrubOverview}
+              onPointerMove={dragOverview}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              role="progressbar"
+              aria-label="Position"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(total)}
+              aria-valuenow={Math.round(playback.position)}
+            >
+              {track && track.analysed ? (
+                <WaveformDetail
+                  trackId={track.id}
+                  progress={0.5}
+                  span={1}
+                  width={overview.width}
+                  height={overview.height}
+                  half
+                />
+              ) : null}
+              <CueMarkers cues={cues} totalMs={total * 1000} />
+              <span
+                ref={overviewHead}
+                className={styles.playhead}
+                data-testid="player-head"
+                aria-hidden
+              />
+            </div>
+            {/* How far through the track the head is, under the overview. */}
+            <div className={styles.scrub} aria-hidden>
+              <div ref={scrubFill} className={styles.scrubFill} />
+            </div>
+          </div>
+  );
+
   return (
     <section
       ref={shell}
@@ -1096,6 +1192,8 @@ export const Player = memo(function Player({
       // Deck B, which reads bottom-up so the two decks' waveforms meet at the
       // line between them.
       data-flipped={flipped || undefined}
+      // The two-deck body, whose rows are DualDeck's.
+      data-dual={dual || undefined}
       data-droppable={takesDrop || undefined}
       onDragOver={dragOver}
       onDrop={drop}
@@ -1103,6 +1201,17 @@ export const Player = memo(function Player({
       {transportSlot ? createPortal(transport, transportSlot) : transport}
 
       <div className={styles.main}>
+        {dual ? (
+          <DualHead
+            track={track}
+            remaining={remaining}
+            elapsed={elapsed}
+            sleeve={sleeve}
+            onBeatSync={beatSync}
+            isMaster={isMaster}
+            onMaster={onMaster}
+          />
+        ) : (
         <div className={styles.head}>
           <span className={styles.title} data-testid="player-title">
             {track ? track.title : ""}
@@ -1153,87 +1262,45 @@ export const Player = memo(function Player({
             </div>
           ) : null}
         </div>
+        )}
 
+        {/* The one-deck overview sits beside the sleeve; the two-deck one
+            runs the deck's width, its sleeve up in the title row. */}
         <div className={styles.overviewRow}>
-          <button
-            type="button"
-            className={styles.artwork}
-            // Loaded, the sleeve ejects — as it does on a CDJ's screen. Empty,
-            // it takes whatever the browser has selected, which is the third
-            // way a track reaches a deck alongside the drop and the menu.
-            aria-label={track ? "Eject" : "Load the selected track"}
-            title={track ? "Eject" : "Load the selected track"}
-            onClick={track ? onEject : onLoadSelected}
-            disabled={track ? !onEject : !onLoadSelected}
-          >
-            {track?.hasArtwork ? (
-              <Artwork trackId={track.id} className={styles.sleeve} />
-            ) : (
-              <DiscIcon className={styles.disc} />
-            )}
-            {/* Shown on hover, over a scrim: what the sleeve does when clicked
-                is not otherwise guessable from a sleeve. */}
-            {track ? <EjectIcon className={styles.eject} /> : null}
-          </button>
-          <div className={styles.overviewStack}>
-            {/* Where the vocals are, from the analysis. */}
-            <VocalStrip trackId={track && track.analysed ? track.id : null} />
-            {/*
-              Clicking either waveform seeks, which is what they are for.
-
-              Reported, not operated: the overview scrubs with the pointer and
-              has no keys of its own — the arrows already belong to the deck. A
-              tab stop here would only park the focus somewhere the keyboard can
-              do nothing, and then paint a ring around the waveform the next
-              time any key went down.
-            */}
-            <div
-              ref={overviewRef}
-              className={styles.overview}
-              data-testid="player-overview"
-              onPointerDown={scrubOverview}
-              onPointerMove={dragOverview}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-              role="progressbar"
-              aria-label="Position"
-              aria-valuemin={0}
-              aria-valuemax={Math.round(total)}
-              aria-valuenow={Math.round(playback.position)}
-            >
-              {track && track.analysed ? (
-                <WaveformDetail
-                  trackId={track.id}
-                  progress={0.5}
-                  span={1}
-                  width={overview.width}
-                  height={overview.height}
-                  half
-                />
-              ) : null}
-              <CueMarkers cues={cues} totalMs={total * 1000} />
-              <span
-                ref={overviewHead}
-                className={styles.playhead}
-                data-testid="player-head"
-                aria-hidden
-              />
-            </div>
-            {/* How far through the track the head is, under the overview. */}
-            <div className={styles.scrub} aria-hidden>
-              <div ref={scrubFill} className={styles.scrubFill} />
-            </div>
-          </div>
+          {dual ? null : sleeve}
+          {overviewStack}
         </div>
 
         <PhraseBar phrases={phrases} totalMs={total * 1000} beatMs={beatMs} />
 
+        {/* The control row comes before the detail in the two-deck body, as
+            the capture has it: the detail is the last row, and takes what is
+            left. */}
+        {dual ? (
+          <DualControls
+            idle={playback.idle}
+            readOnly={readOnly}
+            memory={memory}
+            bpm={formatBpm(Math.round((track?.bpmX100 ?? 0) * playback.tempo))}
+            onNudgeTempo={playback.nudgeTempo}
+            masterTempo={playback.masterTempo}
+            onMasterTempo={playback.setMasterTempo}
+            atUnity={playback.tempo === 1}
+            onResetTempo={() => playback.setTempo(1)}
+            quantize={quantize}
+            onQuantize={() => setQuantize((on) => !on)}
+          />
+        ) : null}
+
         <div className={styles.detailRow}>
+          {/* The two-deck layout's zoom is the shell's, one for the pair. */}
+          {dual ? null : (
           <div className={styles.zoom}>
             <button type="button" aria-label="Zoom in" onClick={() => zoom(-1)}>+</button>
             <span className={styles.rst} aria-hidden>RST</span>
             <button type="button" aria-label="Zoom out" onClick={() => zoom(1)}>−</button>
           </div>
+          )}
           <div
             ref={detailRef}
             className={styles.detail}
@@ -1280,6 +1347,7 @@ export const Player = memo(function Player({
           </div>
         </div>
 
+        {dual ? null : (
         <div className={styles.pads}>
           {/*
             Two stacked tabs, not a pair of pills. The selected one takes the
@@ -1514,6 +1582,7 @@ export const Player = memo(function Player({
           </button>
           <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
         </div>
+        )}
 
       </div>
 

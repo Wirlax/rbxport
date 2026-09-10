@@ -147,6 +147,30 @@ export const LockIcon = (props: IconProps) => (
   </svg>
 );
 
+export const LoopInIcon = (props: IconProps) => (
+  <svg viewBox="0 0 15 6" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" d="M0 3h3l3-3v3h9v3H0z"/>
+  </svg>
+);
+
+export const LoopOutIcon = (props: IconProps) => (
+  <svg viewBox="0 0 15 6" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" d="M15 3h-3L9 0v3H0v3h15z"/>
+  </svg>
+);
+
+export const MagnifierMinusIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 14" aria-hidden focusable="false" {...props}>
+    <circle cx="5.75" cy="5.75" r="4.75" fill="none" stroke="currentColor" strokeWidth="1.5"/> <path d="M9.4 9.4 13 13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/> <path d="M3.4 5.75h4.7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+  </svg>
+);
+
+export const MagnifierPlusIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 14" aria-hidden focusable="false" {...props}>
+    <circle cx="5.75" cy="5.75" r="4.75" fill="none" stroke="currentColor" strokeWidth="1.5"/> <path d="M9.4 9.4 13 13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/> <path d="M5.75 3.4v4.7M3.4 5.75h4.7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+  </svg>
+);
+
 export const MetronomeIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <rect x="2.6" y="8.4" width="2.4" height="5.4" fill="currentColor"/> <rect x="6.8" y="4.6" width="2.4" height="9.2" fill="currentColor"/> <rect x="11.0" y="6.8" width="2.4" height="7.0" fill="currentColor"/>
