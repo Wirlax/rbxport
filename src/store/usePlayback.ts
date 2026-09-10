@@ -82,6 +82,13 @@ export interface Playback {
   /** Where playback is right now, without waiting for a render. */
   positionRef: React.RefObject<number>;
   /**
+   * Where playback is at this instant, extrapolated from the last tick
+   * rather than read from the last frame: `positionRef` moves with the
+   * frame loop, which at a low drawing rate is up to 66 ms behind. Sync
+   * reads this, because a beat is a few of those.
+   */
+  positionNow: () => number;
+  /**
    * Every frame while playing, and once on each seek.
    *
    * The playhead is driven from here rather than from `position`: state feeds
@@ -554,9 +561,14 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     [duration, seek],
   );
 
+  const positionNow = useCallback(
+    () => (anchor.current.playing ? extrapolate(anchor.current, performance.now()) : positionRef.current),
+    [],
+  );
+
   return {
     playing, position, duration, idle, error, toggle, seek, seekFraction,
-    scrubBegin, scrubTo, scrubEnd, positionRef, subscribe,
+    scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, setTempo, nudgeTempo, setMasterTempo,
   };
 }

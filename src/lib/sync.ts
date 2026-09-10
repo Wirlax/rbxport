@@ -141,6 +141,31 @@ export function nudgeFor(leader: Deck, follower: Deck): number {
 }
 
 /**
+ * How far to move the follower so its beat falls where the leader's does.
+ *
+ * The beat rather than the bar: this is what quantized play on a synced deck
+ * lines up. A CDJ with SYNC and QUANTIZE on starts a track on the master's
+ * beat, whichever beat of the bar that is — the bar is the DJ's to choose, by
+ * where the cue was set. At most half a beat either way, as `nudgeFor` is at
+ * most half a bar.
+ */
+export function beatNudgeFor(leader: Deck, follower: Deck): number {
+  const lead = barAt(leader, leader.position);
+  const follow = barAt(follower, follower.position);
+  if (!lead || !follow || lead.length <= 0 || follow.length <= 0) return 0;
+  const beatOf = (bar: { start: number; length: number }, at: number) => {
+    const beat = bar.length / BEATS_PER_BAR;
+    const into = (at - bar.start) / beat;
+    return { fraction: into - Math.floor(into), beat };
+  };
+  const leadBeat = beatOf(lead, leader.position);
+  const followBeat = beatOf(follow, follower.position);
+  const gap = leadBeat.fraction - followBeat.fraction;
+  const wrapped = gap - Math.round(gap);
+  return wrapped * followBeat.beat;
+}
+
+/**
  * Both halves: what the follower's tempo becomes and how far it moves.
  *
  * A deck with no grid and no BPM comes back as "leave it alone" rather than as

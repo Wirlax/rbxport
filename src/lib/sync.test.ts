@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { BEATS_PER_BAR, NO_BEATS } from "./player";
-import { barAt, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck } from "./sync";
+import {
+  barAt, beatNudgeFor, MAX_TEMPO, MIN_TEMPO, nudgeFor, syncTo, tempoFor, type Deck,
+} from "./sync";
 
 /** A grid at a steady `bpm`, starting `offsetMs` in. */
 function grid(bpm: number, beats: number, offsetMs = 0) {
@@ -150,3 +152,24 @@ describe("syncTo", () => {
     expect(into(moved)).toBeCloseTo(into(leader), 3);
   });
 });
+
+describe("beatNudgeFor", () => {
+  it("lines the follower's beat up with the leader's, whichever beat of the bar", () => {
+    // 120 BPM: a half-second beat. The leader is a quarter beat past a beat
+    // and the follower is on one, so the follower moves an eighth of a second
+    // forward — not the two and a quarter beats a bar match would ask for.
+    expect(beatNudgeFor(deck(120, 4.125), deck(120, 5.0))).toBeCloseTo(0.125, 3);
+    // The short way round: three quarters past a beat is a quarter before the next.
+    expect(beatNudgeFor(deck(120, 4.375), deck(120, 5.0))).toBeCloseTo(-0.125, 3);
+    expect(beatNudgeFor(deck(120, 4.0), deck(120, 5.5))).toBeCloseTo(0, 3);
+  });
+
+  it("never asks for more than half a beat, and nothing without a grid or a BPM", () => {
+    for (let at = 0; at < 1; at += 0.03) {
+      expect(Math.abs(beatNudgeFor(deck(120, 4), deck(120, 4 + at)))).toBeLessThanOrEqual(0.2501);
+    }
+    const unknown: Deck = { bpmX100: 0, position: 1, grid: NO_BEATS };
+    expect(beatNudgeFor(unknown, deck(128, 4))).toBe(0);
+  });
+});
+

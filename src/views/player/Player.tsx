@@ -53,7 +53,7 @@ import {
 import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
-import { syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
+import { beatNudgeFor, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
@@ -766,6 +766,37 @@ export const Player = memo(function Player({
     cues, positionSeconds, seek, quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
 
+  // What the other deck reads when its BEAT SYNC is pressed. A ref holding a
+  // closure over the current render, registered once: the shell keeps the
+  // getter, not the values, so nothing here re-renders anything there.
+  const syncState = useRef<() => SyncDeck | null>(() => null);
+  syncState.current = () =>
+    track
+      ? { bpmX100: track.bpmX100, tempo: playback.tempo, position: playback.positionNow(), grid }
+      : null;
+  useEffect(() => {
+    publishSync?.(() => syncState.current());
+  }, [publishSync]);
+
+  /**
+   * PLAY. With BEAT SYNC lit and Q on, a stopped deck starts on the beat: it
+   * is moved to where its beat falls on the master's before it goes, as a
+   * CDJ with SYNC and QUANTIZE does, so the two are on the beat together
+   * from the first sound. A deck already playing, or one following nothing,
+   * simply toggles.
+   */
+  const togglePlay = useCallback(() => {
+    if (!playback.playing && synced && quantize) {
+      const leader = peerSync?.();
+      const follower = syncState.current();
+      if (leader && follower) {
+        const nudge = beatNudgeFor(leader, follower);
+        if (Math.abs(nudge) > 0.001) playback.seek(follower.position + nudge);
+      }
+    }
+    playback.toggle();
+  }, [playback, synced, quantize, peerSync]);
+
   /*
    * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
    *
@@ -793,7 +824,7 @@ export const Player = memo(function Player({
         case "playPause":
           // Space scrolls the page otherwise.
           event.preventDefault();
-          playback.toggle();
+          togglePlay();
           break;
         case "cue":
           // Pressed, not tapped. CUE is a held control on the hardware and in
@@ -870,7 +901,7 @@ export const Player = memo(function Player({
       globalThis.removeEventListener("keyup", onKeyUp);
       globalThis.removeEventListener("blur", onBlur);
     };
-  }, [armed, jump, platform, playback, holdCue, dropCue, memory, hot]);
+  }, [armed, jump, platform, playback, holdCue, dropCue, memory, hot, togglePlay]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding
@@ -926,17 +957,6 @@ export const Player = memo(function Player({
   const remaining = splitTime(Math.max(total - playback.position, 0));
   const elapsed = splitTime(playback.position);
 
-  // What the other deck reads when its BEAT SYNC is pressed. A ref holding a
-  // closure over the current render, registered once: the shell keeps the
-  // getter, not the values, so nothing here re-renders anything there.
-  const syncState = useRef<() => SyncDeck | null>(() => null);
-  syncState.current = () =>
-    track
-      ? { bpmX100: track.bpmX100, tempo: playback.tempo, position: playback.positionRef.current, grid }
-      : null;
-  useEffect(() => {
-    publishSync?.(() => syncState.current());
-  }, [publishSync]);
   useEffect(() => {
     publishZoom?.(zoom);
   }, [publishZoom, zoom]);
@@ -1030,7 +1050,7 @@ export const Player = memo(function Player({
         onDrop={drop}
         playing={playback.playing}
         idle={playback.idle}
-        onToggle={playback.toggle}
+        onToggle={togglePlay}
         position={playback.position}
         total={total}
         cues={cues}
@@ -1131,7 +1151,7 @@ export const Player = memo(function Player({
           className={styles.play}
           data-on={playback.playing ? "" : undefined}
           aria-label={playback.playing ? "Pause" : "Play"}
-          onClick={playback.toggle}
+          onClick={togglePlay}
           disabled={playback.idle}
         >
           {/* Both are here so hover swaps them in CSS: a state change for a
