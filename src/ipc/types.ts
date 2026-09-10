@@ -390,6 +390,24 @@ export interface Backend {
   pickFolder(title: string): Promise<string | null>;
 
   /**
+   * Opens the Preferences window on `pane`, or turns the open one to it.
+   * False where there are no windows — a browser — and the shell draws the
+   * Preferences over itself instead.
+   */
+  openPreferences(pane: string): Promise<boolean>;
+
+  /**
+   * The Preferences window asking the main one for something only it holds:
+   * the browser's columns or the panes' widths put back. Returns its own
+   * unsubscribe.
+   */
+  onPreferencesReset(listener: (what: "columns" | "layout") => void): () => void;
+  requestPreferencesReset(what: "columns" | "layout"): Promise<void>;
+
+  /** Closes the window this runs in; nothing in a browser. */
+  closeWindow(): Promise<void>;
+
+  /**
    * The values the track filter bar can offer for a list: which whole BPMs
    * and which keys it holds, counted over the source and query alone so a
    * picked value never hides the others. Rust tallies them in one pass; the

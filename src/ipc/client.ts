@@ -196,6 +196,19 @@ async function realBackend(): Promise<Backend> {
       // Cancelling is a normal outcome, not an error.
       return typeof picked === "string" ? picked : null;
     },
+    openPreferences: async (pane) => {
+      await invoke<void>("open_preferences", { pane });
+      return true;
+    },
+    onPreferencesReset: (listener) => subscribe<"columns" | "layout">("preferences:reset", listener),
+    requestPreferencesReset: async (what) => {
+      const { emit } = await import("@tauri-apps/api/event");
+      await emit("preferences:reset", what);
+    },
+    closeWindow: async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().close();
+    },
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
     saveDeviceSettings: (path, settings) =>
       invoke<DeviceSettings>("save_device_settings", { path, settings }),

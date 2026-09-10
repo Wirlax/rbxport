@@ -247,8 +247,16 @@ export function App() {
           : "collection";
   const cols = useColumns(columnContext);
   // The Preferences window, and the pane it opens on: the missing-file
-  // manager lives under Advanced, so the File menu opens it there.
+  // manager lives under Advanced, so the File menu opens it there. In the
+  // shell it is a window of its own; in a browser, which has no windows to
+  // open, it is drawn over this one.
   const [settingsOpen, setSettingsOpen] = useState<Pane | null>(null);
+  const openPreferences = useCallback((pane: Pane) => {
+    void getBackend().then(async (backend) => {
+      const opened = await backend.openPreferences(pane).catch(() => false);
+      if (!opened) setSettingsOpen(pane);
+    });
+  }, []);
   const prefs = usePreferencesStore();
   const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
   // Every write path reads this one flag: rekordbox holding the database,
@@ -779,11 +787,33 @@ export function App() {
           return;
         }
         // The missing-file manager is a pane of Preferences.
-        setSettingsOpen(outcome.action === "missing" ? "advanced" : "view");
+        openPreferences(outcome.action === "missing" ? "advanced" : "view");
       });
     })();
     return () => stop?.();
-  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse]);
+  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences]);
+
+  // The Preferences window asking for what only this window holds.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void getBackend().then((backend) => {
+      if (!live) return;
+      stop = backend.onPreferencesReset((what) => {
+        if (what === "columns") {
+          cols.reset();
+        } else {
+          setTreeWidth(clampWidth(305, bounds()));
+          setSubWidth(DEFAULT_SUB_WIDTH);
+          setSubTreeWidth(DEFAULT_SUB_TREE_WIDTH);
+        }
+      });
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [cols, bounds]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {
@@ -920,7 +950,7 @@ export function App() {
       </div>
       <TopBar
         clock={clock}
-        onOpenSettings={() => setSettingsOpen("view")}
+        onOpenSettings={() => openPreferences("view")}
         layout={layout}
         onLayoutChange={setLayout}
         level={master.level}

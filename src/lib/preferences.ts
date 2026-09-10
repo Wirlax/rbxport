@@ -277,7 +277,8 @@ export function sanitisePreferences(value: unknown): Preferences {
   };
 }
 
-const KEY = "rbl.preferences";
+export const PREFERENCES_KEY = "rbl.preferences";
+const KEY = PREFERENCES_KEY;
 
 /** Reads the stored preferences, falling back to the defaults on anything odd. */
 export function loadPreferences(): Preferences {

@@ -5,11 +5,12 @@
  * deck and the key column in the browser both read the same choice, and
  * neither has any business knowing where the other lives.
  */
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import {
   DEFAULT_PREFERENCES,
   loadPreferences,
+  PREFERENCES_KEY,
   savePreferences,
   type PreferencePane,
   type Preferences,
@@ -52,6 +53,18 @@ export function usePreferencesStore(initial?: Preferences): PreferencesStore {
       savePreferences(next);
       return next;
     });
+  }, []);
+
+  // The Preferences window is a window of its own with the same storage: a
+  // choice made there lands here as a `storage` event, which only ever fires
+  // in the other windows. Read back rather than parsed from the event, so it
+  // goes through the same checks as a stored set does at start.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PREFERENCES_KEY || event.key === null) setPreferences(loadPreferences());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   // Memoised as a whole so a consumer re-renders on a change and not on

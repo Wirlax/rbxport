@@ -61,6 +61,16 @@ export interface PreferencesProps {
   onClose: () => void;
   /** Where to open: the missing-file manager lands on Advanced › Database. */
   initialPane?: Pane;
+  /**
+   * Drawn as the whole of a window of its own — no backdrop, no title bar of
+   * ours, the shell's chrome around it — rather than over the main window.
+   */
+  windowed?: boolean;
+}
+
+/** A pane name, or View for anything that is not one. */
+export function asPane(value: string | undefined): Pane {
+  return PANES.some((p) => p.id === value) ? (value as Pane) : "view";
 }
 
 interface Tabs {
@@ -81,11 +91,16 @@ const FIRST_TABS: Tabs = {
 
 export function Preferences({
   summary, limiter, onLimiterChange, reduction, onResetColumns, onResetLayout, onClose,
-  initialPane = "view",
+  initialPane = "view", windowed = false,
 }: PreferencesProps) {
   const window_ = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [pane, setPane] = useState<Pane>(initialPane);
+  // The window is turned to another pane from outside — the File menu's
+  // Missing File Manager while it is already open.
+  useEffect(() => {
+    setPane(initialPane);
+  }, [initialPane]);
   const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
   const [query, setQuery] = useState("");
   const { reset } = usePreferencesContext();
@@ -137,24 +152,26 @@ export function Preferences({
 
   const resetPane = RESETS[pane];
 
-  return (
-    <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
+  const body = (
       <div
         ref={window_}
         className={styles.window}
+        data-windowed={windowed || undefined}
         // The backdrop closes on click; the window must not pass its own through.
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
-        aria-modal="true"
+        aria-modal={windowed ? undefined : "true"}
         aria-label="Preferences"
         tabIndex={-1}
       >
-        <header className={styles.titlebar}>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-          Preferences
-        </header>
+        {windowed ? null : (
+          <header className={styles.titlebar}>
+            <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+            Preferences
+          </header>
+        )}
         <div className={styles.body}>
           <nav className={styles.sidebar} aria-label="Preference panes">
             <div className={styles.search}>
@@ -229,6 +246,12 @@ export function Preferences({
           </div>
         </div>
       </div>
+  );
+
+  if (windowed) return body;
+  return (
+    <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
+      {body}
     </div>
   );
 }

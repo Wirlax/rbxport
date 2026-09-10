@@ -10,6 +10,7 @@ mod explorer;
 mod link;
 pub mod menu;
 mod player;
+mod preferences;
 mod protocol;
 mod relocate;
 mod device_settings;
@@ -348,6 +349,7 @@ pub fn run() {
             commands::import_files,
             commands::relocate_track,
             relocate::auto_relocate,
+            preferences::open_preferences,
             device_settings::reference_stick_settings,
             commands::create_playlist,
             commands::create_folder,

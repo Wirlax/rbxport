@@ -1202,6 +1202,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
     pickFolder: () => wait("/Users/mock/Music/Moved"),
+    // No windows in a browser: the shell draws the Preferences over itself,
+    // and its resets are its own to do.
+    openPreferences: () => wait(false),
+    onPreferencesReset: () => () => {},
+    requestPreferencesReset: () => wait(undefined),
+    closeWindow: () => wait(undefined),
     referenceStickSettings: () => {
       const reference = referenceDeviceSettings("", false);
       return wait({ categories: reference.categories, sorts: reference.sorts });
