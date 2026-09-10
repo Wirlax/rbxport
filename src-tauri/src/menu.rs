@@ -48,10 +48,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
     let missing = MenuItemBuilder::with_id("missing", label("Missing File Manager")).build(app)?;
+    // rekordbox calls its own "Update Manager"; the item is worded the way
+    // every other Mac app words it, since that is where people look for it.
+    let updates = MenuItemBuilder::with_id("updates", "Check for Updates…").build(app)?;
 
     // The application menu, whose first item macOS names after the app.
     let application = SubmenuBuilder::new(app, "rekordbox-lite")
         .item(&PredefinedMenuItem::about(app, None, None)?)
+        .item(&updates)
         .separator()
         .item(&settings)
         .separator()

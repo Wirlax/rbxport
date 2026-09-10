@@ -42,6 +42,9 @@ rbl-onelibrary = { path = "../crates/rbl-onelibrary" }
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"
 dirs = "5"
+tauri-plugin-updater = "2"
+semver = "1"
+time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]
 # `test` gives a mock app, so the native menu can be built and inspected

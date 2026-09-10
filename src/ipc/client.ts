@@ -6,6 +6,7 @@
  */
 import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
+  PreferencesRequest, UpdateCheck, UpdateProgress,
   ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
@@ -126,6 +127,9 @@ async function realBackend(): Promise<Backend> {
     setMasterLevel: (level) => invoke<void>("set_master_level", { level }),
     audioDevices: () => invoke<AudioDevices>("audio_devices"),
     setAudioDevice: (device) => invoke<void>("set_audio_device", { device }),
+    checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
+    installUpdate: () => invoke<void>("install_update"),
+    onUpdateProgress: (listener) => subscribe<UpdateProgress>("update:progress", listener),
     masterLimiter: () => invoke<Limiter>("master_limiter"),
     setMasterLimiter: (limiter) => invoke<Limiter>("set_master_limiter", { limiter }),
     deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),
@@ -201,7 +205,7 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_preferences", { pane });
       return true;
     },
-    onPreferencesReset: (listener) => subscribe<"columns" | "layout">("preferences:reset", listener),
+    onPreferencesReset: (listener) => subscribe<PreferencesRequest>("preferences:reset", listener),
     requestPreferencesReset: async (what) => {
       const { emit } = await import("@tauri-apps/api/event");
       await emit("preferences:reset", what);

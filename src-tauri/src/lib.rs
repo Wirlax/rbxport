@@ -17,6 +17,7 @@ mod device_settings;
 mod dto;
 mod error;
 mod state;
+mod update;
 
 pub use error::{AppError, AppResult, ErrorKind};
 
@@ -266,6 +267,7 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Puts the window back where it was: size, position, and whether it
         // was maximised. Restored before the window is shown, so it does not
         // appear at the default size and jump.
@@ -280,6 +282,7 @@ pub fn run() {
         .plugin(window_geometry())
         .manage(Arc::new(AppState::new()))
         .manage(Arc::new(crate::player::Player::default()))
+        .manage(Arc::new(crate::update::Updates::default()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());
             app.set_menu(crate::menu::build(app.handle())?)?;
@@ -335,6 +338,8 @@ pub fn run() {
             commands::set_audio_device,
             commands::master_limiter,
             commands::set_master_limiter,
+            update::check_for_update,
+            update::install_update,
             commands::deck_tempo,
             commands::deck_master_tempo,
             commands::set_channel_band,

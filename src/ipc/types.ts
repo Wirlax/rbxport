@@ -324,6 +324,21 @@ export interface Backend {
   audioDevices(): Promise<AudioDevices>;
   /** Choose one, or `null` for the system's own. Takes effect on the next play. */
   setAudioDevice(device: string | null): Promise<void>;
+  /**
+   * Asks the download server for the newest version.
+   *
+   * `version` is null when this build is the newest; otherwise `changes`
+   * holds the changelog between the two, newest first, and the update is
+   * held for `installUpdate`.
+   */
+  checkForUpdate(): Promise<UpdateCheck>;
+  /**
+   * Downloads and installs what the last check found, then restarts. It
+   * resolves only if the install failed — a success restarts the app.
+   */
+  installUpdate(): Promise<void>;
+  /** The download's progress, about ten times a second while it runs. */
+  onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
   /** The master limiter as it stands. */
   masterLimiter(): Promise<Limiter>;
   /** Sets the master limiter; what comes back is what the engine could set. */
@@ -403,11 +418,12 @@ export interface Backend {
 
   /**
    * The Preferences window asking the main one for something only it holds:
-   * the browser's columns or the panes' widths put back. Returns its own
+   * the browser's columns or the panes' widths put back, or a check for
+   * updates, whose window belongs to the main one. Returns its own
    * unsubscribe.
    */
-  onPreferencesReset(listener: (what: "columns" | "layout") => void): () => void;
-  requestPreferencesReset(what: "columns" | "layout"): Promise<void>;
+  onPreferencesReset(listener: (what: PreferencesRequest) => void): () => void;
+  requestPreferencesReset(what: PreferencesRequest): Promise<void>;
 
   /** Closes the window this runs in; nothing in a browser. */
   closeWindow(): Promise<void>;
@@ -473,6 +489,35 @@ export interface AudioDevices {
   default: string | null;
   /** What this app has been told to use, or `null` for the system's. */
   chosen: string | null;
+}
+
+/** What the Preferences window can ask the main window to do. */
+export type PreferencesRequest = "columns" | "layout" | "updates";
+
+/** One release's section of the changelog. */
+export interface UpdateChange {
+  version: string;
+  /** `2026-09-10`, when the heading carries one. */
+  date: string | null;
+  /** The section's markdown, its heading included. */
+  body: string;
+}
+
+/** What a check for updates found. */
+export interface UpdateCheck {
+  currentVersion: string;
+  /** The version on offer, or null when this build is the newest. */
+  version: string | null;
+  /** RFC 3339, when the feed says when it was published. */
+  date: string | null;
+  /** The changelog between the two versions, newest first. */
+  changes: UpdateChange[];
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  /** null when the server did not say how big the file is. */
+  total: number | null;
 }
 
 /**

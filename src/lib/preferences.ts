@@ -116,6 +116,8 @@ export interface AdvancedPreferences {
   /** Allow BEAT/BPM SYNC with double/half BPM. */
   syncDoubleHalf: boolean;
   quantizeBeat: QuantizeBeat;
+  /** Ask the download server for a newer version when the app starts. */
+  checkUpdates: boolean;
 }
 
 export interface Preferences {
@@ -169,6 +171,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     syncType: "beat",
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
+    checkUpdates: true,
   },
 };
 
@@ -273,6 +276,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       syncType: oneOf(advanced.syncType, SYNC_TYPES, d.advanced.syncType),
       syncDoubleHalf: bool(advanced.syncDoubleHalf, d.advanced.syncDoubleHalf),
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),
+      checkUpdates: bool(advanced.checkUpdates, d.advanced.checkUpdates),
     },
   };
 }

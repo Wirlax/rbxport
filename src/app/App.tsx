@@ -28,6 +28,8 @@ import {
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
 import { useLimiter } from "@/store/useLimiter";
+import { useUpdater } from "@/store/useUpdater";
+import { UpdateManager } from "@/views/update/UpdateManager";
 import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
@@ -262,6 +264,10 @@ export function App() {
   // Every write path reads this one flag: rekordbox holding the database,
   // or Library Protection in Preferences, refuse the same way.
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
+  // Checks on its own a while after launch when Preferences says so; the
+  // menu and Preferences ask by hand.
+  const updater = useUpdater(advancedPrefs.checkUpdates);
+  const checkForUpdates = updater.check;
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
@@ -782,6 +788,10 @@ export function App() {
           setSubOpen((open) => !open);
           return;
         }
+        if (outcome.action === "updates") {
+          checkForUpdates(true);
+          return;
+        }
         if (outcome.action.startsWith("layout-")) {
           setLayout(asLayout(outcome.action.slice("layout-".length)));
           return;
@@ -791,7 +801,7 @@ export function App() {
       });
     })();
     return () => stop?.();
-  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences]);
+  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences, checkForUpdates]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {
@@ -800,7 +810,12 @@ export function App() {
     void getBackend().then((backend) => {
       if (!live) return;
       stop = backend.onPreferencesReset((what) => {
-        if (what === "columns") {
+        if (what === "updates") {
+          // The Update Manager is this window's; Preferences gets out of
+          // its way, as it would if it were a window of its own.
+          setSettingsOpen(null);
+          checkForUpdates(true);
+        } else if (what === "columns") {
           cols.reset();
         } else {
           setTreeWidth(clampWidth(305, bounds()));
@@ -813,7 +828,7 @@ export function App() {
       live = false;
       stop?.();
     };
-  }, [cols, bounds]);
+  }, [cols, bounds, checkForUpdates]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {
@@ -1194,6 +1209,14 @@ export function App() {
           onToggleSub={() => setSubOpen((open) => !open)}
         />
       </div>
+      {updater.open ? (
+        <UpdateManager
+          state={updater.state}
+          onCheck={() => updater.check(true)}
+          onInstall={updater.install}
+          onClose={updater.dismiss}
+        />
+      ) : null}
       {settingsOpen !== null ? (
         <Preferences
           summary={summary}

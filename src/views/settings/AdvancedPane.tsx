@@ -98,6 +98,29 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             onChange={(syncDoubleHalf) => set({ syncDoubleHalf })}
           />
         </Section>
+        <Section title="Update Manager">
+          <Toggle
+            label="Check for a new version when rekordbox-lite starts."
+            checked={advanced.checkUpdates}
+            onChange={(checkUpdates) => set({ checkUpdates })}
+          />
+          <div className={styles.actions}>
+            <Button
+              onClick={() => {
+                // The Update Manager belongs to the main window, so the
+                // check is asked for there — this pane may be a window of
+                // its own.
+                void getBackend().then((backend) => backend.requestPreferencesReset("updates"));
+              }}
+            >
+              Check for Updates…
+            </Button>
+          </div>
+          <Note>
+            A new version is downloaded and installed from here, with what
+            changed since this one shown first.
+          </Note>
+        </Section>
       </>
     );
   }

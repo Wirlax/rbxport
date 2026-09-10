@@ -12,6 +12,7 @@
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
   FilterValues, LibrarySummary, Limiter, RowDto, SortColumn, Tick, TrackDetails, TrackField,
+  PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -715,6 +716,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   /** The master limiter, likewise. */
   let limiter: Limiter = { enabled: true, ceilingDb: -0.3, releaseMs: 100 };
 
+  const preferencesRequestListeners = new Set<(what: PreferencesRequest) => void>();
+
+  /** Who is told how the pretend download is going. */
+  const updateProgressListeners = new Set<(progress: UpdateProgress) => void>();
+
   const tick = (): Tick => ({
     a: { ...deckA },
     b: { ...deckB },
@@ -1081,6 +1087,56 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     setAudioDevice: () => wait(undefined),
     // Held and given back clamped as the engine would, so the controls in
     // Settings behave in a browser.
+    // A browser has nothing to update, so this offers a pretend version two
+    // releases on, with a changelog shaped like the real one, and its
+    // download runs at a believable pace so the bar can be watched.
+    checkForUpdate: () =>
+      wait<UpdateCheck>({
+        currentVersion: "0.4.0",
+        version: "0.6.0",
+        date: "2026-09-12T18:00:00Z",
+        changes: [
+          {
+            version: "0.6.0",
+            date: "2026-09-12",
+            body:
+              "## [0.6.0] — 2026-09-12\n\n### Added\n- The app checks for a newer version when it " +
+              "starts, downloads it with a progress bar, and shows what changed since the version " +
+              "running.\n\n### Fixed\n- A track dragged to a player carries a faded copy of its row.",
+          },
+          {
+            version: "0.5.0",
+            date: "2026-09-11",
+            body:
+              "## [0.5.0] — 2026-09-11\n\n### Added\n- The app icon is the rekordbox cube ring with a " +
+              "feather in the middle.\n\n### Changed\n- The right-click menus list what rekordbox's do.",
+          },
+        ],
+      }),
+    installUpdate: () =>
+      new Promise<void>((_resolve, reject) => {
+        const total = 16_342_693;
+        let downloaded = 0;
+        const tick = () => {
+          downloaded = Math.min(total, downloaded + 900_000 + Math.random() * 400_000);
+          for (const listener of updateProgressListeners) listener({ downloaded, total });
+          if (downloaded < total) {
+            setTimeout(tick, 100);
+          } else {
+            // A real install restarts the app; a browser cannot, so the
+            // manager is told what it would be told if the install failed
+            // after the download — which is the only way it ever hears back.
+            setTimeout(() => reject(new Error("A browser cannot install an update.")), 800);
+          }
+        };
+        setTimeout(tick, 300);
+      }),
+    onUpdateProgress: (listener) => {
+      updateProgressListeners.add(listener);
+      return () => {
+        updateProgressListeners.delete(listener);
+      };
+    },
     masterLimiter: () => wait({ ...limiter }),
     setMasterLimiter: (wanted) => {
       limiter = {
@@ -1214,8 +1270,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No windows in a browser: the shell draws the Preferences over itself,
     // and its resets are its own to do.
     openPreferences: () => wait(false),
-    onPreferencesReset: () => () => {},
-    requestPreferencesReset: () => wait(undefined),
+    // In a browser the Preferences overlay and the shell share a page, so a
+    // request is handed straight to whoever is listening.
+    onPreferencesReset: (listener) => {
+      preferencesRequestListeners.add(listener);
+      return () => {
+        preferencesRequestListeners.delete(listener);
+      };
+    },
+    requestPreferencesReset: (what) => {
+      for (const listener of preferencesRequestListeners) listener(what);
+      return wait(undefined);
+    },
     closeWindow: () => wait(undefined),
     referenceStickSettings: () => {
       const reference = referenceDeviceSettings("", false);
