@@ -92,6 +92,21 @@
   --c-comment-aqua: #56BDF3; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
   --c-comment-blue: #204FEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
   --c-comment-purple: #8B1EEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-device-tab-on: #3571E3; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the selected tab of the six on a device, which is not the browser's accent blue */
+  --c-device-label: #969696; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the field captions (Device Name, Waveform color, Inactive Categories) and the space table's left column */
+  --c-device-disabled: #808080; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a greyed radio label (Half Waveform / Full Waveform) */
+  --c-device-disabled-ring: #4C4C4C; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the ring of a greyed radio */
+  --c-device-list-dim: #646464; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a fixed item in the Active list (TRACK, PLAYLIST, HISTORY, SEARCH, FOLDER, DEFAULT, ALPHABET) */
+  --c-device-row: #191919; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a colour-comment row and the three image buttons */
+  --c-device-arrow: #969696; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the two arrows between the Inactive and Active lists */
+  --c-label-pink: #E778F1; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Pink dot on the Color tab */
+  --c-label-red: #E33122; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Red dot */
+  --c-label-orange: #EBA44A; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Orange dot */
+  --c-label-yellow: #F4E458; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Yellow dot */
+  --c-label-green: #66DD42; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Green dot */
+  --c-label-aqua: #56BDF3; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Aqua dot */
+  --c-label-blue: #204FEF; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Blue dot */
+  --c-label-purple: #8B1EEF; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Purple dot */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -231,6 +246,37 @@
   --s-filter-toggle: 18px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the header's filter button x 3122..3158, y 760..796 */
   --s-filter-toggle-glyph: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the glyph inside it, x 3129..3151 */
   --s-filter-scrollbar-w: 6px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the list scrollbar column x 1190..1202, with a 4pt thumb */
+  --s-device-strip-h: 33px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the tab strip band y 376..408.5pt, tabs 20pt tall 5pt below its top */
+  --s-device-tab-w: 128px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one tab x 402..529.5pt; six on a 132pt pitch, 14pt in from the panel's left edge */
+  --s-device-tab-h: 20px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one tab y 381..400.5pt */
+  --s-device-tab-gap: 4px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the gap between two tabs, 9 capture px */
+  --s-device-body-pad: 10px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the body's left inset: the Device Name caption starts at x 398pt on a panel edge of 388pt */
+  --s-device-field-w: 657px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Device Name field and both dropdowns, x 398..1054.5pt; the same width as the space table */
+  --s-device-field-h: 22px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Device Name field y 436..457.5pt; the dropdowns and the colour rows are the same height */
+  --s-device-field-pitch: 48px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one captioned field to the next: y 436, 484, 532pt */
+  --s-device-group-pitch: 54px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one radio group's caption to the next: y 570.5, 624.5, 678.5pt */
+  --s-device-radio: 11px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a radio ring, 22 capture px across */
+  --s-device-radio-dot: 6px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the filled centre of a chosen radio, 13 capture px */
+  --s-device-radio-col: 210px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the three radio columns start at x 399.5, 609.5, 819.5pt */
+  --s-device-disc: 100px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the No image box, 200 capture px square */
+  --s-device-disc-ring: 75px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the disc drawn in it, about 150 capture px across */
+  --s-device-image-btn-w: 35px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): Copy from / Import / Delete image buttons, x 514..548.5pt */
+  --s-device-image-btn-h: 20px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): those buttons' height, 40 capture px */
+  --s-device-image-btn-pitch: 34.5px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): those buttons' pitch: text centres at y 903.5, 938, 972pt */
+  --s-device-table-col: 156px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the space table's divider at x 554pt on a table starting at 398pt */
+  --s-device-list-w: 305px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): each of the Inactive and Active lists, 610 capture px */
+  --s-device-list-h: 267px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Inactive list y 436..702.5pt */
+  --s-device-active-list-h: 227px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Active list y 436..662.5pt, shorter to leave room for Up and Down */
+  --s-device-list-gap: 47.5px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): between the two lists, 95 capture px, with the arrows centred in it */
+  --s-device-list-inset: 60px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Inactive list's left edge at x 448pt on a panel edge of 388pt */
+  --s-device-list-row-h: 20px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one list row, 40 capture px pitch */
+  --s-device-arrow-w: 16px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one arrow glyph, 32 capture px; the two sit 37.5pt apart */
+  --s-device-move-btn-w: 95px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Up and Down buttons, 190 capture px each with 6pt between */
+  --s-device-move-btn-h: 30px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Up and Down buttons, y 673..702.5pt */
+  --s-device-color-row-w: 650px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): a colour-comment row, x 398..1047.5pt */
+  --s-device-color-row-pitch: 27px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one colour row to the next, 54 capture px */
+  --s-device-color-dot: 8px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the colour dot, 16 capture px, 5pt in from the row's edge */
+  --s-device-column-w: 261px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Default right column dropdown, x 398..658.5pt */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -240,6 +286,9 @@
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
   --f-size-menu: 12.5px; /* the layout menu's 'SIMPLE PLAYER' in the same 2x capture: 194px wide with an 18px cap height, which Arial gives at 12.5px */
   --f-size-filter-strip: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): MASTER PLAYER, two lines with 15px cap height at 2x on a 25px pitch */
+  --f-size-device: 14px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the device tabs' captions, values and list items: Device Name reads a 20 capture px cap height, which Arial gives at 14px */
+  --f-size-device-radio: 11px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the radio labels (BLUE, CENTER, TIMESCALE): a 16 capture px cap height */
+  --f-size-device-tab: 10.5px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the tab labels (General, Category): 15 capture px tall */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than
