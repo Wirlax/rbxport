@@ -100,17 +100,6 @@
 /* The portalled transport fills its half rather than sitting at its own
    height, so the two halves meet in the middle. */
 .transportSlot > * { height: 100%; }
-/* DUAL PLAYER: the two decks beside each other, which is the difference its
-   icon draws against 2 PLAYER's stacked bars. */
-.decks[data-side-by-side] {
-  grid-template-columns: auto auto 1fr 1fr;
-  grid-template-areas: "rail mixer a b" "gutter gutter gutter gutter";
-}
-.decks[data-side-by-side] > :nth-child(1) { grid-area: rail; }
-.decks[data-side-by-side] > :nth-child(2) { grid-area: mixer; }
-.decks[data-side-by-side] > :nth-child(3) { grid-area: a; }
-.decks[data-side-by-side] > :nth-child(4) { grid-area: b; }
-.decks[data-side-by-side] > .playerGutter { grid-area: gutter; }
 .playerGutter { height: var(--s-player-gutter-h); background: var(--c-black); }
 
 /* With a panel open the browser gives up width to it, at the width

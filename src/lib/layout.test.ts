@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { asLayout, deckCount, isFullDeck, isSideBySide, LAYOUTS, layoutLabel } from "./layout";
+import { asLayout, deckCount, isFullDeck, LAYOUTS, layoutLabel } from "./layout";
 
 describe("deckCount", () => {
   it("counts the decks each layout draws", () => {
     expect(deckCount("one")).toBe(1);
     expect(deckCount("two")).toBe(2);
-    expect(deckCount("dual")).toBe(2);
     expect(deckCount("simple")).toBe(1);
     expect(deckCount("browser")).toBe(0);
   });
@@ -16,17 +15,7 @@ describe("isFullDeck", () => {
   it("is the simple player that drops the pads and the cue list", () => {
     expect(isFullDeck("one")).toBe(true);
     expect(isFullDeck("two")).toBe(true);
-    expect(isFullDeck("dual")).toBe(true);
     expect(isFullDeck("simple")).toBe(false);
-  });
-});
-
-describe("isSideBySide", () => {
-  it("is what tells the two two-deck layouts apart", () => {
-    // The menu draws it: 2 PLAYER is stacked bars, DUAL two overlapping panels.
-    expect(isSideBySide("dual")).toBe(true);
-    expect(isSideBySide("two")).toBe(false);
-    expect(isSideBySide("one")).toBe(false);
   });
 });
 

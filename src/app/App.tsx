@@ -25,7 +25,7 @@ import { loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS } from "@/lib/sessi
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
 import { useMaster } from "@/store/useMaster";
-import { asLayout, deckCount, isFullDeck, isSideBySide, type PlayerLayout } from "@/lib/layout";
+import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -760,7 +760,6 @@ export function App() {
       {deckCount(layout) > 0 ? (
         <div
           className={styles.decks}
-          data-side-by-side={isSideBySide(layout) ? "" : undefined}
           data-mixer={deckCount(layout) > 1 ? "" : undefined}
         >
           {/* One transport column for the pair, as rekordbox draws it: deck A

@@ -2,7 +2,7 @@
  * The layout switch, in the corner rekordbox keeps it.
  *
  * Transcribed from a capture of the menu open: a glyph and a chevron on the
- * bar, and a bordered panel of five rows, each a tick column, the layout's own
+ * bar, and a bordered panel of rows, each a tick column, the layout's own
  * icon and its name in capitals. Not a `<select>` — the platform's own control
  * draws none of that and cannot show the icons the menu is mostly made of.
  */
@@ -10,7 +10,6 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   LayoutBrowserIcon,
-  LayoutDualIcon,
   LayoutOneIcon,
   LayoutSimpleIcon,
   LayoutTwoIcon,
@@ -21,7 +20,6 @@ import styles from "./LayoutMenu.module.css";
 const GLYPHS: Record<PlayerLayout, typeof LayoutOneIcon> = {
   one: LayoutOneIcon,
   two: LayoutTwoIcon,
-  dual: LayoutDualIcon,
   simple: LayoutSimpleIcon,
   browser: LayoutBrowserIcon,
 };

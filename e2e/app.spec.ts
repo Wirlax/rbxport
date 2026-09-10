@@ -1770,14 +1770,6 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   await choose("2 PLAYER");
   await expect(decks).toHaveCount(2);
 
-  // DUAL is the other two-deck layout: side by side rather than stacked.
-  await choose("DUAL PLAYER");
-  await expect(decks).toHaveCount(2);
-  const boxes = await decks.all();
-  const left = await boxes[0]?.boundingBox();
-  const right = await boxes[1]?.boundingBox();
-  expect(right?.x).toBeGreaterThan(left?.x ?? 0);
-
   // The simple player is the same deck without the pad row or the cue list.
   await choose("SIMPLE PLAYER");
   await expect(decks).toHaveCount(1);

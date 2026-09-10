@@ -6,12 +6,11 @@
  * and what changes is how many decks sit above it and how much of a deck each
  * of those shows.
  */
-export type PlayerLayout = "one" | "two" | "dual" | "simple" | "browser";
+export type PlayerLayout = "one" | "two" | "simple" | "browser";
 
 export const LAYOUTS: readonly { id: PlayerLayout; label: string }[] = [
   { id: "one", label: "1 PLAYER" },
   { id: "two", label: "2 PLAYER" },
-  { id: "dual", label: "DUAL PLAYER" },
   { id: "simple", label: "SIMPLE PLAYER" },
   { id: "browser", label: "FULL BROWSER" },
 ];
@@ -19,18 +18,8 @@ export const LAYOUTS: readonly { id: PlayerLayout; label: string }[] = [
 /** How many decks a layout draws. */
 export function deckCount(layout: PlayerLayout): number {
   if (layout === "browser") return 0;
-  if (layout === "two" || layout === "dual") return 2;
+  if (layout === "two") return 2;
   return 1;
-}
-
-/**
- * Whether the two decks sit beside each other rather than one above the other.
- *
- * That is the difference the menu's own icons draw: 2 PLAYER is two stacked
- * bars, DUAL PLAYER two overlapping panels.
- */
-export function isSideBySide(layout: PlayerLayout): boolean {
-  return layout === "dual";
 }
 
 /**
