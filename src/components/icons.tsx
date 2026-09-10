@@ -177,6 +177,42 @@ export const NoteIcon = (props: IconProps) => (
   </svg>
 );
 
+export const PrefAdvancedIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 12" aria-hidden focusable="false" {...props}>
+    <g fill="currentColor"> <rect x="0" y="0.5" width="16" height="1.6"/> <rect x="0" y="5.2" width="16" height="1.6"/> <rect x="0" y="9.9" width="16" height="1.6"/> </g>
+  </svg>
+);
+
+export const PrefAnalysisIcon = (props: IconProps) => (
+  <svg viewBox="0 0 18 14" aria-hidden focusable="false" {...props}>
+    <g fill="currentColor"> <rect x="0" y="5" width="1.6" height="4"/> <rect x="2.8" y="3" width="1.6" height="8"/> <rect x="5.6" y="4" width="1.6" height="6"/> <rect x="8.2" y="0" width="1.6" height="14"/> <rect x="10.8" y="4" width="1.6" height="6"/> <rect x="13.6" y="3" width="1.6" height="8"/> <rect x="16.4" y="5" width="1.6" height="4"/> </g>
+  </svg>
+);
+
+export const PrefAudioIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path d="M1 5.5h3.4L9 2v12L4.4 10.5H1z" fill="currentColor"/> <rect x="11" y="5.5" width="2.6" height="5" fill="currentColor"/>
+  </svg>
+);
+
+export const PrefDjSystemIcon = (props: IconProps) => (
+  <svg viewBox="0 0 18 14" aria-hidden focusable="false" {...props}>
+    <rect x="0.7" y="0.7" width="16.6" height="12.6" rx="1" fill="none" stroke="currentColor" strokeWidth="1.4"/> <circle cx="5.5" cy="7" r="2.8" fill="none" stroke="currentColor" strokeWidth="1.3"/> <circle cx="5.5" cy="7" r="0.9" fill="currentColor"/> <g fill="currentColor"> <rect x="10.5" y="3.5" width="4.5" height="1.3"/> <rect x="10.5" y="6.3" width="4.5" height="1.3"/> <rect x="10.5" y="9.1" width="4.5" height="1.3"/> </g>
+  </svg>
+);
+
+export const PrefKeyboardIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" fillRule="evenodd" d="M2 0.5h12A1.5 1.5 0 0 1 15.5 2v12a1.5 1.5 0 0 1-1.5 1.5H2A1.5 1.5 0 0 1 .5 14V2A1.5 1.5 0 0 1 2 .5zM7 3.5 3.6 12.8h1.9l.8-2.4h3.4l.8 2.4h1.9L9 3.5zm1 2.4L6.8 8.9h2.4z"/>
+  </svg>
+);
+
+export const PrefViewIcon = (props: IconProps) => (
+  <svg viewBox="0 0 18 13" aria-hidden focusable="false" {...props}>
+    <path d="M9 1C5.2 1 2.2 3.6 1 6.5 2.2 9.4 5.2 12 9 12s6.8-2.6 8-5.5C15.8 3.6 12.8 1 9 1z" fill="none" stroke="currentColor" strokeWidth="1.4"/> <circle cx="9" cy="6.5" r="2.6" fill="currentColor"/>
+  </svg>
+);
+
 export const RecordIcon = (props: IconProps) => (
   <svg viewBox="0 0 100 100" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" fillRule="evenodd" d="M50 7a43 43 0 1 0 0 86 43 43 0 0 0 0-86zm0 31a12 12 0 1 0 0 24 12 12 0 0 0 0-24z"/>

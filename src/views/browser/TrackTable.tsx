@@ -21,9 +21,14 @@ import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
 import { RecordIcon } from "@/components/icons";
 import type { ColumnKey, ColumnSpec } from "@/lib/columns";
+import { browseScale, formatKey } from "@/lib/preferences";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
+import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 
 const ROW_H = 25; // --s-row-height
+/** One frozen empty list, so a row without cues does not re-render for a new one. */
+const NO_CUES: RowDto["hotCues"] = [];
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
 const COL_HEADER_H = 24;
@@ -130,36 +135,54 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, onCommit,
+  value, label, onCommit, onClick, tip,
 }: {
   value: string;
   label: string;
   onCommit: (next: string) => void;
+  /**
+   * Edit Library › Double-click to edit is off: a click on this cell of a
+   * row that is already selected opens it, as in rekordbox. On, and only a
+   * double click does.
+   */
+  onClick: boolean;
+  tip: string | undefined;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
   if (!editing) {
+    const begin = () => {
+      setDraft(value);
+      setEditing(true);
+    };
     return (
       <div
         className={styles.cell}
         data-col="comment"
         role="gridcell"
+        onClick={onClick ? begin : undefined}
         onDoubleClick={(e) => {
           // Editing a comment is not asking to play the track: without this
           // the row's own double-click loads it into the player as well.
           e.stopPropagation();
-          setDraft(value);
-          setEditing(true);
+          if (!onClick) begin();
         }}
-        title={`${label} — double-click to edit`}
+        title={tip}
       >
         {value}
       </div>
     );
   }
   return (
-    <div className={styles.cell} data-col="comment" role="gridcell">
+    <div
+      className={styles.cell}
+      data-col="comment"
+      role="gridcell"
+      // A second click on a cell that has just opened is not a request to
+      // play the track either.
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
       <input
         className={styles.editor}
         value={draft}
@@ -188,13 +211,20 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onMenu,
+  onComment, onMenu, keyDisplay, previewCues, clickToEdit, tooltips,
 }: {
   row: RowDto | undefined;
   top: number;
   selected: boolean;
   index: number;
   columns: readonly ColumnSpec[];
+  /** Preferences: `Ebm` or `2A`. */
+  keyDisplay: KeyDisplay;
+  /** Preferences: the hot cue badges over the row's waveform. */
+  previewCues: boolean;
+  /** Preferences: a comment opens on a click rather than a double click. */
+  clickToEdit: boolean;
+  tooltips: boolean;
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   /** Load the track into the player. A double-click, as in rekordbox. */
   onOpen: (index: number) => void;
@@ -239,7 +269,9 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "attr") {
           return (
             <div key={col.key} className={styles.attr} data-col={col.key} role="gridcell">
-              {row.analysed ? <span className={styles.analysed} title="Analyzed" /> : null}
+              {row.analysed ? (
+                <span className={styles.analysed} title={tooltips ? "Analyzed" : undefined} />
+              ) : null}
               <span className={styles.cue}>{row.hotCues.length > 0 ? "CUE" : ""}</span>
             </div>
           );
@@ -268,6 +300,16 @@ const TrackRow = memo(function TrackRow({
               value={row.comment}
               label="Comment"
               onCommit={(next) => onComment(row.id, next)}
+              // A click edits only a selected row's comment; on any other
+              // row the click is a selection, as it has to be.
+              onClick={clickToEdit && selected}
+              tip={
+                tooltips
+                  ? clickToEdit
+                    ? "Comment — click to edit"
+                    : "Comment — double-click to edit"
+                  : undefined
+              }
             />
           );
         }
@@ -279,7 +321,7 @@ const TrackRow = memo(function TrackRow({
                   trackId={row.id}
                   width={col.width - 6}
                   height={PREVIEW_BAND_H}
-                  hotCues={row.hotCues}
+                  hotCues={previewCues ? row.hotCues : NO_CUES}
                   durationSec={row.durationSec}
                 />
               ) : null}
@@ -300,7 +342,7 @@ const TrackRow = memo(function TrackRow({
             data-col={col.key}
             role="gridcell"
           >
-            {cellText(row, col.key)}
+            {col.key === "key" ? formatKey(row.key, keyDisplay) : cellText(row, col.key)}
           </div>
         );
       })}
@@ -418,6 +460,14 @@ export function TrackTable({
     };
   }, [onAnalyse]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed);
+  const preferences = usePreferences();
+  const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
+  const tip = useTooltip();
+  const clickToEdit = !preferences.advanced.doubleClickToEdit;
+  // Browse › FontSize and Line Space scale the measured tokens; the
+  // virtualizer has to be told the same height the CSS draws.
+  const fontScale = browseScale(preferences.view.browseFontSize);
+  const rowH = Math.round(ROW_H * browseScale(preferences.view.browseLineSpace));
 
   // Hand the top of the view up once it is real, for the next start's opening
   // screen. Only the first page, and only when it is filled.
@@ -485,13 +535,18 @@ export function TrackTable({
   const virtualizer = useVirtualizer({
     count: view.count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_H,
+    estimateSize: () => rowH,
     overscan: 8,
     // The sticky column header is in the scroller's flow, so the list starts
     // this far down it. Without this the virtualizer's idea of which rows are
     // visible is a header's worth out.
     scrollMargin: COL_HEADER_H,
   });
+
+  // A new row height throws away what the virtualizer measured at the old one.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [virtualizer, rowH]);
 
   const items = virtualizer.getVirtualItems();
 
@@ -704,6 +759,12 @@ export function TrackTable({
       style={{
         ["--cols" as string]: gridOf(columns),
         ["--table-w" as string]: `${totalWidthOf(columns)}px`,
+        // Browse › FontSize, Bold and Line Space, scoped to the list: the
+        // tokens are the measured sizes, and these are the slider's multiples
+        // of them.
+        ["--s-row-height" as string]: `${rowH}px`,
+        ["--f-size-ui" as string]: `calc(${fontScale} * var(--f-size-ui-base))`,
+        ["--browse-weight" as string]: preferences.view.browseBold ? 700 : 400,
       }}
     >
       <div className={styles.browserHead}>
@@ -723,7 +784,7 @@ export function TrackTable({
             data-on={filterOpen || undefined}
             aria-pressed={filterOpen}
             aria-label="Display/Hide Track Filter"
-            title="Display/Hide Track Filter"
+            title={tip("Display/Hide Track Filter")}
             data-testid="filter-toggle"
             onClick={onToggleFilter}
           >
@@ -774,6 +835,10 @@ export function TrackTable({
                 onDragEnd={endDraggingTracks}
                 onRate={onRate}
                 onComment={onComment}
+                keyDisplay={keyDisplay}
+                previewCues={previewCueMarkers}
+                clickToEdit={clickToEdit}
+                tooltips={tooltips}
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}

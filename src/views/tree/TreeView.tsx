@@ -18,10 +18,12 @@ import {
 import { SourceRail } from "./SourceRail";
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu, count,
 }: {
   node: TreeNode;
   selected: boolean;
+  /** The playlist's track count, when Preferences asks for it on the tree. */
+  count: number | undefined;
   /** Whether a track drag could land here. */
   droppable: boolean;
   onDropTracks: ((playlistId: string) => void) | undefined;
@@ -112,6 +114,9 @@ const Row = memo(function Row({
         <Icon className={styles.icon} />
       )}
       <span className={styles.label}>{node.name}</span>
+      {count !== undefined ? (
+        <span className={styles.count} aria-label={`${count} tracks`}>({count})</span>
+      ) : null}
     </div>
   );
 });
@@ -128,6 +133,8 @@ export interface TreeViewProps {
   onDeleteNode?: (node: TreeNode) => void;
   /** rekordbox is running, so every write is greyed rather than raced. */
   readOnly?: boolean;
+  /** Preferences: the number of tracks after each playlist's name. */
+  showCounts?: boolean;
   /** True while tracks are being dragged, so playlists can offer themselves. */
   dragging?: boolean;
   /** Drop the dragged tracks onto a playlist. */
@@ -141,7 +148,7 @@ export interface TreeViewProps {
 
 export function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport,
-  onCreatePlaylist, onCreateFolder, onDeleteNode, readOnly = false, onExpand,
+  onCreatePlaylist, onCreateFolder, onDeleteNode, readOnly = false, onExpand, showCounts = false,
 }: TreeViewProps) {
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
@@ -223,6 +230,7 @@ export function TreeView({
             droppable={Boolean(dragging) && node.kind === "playlist"}
             onDropTracks={onDropTracks}
             onMenu={(node, at) => setMenu({ ...at, node })}
+            count={showCounts && node.kind === "playlist" ? node.childCount : undefined}
           />
         ))}
         {visible.length === 0 ? (

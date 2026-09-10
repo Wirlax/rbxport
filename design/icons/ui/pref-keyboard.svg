@@ -1,0 +1,7 @@
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Preferences › Keyboard: a key cap with an A cut out of it. The cap is the
+    icon's colour; the letter is the row behind showing through.
+  -->
+  <path fill="currentColor" fill-rule="evenodd" d="M2 0.5h12A1.5 1.5 0 0 1 15.5 2v12a1.5 1.5 0 0 1-1.5 1.5H2A1.5 1.5 0 0 1 .5 14V2A1.5 1.5 0 0 1 2 .5zM7 3.5 3.6 12.8h1.9l.8-2.4h3.4l.8 2.4h1.9L9 3.5zm1 2.4L6.8 8.9h2.4z"/>
+</svg>

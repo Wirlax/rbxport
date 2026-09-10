@@ -1,0 +1,234 @@
+/**
+ * The Preferences window.
+ *
+ * rekordbox's, drawn from the captures docs/screenshots 9.46.53 to 9.49.51 PM:
+ * a sidebar of panes on the left, a strip of tabs across the top of the
+ * pane, the tab's sections stacked beneath, and Reset to defaults under
+ * them. Two panes are missing on purpose — PLAN and CLOUD are Pioneer's
+ * subscription and its cloud sync, and there is nothing here for either.
+ *
+ * Every control on every pane drives something the application does. What
+ * rekordbox offers that this build has nothing behind — a light theme, a
+ * metronome, a streaming service — is left out rather than drawn dead: a
+ * switch that changes nothing is worse than no switch.
+ */
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
+
+import {
+  PrefAdvancedIcon, PrefAnalysisIcon, PrefAudioIcon, PrefDjSystemIcon, PrefKeyboardIcon,
+  PrefViewIcon,
+} from "@/components/icons";
+import type { LibrarySummary, Limiter } from "@/ipc/types";
+import { usePreferencesContext } from "@/store/usePreferences";
+import type { PreferencePane } from "@/lib/preferences";
+import { AdvancedPane, ADVANCED_TABS, type AdvancedTab } from "./AdvancedPane";
+import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
+import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
+import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
+import { KeyboardPane } from "./KeyboardPane";
+import styles from "./Preferences.module.css";
+import { Button } from "./controls";
+import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
+
+/** The sidebar, in the capture's order and wording, less PLAN and CLOUD. */
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "keyboard" | "advanced";
+
+const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
+  { id: "view", label: "View", Icon: PrefViewIcon },
+  { id: "audio", label: "Audio", Icon: PrefAudioIcon },
+  { id: "analysis", label: "Analysis", Icon: PrefAnalysisIcon },
+  { id: "djSystem", label: "DJ System", Icon: PrefDjSystemIcon },
+  { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
+  { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+];
+
+/** Which stored pane a sidebar pane's Reset to defaults clears. */
+const RESETS: Partial<Record<Pane, PreferencePane>> = {
+  view: "view",
+  analysis: "analysis",
+  djSystem: "djSystem",
+  advanced: "advanced",
+};
+
+export interface PreferencesProps {
+  summary: LibrarySummary | null;
+  /** The master limiter as it stands, where a change goes, and how hard it is working. */
+  limiter: Limiter;
+  onLimiterChange: (change: Partial<Limiter>) => void;
+  reduction: number;
+  onResetColumns: () => void;
+  onResetLayout: () => void;
+  onClose: () => void;
+  /** Where to open: the missing-file manager lands on Advanced › Database. */
+  initialPane?: Pane;
+}
+
+interface Tabs {
+  view: ViewTab;
+  audio: AudioTab;
+  analysis: AnalysisTab;
+  djSystem: DjSystemTab;
+  advanced: AdvancedTab;
+}
+
+const FIRST_TABS: Tabs = {
+  view: "display",
+  audio: "configuration",
+  analysis: "track",
+  djSystem: "general",
+  advanced: "database",
+};
+
+export function Preferences({
+  summary, limiter, onLimiterChange, reduction, onResetColumns, onResetLayout, onClose,
+  initialPane = "view",
+}: PreferencesProps) {
+  const window_ = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const [pane, setPane] = useState<Pane>(initialPane);
+  const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
+  const [query, setQuery] = useState("");
+  const { reset } = usePreferencesContext();
+
+  useEffect(() => {
+    // Focus the window so Escape reaches it and a reader lands inside.
+    window_.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  // The search box narrows the pane to the sections that mention the words
+  // typed. The sections' own text is the index: every label in them is what
+  // somebody would search for, so nothing has to be listed twice.
+  useLayoutEffect(() => {
+    const host = scroller.current;
+    if (!host) return;
+    const needle = query.trim().toLowerCase();
+    for (const section of host.querySelectorAll<HTMLElement>("section")) {
+      section.hidden = needle !== "" && !(section.textContent ?? "").toLowerCase().includes(needle);
+    }
+  });
+
+  const tabStrip = <T extends string>(
+    all: readonly { id: T; label: string }[],
+    current: T,
+    pick: (id: T) => void,
+  ) => (
+    <div className={styles.tabs} role="tablist">
+      {all.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          className={styles.tab}
+          aria-selected={current === t.id}
+          onClick={() => pick(t.id)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const resetPane = RESETS[pane];
+
+  return (
+    <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
+      <div
+        ref={window_}
+        className={styles.window}
+        // The backdrop closes on click; the window must not pass its own through.
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Preferences"
+        tabIndex={-1}
+      >
+        <header className={styles.titlebar}>
+          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+          Preferences
+        </header>
+        <div className={styles.body}>
+          <nav className={styles.sidebar} aria-label="Preference panes">
+            <div className={styles.search}>
+              <svg viewBox="0 0 16 16" aria-hidden focusable="false">
+                <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M10 10l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                aria-label="Search preferences"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <ul className={styles.panes} role="tablist" aria-orientation="vertical">
+              {PANES.map(({ id, label, Icon }) => (
+                <li key={id}>
+                  <button
+                    type="button"
+                    role="tab"
+                    className={styles.pane}
+                    aria-selected={pane === id}
+                    onClick={() => setPane(id)}
+                  >
+                    <Icon />
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <div className={styles.content}>
+            {pane === "view"
+              ? tabStrip(VIEW_TABS, tabs.view, (view) => setTabs((t) => ({ ...t, view })))
+              : pane === "audio"
+                ? tabStrip(AUDIO_TABS, tabs.audio, (audio) => setTabs((t) => ({ ...t, audio })))
+                : pane === "analysis"
+                  ? tabStrip(ANALYSIS_TABS, tabs.analysis, (analysis) => setTabs((t) => ({ ...t, analysis })))
+                  : pane === "djSystem"
+                    ? tabStrip(DJ_SYSTEM_TABS, tabs.djSystem, (djSystem) => setTabs((t) => ({ ...t, djSystem })))
+                    : pane === "advanced"
+                      ? tabStrip(ADVANCED_TABS, tabs.advanced, (advanced) => setTabs((t) => ({ ...t, advanced })))
+                      : null}
+            <div ref={scroller} className={styles.scroller} role="tabpanel">
+              <div className={styles.sections}>
+                {pane === "view" ? (
+                  <ViewPane tab={tabs.view} onResetColumns={onResetColumns} onResetLayout={onResetLayout} />
+                ) : pane === "audio" ? (
+                  <AudioPane
+                    tab={tabs.audio}
+                    limiter={limiter}
+                    onLimiterChange={onLimiterChange}
+                    reduction={reduction}
+                  />
+                ) : pane === "analysis" ? (
+                  <AnalysisPane tab={tabs.analysis} />
+                ) : pane === "djSystem" ? (
+                  <DjSystemPane tab={tabs.djSystem} />
+                ) : pane === "keyboard" ? (
+                  <KeyboardPane />
+                ) : (
+                  <AdvancedPane tab={tabs.advanced} summary={summary} />
+                )}
+              </div>
+            </div>
+            {resetPane ? (
+              <Button className={styles.reset} onClick={() => reset(resetPane)}>
+                Reset to defaults
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

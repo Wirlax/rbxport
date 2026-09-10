@@ -69,6 +69,8 @@
 .node[data-kind="note"] { color: var(--c-text-dim); }
 .node[data-kind="note"]:hover { background: none; }
 .label { overflow: hidden; text-overflow: ellipsis; }
+/* The track count after a playlist's name, when Preferences asks for it. */
+.count { flex: none; margin-left: 4px; color: var(--c-text-dim); }
 
 /* A section with nothing in it says so, rather than showing a blank panel. */
 .emptyNote {

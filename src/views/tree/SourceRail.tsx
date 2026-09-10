@@ -14,6 +14,7 @@ import type { Source } from "@/lib/tree";
 
 import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon } from "@/components/icons";
 import styles from "./SourceRail.module.css";
+import { useTooltip } from "@/store/usePreferences";
 
 const SOURCES: ReadonlyArray<{
   id: Source;
@@ -36,6 +37,7 @@ export interface SourceRailProps {
 }
 
 export function SourceRail({ selected, onSelect, empty }: SourceRailProps) {
+  const tip = useTooltip();
   return (
     <div className={styles.rail} role="tablist" aria-label="Library sources" aria-orientation="vertical">
       {SOURCES.map(({ id, label, Icon }) => (
@@ -48,7 +50,7 @@ export function SourceRail({ selected, onSelect, empty }: SourceRailProps) {
           // Dimmed rather than removed: a missing Devices button reads as a
           // broken app, an empty one reads as no device plugged in.
           data-empty={empty?.has(id) || undefined}
-          title={label}
+          title={tip(label)}
           aria-label={label}
           onClick={() => onSelect(id)}
         >

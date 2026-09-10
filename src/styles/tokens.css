@@ -129,6 +129,13 @@
   --c-context-menu-separator: #191919; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the 2px rule between groups, (25,25,25), a shade darker than the panel */
   --c-cue-line: #FFFFFF; /* the user's 2x crop of a hot cue on the detail waveform (cue-badge.png, 268x406, rekordbox 7.2.11; the 28px phrase bar at its top is the 14pt one, so 2x): under the badge a 2px line of flat (255,255,255) runs y 126..333, over the waveform. It is the downbeat's white, and that cue sits on a downbeat, so whether a cue off the grid draws one is [ASSUME]d from the user's reading of the crop, not measured */
   --c-deck-button: #282828; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the control row's buttons and the transport's, a flat (40,40,40) — the same grey the mixer's kill buttons are */
+  --c-pref-select: #3571E3; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the selected sidebar row, the selected tab, a toggle that is on, the ring of a checked radio and the fill of a checked checkbox, (53,113,227); not the browser's accent */
+  --c-pref-text: #AAAAAA; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): an unselected sidebar row's label and an unselected tab's text, (170,170,170) */
+  --c-pref-control-off: #969696; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a toggle that is off and an unchecked radio, (150,150,150) */
+  --c-pref-button-top: #323336; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the top of the Reset to defaults button's gradient, (50,51,54) */
+  --c-pref-button-bottom: #19191C; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the bottom of that gradient, (25,25,28) */
+  --c-pref-button-border: #0B0B0B; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the 1pt edge around that button, (11,11,11) */
+  --c-pref-key-badge: #222222; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge beside a shortcut on the Keyboard pane, (34,34,34) */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
@@ -441,6 +448,59 @@
   --s-player-dual-loop-icon-gap: 5.5px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): black x 793.5..799 between the two loop buttons */
   --s-player-dual-zoom-x: 7.5px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the zoom cluster's glyphs x 128.5..142, 7.5 in from the deck's edge, floating over the two detail waveforms where they meet */
   --s-player-dual-zoom-spread: 50px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the + glyph centred on y 240.5 and the − on 290.5, RST between them on the centre line at 266.5: one cluster for the pair, not one per deck */
+  --s-pref-w: 798px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the window's content x 114..1709 at 2x */
+  --s-pref-h: 828px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the window y 76..1731 at 2x, title bar included */
+  --s-pref-title-h: 28px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the title bar y 76..131 */
+  --s-pref-sidebar-w: 159px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the sidebar x 114..431 */
+  --s-pref-sidebar-inset: 7px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the search box and the rows start 14 capture px in from the sidebar's edge */
+  --s-pref-search-h: 24px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the search box y 164..211 */
+  --s-pref-search-top: 16px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the search box's top, 32 capture px below the title bar */
+  --s-pref-item-h: 30px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the selected row y 376..435 */
+  --s-pref-item-pitch: 33px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): PLAN, CLOUD and View centred at y 275, 341, 407 */
+  --s-pref-items-top: 56.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the first row's top, y 245, below the title bar's bottom at 132 */
+  --s-pref-item-icon-x: 14.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the icon's centre from the row's left edge */
+  --s-pref-item-label-x: 40px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the label's left from the row's left edge, x 208 on a row at 128 */
+  --s-pref-item-icon: 15px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the PLAN glyph 30 capture px square; the eye is 36 by 26 */
+  --s-pref-tab-h: 30px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the tab strip y 140..199 */
+  --s-pref-tab-top: 4px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the strip's top, 8 capture px below the title bar */
+  --s-pref-tab-gap: 4px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): between two tabs, 8 capture px */
+  --s-pref-tab-pad: 4.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a tab's text is 9 capture px in from either end */
+  --s-pref-section-gap: 4px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the black gap between sections, 8 capture px, and between the strip and the first */
+  --s-pref-section-w: 624px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a section x 440..1687 */
+  --s-pref-scrollbar-w: 6px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the scrollbar track x 1690..1701 */
+  --s-pref-section-pad-x: 26px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a section title starts at x 492 on a section edge of 440 */
+  --s-pref-section-pad-top: 22px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a section's top to its title's cap top is 24pt; 2pt of that is the line's own lead */
+  --s-pref-section-pad-bottom: 20px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the Tooltips toggle's bottom at y 556 to the section's bottom at 595 */
+  --s-pref-sub-inset: 57px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a sub-heading (FontSize) starts at x 554 */
+  --s-pref-control-inset: 52px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a toggle, radio or dropdown starts at x 544 */
+  --s-pref-nest-inset: 84px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a radio under a sub-heading starts at x 608; the Bold toggle at 609 */
+  --s-pref-slider-inset: 94px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the slider track starts at x 628 */
+  --s-pref-row-pitch: 26px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): Classic, Alphanumeric and the toggle under them centred at y 312, 364, 416 */
+  --s-pref-sep-inset: 21px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a separator line runs from x 482 to 1652 inside a section 440..1687 */
+  --s-pref-toggle-w: 32px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a toggle x 544..608 */
+  --s-pref-toggle-h: 16px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a toggle y 524..556 */
+  --s-pref-toggle-knob: 12.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the knob x 612..636 */
+  --s-pref-radio: 16.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a radio x 544..576 */
+  --s-pref-radio-dot: 7px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the white dot of a checked radio, estimated from its 14 capture px width */
+  --s-pref-checkbox: 17px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a checkbox x 608..641 */
+  --s-pref-select-w: 520px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a dropdown x 544..1583 */
+  --s-pref-select-h: 22px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a dropdown y 320..363 */
+  --s-pref-select-pad: 7px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the dropdown's text starts 14 capture px in */
+  --s-pref-chevron-w: 15px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the dropdown's chevron x 1549..1578 */
+  --s-pref-chevron-h: 6.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the chevron y 337..349 */
+  --s-pref-slider-w: 504px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the slider track x 628..1635 */
+  --s-pref-slider-track-h: 4px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the track y 800..807 */
+  --s-pref-slider-thumb-w: 5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the thumb x 1060..1069 */
+  --s-pref-slider-thumb-h: 20px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the thumb y 784..823 */
+  --s-pref-button-w: 249px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): Reset to defaults x 441..938 */
+  --s-pref-button-h: 30px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): Reset to defaults y 1661..1720 */
+  --s-pref-button-gap: 5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the sections' bottom at 1651 to the button's top at 1661 */
+  --s-pref-bottom-pad: 5.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the button's bottom at 1720 to the window's at 1731 */
+  --s-pref-key-row-h: 20px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): Play/Pause and Quantize centred at y 339 and 379 on the Keyboard pane */
+  --s-pref-key-list-inset: 20px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the Keyboard pane's list x 436..1611 inside a section 396..1651 */
+  --s-pref-key-list-top: 58px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the list's top at y 232 under a section top of 116 */
+  --s-pref-key-badge-w: 72px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the spacebar badge x 1398..1541 */
+  --s-pref-key-badge-h: 21px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the badge y 322..364 */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -465,6 +525,14 @@
   --f-size-dual-button: 9px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the control row's and title row's buttons: MEMORY's cap height 6.5 (y 173.5..180) and KEY SYNC's the same, which Arial gives at 9px; bold, MEMORY 39.5 wide where Arial Bold 9px gives 40.5 */
   --f-size-dual-field: 11px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the loop length and tempo fields: '2' and '128.00' with an 8pt digit height (y 172.5..180.5), Arial at 11px */
   --f-size-dual-readout: 12.5px; /* the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x, both decks loaded; window x 0..1920pt, the pair y 56..477): the title row's times, key and BPM: a 9.5pt digit height says 13px and '128.00' at 36.5 wide says 12px; the times are narrower still than Arial at either. Between the two, and [OBS] the face may not be Arial */
+  --f-size-pref-window-title: 14px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): 'Preferences' in the title bar: a 20 capture px cap; bold */
+  --f-size-pref-title: 18px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a section title (Language): a 25 capture px cap; bold */
+  --f-size-pref-sub: 16px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a sub-heading (FontSize): a 23 capture px cap; bold */
+  --f-size-pref-label: 14.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a control's label (Show Tooltips, Classic): a 21 capture px cap */
+  --f-size-pref-small: 13px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the slider's Small and Large: a 19 capture px cap */
+  --f-size-pref-side: 14px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a sidebar row (View): a 20 capture px cap */
+  --f-size-pref-tab: 12.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a tab (Display Type): cap top to descender 23 capture px */
+  --f-size-pref-badge: 11px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge's text (spacebar): an 18 capture px x-height-to-ascender span */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than

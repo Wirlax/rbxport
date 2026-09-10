@@ -1,0 +1,11 @@
+<svg viewBox="0 0 18 14" xmlns="http://www.w3.org/2000/svg">
+  <!-- Preferences › DJ System: a player, its jog on the left and a screen on the right. -->
+  <rect x="0.7" y="0.7" width="16.6" height="12.6" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <circle cx="5.5" cy="7" r="2.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  <circle cx="5.5" cy="7" r="0.9" fill="currentColor"/>
+  <g fill="currentColor">
+    <rect x="10.5" y="3.5" width="4.5" height="1.3"/>
+    <rect x="10.5" y="6.3" width="4.5" height="1.3"/>
+    <rect x="10.5" y="9.1" width="4.5" height="1.3"/>
+  </g>
+</svg>

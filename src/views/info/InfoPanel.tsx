@@ -38,6 +38,7 @@ import type { Backend, RowDto, TrackDetails, TrackField, TrackLookups } from "@/
 import { formatBpm } from "@/lib/format";
 import styles from "./InfoPanel.module.css";
 import { acceptable, COLORS, dateSegments, fieldText, summaryFacts } from "./fields";
+import { useTooltip } from "@/store/usePreferences";
 
 export type InfoTab = "summary" | "info" | "artwork";
 
@@ -117,6 +118,7 @@ export function InfoPanel({
 
   const record = details && details.id === trackId ? details : null;
 
+  const tip = useTooltip();
   return (
     <aside className={styles.panel} aria-label="Information">
       <div className={styles.tabs} role="tablist" aria-label="Information">
@@ -138,7 +140,7 @@ export function InfoPanel({
           type="button"
           className={styles.reload}
           aria-label="Reload Tag"
-          title="Not wired: the glyph matches rekordbox's refresh, but what it reloads is unconfirmed."
+          title={tip("Not wired: the glyph matches rekordbox's refresh, but what it reloads is unconfirmed.")}
           disabled
         >
           <ReloadIcon className={styles.reloadGlyph} />
@@ -189,6 +191,7 @@ const Summary = memo(function Summary({
   const title = details?.title ?? track.title;
   const artist = details?.artist ?? track.artist;
   const album = details?.album ?? track.album;
+  const tip = useTooltip();
   return (
     <>
       <div className={styles.summaryHead}>
@@ -218,7 +221,7 @@ const Summary = memo(function Summary({
         {summaryFacts(track, details).map((fact) => (
           <div key={fact.label} className={styles.fact}>
             <dt className={styles.label}>{fact.label}</dt>
-            <dd className={styles.value} title={fact.value}>{fact.value}</dd>
+            <dd className={styles.value} title={tip(fact.value)}>{fact.value}</dd>
           </div>
         ))}
       </dl>
@@ -506,6 +509,7 @@ function Locked({
   children?: React.ReactNode;
 }) {
   const inputId = `info-field-${name}`;
+  const tip = useTooltip();
   return (
     <div className={styles.fieldBlock} data-locked="">
       <label className={styles.formLabel} htmlFor={inputId}>{label}</label>
@@ -516,7 +520,7 @@ function Locked({
             className={styles.input}
             value={value ?? ""}
             readOnly
-            title={LOCKED[name]}
+            title={tip(LOCKED[name])}
             aria-description={LOCKED[name]}
           />
         </div>
@@ -528,8 +532,9 @@ function Locked({
 /** The Release Date's three boxes and its clear button, all inert. */
 function DateBox({ iso }: { iso: string }) {
   const [day, month, year] = dateSegments(iso);
+  const tip = useTooltip();
   return (
-    <div className={styles.dateRow} title={LOCKED["releaseDate"]}>
+    <div className={styles.dateRow} title={tip(LOCKED["releaseDate"])}>
       <div className={styles.dateBoxes} role="group" aria-label="Release Date" aria-description={LOCKED["releaseDate"]}>
         {[["day", day], ["month", month], ["year", year]].map(([name, part]) => (
           <span key={name} className={styles.dateBox}>
@@ -653,8 +658,9 @@ function Stars({
 /** A checkbox that is drawn and read; see `LOCKED` for why it is not written. */
 function Check({ label, name, checked }: { label: string; name: string; checked: boolean }) {
   const inputId = `info-field-${name}`;
+  const tip = useTooltip();
   return (
-    <div className={styles.checkRow} data-locked="" title={LOCKED[name]}>
+    <div className={styles.checkRow} data-locked="" title={tip(LOCKED[name])}>
       <label className={styles.checkLabel} htmlFor={inputId}>{label}</label>
       <input
         id={inputId}
@@ -675,6 +681,7 @@ function Check({ label, name, checked }: { label: string; name: string; checked:
 
 function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails | null }) {
   const hasArtwork = details?.hasArtwork ?? track.hasArtwork;
+  const tip = useTooltip();
   return (
     <div className={styles.artworkArea}>
       <div className={styles.picture} style={{ ["--hue" as string]: `${track.artworkHue}deg` }}>
@@ -691,7 +698,7 @@ function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails |
           type="button"
           className={styles.artworkButton}
           aria-label="Add Artwork"
-          title="Not wired: where rekordbox files an imported sleeve is observed, how it names the directory is not."
+          title={tip("Not wired: where rekordbox files an imported sleeve is observed, how it names the directory is not.")}
           disabled
         >
           <ArtworkImportIcon className={styles.artworkGlyph} />
@@ -700,7 +707,7 @@ function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails |
           type="button"
           className={styles.artworkButton}
           aria-label="Delete Artwork"
-          title="Not wired: whether rekordbox clears ImagePath to empty or NULL, and whether it removes the file, has not been recorded."
+          title={tip("Not wired: whether rekordbox clears ImagePath to empty or NULL, and whether it removes the file, has not been recorded.")}
           disabled
         >
           <ArtworkDeleteIcon className={styles.artworkGlyph} />

@@ -24,6 +24,7 @@ import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
   NO_BEATS,
+  subdivideGrid,
   ZOOM_STEPS,
   showsEveryBeat,
   beatsIn,
@@ -50,6 +51,8 @@ import {
   type PadMode,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
+import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
@@ -233,6 +236,7 @@ export const CueMarkers = memo(function CueMarkers({
   /** The slice of the track being shown, for the zoomed detail waveform. */
   window?: { from: number; to: number };
 }) {
+  const tip = useTooltip();
   if (totalMs <= 0) return null;
   const from = window?.from ?? 0;
   const to = window?.to ?? 1;
@@ -262,7 +266,7 @@ export const CueMarkers = memo(function CueMarkers({
             data-band={band}
             data-cue={cue.memory ? "" : cue.letter}
             style={cueStyle(left, cue.colour)}
-            title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
+            title={tip(cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`)}
             aria-hidden
           >
             {head}
@@ -317,14 +321,17 @@ const BeatGrid = memo(function BeatGrid({
  * is worse than a coloured block whose shape already says what it is.
  */
 const PhraseBar = memo(function PhraseBar({
-  phrases, totalMs, beatMs,
+  phrases, totalMs, beatMs, labels = true,
 }: {
   phrases: readonly Phrase[];
   totalMs: number;
   /** Milliseconds a beat lasts, for phrases the beat grid did not reach. */
   beatMs: number;
+  /** "Always show types of phrases": the name in each block, or colour alone. */
+  labels?: boolean;
 }) {
   const spans = phraseSpans(phrases, totalMs, beatMs);
+  const tip = useTooltip();
   return (
     <div className={styles.phrase} aria-label="Phrase" data-testid="player-phrase">
       {spans.map((span) => (
@@ -333,9 +340,9 @@ const PhraseBar = memo(function PhraseBar({
           className={styles.phraseBlock}
           data-kind={span.kind}
           style={{ left: `${span.from * 100}%`, width: `${(span.to - span.from) * 100}%` }}
-          title={span.label}
+          title={tip(span.label)}
         >
-          {span.label}
+          {labels ? span.label : ""}
         </span>
       ))}
     </div>
@@ -497,6 +504,14 @@ export const Player = memo(function Player({
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
+  const { view: viewPrefs, advanced: advancedPrefs } = usePreferences();
+  const tip = useTooltip();
+  // QUANTIZE BEAT VALUE in Preferences: the grid every quantized cue snaps
+  // to, split as finely as the value asks.
+  const quantizeGrid = useMemo(
+    () => subdivideGrid(grid, 1 / quantizeFraction(advancedPrefs.quantizeBeat)),
+    [grid, advancedPrefs.quantizeBeat],
+  );
   /** How far a jump moves, chosen from the size menu. */
   const [ownJumpSizeId, setOwnJumpSizeId] = useState<string>(JUMP_SIZE_ID);
   const jumpSizeId = linkedJump ?? ownJumpSizeId;
@@ -708,13 +723,13 @@ export const Player = memo(function Player({
       playback.positionRef.current,
       cuePoint,
       playback.playing,
-      quantize ? grid : null,
+      quantize ? quantizeGrid : null,
     );
     previewing.current = action.playing;
     if (action.cuePoint !== cuePoint) setCuePoint(action.cuePoint);
     if (action.seekTo !== null) playback.seek(action.seekTo);
     if (action.playing !== playback.playing) playback.toggle();
-  }, [playback, cuePoint, quantize, grid]);
+  }, [playback, cuePoint, quantize, quantizeGrid]);
 
   const dropCue = useCallback(() => {
     const action = releaseCue(previewing.current, cuePoint);
@@ -732,7 +747,7 @@ export const Player = memo(function Player({
   });
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, quantiseTo: quantize ? grid : null, readOnly, onError,
+    cues, positionSeconds, seek, quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
 
   /*
@@ -915,12 +930,17 @@ export const Player = memo(function Player({
     const leader = peerSync?.();
     const follower = syncState.current();
     if (!leader || !follower) return;
-    const { tempo, nudge } = syncTo(leader, follower);
+    // BEAT/BPM SYNC in Preferences: whether the bar is matched as well as
+    // the tempo, and whether a double or half BPM counts as the same tempo.
+    const { tempo, nudge } = syncTo(leader, follower, {
+      type: advancedPrefs.syncType,
+      doubleHalf: advancedPrefs.syncDoubleHalf,
+    });
     playback.setTempo(tempo);
     // The nudge second: it is measured against where the follower is now, and
     // the tempo does not move the playhead.
     if (Math.abs(nudge) > 0.001) playback.seek(follower.position + nudge);
-  }, [peerSync, playback]);
+  }, [peerSync, playback, advancedPrefs.syncType, advancedPrefs.syncDoubleHalf]);
 
   const takesDrop = dragging && Boolean(onDropTrack);
 
@@ -1017,7 +1037,7 @@ export const Player = memo(function Player({
           aria-expanded={jumpMenu !== null}
           // Transcribed from rekordbox: "Select the beat/bar length jumping
           // from the current position."
-          title="Select the beat/bar length jumping from the current position."
+          title={tip("Select the beat/bar length jumping from the current position.")}
           onClick={(event) => {
             const box = event.currentTarget.getBoundingClientRect();
             // Opened beside the button rather than under it: the deck sits at
@@ -1112,7 +1132,7 @@ export const Player = memo(function Player({
             // it takes whatever the browser has selected, which is the third
             // way a track reaches a deck alongside the drop and the menu.
             aria-label={track ? "Eject" : "Load the selected track"}
-            title={track ? "Eject" : "Load the selected track"}
+            title={tip(track ? "Eject" : "Load the selected track")}
             onClick={track ? onEject : onLoadSelected}
             disabled={track ? !onEject : !onLoadSelected}
           >
@@ -1131,8 +1151,11 @@ export const Player = memo(function Player({
 
   const overviewStack = (
           <div className={styles.overviewStack}>
-            {/* Where the vocals are, from the analysis. */}
-            <VocalStrip trackId={track && track.analysed ? track.id : null} />
+            {/* Where the vocals are, from the analysis; Vocal (Full
+                Waveform) in Preferences turns the strip off. */}
+            {viewPrefs.vocalFull ? (
+              <VocalStrip trackId={track && track.analysed ? track.id : null} />
+            ) : null}
             {/*
               Clicking either waveform seeks, which is what they are for.
 
@@ -1163,7 +1186,9 @@ export const Player = memo(function Player({
                   span={1}
                   width={overview.width}
                   height={overview.height}
-                  half
+                  // Full/Preview Waveform in Preferences: single-sided from
+                  // the baseline, or mirrored about the middle.
+                  half={viewPrefs.overviewWaveform === "half"}
                 />
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} />
@@ -1229,7 +1254,7 @@ export const Player = memo(function Player({
                 {elapsed.main}
                 <i className={styles.tenths}>.{elapsed.tenths}</i>
               </span>
-              <span className={styles.readout}>{track.key}</span>
+              <span className={styles.readout}>{formatKey(track.key, viewPrefs.keyDisplay)}</span>
               <span className={styles.readout}>{formatBpm(track.bpmX100)}</span>
             </>
           ) : null}
@@ -1242,11 +1267,11 @@ export const Player = memo(function Player({
                 className={styles.chip}
                 aria-label="Beat sync"
                 disabled={!track || isMaster}
-                title={
+                title={tip(
                   isMaster
                     ? "This deck is the master; sync the other one to it."
-                    : "Match this deck to the master's tempo and bar."
-                }
+                    : "Match this deck to the master's tempo and bar.",
+                )}
                 onClick={beatSync}
               >
                 BEAT SYNC
@@ -1273,7 +1298,14 @@ export const Player = memo(function Player({
           {overviewStack}
         </div>
 
-        <PhraseBar phrases={phrases} totalMs={total * 1000} beatMs={beatMs} />
+        {viewPrefs.phraseFull ? (
+          <PhraseBar
+            phrases={phrases}
+            totalMs={total * 1000}
+            beatMs={beatMs}
+            labels={viewPrefs.phraseLabels}
+          />
+        ) : null}
 
         {/* The control row comes before the detail in the two-deck body, as
             the capture has it: the detail is the last row, and takes what is
@@ -1390,7 +1422,7 @@ export const Player = memo(function Player({
                           // Saving needs the PQT2 tag, whose payload is not
                           // understood; an editor that cannot save is a trap.
                           disabled
-                          title="Grid editing needs the PQT2 tag, which is not yet understood"
+                          title={tip("Grid editing needs the PQT2 tag, which is not yet understood")}
                         >
                           {EDIT_ICONS[edit.id]
                             ? // Our own icons: Pioneer's are reference for
@@ -1445,7 +1477,7 @@ export const Player = memo(function Player({
                     aria-pressed={cue !== null}
                     title={cue
                       ? undefined
-                      : readOnly ? READ_ONLY_REASON : `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`}
+                      : tip(readOnly ? READ_ONLY_REASON : `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`)}
                     disabled={!cue && !hot.canEdit}
                     onClick={() => hot.press(letter)}
                   >
@@ -1466,7 +1498,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.memoryLabel}
                 aria-label="Set memory cue"
-                title={readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)"}
+                title={tip(readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)")}
                 disabled={!memory.canEdit}
                 onClick={memory.store}
               >
@@ -1476,7 +1508,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.step}
                 aria-label="Previous memory cue"
-                title="Call Previous Memory Cue (B)"
+                title={tip("Call Previous Memory Cue (B)")}
                 disabled={playback.idle}
                 onClick={memory.callPrevious}
               >
@@ -1486,7 +1518,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.step}
                 aria-label="Next memory cue"
-                title="Call Next Memory Cue (N)"
+                title={tip("Call Next Memory Cue (N)")}
                 disabled={playback.idle}
                 onClick={memory.callNext}
               >
@@ -1496,7 +1528,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.step}
                 aria-label="Delete memory cue"
-                title={readOnly ? READ_ONLY_REASON : "Delete Memory Cue (X)"}
+                title={tip(readOnly ? READ_ONLY_REASON : "Delete Memory Cue (X)")}
                 disabled={!memory.canEdit}
                 onClick={memory.deleteAtHead}
               >
@@ -1679,7 +1711,7 @@ export const Player = memo(function Player({
                   type="button"
                   className={styles.cueDelete}
                   aria-label={`Delete memory cue ${memoryTime(cue.positionMs)}`}
-                  title={readOnly ? READ_ONLY_REASON : "Delete Memory Cue"}
+                  title={tip(readOnly ? READ_ONLY_REASON : "Delete Memory Cue")}
                   disabled={!memory.canEdit || cue.id === ""}
                   onClick={(event) => {
                     // The row underneath seeks; a delete is not also a jump.

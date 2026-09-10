@@ -27,6 +27,7 @@ import type {
 } from "@/ipc/types";
 import { contentsText, formatSpace } from "@/lib/devices";
 import styles from "./DevicePanel.module.css";
+import { useTooltip } from "@/store/usePreferences";
 
 interface RadioGroupProps<T extends string> {
   label: string;
@@ -49,8 +50,9 @@ function RadioGroup<T extends string>({
   disabled = false,
   reason,
 }: RadioGroupProps<T>) {
+  const tip = useTooltip();
   return (
-    <fieldset className={styles.group} disabled={disabled} title={reason}>
+    <fieldset className={styles.group} disabled={disabled} title={tip(reason)}>
       <legend className={styles.caption}>{label}</legend>
       <div className={styles.radios}>
         {options.map((option) => (
@@ -151,6 +153,7 @@ export function GeneralTab({
     .filter(Boolean)
     .join(", ");
 
+  const tip = useTooltip();
   return (
     <div className={styles.general}>
       <label className={styles.field}>
@@ -164,18 +167,18 @@ export function GeneralTab({
             if (e.key === "Enter") e.currentTarget.blur();
           }}
           disabled={!settings.hasLibrarySettings}
-          title={settings.hasLibrarySettings ? undefined : NO_LIBRARY}
+          title={tip(settings.hasLibrarySettings ? undefined : NO_LIBRARY)}
           maxLength={64}
         />
       </label>
 
-      <label className={styles.field} title={UNKNOWN_BACKGROUND}>
+      <label className={styles.field} title={tip(UNKNOWN_BACKGROUND)}>
         <span className={styles.caption}>Background Color : OneLibrary</span>
         <select className={styles.select} value="default" disabled aria-disabled>
           <option value="default">Default Color</option>
         </select>
       </label>
-      <label className={styles.field} title={UNKNOWN_BACKGROUND}>
+      <label className={styles.field} title={tip(UNKNOWN_BACKGROUND)}>
         <span className={styles.caption}>Background Color : Device Library</span>
         <select className={styles.select} value="default" disabled aria-disabled>
           <option value="default">Default Color</option>
@@ -220,7 +223,7 @@ export function GeneralTab({
         onChange={(keyDisplay) => onChange({ ...settings, keyDisplay })}
       />
 
-      <fieldset className={styles.group} title={UNKNOWN_IMAGE} disabled>
+      <fieldset className={styles.group} title={tip(UNKNOWN_IMAGE)} disabled>
         <legend className={styles.caption}>Image On-Jog Display</legend>
         <div className={styles.radios}>
           {JOG_IMAGES.map((option, i) => (

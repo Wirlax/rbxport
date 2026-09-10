@@ -19,7 +19,7 @@ import { detectPlatform, dispatch } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
-import { resolveMenu } from "@/lib/menu";
+import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
   DEFAULT_SUB_TREE_WIDTH, DEFAULT_SUB_WIDTH, loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS,
@@ -42,11 +42,13 @@ import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
-import { Settings } from "@/views/settings/Settings";
+import { Preferences, type Pane } from "@/views/settings/Preferences";
+import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { FilterValues } from "@/ipc/types";
+import { useTooltip } from "@/store/usePreferences";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -213,7 +215,17 @@ export function App() {
           ? "folder"
           : "collection";
   const cols = useColumns(columnContext);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The Preferences window, and the pane it opens on: the missing-file
+  // manager lives under Advanced, so the File menu opens it there.
+  const [settingsOpen, setSettingsOpen] = useState<Pane | null>(null);
+  const prefs = usePreferencesStore();
+  const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
+  // Every write path reads this one flag: rekordbox holding the database,
+  // or Library Protection in Preferences, refuse the same way.
+  const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
+  // DJ System in Preferences is what a stick with no settings of its own
+  // gets on export; the same shape goes with every export call.
+  const stickDefaults = prefs.preferences.djSystem;
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
   const cost = useDiagnostics(true);
@@ -455,6 +467,13 @@ export function App() {
   /** Runs one edit and reports what happened, refusals included. */
   const runEdit = useCallback(
     async (what: string, edit: (b: Awaited<ReturnType<typeof getBackend>>) => Promise<unknown>) => {
+      // Library Protection is a choice the backend cannot see, so it is
+      // refused here, with the same words the menu uses. rekordbox holding
+      // the database is the backend's to refuse, checked as the write starts.
+      if (advancedPrefs.protectLibrary) {
+        refuse(refusal(true));
+        return;
+      }
       const backend = await getBackend();
       try {
         await edit(backend);
@@ -463,7 +482,7 @@ export function App() {
         refuse(e instanceof Error ? e.message : "That could not be saved.");
       }
     },
-    [report, refuse],
+    [report, refuse, advancedPrefs.protectLibrary],
   );
 
   /** Shows an edit at once, so the interface does not wait on the reload. */
@@ -510,6 +529,10 @@ export function App() {
       setDraggedTracks(null);
       if (!ids || ids.length === 0) return;
       if (ids.some(refuseLoose)) return;
+      if (advancedPrefs.protectLibrary) {
+        refuse(refusal(true));
+        return;
+      }
       void (async () => {
         const backend = await getBackend();
         try {
@@ -523,7 +546,7 @@ export function App() {
         }
       })();
     },
-    [draggedTracks, tree, report, refuse, refuseLoose],
+    [draggedTracks, tree, report, refuse, refuseLoose, advancedPrefs.protectLibrary],
   );
 
   /**
@@ -679,10 +702,13 @@ export function App() {
           : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
       );
       setTree(await backend.playlistTree());
+      // Auto Analysis in Preferences: what just landed goes straight into
+      // the queue, as rekordbox does unless told not to.
+      if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
     } catch (e) {
       refuse(e instanceof Error ? e.message : "Those files could not be imported.");
     }
-  }, [report, refuse]);
+  }, [report, refuse, analysisPrefs.auto, analysis]);
 
   // Native menu clicks. The shell sends the item's id and nothing else; what
   // it means, and whether it is allowed right now, is decided in one place.
@@ -691,7 +717,7 @@ export function App() {
     void (async () => {
       const backend = await getBackend();
       stop = backend.onMenu((id) => {
-        const outcome = resolveMenu(id, summary?.readOnly ?? false);
+        const outcome = resolveMenu(id, readOnly, advancedPrefs.protectLibrary);
         if (!outcome) return;
         if ("refused" in outcome) {
           refuse(outcome.refused);
@@ -713,13 +739,12 @@ export function App() {
           setLayout(asLayout(outcome.action.slice("layout-".length)));
           return;
         }
-        // Both the settings panel and the missing-file manager live in
-        // Settings, so either opens it.
-        setSettingsOpen(true);
+        // The missing-file manager is a pane of Preferences.
+        setSettingsOpen(outcome.action === "missing" ? "advanced" : "view");
       });
     })();
     return () => stop?.();
-  }, [summary?.readOnly, importFromMenu, refuse]);
+  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {
@@ -731,9 +756,16 @@ export function App() {
   // Devices join the tree as nodes so the Devices section renders through the
   // same path as every other section, and the Explorer's folders after them.
   const explorer = useExplorer();
+  // View › Layout in Preferences decides whether All Tracks heads the
+  // playlists and whether the Explorer is there at all; the rail dims a
+  // section with nothing in it, so a hidden Explorer reads as empty.
   const treeNodes = useMemo(
-    () => [...tree, ...deviceNodes(devices), ...explorer.nodes],
-    [tree, devices, explorer.nodes],
+    () => [
+      ...(viewPrefs.allTracks ? tree : tree.filter((node) => node.kind !== "allTracks")),
+      ...deviceNodes(devices),
+      ...(viewPrefs.explorer ? explorer.nodes : []),
+    ],
+    [tree, devices, explorer.nodes, viewPrefs.allTracks, viewPrefs.explorer],
   );
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
@@ -748,7 +780,7 @@ export function App() {
       report(`Writing ${name} to ${selectedDevice.name}…`);
       try {
         const backend = await getBackend();
-        const written = await backend.exportPlaylist(playlistId, selectedDevice.path);
+        const written = await backend.exportPlaylist(playlistId, selectedDevice.path, stickDefaults);
         if (written !== null) report(exportSummary(selectedDevice.name, written));
         setDevices(await backend.listDevices());
       } catch (e) {
@@ -757,7 +789,7 @@ export function App() {
         setSyncing(false);
       }
     },
-    [selectedDevice, tree, report, refuse],
+    [selectedDevice, tree, report, refuse, stickDefaults],
   );
 
   const exportPlaylist = useCallback((node: TreeNode) => {
@@ -765,7 +797,7 @@ export function App() {
       const backend = await getBackend();
       report(`Exporting ${node.name}…`);
       try {
-        const written = await backend.exportPlaylist(node.id);
+        const written = await backend.exportPlaylist(node.id, undefined, stickDefaults);
         if (written === null) {
           setNote(null);
           return;
@@ -775,7 +807,7 @@ export function App() {
         refuse(e instanceof Error ? e.message : "That export could not be written.");
       }
     })();
-  }, [report, refuse]);
+  }, [report, refuse, stickDefaults]);
 
   // The top of the current view, kept only to write the next start's opening
   // screen. The library itself still lives entirely in Rust.
@@ -822,7 +854,9 @@ export function App() {
   const selectionText =
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
+  const tip = useTooltip();
   return (
+    <PreferencesProvider value={prefs}>
     <div className={styles.window}>
       <div
         className={styles.titleBar}
@@ -835,10 +869,10 @@ export function App() {
         <div className={styles.cost} data-testid="app-cost">
           {/* Processor lives in the top bar's own meter now, and GPU was
               always a dash: macOS accounts it per process only to root. */}
-          <span title="Resident memory">MEM {formatMemory(cost.memoryMb)}</span>
-          <span title="Threads in the process">THR {formatCount(cost.threads)}</span>
-          <span title="Open file descriptors">FD {formatCount(cost.openFiles)}</span>
-          <span title="Frames a second, timed in the window">
+          <span title={tip("Resident memory")}>MEM {formatMemory(cost.memoryMb)}</span>
+          <span title={tip("Threads in the process")}>THR {formatCount(cost.threads)}</span>
+          <span title={tip("Open file descriptors")}>FD {formatCount(cost.openFiles)}</span>
+          <span title={tip("Frames a second, timed in the window")}>
             FPS {formatCount(cost.fps)}
           </span>
         </div>
@@ -846,7 +880,7 @@ export function App() {
       </div>
       <TopBar
         clock={clock}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => setSettingsOpen("view")}
         layout={layout}
         onLayoutChange={setLayout}
         level={master.level}
@@ -876,7 +910,7 @@ export function App() {
                 className={styles.dual}
                 aria-label="Dual control"
                 aria-pressed={dual}
-                title="Link the waveform controls and beat jump across both decks."
+                title={tip("Link the waveform controls and beat jump across both decks.")}
                 data-on={dual || undefined}
                 onClick={() => setDual((was) => !was)}
               >
@@ -905,7 +939,7 @@ export function App() {
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
             onMaster={() => setSyncMaster("a")}
-            readOnly={summary?.readOnly ?? false}
+            readOnly={readOnly}
           />
           {deckCount(layout) > 1 ? (
             <Player
@@ -926,7 +960,7 @@ export function App() {
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}
               onMaster={() => setSyncMaster("b")}
-              readOnly={summary?.readOnly ?? false}
+              readOnly={readOnly}
             />
           ) : null}
           {/* Over the line between the decks, where the capture floats it.
@@ -957,8 +991,9 @@ export function App() {
           onCreatePlaylist={createPlaylistIn}
           onCreateFolder={createFolderIn}
           onDeleteNode={deleteNode}
-          readOnly={summary?.readOnly ?? false}
+          readOnly={readOnly}
           onExpand={explorer.expand}
+          showCounts={viewPrefs.playlistCounts}
         />
         <div
           className={styles.splitter}
@@ -992,7 +1027,7 @@ export function App() {
           }}
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
-          readOnly={summary?.readOnly ?? false}
+          readOnly={readOnly}
           onFocusedRow={setPlayerTrack}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
@@ -1044,7 +1079,7 @@ export function App() {
               onCreatePlaylist: createPlaylistIn,
               onCreateFolder: createFolderIn,
               onDeleteNode: deleteNode,
-              readOnly: summary?.readOnly ?? false,
+              readOnly: readOnly,
             }}
             list={{
               onDragTracks: setDraggedTracks,
@@ -1054,7 +1089,7 @@ export function App() {
               onRate: rateTrack,
               onComment: commentTrack,
               pendingEdits,
-              readOnly: summary?.readOnly ?? false,
+              readOnly: readOnly,
             }}
           />
         ) : null}
@@ -1063,7 +1098,7 @@ export function App() {
             // The browser's selection, as rekordbox's Information Window
             // follows it; the deck's track only when nothing is selected.
             track={selectedRow ?? playerTrack}
-            readOnly={summary?.readOnly ?? false}
+            readOnly={readOnly}
             libraryGeneration={libraryGeneration}
             onRate={rateTrack}
             onComment={commentTrack}
@@ -1078,19 +1113,20 @@ export function App() {
           onToggleSub={() => setSubOpen((open) => !open)}
         />
       </div>
-      {settingsOpen ? (
-        <Settings
+      {settingsOpen !== null ? (
+        <Preferences
           summary={summary}
           limiter={limiter.limiter}
           onLimiterChange={limiter.set}
           reduction={master.reduction}
+          initialPane={settingsOpen}
           onResetColumns={cols.reset}
           onResetLayout={() => {
             setTreeWidth(clampWidth(305, bounds()));
             setSubWidth(DEFAULT_SUB_WIDTH);
             setSubTreeWidth(DEFAULT_SUB_TREE_WIDTH);
           }}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setSettingsOpen(null)}
         />
       ) : null}
 
@@ -1110,8 +1146,10 @@ export function App() {
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
         analysisFailures={analysis.state.failed.length}
         selection={selectionText}
-        readOnly={summary?.readOnly ?? false}
+        readOnly={readOnly}
+        protectedLibrary={advancedPrefs.protectLibrary}
       />
     </div>
+    </PreferencesProvider>
   );
 }

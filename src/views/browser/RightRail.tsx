@@ -12,6 +12,7 @@
  */
 import { InfoIcon, SubBrowseIcon } from "@/components/icons";
 import styles from "./RightRail.module.css";
+import { useTooltip } from "@/store/usePreferences";
 
 export interface RightRailProps {
   /** Where the shell puts it, since the shell's grid decides that. */
@@ -23,13 +24,14 @@ export interface RightRailProps {
 }
 
 export function RightRail({ className, infoOpen, onToggleInfo, subOpen, onToggleSub }: RightRailProps) {
+  const tip = useTooltip();
   return (
     <div className={className ? `${styles.rail} ${className}` : styles.rail} role="toolbar" aria-label="Browser panels" aria-orientation="vertical">
       <div className={styles.group}>
         <button
           type="button"
           className={styles.button}
-          title="Display information window."
+          title={tip("Display information window.")}
           aria-label="Information"
           aria-pressed={infoOpen}
           onClick={onToggleInfo}
@@ -39,7 +41,7 @@ export function RightRail({ className, infoOpen, onToggleInfo, subOpen, onToggle
         <button
           type="button"
           className={styles.button}
-          title="Display sub-browser window."
+          title={tip("Display sub-browser window.")}
           aria-label="Sub-Browser Window"
           aria-pressed={subOpen}
           onClick={onToggleSub}

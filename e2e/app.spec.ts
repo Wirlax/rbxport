@@ -644,18 +644,79 @@ test("play/pause leaves no focus ring behind on the waveform", async ({ page }) 
   expect(await page.evaluate(() => document.querySelectorAll(":focus-visible").length)).toBe(0);
 });
 
-test("the gear opens settings, and Escape closes them", async ({ page }) => {
+test("the gear opens Preferences, and Escape closes them", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
   await expect(dialog).toBeVisible();
-  // Real information, not placeholder rows.
-  await expect(dialog.getByText("Tracks")).toBeVisible();
+  // rekordbox's panes, less PLAN and CLOUD, which have nothing here.
+  await expect(dialog.getByRole("tab", { name: "View", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "PLAN" })).toHaveCount(0);
+  await expect(dialog.getByRole("tab", { name: "CLOUD" })).toHaveCount(0);
+
+  // Advanced › Database holds real information, not placeholder rows.
+  await dialog.getByRole("tab", { name: "Advanced" }).click();
   await expect(dialog.getByText("Database version")).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
+});
+
+test("preferences are kept, and the key column follows the display format", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const cell = page.locator('[role="gridcell"][data-col="key"]').first();
+  const classic = (await cell.innerText()).trim();
+
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("radio", { name: "Alphanumeric" }).click();
+  // A Camelot code: a number and A or B.
+  await expect(cell).toHaveText(/^\d{1,2}[AB]$/);
+  await expect(cell).not.toHaveText(classic);
+
+  // Kept across a reload, and Reset to defaults puts it back.
+  await page.reload();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.locator('[role="gridcell"][data-col="key"]').first()).toHaveText(/^\d{1,2}[AB]$/);
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("dialog", { name: "Preferences" }).getByRole("button", { name: "Reset to defaults" }).click();
+  await expect(page.locator('[role="gridcell"][data-col="key"]').first()).toHaveText(classic);
+});
+
+test("Library Protection refuses edits the way a running rekordbox does", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "Advanced" }).click();
+  await dialog.getByRole("tab", { name: "Browse", exact: true }).click();
+  await dialog.getByRole("switch", { name: "Protect library edit." }).click();
+  await page.keyboard.press("Escape");
+
+  // The status bar says so, and a drop onto a playlist is refused rather than raced.
+  await expect(page.getByRole("contentinfo")).toContainText(/read-only/i);
+  const row = page.getByRole("row").filter({ has: page.getByRole("gridcell") }).first();
+  const target = page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first();
+  await row.dragTo(target);
+  await expect(page.getByRole("contentinfo")).toContainText("Library Protection");
+});
+
+test("the Layout tab hides the Explorer and shows playlist counts", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.locator('[role="treeitem"][data-kind="explorer"]')).toHaveCount(1);
+
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "Layout", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "Explorer" }).click();
+  await dialog.getByRole("checkbox", { name: /number of tracks in a playlist/ }).click();
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator('[role="treeitem"][data-kind="explorer"]')).toHaveCount(0);
+  await expect(page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first()).toContainText(/\(\d+\)/);
 });
 
 test("settings can put the columns back", async ({ page }) => {
@@ -666,6 +727,7 @@ test("settings can put the columns back", async ({ page }) => {
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("dialog", { name: "Preferences" }).getByRole("tab", { name: "Layout", exact: true }).click();
   await page.getByRole("button", { name: "Reset columns" }).click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
 });
@@ -910,6 +972,7 @@ test("a comment commits on Enter", async ({ page }) => {
 test("settings can check for missing files", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("dialog", { name: "Preferences" }).getByRole("tab", { name: "Advanced" }).click();
 
   const section = page.getByRole("region", { name: "Missing files" });
   await expect(section.getByRole("button", { name: /check for missing files/i })).toBeVisible();
@@ -940,14 +1003,17 @@ test("the player marks a track's cues on its waveforms", async ({ page }) => {
   await expect(detail.locator('[title^="Hot cue"]')).toHaveCount(0);
 });
 
-test("settings offers adding music, and says what it will not do", async ({ page }) => {
+test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "Analysis" }).click();
 
-  const section = page.getByRole("region", { name: "Add music" });
-  await expect(section.getByRole("button", { name: /add files/i })).toBeVisible();
-  // Honest about not running analysis, rather than leaving it a surprise.
-  await expect(section).toContainText("Analysis is not run");
+  const section = dialog.getByRole("region", { name: "Track Analysis" });
+  // On by default, as rekordbox ships; the switch is its "Disable".
+  await expect(section).toContainText("analysed straight away");
+  await section.getByRole("switch", { name: "Disable" }).click();
+  await expect(section).toContainText("analysed by hand");
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
@@ -1030,6 +1096,9 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
 test("settings can look for link devices, and says why a browser cannot", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "DJ System" }).click();
+  await dialog.getByRole("tab", { name: "Others" }).click();
 
   const section = page.getByRole("region", { name: "Link" });
   // Honest about listening only, rather than implying it appears as a source.
@@ -1719,6 +1788,7 @@ test("the settings window offers the audio output, and says when there is none",
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("dialog", { name: "Preferences" }).getByRole("tab", { name: "Audio" }).click();
 
   const section = page.getByRole("region", { name: "Audio output" });
   await expect(section).toBeVisible();

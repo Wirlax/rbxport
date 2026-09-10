@@ -232,6 +232,8 @@
   line-height: var(--s-row-height);
   padding: 0 6px;
   font-size: var(--f-size-ui);
+  /* Browse › Bold in Preferences; the list sets this, nothing else does. */
+  font-weight: var(--browse-weight, 400);
   color: var(--c-text);
   white-space: nowrap;
   overflow: hidden;

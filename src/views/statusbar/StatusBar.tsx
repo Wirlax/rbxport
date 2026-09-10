@@ -1,4 +1,6 @@
 import styles from "./StatusBar.module.css";
+import { useTooltip } from "@/store/usePreferences";
+import { refusal } from "@/lib/menu";
 
 export interface StatusBarProps {
   /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
@@ -13,6 +15,8 @@ export interface StatusBarProps {
   /** e.g. "Selected: 4 Tracks, 18 minutes, 58.4 MB"; empty when nothing is selected. */
   selection?: string;
   readOnly?: boolean;
+  /** Library Protection in Preferences is why, rather than rekordbox running. */
+  protectedLibrary?: boolean;
   /** Present only while analysis is running, so it can be stopped. */
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
@@ -24,14 +28,16 @@ export function StatusBar({
   error = null,
   selection = "",
   readOnly = false,
+  protectedLibrary = false,
   onCancelAnalysis,
   analysisFailures = 0,
 }: StatusBarProps) {
+  const tip = useTooltip();
   return (
     <footer className={styles.statusBar}>
       <span className={styles.logo}>rekordbox-lite</span>
       {readOnly ? (
-        <span className={styles.readOnly} title="rekordbox is running, so the library is open read-only">
+        <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
           Read-only
         </span>
       ) : null}
@@ -54,7 +60,7 @@ export function StatusBar({
       {analysisFailures > 0 ? (
         <span
           className={styles.failures}
-          title="These tracks could not be analysed; the run carried on past them"
+          title={tip("These tracks could not be analysed; the run carried on past them")}
         >
           {analysisFailures} failed
         </span>

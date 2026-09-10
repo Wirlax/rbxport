@@ -20,6 +20,8 @@ import { formatBpm } from "@/lib/format";
 import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "@/components/icons";
 import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
+import { formatKey } from "@/lib/preferences";
 
 /** A time split the way `splitTime` returns it. */
 interface Split {
@@ -50,6 +52,8 @@ export interface DualHeadProps {
 export const DualHead = memo(function DualHead({
   track, remaining, elapsed, sleeve, onBeatSync, isMaster, onMaster,
 }: DualHeadProps) {
+  const tip = useTooltip();
+  const { keyDisplay } = usePreferences().view;
   return (
     <div className={styles.head} data-testid="player-head-row">
       {sleeve}
@@ -78,7 +82,7 @@ export const DualHead = memo(function DualHead({
                   <i className={styles.tenths}>.{elapsed.tenths}</i>
                 </span>
               </span>
-              <span className={styles.cell}>{track.key}</span>
+              <span className={styles.cell}>{formatKey(track.key, keyDisplay)}</span>
               <span className={styles.cell}>{formatBpm(track.bpmX100)}</span>
             </>
           ) : null}
@@ -94,7 +98,7 @@ export const DualHead = memo(function DualHead({
           className={styles.syncButton}
           aria-label="Key sync"
           disabled
-          title="Key sync needs a key shifter, which the engine does not have yet."
+          title={tip("Key sync needs a key shifter, which the engine does not have yet.")}
         >
           KEY SYNC
         </button>
@@ -103,11 +107,11 @@ export const DualHead = memo(function DualHead({
           className={styles.syncButton}
           aria-label="Beat sync"
           disabled={!track || isMaster}
-          title={
+          title={tip(
             isMaster
               ? "This deck is the master; sync the other one to it."
-              : "Match this deck to the master's tempo and bar."
-          }
+              : "Match this deck to the master's tempo and bar.",
+          )}
           onClick={onBeatSync}
         >
           BEAT SYNC
@@ -117,7 +121,7 @@ export const DualHead = memo(function DualHead({
             is inert for the same reason. */}
         <div className={styles.keyShift} aria-label="Key shift">
           <button type="button" className={styles.shiftStep} aria-label="Shift the key down" disabled>‹</button>
-          <span className={styles.shiftKey}>{track ? track.key : ""}</span>
+          <span className={styles.shiftKey}>{track ? formatKey(track.key, keyDisplay) : ""}</span>
           <span className={styles.shiftAmount}>±0</span>
           <button type="button" className={styles.shiftStep} aria-label="Shift the key up" disabled>›</button>
         </div>
@@ -171,16 +175,17 @@ export const DualControls = memo(function DualControls({
   atUnity, onResetTempo, quantize, onQuantize,
 }: DualControlsProps) {
   const gridReason = "Grid editing needs the PQT2 tag, which is not yet understood";
+  const tip = useTooltip();
   return (
     <div className={styles.controls} role="group" aria-label="Deck controls" data-testid="player-controls">
       <div className={styles.group}>
-        <button type="button" className={styles.icon} aria-label="Shift the grid earlier" disabled title={gridReason}>
+        <button type="button" className={styles.icon} aria-label="Shift the grid earlier" disabled title={tip(gridReason)}>
           <span className={styles.gridGlyph} data-dir="back" aria-hidden />
         </button>
-        <button type="button" className={styles.mark} aria-label="Mark the downbeat here" disabled title={gridReason}>
+        <button type="button" className={styles.mark} aria-label="Mark the downbeat here" disabled title={tip(gridReason)}>
           <span className={styles.markGlyph} aria-hidden />
         </button>
-        <button type="button" className={styles.icon} aria-label="Shift the grid later" disabled title={gridReason}>
+        <button type="button" className={styles.icon} aria-label="Shift the grid later" disabled title={tip(gridReason)}>
           <span className={styles.gridGlyph} data-dir="forward" aria-hidden />
         </button>
       </div>
@@ -192,7 +197,7 @@ export const DualControls = memo(function DualControls({
         type="button"
         className={styles.memory}
         aria-label="Set memory cue"
-        title={readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)"}
+        title={tip(readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)")}
         disabled={!memory.canEdit}
         onClick={memory.store}
       >
@@ -236,10 +241,10 @@ export const DualControls = memo(function DualControls({
 
       {/* Loop In and Loop Out — german.lang's names. Not built. */}
       <div className={styles.loops} role="group" aria-label="Loop">
-        <button type="button" className={styles.icon} aria-label="Loop in" disabled title="Loops are not built yet.">
+        <button type="button" className={styles.icon} aria-label="Loop in" disabled title={tip("Loops are not built yet.")}>
           <LoopInIcon className={styles.loopGlyph} />
         </button>
-        <button type="button" className={styles.icon} aria-label="Loop out" disabled title="Loops are not built yet.">
+        <button type="button" className={styles.icon} aria-label="Loop out" disabled title={tip("Loops are not built yet.")}>
           <LoopOutIcon className={styles.loopGlyph} />
         </button>
       </div>

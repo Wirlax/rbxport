@@ -24,6 +24,8 @@ import { splitTime } from "@/lib/player";
 import { CueMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
 import styles from "./SimplePlayer.module.css";
+import { usePreferences, useTooltip } from "@/store/usePreferences";
+import { formatKey } from "@/lib/preferences";
 
 export interface SimplePlayerProps {
   track: RowDto | null;
@@ -67,6 +69,8 @@ export const SimplePlayer = memo(function SimplePlayer({
   const remaining = splitTime(Math.max(total - position, 0));
   const elapsed = splitTime(position);
 
+  const tip = useTooltip();
+  const { keyDisplay } = usePreferences().view;
   return (
     <section
       ref={shell}
@@ -102,7 +106,7 @@ export const SimplePlayer = memo(function SimplePlayer({
         type="button"
         className={styles.artwork}
         aria-label={track ? "Eject" : "Load the selected track"}
-        title={track ? "Eject" : "Load the selected track"}
+        title={tip(track ? "Eject" : "Load the selected track")}
         onClick={track ? onEject : onLoadSelected}
         disabled={track ? !onEject : !onLoadSelected}
       >
@@ -133,7 +137,7 @@ export const SimplePlayer = memo(function SimplePlayer({
                   <i className={styles.tenths}>.{elapsed.tenths}</i>
                 </span>
               </span>
-              <span className={styles.key} data-testid="simple-player-key">{track.key}</span>
+              <span className={styles.key} data-testid="simple-player-key">{formatKey(track.key, keyDisplay)}</span>
               <span className={styles.bpm} data-testid="simple-player-bpm">{formatBpm(track.bpmX100)}</span>
             </>
           ) : null}

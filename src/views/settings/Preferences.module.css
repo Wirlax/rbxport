@@ -1,0 +1,493 @@
+/* The Preferences window. Every colour and size is a token measured from the
+   captures docs/screenshots 9.46.53 to 9.49.51 PM; see design/tokens. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 55%);
+}
+
+/* rekordbox opens a window; this is that window drawn inside ours, title
+   bar included, clamped to the screen it has. */
+.window {
+  display: flex;
+  flex-direction: column;
+  width: var(--s-pref-w);
+  height: var(--s-pref-h);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--c-black);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-pref-label);
+}
+.window:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+
+.titlebar {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: var(--s-pref-title-h);
+  background: var(--c-titlebar);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-pref-window-title);
+  font-weight: 700;
+}
+.close {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  height: 100%;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--c-icon-off);
+  font: inherit;
+  font-weight: 400;
+  cursor: default;
+}
+.close:hover { color: var(--c-icon-on); }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+  flex: none;
+  width: var(--s-pref-sidebar-w);
+  box-sizing: border-box;
+  padding: var(--s-pref-search-top) var(--s-pref-sidebar-inset) 0;
+  background: var(--c-panel);
+}
+.search {
+  display: flex;
+  align-items: center;
+  height: var(--s-pref-search-h);
+  padding: 0 4px;
+  box-sizing: border-box;
+  background: var(--c-field);
+  color: var(--c-field-placeholder);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0 4px;
+  background: none;
+  color: var(--c-icon-on);
+  font: inherit;
+  font-size: var(--f-size-pref-side);
+}
+.search input:focus { outline: none; }
+.search svg { width: 13px; height: 13px; flex: none; }
+
+.panes {
+  margin: calc(var(--s-pref-items-top) - var(--s-pref-search-top) - var(--s-pref-search-h)) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pane {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--s-pref-item-h);
+  margin-bottom: calc(var(--s-pref-item-pitch) - var(--s-pref-item-h));
+  padding: 0 0 0 var(--s-pref-item-label-x);
+  box-sizing: border-box;
+  position: relative;
+  border: 0;
+  background: none;
+  color: var(--c-pref-text);
+  font: inherit;
+  font-size: var(--f-size-pref-side);
+  text-align: left;
+  cursor: default;
+}
+.pane[aria-selected="true"] { background: var(--c-pref-select); color: var(--c-icon-on); }
+.pane svg {
+  position: absolute;
+  left: var(--s-pref-item-icon-x);
+  top: 50%;
+  width: var(--s-pref-item-icon);
+  height: var(--s-pref-item-icon);
+  transform: translate(-50%, -50%);
+  color: var(--c-icon-off);
+}
+.pane[aria-selected="true"] svg { color: var(--c-icon-on); }
+/* The eye is wider than it is tall. */
+.pane svg[viewBox="0 0 18 13"] { width: 18px; height: 13px; }
+.pane svg[viewBox="0 0 18 14"] { width: 18px; height: 14px; }
+.pane svg[viewBox="0 0 16 12"] { width: 16px; height: 12px; }
+
+/* ---- Content ---- */
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-pref-tab-top) var(--s-pref-section-gap) var(--s-pref-bottom-pad);
+  box-sizing: border-box;
+}
+.tabs {
+  flex: none;
+  display: flex;
+  gap: var(--s-pref-tab-gap);
+  height: var(--s-pref-tab-h);
+  margin-bottom: var(--s-pref-section-gap);
+}
+.tab {
+  height: 100%;
+  padding: 0 var(--s-pref-tab-pad);
+  border: 0;
+  background: var(--c-panel);
+  color: var(--c-pref-text);
+  font: inherit;
+  font-size: var(--f-size-pref-tab);
+  cursor: default;
+}
+.tab[aria-selected="true"] { background: var(--c-pref-select); color: var(--c-icon-on); }
+
+/* The sections scroll together; the scrollbar's track sits beside them. */
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-raised) var(--c-black);
+}
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-pref-section-gap);
+}
+.section {
+  padding: var(--s-pref-section-pad-top) var(--s-pref-section-pad-x) var(--s-pref-section-pad-bottom);
+  background: var(--c-panel);
+}
+.title {
+  margin: 0 0 16px;
+  font-size: var(--f-size-pref-title);
+  font-weight: 700;
+  line-height: 22px;
+}
+.sub {
+  margin: 0 0 6px calc(var(--s-pref-sub-inset) - var(--s-pref-section-pad-x));
+  font-size: var(--f-size-pref-sub);
+  font-weight: 700;
+  line-height: 22px;
+}
+.sub[data-dim] { color: var(--c-device-disabled); }
+/* A thin line between two sub-sections, inset from the section's edges. */
+.separator {
+  height: 1px;
+  margin: 14px calc(var(--s-pref-sep-inset) - var(--s-pref-section-pad-x)) 16px;
+  background: var(--c-raised);
+}
+
+/* A row of controls: a toggle, a radio, a checkbox, a dropdown. Rows sit on
+   a 26pt pitch; nested ones a further 32pt in. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 5.5px;
+  min-height: var(--s-pref-row-pitch);
+  margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+  cursor: default;
+}
+.row[data-nested] { margin-left: calc(var(--s-pref-nest-inset) - var(--s-pref-section-pad-x)); }
+.row[data-dim] { color: var(--c-device-disabled); }
+.note {
+  margin: 4px 0 0 calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+  color: var(--c-text-dim);
+  font-size: var(--f-size-pref-small);
+  line-height: 18px;
+}
+.note[data-failed] { color: var(--c-error); }
+
+/* Toggle: a 32 by 16 pill, the knob on the right when on. */
+.toggle {
+  appearance: none;
+  margin: 0;
+  flex: none;
+  position: relative;
+  width: var(--s-pref-toggle-w);
+  height: var(--s-pref-toggle-h);
+  border-radius: calc(var(--s-pref-toggle-h) / 2);
+  background: var(--c-pref-control-off);
+  cursor: default;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: calc((var(--s-pref-toggle-h) - var(--s-pref-toggle-knob)) / 2);
+  width: var(--s-pref-toggle-knob);
+  height: var(--s-pref-toggle-knob);
+  border-radius: 50%;
+  background: var(--c-icon-on);
+  transform: translateY(-50%);
+}
+.toggle:checked { background: var(--c-pref-select); }
+.toggle:checked::after {
+  left: auto;
+  right: calc((var(--s-pref-toggle-h) - var(--s-pref-toggle-knob)) / 2);
+}
+.toggle:disabled { opacity: .4; }
+
+/* Radio: a grey disc off; a blue ring around a white dot on. */
+.radio {
+  appearance: none;
+  margin: 0;
+  flex: none;
+  position: relative;
+  width: var(--s-pref-radio);
+  height: var(--s-pref-radio);
+  border-radius: 50%;
+  background: var(--c-pref-control-off);
+  cursor: default;
+}
+.radio:checked { background: var(--c-pref-select); }
+.radio:checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--s-pref-radio-dot);
+  height: var(--s-pref-radio-dot);
+  border-radius: 50%;
+  background: var(--c-icon-on);
+}
+.row[data-dim] .radio { background: var(--c-device-disabled-ring); }
+.row[data-dim] .radio:checked::after { background: var(--c-device-disabled); }
+
+/* Checkbox: a dark square with a grey edge off; blue with a white tick on. */
+.checkbox {
+  appearance: none;
+  margin: 0;
+  flex: none;
+  position: relative;
+  width: var(--s-pref-checkbox);
+  height: var(--s-pref-checkbox);
+  box-sizing: border-box;
+  border: 1px solid var(--c-pref-control-off);
+  background: var(--c-panel);
+  cursor: default;
+}
+.checkbox:checked { border-color: var(--c-pref-select); background: var(--c-pref-select); }
+.checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--c-icon-on);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.checkbox:disabled { opacity: .4; }
+
+/* Dropdown: black, bold, a chevron at the right. */
+.select {
+  appearance: none;
+  width: var(--s-pref-select-w);
+  max-width: 100%;
+  height: var(--s-pref-select-h);
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  padding: 0 calc(var(--s-pref-chevron-w) + 8px) 0 var(--s-pref-select-pad);
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1px), var(--c-icon-on) calc(50% - 1px), var(--c-icon-on) calc(50% + 1px), transparent calc(50% + 1px)) no-repeat right 8px top 6px / 8px 8px,
+    linear-gradient(-45deg, transparent calc(50% - 1px), var(--c-icon-on) calc(50% - 1px), var(--c-icon-on) calc(50% + 1px), transparent calc(50% + 1px)) no-repeat right 2px top 6px / 8px 8px,
+    var(--c-black);
+  color: var(--c-icon-on);
+  font: inherit;
+  font-weight: 700;
+}
+.select:disabled { color: var(--c-device-disabled); opacity: 1; }
+.select[data-plain] { font-weight: 400; }
+.selectRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+}
+.selectRow[data-nested] { margin-left: calc(var(--s-pref-nest-inset) - var(--s-pref-section-pad-x)); }
+.selectLabel { width: 120px; flex: none; }
+
+/* Slider: a dark 4pt track, a white 5 by 20 thumb, Small and Large under
+   the ends. */
+.slider {
+  margin-left: calc(var(--s-pref-slider-inset) - var(--s-pref-section-pad-x));
+  width: var(--s-pref-slider-w);
+  max-width: 100%;
+}
+.slider input {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: var(--s-pref-slider-thumb-h);
+  margin: 6px 0;
+  background: none;
+  cursor: default;
+}
+.slider input::-webkit-slider-runnable-track {
+  height: var(--s-pref-slider-track-h);
+  background: var(--c-top);
+}
+.slider input::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--s-pref-slider-thumb-w);
+  height: var(--s-pref-slider-thumb-h);
+  margin-top: calc((var(--s-pref-slider-track-h) - var(--s-pref-slider-thumb-h)) / 2);
+  border: 0;
+  border-radius: 0;
+  background: var(--c-icon-on);
+}
+.slider input::-moz-range-track { height: var(--s-pref-slider-track-h); background: var(--c-top); }
+.slider input::-moz-range-thumb {
+  width: var(--s-pref-slider-thumb-w);
+  height: var(--s-pref-slider-thumb-h);
+  border: 0;
+  border-radius: 0;
+  background: var(--c-icon-on);
+}
+.slider[data-disabled] { opacity: .4; }
+.sliderEnds {
+  display: flex;
+  justify-content: space-between;
+  /* Small under the track's start, Large under its end; the Bold toggle
+     sits 30pt below them in the capture. */
+  margin: 0 -10px 12px -10px;
+  font-size: var(--f-size-pref-small);
+}
+
+/* Pushbutton: the Reset to defaults gradient, also used for the actions
+   inside a section at their own width. */
+.button {
+  height: var(--s-pref-button-h);
+  padding: 0 14px;
+  border: 1px solid var(--c-pref-button-border);
+  border-radius: 2px;
+  background: linear-gradient(var(--c-pref-button-top), var(--c-pref-button-bottom));
+  color: var(--c-icon-on);
+  font: inherit;
+  cursor: default;
+}
+.button:hover:not(:disabled) { border-color: var(--c-accent); }
+.button:disabled { color: var(--c-device-disabled); }
+.reset {
+  flex: none;
+  width: var(--s-pref-button-w);
+  margin-top: var(--s-pref-button-gap);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+}
+.actions .select { flex: 1; width: auto; min-width: 0; }
+
+/* Facts: the library's counts. */
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0 0 0 calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+}
+.facts dt { color: var(--c-device-label); }
+.facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* A bounded list: a library can lose thousands when a drive is unplugged. */
+.list {
+  margin: 8px 0 0 calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+  padding: 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: var(--f-size-pref-small);
+}
+.list li {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--c-raised);
+}
+.list li:last-child { border-bottom: 0; }
+.listTitle { color: var(--c-icon-on); }
+.listPath { color: var(--c-text-dim); word-break: break-all; }
+.listAction {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--c-raised);
+  border-radius: 2px;
+  background: var(--c-button);
+  color: var(--c-icon-on);
+  font: inherit;
+  font-size: var(--f-size-pref-small);
+  cursor: default;
+}
+.listAction:hover { border-color: var(--c-accent); }
+
+/* ---- Keyboard ---- */
+.keys {
+  margin: calc(var(--s-pref-key-list-top) - var(--s-pref-section-pad-top)) calc(var(--s-pref-key-list-inset) - var(--s-pref-section-pad-x)) 0;
+  padding: 4px 0;
+  background: var(--c-black);
+}
+.keyGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: var(--s-pref-key-row-h);
+  padding: 0 0 0 6px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--f-size-pref-label);
+  text-align: left;
+  cursor: default;
+}
+.keyGroup svg { width: 8px; height: 8px; color: var(--c-icon-off); }
+.keyGroup[aria-expanded="true"] svg { transform: rotate(90deg); }
+.keyRow {
+  display: flex;
+  align-items: center;
+  height: var(--s-pref-key-row-h);
+  padding: 0 30px 0 30px;
+}
+.keyName { flex: 1; min-width: 0; }
+.keyBadge {
+  display: grid;
+  place-items: center;
+  min-width: var(--s-pref-key-badge-w);
+  height: var(--s-pref-key-badge-h);
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: var(--c-pref-key-badge);
+  font-size: var(--f-size-pref-badge);
+}
+
+/* The device tabs' list pair, borrowed for DJ System › Category and Sort.
+   In this window the lists are black on the section's grey and the headings
+   are white, so the two tokens the pair reads are re-pointed here. */
+.pairHost {
+  margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x) - 14px);
+  --c-panel: var(--c-black);
+  --c-device-label: var(--c-icon-on);
+}

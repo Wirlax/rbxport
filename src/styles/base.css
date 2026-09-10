@@ -3,6 +3,11 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* The measured list size under a second name, so the track list can scale
+   `--f-size-ui` for Browse › FontSize in Preferences without a custom
+   property that refers to itself. */
+:root { --f-size-ui-base: var(--f-size-ui); }
+
 html, body, #root {
   height: 100%;
   margin: 0;
