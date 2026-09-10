@@ -382,7 +382,11 @@ jobs:
           # removes them once the installer is signed.
           AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
         with:
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          # `--verbose` is for the bundlers' own scripts: without it the DMG
+          # step's `bundle_dmg.sh` fails with "failed to run" and not a word
+          # of why, which is all the 0.5.1 log had when hdiutil gave up on
+          # the second Mac. With it, hdiutil's messages are in the log.
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --verbose
 
       - name: Collect the installers
         shell: bash
