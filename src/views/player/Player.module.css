@@ -905,29 +905,42 @@
   display: grid;
   grid-template-rows: 1fr auto;
   min-height: 0;
-  background: var(--c-pad-well);
+  /* The panel's own grey, measured: the list's boxes sit on it. */
+  background: var(--c-panel);
   border-left: 1px solid var(--c-panel);
 }
 
-.cueList { overflow: auto; min-height: 0; }
+/* Measured off the capture's MEMORY list: boxes on the panel, a point of
+   panel between them, five points of panel above the first. */
+.cueList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-cue-row-gap);
+  padding: var(--s-cue-list-inset) var(--s-cue-list-inset-x) 0;
+  overflow: auto;
+  min-height: 0;
+}
 
 /* A whole row is the target: a cue list is for jumping to a cue. */
 .cueRow {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 26px;
+  height: var(--s-cue-row-h);
   padding: 0 8px;
   font-size: var(--f-size-sm);
   border: 0;
-  border-bottom: 1px solid var(--c-panel);
-  background: none;
+  background: var(--c-cue-row);
   color: var(--c-text);
   cursor: default;
   text-align: left;
 }
 .cueRow:hover:not([data-empty]) { background: var(--c-button); }
+/* An empty box keeps its ✕ at the right, dimmed, where a cue's would be. */
+.cueRow[data-blank] { justify-content: flex-end; }
+.cueRow[data-blank] .cueDelete { color: var(--c-cue-delete-empty); }
 
 /* The hot-cue list is eight fixed slots; an empty one shows its letter and
    nothing else, so the list reads as the pads do. */
@@ -947,7 +960,7 @@
 
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
-.cueDelete { color: var(--c-text); flex: none; }
+.cueDelete { color: var(--c-cue-delete); flex: none; }
 /* The memory list's ✕ is a button of its own; the hot-cue list's is still a
    glyph. Same glyph, same place, and disabled it dims like the pad row's. */
 button.cueDelete {

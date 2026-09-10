@@ -404,6 +404,16 @@ const PHRASE_EDITS = [
   { id: "phrase-clear", label: "Clear the phrase", text: "CLEAR" },
 ] as const;
 
+/**
+ * How many rows the MEMORY list draws whatever it holds.
+ *
+ * Ten, counted off the capture (`docs/screenshots` 9.08.22 PM): four cues and
+ * six empty boxes below them, each with its dimmed ✕, filling the panel. A
+ * track with no memory cues shows the same ten empty boxes rather than a
+ * blank panel; a track with more scrolls.
+ */
+const MEMORY_ROWS = 10;
+
 /** The panel tabs beside the deck. */
 const PANELS = [
   { id: "memory", label: "MEMORY" },
@@ -1603,6 +1613,15 @@ export const Player = memo(function Player({
                 >
                   ✕
                 </button>
+              </div>
+            ))}
+            {/* The boxes below the cues, so the panel is the same grid whether
+                the track has ten memory cues or none. Nothing to press: the
+                ✕ is drawn dimmed, as the capture draws it, and is not a
+                control. */}
+            {Array.from({ length: Math.max(0, MEMORY_ROWS - cuesFor(cues, panel).length) }, (_, i) => (
+              <div key={`empty-${i}`} className={styles.cueRow} data-blank="" aria-hidden>
+                <span className={styles.cueDelete}>✕</span>
               </div>
             ))}
           </div>
