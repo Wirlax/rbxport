@@ -348,6 +348,17 @@ export interface Backend {
    * frontend never scans rows for this.
    */
   filterValues(spec: ViewSpec): Promise<FilterValues>;
+
+  /**
+   * What a selected device's six tabs show: the display settings a player
+   * reads from `DEVSETTING.DAT`, and the name, browse categories, sort
+   * options, sub-column and colour comments in `exportLibrary.db`. A stick
+   * that holds none of it still answers, with the defaults and the presence
+   * flags clear.
+   */
+  deviceSettings(path: string): Promise<DeviceSettings>;
+  /** Writes them back and resolves to what the stick now holds. */
+  saveDeviceSettings(path: string, settings: DeviceSettings): Promise<DeviceSettings>;
 }
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
@@ -634,4 +645,52 @@ export interface FilterValues {
   /** Keys present, in Camelot order. */
   keys: Counted<string>[];
   tags: TagCategory[];
+}
+
+/** One browse category or sort option on a stick: a row of `category` or `sort`. */
+export interface MenuSlot {
+  /** The row's own key, stable across exports. */
+  id: number;
+  /** Which menu item it is; `MENU_ITEM.*` in `src/lib/deviceSettings.ts`. */
+  menuItem: number;
+  /** As the player shows it: `ARTIST`, `DATE ADDED`. */
+  name: string;
+  /** Position among the visible rows, 1-based; 0 when hidden. */
+  seq: number;
+  visible: boolean;
+}
+
+export interface ColorName {
+  /** 1 to 8, in rekordbox's order Pink to Purple. */
+  id: number;
+  name: string;
+}
+
+export type WaveformColor = "blue" | "rgb" | "3band";
+export type WaveformPosition = "center" | "left";
+export type OverviewWaveform = "half" | "full";
+export type KeyDisplay = "classic" | "alphanumeric";
+
+/** Everything the device tabs read and write. A few kilobytes. */
+export interface DeviceSettings {
+  /** `export.pdb` is on the stick — "Device Library" in rekordbox's words. */
+  hasDeviceLibrary: boolean;
+  /** `exportLibrary.db` is on the stick — "OneLibrary". */
+  hasOneLibrary: boolean;
+  /** `DEVSETTING.DAT` was read; when false the four below are defaults. */
+  hasDevSetting: boolean;
+  waveformColor: WaveformColor;
+  waveformPosition: WaveformPosition;
+  overviewWaveform: OverviewWaveform;
+  keyDisplay: KeyDisplay;
+  /** The library rows were read; when false they are the reference rows and are not written. */
+  hasLibrarySettings: boolean;
+  deviceName: string;
+  /** `property.backGroundColorType`, carried but not understood. */
+  backgroundColorType: number;
+  categories: MenuSlot[];
+  sorts: MenuSlot[];
+  /** `menuItem` of the sort option shown beside the track name, or null for Not Specified. */
+  subColumn: number | null;
+  colors: ColorName[];
 }

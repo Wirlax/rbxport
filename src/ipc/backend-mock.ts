@@ -10,12 +10,14 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  AppErrorDto, Backend, Cue, DeckEvent, Device, Edits, FilterValues, LibrarySummary, RowDto,
-  SortColumn, Tick, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
+  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, FilterValues,
+  LibrarySummary, RowDto, SortColumn, Tick, TrackFilter, TreeNode, ViewHandle, ViewSpec,
+  WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
+import { referenceDeviceSettings } from "./mock-device-settings";
 
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
@@ -294,7 +296,41 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       removable: true,
       export: null,
     },
+    // A stick rekordbox wrote, as the device tabs' captures show one: the
+    // real TEST stick's sizes and contents, so the panel can be checked
+    // against them.
+    {
+      name: "TEST",
+      path: "/Volumes/TEST",
+      totalBytes: 1_535_800_000_000,
+      freeBytes: 216_800_000_000,
+      removable: true,
+      export: { tracks: 77, playlists: 3, ours: false, written: "" },
+    },
   ];
+
+  // What each stick's tabs hold. DJ STICK starts empty and gains a library
+  // when something is exported to it; TEST carries the rows read off the
+  // real stick.
+  const deviceSettings = new Map<string, DeviceSettings>([
+    ["/Volumes/TEST", referenceDeviceSettings("TEST", true)],
+  ]);
+  // Handed out by copy, as IPC would: a caller mutating its copy must not
+  // reach into the "stick". A few dozen small rows, nothing like a page.
+  const copySettings = (s: DeviceSettings): DeviceSettings => ({
+    ...s,
+    categories: s.categories.map((slot) => ({ ...slot })),
+    sorts: s.sorts.map((slot) => ({ ...slot })),
+    colors: s.colors.map((c) => ({ ...c })),
+  });
+  const settingsOf = (path: string): DeviceSettings => {
+    const known = deviceSettings.get(path);
+    if (known) return known;
+    const device = devices.find((d) => d.path === path);
+    const fresh = referenceDeviceSettings(device?.name ?? "", device?.export !== null);
+    deviceSettings.set(path, fresh);
+    return fresh;
+  };
 
   /** How many tracks a playlist holds — the same count `openView` shows. */
   const playlistSize = (id: string): number => {
@@ -695,6 +731,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           ours: true,
           written: "2026-09-08 00:30:00.000 +00:00",
         };
+        // The export writes a library, which is what the tabs need.
+        const settings = settingsOf(device.path);
+        deviceSettings.set(device.path, {
+          ...settings,
+          hasDeviceLibrary: true,
+          hasOneLibrary: true,
+          hasLibrarySettings: true,
+          deviceName: settings.deviceName || "REKORDBOX-LITE",
+        });
       }
       return wait({
         tracks,
@@ -893,6 +938,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),
     relocateTrack: () => wait(null),
+
+    // The device tabs. Held per stick so a change survives switching tabs
+    // and devices, the way a written file would.
+    deviceSettings: (path) => wait(copySettings(settingsOf(path))),
+    saveDeviceSettings: (path, settings) => {
+      const current = settingsOf(path);
+      // A stick without a library keeps its reference rows: nothing to
+      // write them into, as the real backend also refuses.
+      const next: DeviceSettings = current.hasLibrarySettings
+        ? { ...copySettings(settings), hasDevSetting: true }
+        : {
+            ...current,
+            hasDevSetting: true,
+            waveformColor: settings.waveformColor,
+            waveformPosition: settings.waveformPosition,
+            overviewWaveform: settings.overviewWaveform,
+            keyDisplay: settings.keyDisplay,
+          };
+      deviceSettings.set(path, next);
+      return wait(copySettings(next));
+    },
 
     onLibraryChanged: (listener) => {
       listeners.add(listener);

@@ -5,8 +5,8 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport,
-  FilterValues, Phrase, ImportReport,
+  AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics,
+  ExportReport, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
@@ -184,6 +184,9 @@ async function realBackend(): Promise<Backend> {
       await invoke<number>("relocate_track", { track: trackId, path: picked });
       return picked;
     },
+    deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
+    saveDeviceSettings: (path, settings) =>
+      invoke<DeviceSettings>("save_device_settings", { path, settings }),
     onLibraryChanged: (listener) => {
       // Tauri's listen resolves asynchronously; unsubscribing before it does
       // has to still work, so the flag is checked when it lands.
