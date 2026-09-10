@@ -46,6 +46,37 @@ describe("parseChangelog", () => {
     expect(parseChangelog("")).toEqual([]);
     expect(parseChangelog("\n\n")).toEqual([]);
   });
+
+  it("joins a bullet's indented continuation lines and flattens a nested bullet into the list", () => {
+    const markdown = "- A long item\n  that wraps twice\n  over.\n  - A nested one\n- Another";
+    expect(parseChangelog(markdown)).toEqual([
+      { kind: "list", items: ["A long item that wraps twice over.", "A nested one", "Another"] },
+    ]);
+  });
+
+  it("reads star bullets as bullets", () => {
+    expect(parseChangelog("* One\n* Two")).toEqual([{ kind: "list", items: ["One", "Two"] }]);
+  });
+
+  it("starts a heading or a release without a blank line before it", () => {
+    const markdown = "### Added\n- a\n### Fixed\n- b\n## [0.1.0]\nFirst.";
+    expect(parseChangelog(markdown)).toEqual([
+      { kind: "heading", text: "Added" },
+      { kind: "list", items: ["a"] },
+      { kind: "heading", text: "Fixed" },
+      { kind: "list", items: ["b"] },
+      { kind: "release", version: "0.1.0", date: null },
+      { kind: "paragraph", text: "First." },
+    ]);
+  });
+
+  it("ends a list where prose starts and a paragraph where a bullet starts", () => {
+    expect(parseChangelog("- a\nProse.\n- b")).toEqual([
+      { kind: "list", items: ["a"] },
+      { kind: "paragraph", text: "Prose." },
+      { kind: "list", items: ["b"] },
+    ]);
+  });
 });
 
 describe("spans", () => {
@@ -71,5 +102,15 @@ describe("formatBytes", () => {
     expect(formatBytes(300 * 1024)).toBe("300 KB");
     expect(formatBytes(16_342_693)).toBe("15.6 MB");
     expect(formatBytes(Number.NaN)).toBe("0 KB");
+  });
+
+  it("never shows a download as nothing, and turns to megabytes at exactly one", () => {
+    expect(formatBytes(0)).toBe("1 KB");
+    expect(formatBytes(1023)).toBe("1 KB");
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(1024 * 1024 - 1)).toBe("1024 KB");
+    expect(formatBytes(1024 * 1024)).toBe("1.0 MB");
+    expect(formatBytes(-1)).toBe("0 KB");
+    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe("0 KB");
   });
 });

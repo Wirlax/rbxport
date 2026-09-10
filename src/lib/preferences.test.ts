@@ -55,6 +55,14 @@ describe("sanitisePreferences", () => {
     expect(out.advanced.protectLibrary).toBe(true);
   });
 
+  it("checks for updates unless the store plainly says not to", () => {
+    // A store written before the switch existed has no such key.
+    expect(sanitisePreferences({ advanced: {} }).advanced.checkUpdates).toBe(true);
+    expect(sanitisePreferences({ advanced: { checkUpdates: "no" } }).advanced.checkUpdates).toBe(true);
+    expect(sanitisePreferences({ advanced: { checkUpdates: 0 } }).advanced.checkUpdates).toBe(true);
+    expect(sanitisePreferences({ advanced: { checkUpdates: false } }).advanced.checkUpdates).toBe(false);
+  });
+
   it("keeps stored rows when every one is a row", () => {
     const rows = [{ id: 1, menuItem: 1, name: "GENRE", seq: 1, visible: true }];
     expect(sanitisePreferences({ djSystem: { categories: rows } }).djSystem.categories).toEqual(rows);

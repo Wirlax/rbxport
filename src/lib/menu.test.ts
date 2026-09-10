@@ -19,6 +19,15 @@ describe("menu", () => {
     expect(resolveMenu("import", false)).toEqual({ action: "import" });
   });
 
+  it("checks for updates whatever state the library is in", () => {
+    // An update touches nothing in the library, so a read-only one is no
+    // reason to refuse — whichever of the two reasons made it read-only.
+    expect(resolveMenu("updates", true)).toEqual({ action: "updates" });
+    expect(resolveMenu("updates", true, true)).toEqual({ action: "updates" });
+    expect(resolveMenu("updates", false)).toEqual({ action: "updates" });
+    expect(menuCommand("updates")?.writes).toBe(false);
+  });
+
   it("says why rather than doing nothing", () => {
     const outcome = resolveMenu("missing", true);
     expect(outcome).not.toBeNull();
