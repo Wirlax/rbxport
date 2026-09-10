@@ -358,6 +358,15 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # artifact-signing-cli logs in with `az`, and on Windows `az` keeps
+          # its token cache DPAPI-encrypted — a key that exists only for a
+          # console logon with a password behind it. The runner is started
+          # by a scheduled task or over ssh, neither of which has one, so
+          # the login died on "Decryption failed: Key not valid for use in
+          # specified state" (a release on 2026-09-10, after the host had
+          # rebooted unattended). Plain files instead; the step below
+          # removes them once the installer is signed.
+          AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
@@ -483,6 +492,22 @@ jobs:
           fi
           security delete-keychain "$KEYCHAIN" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Tear down the Azure login
+        # Always, and last, for the same reason as the keychain above: with
+        # the cache unencrypted (see the build step) `az login` leaves the
+        # service principal's secret and a token in plain files under the
+        # desktop owner's ~/.azure. They are for this job only.
+        if: always() && runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+        shell: pwsh
+        env:
+          AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
+        run: |
+          $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+          if (Test-Path $az) { & $az account clear --only-show-errors 2>$null }
+          foreach ($f in "msal_token_cache.json", "service_principal_entries.json", "msal_http_cache.json") {
+            Remove-Item "$env:USERPROFILE\.azure\$f" -Force -ErrorAction SilentlyContinue
+          }
 
   publish:
     # Only a tag publishes. A manual run builds and stops, so this file can be
