@@ -837,13 +837,17 @@
 .page { display: flex; align-items: center; gap: 4px; flex: none; }
 
 .memoryLabel {
+  border: 0;
   background: var(--c-button);
   color: var(--c-text);
+  font: inherit;
   font-size: var(--f-size-xs);
   font-weight: 700;
   border-radius: 2px;
   padding: 5px 9px;
+  cursor: default;
 }
+.memoryLabel:disabled { color: var(--c-icon-off); }
 
 .step {
   border: 0;
@@ -942,6 +946,17 @@
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .cueDelete { color: var(--c-text); flex: none; }
+/* The memory list's ✕ is a button of its own; the hot-cue list's is still a
+   glyph. Same glyph, same place, and disabled it dims like the pad row's. */
+button.cueDelete {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: default;
+}
+button.cueDelete:disabled { color: var(--c-icon-off); }
+.cueRow[role="button"] { cursor: default; text-align: left; }
 
 /* INFO is a stack of lines with hairlines between the blocks, not a
    label/value grid. */

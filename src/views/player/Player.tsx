@@ -56,6 +56,8 @@ import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
+import { useTrackCues } from "./useTrackCues";
+import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
 import styles from "./Player.module.css";
 
 export interface PlayerProps {
@@ -147,6 +149,11 @@ export interface PlayerProps {
    * selected, or several things — the empty deck is inert.
    */
   onLoadSelected?: (() => void) | undefined;
+  /**
+   * rekordbox holds the database. The MEMORY cluster and the list's ✕ are
+   * drawn and disabled, with the same reason the menus give.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -212,7 +219,7 @@ export const CueMarkers = memo(function CueMarkers({
           );
         return (
           <span
-            key={cue.memory ? `m-${cue.positionMs}` : `h-${cue.letter}-${cue.positionMs}`}
+            key={cue.id || (cue.memory ? `m-${cue.positionMs}` : `h-${cue.letter}-${cue.positionMs}`)}
             className={cue.memory ? styles.memoryCue : styles.hotCue}
             data-band={band}
             data-cue={cue.memory ? "" : cue.letter}
@@ -391,7 +398,7 @@ export const Player = memo(function Player({
   track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
-  publishSync, peerSync, isMaster = false, onMaster,
+  publishSync, peerSync, isMaster = false, onMaster, readOnly = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -404,7 +411,6 @@ export const Player = memo(function Player({
   const detailHead = useRef<HTMLSpanElement>(null);
   const scrubFill = useRef<HTMLDivElement>(null);
   const barsLabel = useRef<HTMLSpanElement>(null);
-  const [cues, setCues] = useState<Cue[]>([]);
   const [grid, setGrid] = useState<BeatGridData>(NO_BEATS);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [ownBars, setOwnBars] = useState<number>(DETAIL_BARS);
@@ -428,6 +434,12 @@ export const Player = memo(function Player({
    * there the way the deck does.
    */
   const [cuePoint, setCuePoint] = useState(0);
+  // Kept current by the backend: an edit from any deck refetches. The cue
+  // point is settled from the first fetch only — see `useTrackCues`.
+  const cues = useTrackCues(track, (loaded) => {
+    const first = cuesFor(loaded, "memory")[0];
+    setCuePoint(first ? first.positionMs / 1000 : 0);
+  });
   /**
    * Quantize — the Q button at the end of the pad row. On by default, as a CDJ
    * ships: a cue set by hand lands tens of milliseconds off the beat, and every
@@ -469,23 +481,15 @@ export const Player = memo(function Player({
 
   useEffect(() => {
     if (!track) {
-      setCues([]);
       setPhrases([]);
       return;
     }
     let live = true;
     void (async () => {
       const backend = await getBackend();
-      const [foundCues, foundPhrases] = await Promise.all([
-        backend.trackCues(track.id),
-        backend.trackPhrases(track.id),
-      ]);
-      // The track may have changed while these were in flight.
-      if (!live) return;
-      setCues(foundCues);
-      const first = cuesFor(foundCues, "memory")[0];
-      setCuePoint(first ? first.positionMs / 1000 : 0);
-      setPhrases(foundPhrases);
+      const found = await backend.trackPhrases(track.id);
+      // The track may have changed while this was in flight.
+      if (live) setPhrases(found);
     })();
     return () => {
       live = false;
@@ -669,6 +673,13 @@ export const Player = memo(function Player({
     if (playback.playing) playback.toggle();
   }, [playback, cuePoint]);
 
+  const { seek } = playback;
+  const positionSeconds = useCallback(() => positionRef.current, [positionRef]);
+  const memory = useMemoryCues({
+    trackId: playback.idle ? null : track?.id ?? null,
+    cues, positionSeconds, seek, cuePoint, setCuePoint, readOnly, onError,
+  });
+
   /*
    * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
    *
@@ -722,6 +733,18 @@ export const Player = memo(function Player({
           event.preventDefault();
           setPanel("info");
           break;
+        case "memoryCue":
+          if (!event.repeat) memory.store();
+          break;
+        case "previousMemoryCue":
+          memory.callPrevious();
+          break;
+        case "nextMemoryCue":
+          memory.callNext();
+          break;
+        case "deleteMemoryCue":
+          if (!event.repeat) memory.deleteAtHead();
+          break;
         default:
           break;
       }
@@ -752,7 +775,7 @@ export const Player = memo(function Player({
       globalThis.removeEventListener("keyup", onKeyUp);
       globalThis.removeEventListener("blur", onBlur);
     };
-  }, [armed, jump, platform, playback, holdCue, dropCue]);
+  }, [armed, jump, platform, playback, holdCue, dropCue, memory]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding
@@ -1307,11 +1330,53 @@ export const Player = memo(function Player({
               })}
             </div>
 
+            {/* MEMORY stores the cue point, ◀ ▶ call the memory cue either
+                side of the playhead, ✕ deletes the one it is on — `Set Memory
+                Cue`, `Call Previous/Next Memory Cue`, `Delete Memory Cue` in
+                german.lang, on M, B, N and X in the Export key map. Calling
+                needs no write and works read-only; the rest is disabled with
+                the reason the menus give. */}
             <div className={styles.memory} aria-label="Memory cues">
-              <span className={styles.memoryLabel}>MEMORY</span>
-              <button type="button" className={styles.step} aria-label="Previous memory cue" disabled>◀</button>
-              <button type="button" className={styles.step} aria-label="Next memory cue" disabled>▶</button>
-              <button type="button" className={styles.step} aria-label="Delete memory cue" disabled>✕</button>
+              <button
+                type="button"
+                className={styles.memoryLabel}
+                aria-label="Set memory cue"
+                title={readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)"}
+                disabled={!memory.canEdit}
+                onClick={memory.store}
+              >
+                MEMORY
+              </button>
+              <button
+                type="button"
+                className={styles.step}
+                aria-label="Previous memory cue"
+                title="Call Previous Memory Cue (B)"
+                disabled={playback.idle}
+                onClick={memory.callPrevious}
+              >
+                ◀
+              </button>
+              <button
+                type="button"
+                className={styles.step}
+                aria-label="Next memory cue"
+                title="Call Next Memory Cue (N)"
+                disabled={playback.idle}
+                onClick={memory.callNext}
+              >
+                ▶
+              </button>
+              <button
+                type="button"
+                className={styles.step}
+                aria-label="Delete memory cue"
+                title={readOnly ? READ_ONLY_REASON : "Delete Memory Cue (X)"}
+                disabled={!memory.canEdit}
+                onClick={memory.deleteAtHead}
+              >
+                ✕
+              </button>
             </div>
 
             <div className={styles.auto} role="group" aria-label="Cue mode">
@@ -1448,16 +1513,41 @@ export const Player = memo(function Player({
         ) : (
           <div className={styles.cueList}>
             {cuesFor(cues, panel).map((cue) => (
-              <button
-                key={`m-${cue.positionMs}`}
-                type="button"
+              /* A row rather than a button, because the ✕ inside it is one:
+                 the row seeks, the ✕ deletes, and a button cannot hold a
+                 button. Keyed by the cue's id so a deleted row leaves rather
+                 than the one after it re-rendering as it. */
+              <div
+                key={cue.id || `m-${cue.positionMs}`}
+                role="button"
+                tabIndex={0}
                 className={styles.cueRow}
+                data-loop={cue.outMs > 0 ? "" : undefined}
                 onClick={() => playback.seek(cue.positionMs / 1000)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    playback.seek(cue.positionMs / 1000);
+                  }
+                }}
               >
                 <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
-                <span className={styles.cueName}>CUE(Auto)</span>
-                <span className={styles.cueDelete} aria-hidden>✕</span>
-              </button>
+                <span className={styles.cueName}>{cue.outMs > 0 ? "LOOP(Auto)" : "CUE(Auto)"}</span>
+                <button
+                  type="button"
+                  className={styles.cueDelete}
+                  aria-label={`Delete memory cue ${memoryTime(cue.positionMs)}`}
+                  title={readOnly ? READ_ONLY_REASON : "Delete Memory Cue"}
+                  disabled={!memory.canEdit || cue.id === ""}
+                  onClick={(event) => {
+                    // The row underneath seeks; a delete is not also a jump.
+                    event.stopPropagation();
+                    memory.remove(cue);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         )}

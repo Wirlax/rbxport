@@ -813,6 +813,7 @@ export function App() {
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
             onMaster={() => setSyncMaster("a")}
+            readOnly={summary?.readOnly ?? false}
           />
           {deckCount(layout) > 1 ? (
             <Player
@@ -831,6 +832,7 @@ export function App() {
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}
               onMaster={() => setSyncMaster("b")}
+              readOnly={summary?.readOnly ?? false}
             />
           ) : null}
           <div className={styles.playerGutter} aria-hidden />
