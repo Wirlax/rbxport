@@ -583,11 +583,15 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          curl -fsSL "$CDN_BASE_URL/latest.json" -o published.json
+          # A few retries: a freshly written object is readable at once, but a
+          # public domain enabled minutes ago answered 401 for its first ten
+          # seconds, and that is a wait, not a failure.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$CDN_BASE_URL/latest.json" -o published.json
           cat published.json
           test "$(node -p 'require("./published.json").version')" = "$version"
           for url in $(node -p '
             Object.values(require("./published.json").platforms).map((p) => p.url).join("\n")
           '); do
-            curl -fsI "$url" > /dev/null
+            curl -fsI --retry 5 --retry-all-errors --retry-delay 5 "$url" > /dev/null
           done
