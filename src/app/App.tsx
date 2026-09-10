@@ -15,7 +15,7 @@ import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
 import styles from "./App.module.css";
-import { detectPlatform, dispatch } from "@/lib/shortcuts";
+import { detectPlatform, dispatch, menuAccelerator } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
@@ -422,38 +422,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const action = dispatch(event, platform, event.target as HTMLElement | null);
-      if (action === null) return;
-      // Only the actions handled here are swallowed; everything else falls
-      // through to the browser and the OS.
-      switch (action) {
-        case "focusSearch":
-          event.preventDefault();
-          searchRef.current?.focus();
-          searchRef.current?.select();
-          break;
-        case "clearSearch":
-          // Escape in an empty box should blur rather than do nothing, so the
-          // next arrow key reaches the track list.
-          if (query === "") {
-            searchRef.current?.blur();
-          } else {
-            setQuery("");
-          }
-          break;
-        default:
-          // Movement and selection live in the table; it listens for itself.
-          return;
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [platform, query]);
-
-  useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
     void (async () => {
@@ -763,45 +731,92 @@ export function App() {
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
-  // Native menu clicks. The shell sends the item's id and nothing else; what
-  // it means, and whether it is allowed right now, is decided in one place.
+  // A menu item, by id. The shell sends the id and nothing else; what it
+  // means, and whether it is allowed right now, is decided in one place —
+  // and the keyboard reaches it the same way on the platforms where the
+  // webview keeps the accelerators from the native menu.
+  const runMenu = useCallback((id: string) => {
+    const outcome = resolveMenu(id, readOnly, advancedPrefs.protectLibrary);
+    if (!outcome) return;
+    if ("refused" in outcome) {
+      refuse(outcome.refused);
+      return;
+    }
+    if (outcome.action === "import") {
+      void importFromMenu();
+      return;
+    }
+    if (outcome.action === "info") {
+      setInfoOpen((open) => !open);
+      return;
+    }
+    if (outcome.action === "sub") {
+      setSubOpen((open) => !open);
+      return;
+    }
+    if (outcome.action === "updates") {
+      checkForUpdates(true);
+      return;
+    }
+    if (outcome.action.startsWith("layout-")) {
+      setLayout(asLayout(outcome.action.slice("layout-".length)));
+      return;
+    }
+    // The missing-file manager is a pane of Preferences.
+    openPreferences(outcome.action === "missing" ? "advanced" : "view");
+  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences, checkForUpdates]);
+
+  // Native menu clicks.
   useEffect(() => {
     let stop: (() => void) | undefined;
     void (async () => {
       const backend = await getBackend();
-      stop = backend.onMenu((id) => {
-        const outcome = resolveMenu(id, readOnly, advancedPrefs.protectLibrary);
-        if (!outcome) return;
-        if ("refused" in outcome) {
-          refuse(outcome.refused);
-          return;
-        }
-        if (outcome.action === "import") {
-          void importFromMenu();
-          return;
-        }
-        if (outcome.action === "info") {
-          setInfoOpen((open) => !open);
-          return;
-        }
-        if (outcome.action === "sub") {
-          setSubOpen((open) => !open);
-          return;
-        }
-        if (outcome.action === "updates") {
-          checkForUpdates(true);
-          return;
-        }
-        if (outcome.action.startsWith("layout-")) {
-          setLayout(asLayout(outcome.action.slice("layout-".length)));
-          return;
-        }
-        // The missing-file manager is a pane of Preferences.
-        openPreferences(outcome.action === "missing" ? "advanced" : "view");
-      });
+      stop = backend.onMenu(runMenu);
     })();
     return () => stop?.();
-  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences, checkForUpdates]);
+  }, [runMenu]);
+
+  // The keyboard: the shell's own shortcuts, and the menu accelerators the
+  // webview keeps from the native menu on Windows.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // The native menu's accelerators, on the platforms where a keystroke
+      // in the webview never reaches them (see `menuAccelerator`).
+      const item = menuAccelerator(event, platform);
+      if (item !== null) {
+        event.preventDefault();
+        runMenu(item);
+        return;
+      }
+      const action = dispatch(event, platform, event.target as HTMLElement | null);
+      if (action === null) return;
+      // Only the actions handled here are swallowed; everything else falls
+      // through to the browser and the OS.
+      switch (action) {
+        case "focusSearch":
+          event.preventDefault();
+          searchRef.current?.focus();
+          searchRef.current?.select();
+          break;
+        case "clearSearch":
+          // Escape in an empty box should blur rather than do nothing, so the
+          // next arrow key reaches the track list.
+          if (query === "") {
+            searchRef.current?.blur();
+          } else {
+            setQuery("");
+          }
+          break;
+        default:
+          // Movement and selection live in the table; it listens for itself.
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [platform, query, runMenu]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {
@@ -927,13 +942,16 @@ export function App() {
   }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
-  // soon as the library is up, so a stale row cannot outlive its replacement.
+  // soon as the library is up, so a stale row cannot outlive its replacement —
+  // and dropped when the library has failed, since a window that says the
+  // library could not be opened must not go on showing last week's tracks
+  // under that message (seen on a machine with no rekordbox at all).
   const seed = useMemo(
     () =>
-      summary === null && restored.rows.length > 0
+      summary === null && loadError === null && restored.rows.length > 0
         ? { count: restored.count, rows: restored.rows }
         : undefined,
-    [summary, restored.count, restored.rows],
+    [summary, loadError, restored.count, restored.rows],
   );
 
   const selectionText =
