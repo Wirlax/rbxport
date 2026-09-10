@@ -26,7 +26,7 @@ import { ColumnMenu } from "./ColumnMenu";
 const ROW_H = 25; // --s-row-height
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
-const COL_HEADER_H = 23;
+const COL_HEADER_H = 24;
 /// --s-preview-band-h: the strip the row's waveform and its cue badges share.
 /// The canvas needs the number for its backing store; the cell's CSS places it.
 const PREVIEW_BAND_H = 15;

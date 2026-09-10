@@ -3,7 +3,7 @@
   display: grid;
   /* The column header lives inside the scroller now, so it is not a row here.
      The middle row is the Track Filter bar, nothing when it is closed. */
-  grid-template-rows: var(--s-browser-head-h) auto 1fr;
+  grid-template-rows: calc(var(--s-browser-head-h) + var(--s-browser-head-gap)) auto 1fr;
   min-width: 0;
   /* Without this a grid item floors at its content height, so .scroll would be
      as tall as the whole list and the virtualizer would render every row. */
@@ -11,11 +11,16 @@
   background: var(--c-black);
 }
 
+/* The title row: 26pt of panel with a measured point of black under it
+   before the column headings, drawn as a border so the row and its line are
+   one grid track. The search field sits at the right, 20pt short of the
+   pane's edge. */
 .browserHead {
   display: flex;
   align-items: center;
   background: var(--c-panel);
-  padding: 0 12px;
+  border-bottom: var(--s-browser-head-gap) solid var(--c-black);
+  padding: 0 var(--s-search-inset-right) 0 12px;
   gap: 12px;
 }
 
@@ -47,40 +52,56 @@
 }
 .filterToggle + .search { margin-left: 0; }
 
+/* The field as the capture draws it: black, no border of its own, 24pt tall
+   in the 26pt row, the magnifier 9pt in and the text 37pt in — the gap is
+   where rekordbox puts its search-mode triangle, which this app does not
+   have. The width is the full-width capture's; rekordbox narrows it when the
+   Information panel takes room, and so does `flex-shrink` here. */
 .search {
   margin-left: auto;
   position: relative;
-  width: 210px;
-  height: 19px;
-  line-height: 19px;
-  padding-left: 30px;
+  display: flex;
+  align-items: center;
+  flex: 0 1 var(--s-search-w);
+  min-width: 0;
+  height: var(--s-search-h);
+  padding-left: var(--s-search-text-left);
   background: var(--c-field);
-  border: 1px solid var(--c-raised);
-  border-radius: 2px;
   color: var(--c-field-placeholder);
-  font-size: var(--f-size-sm);
+  font-size: var(--f-size-search);
   white-space: nowrap;
   overflow: hidden;
 }
 
+/* The magnifier: a ring with a handle at the lower right, on a 13pt box. */
 .searchIcon {
   position: absolute;
-  left: 8px;
-  top: 4px;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid var(--c-field-placeholder);
+  left: var(--s-search-glyph-left);
+  top: var(--s-search-glyph-top);
+  width: var(--s-search-glyph-size);
+  height: var(--s-search-glyph-size);
+  color: var(--c-search-glyph);
+}
+.searchIcon::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 70%;
+  height: 70%;
+  border: 1.5px solid currentColor;
   border-radius: 50%;
 }
 .searchIcon::after {
   content: "";
   position: absolute;
-  left: 8px;
-  top: 8px;
-  width: 5px;
-  height: 1.5px;
-  background: var(--c-field-placeholder);
+  left: 62%;
+  top: 74%;
+  width: 42%;
+  height: 2px;
+  background: currentColor;
   transform: rotate(45deg);
+  transform-origin: 0 50%;
 }
 
 .colHead {
@@ -286,13 +307,16 @@
 .searchInput {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   background: none;
   outline: none;
   font: inherit;
   color: var(--c-text);
 }
-.searchInput::placeholder { color: var(--c-text-dim); }
+/* The measured grey, the same as the magnifier's ring in the capture. */
+.searchInput::placeholder { color: var(--c-field-placeholder); }
 /* WebKit draws its own clear button and magnifier inside a search input. */
 .searchInput::-webkit-search-decoration,
 .searchInput::-webkit-search-cancel-button { appearance: none; }
