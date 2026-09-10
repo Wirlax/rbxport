@@ -411,3 +411,18 @@ fn the_cue_palette_only_answers_for_measured_indices() {
     assert_eq!(rbl_anlz::cue_colour(41), None);
     assert_eq!(rbl_anlz::cue_colour(0), None);
 }
+
+/// The drawn palette answers for exactly the indices the stored one does:
+/// both come from the same measured export, and an index one knows and the
+/// other does not would mean a badge painted from a guess.
+#[test]
+fn the_drawn_palette_covers_the_same_indices_as_the_stored_one() {
+    let stored: Vec<u8> = rbl_anlz::MEASURED_CUE_COLOURS.iter().map(|&(i, _)| i).collect();
+    let drawn: Vec<u8> = rbl_anlz::DRAWN_CUE_COLOURS.iter().map(|&(i, _)| i).collect();
+    assert_eq!(stored, drawn);
+    // The one pair measured twice over — once here, once as the badge in
+    // `Player.module.css` — and the default index nearly every cue carries.
+    assert_eq!(rbl_anlz::cue_colour_drawn(21), Some([0x77, 0xE8, 0x66]));
+    assert_eq!(rbl_anlz::cue_colour_drawn(41), None);
+    assert_eq!(rbl_anlz::cue_colour_drawn(0), None);
+}

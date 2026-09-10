@@ -593,10 +593,12 @@
   width: 1px;
   background: var(--c-cue-memory);
 }
-.hotCue[data-band="detail"]::before { background: var(--c-cue-hot); }
+.hotCue[data-band="detail"]::before { background: var(--cue-colour, var(--c-cue-hot)); }
 
 /* The overview's badge: 11pt square, the letter inside, its left edge on the
-   cue so the marker overhangs the position rather than nudging it. */
+   cue so the marker overhangs the position rather than nudging it. Its colour
+   is the cue's own where one was measured for its ColorTableIndex — set on
+   the marker as --cue-colour — and the default green otherwise. */
 .hotCueBadge {
   position: absolute;
   top: 0;
@@ -605,7 +607,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--c-cue-hot);
+  background: var(--cue-colour, var(--c-cue-hot));
   color: var(--c-cue-hot-text);
   font-size: var(--f-size-xs);
   font-weight: 700;
@@ -830,7 +832,7 @@
   font-weight: 700;
   color: var(--c-pad-label);
 }
-.pad[data-set] .padInner { background: var(--c-pad-set); color: var(--c-black); }
+.pad[data-set] .padInner { background: var(--cue-colour, var(--c-pad-set)); color: var(--c-black); }
 
 .memory,
 .auto,
@@ -941,7 +943,7 @@
   color: var(--c-pad-label);
   flex: none;
 }
-.cueChip[data-set] { background: var(--c-pad-set); color: var(--c-black); }
+.cueChip[data-set] { background: var(--cue-colour, var(--c-pad-set)); color: var(--c-black); }
 
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }

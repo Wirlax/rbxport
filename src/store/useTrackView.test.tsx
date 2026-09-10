@@ -58,7 +58,7 @@ function row(i: number): RowDto {
     analysed: 0,
     dateAdded: "",
     releaseDate: "",
-    cues: "",
+    hotCues: [],
     hasArtwork: false,
     artworkHue: 0,
   };

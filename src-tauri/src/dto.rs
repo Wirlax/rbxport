@@ -24,8 +24,13 @@ pub struct RowDto {
     pub analysed: u8,
     pub date_added: String,
     pub release_date: String,
-    /// Hot-cue letters present on the track. Populated once `rbl-anlz` lands.
-    pub cues: String,
+    /// The track's hot cues, for the badges on the row's preview waveform.
+    ///
+    /// A tuple per cue rather than an object: `["A",46,"#77E866"]` is 18
+    /// bytes against 45 with field names, and rekordbox 7 allows sixteen a
+    /// track, so a page of 64 rows stays inside the 64 KB response cap even
+    /// when every row is full.
+    pub hot_cues: Vec<RowCueDto>,
     /// Deterministic tint, drawn when a track has no artwork — a little under
     /// half the reference library.
     pub artwork_hue: u16,
@@ -143,6 +148,23 @@ pub struct CueDto {
     /// `A` to `P` for a hot cue, empty for a memory cue.
     pub letter: String,
     pub memory: bool,
+    /// What rekordbox paints for the cue's `ColorTableIndex`, as `#RRGGBB`,
+    /// or `None` for an index nobody has measured — the interface then draws
+    /// its one measured green rather than a guess. Always `None` on a memory
+    /// cue, which has no colour of its own.
+    pub colour: Option<String>,
+}
+
+/// A hot cue on a track-list row: letter, position in ms, drawn colour.
+///
+/// Serialised as a JSON array, not an object — see [`RowDto::hot_cues`].
+#[derive(Debug, Clone, Serialize)]
+pub struct RowCueDto(pub char, pub u32, pub Option<String>);
+
+/// `#RRGGBB` for a cue's `ColorTableIndex`, where it has been measured.
+pub fn cue_colour_css(index: u8) -> Option<String> {
+    rbl_anlz::cue_colour_drawn(index)
+        .map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
 }
 
 /// What an import batch did.

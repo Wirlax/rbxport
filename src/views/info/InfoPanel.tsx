@@ -42,7 +42,7 @@ export function fieldsOf(track: RowDto): Field[] {
     { label: "Rating", value: track.rating > 0 ? "★".repeat(track.rating) : "" },
     { label: "Date Added", value: formatShortDate(track.dateAdded) },
     { label: "Release Date", value: formatShortDate(track.releaseDate) },
-    { label: "Hot Cue", value: track.cues },
+    { label: "Hot Cue", value: track.hotCues.map(([letter]) => letter).join("") },
     { label: "Comments", value: track.comment },
   ];
 }

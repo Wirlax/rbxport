@@ -229,6 +229,42 @@ pub fn cue_colour(index: u8) -> Option<[u8; 3]> {
     MEASURED_CUE_COLOURS.iter().find(|&&(i, _)| i == index).map(|&(_, rgb)| rgb)
 }
 
+/// What rekordbox *paints* for a `ColorTableIndex` on screen, which is not
+/// what it stores.
+///
+/// `[OBS]` rekordbox 7.2.11, `design/reference/macos/playlist-player@2x.png`
+/// and `player-1p-hotcue@1x.png`. The stored values above are the saturated
+/// CDJ palette; the desktop draws each as a lighter, duller version, and
+/// there is no formula between the two — `#00FF00` becomes `#77E866` and
+/// `#0000FF` becomes `#3A59F6`, which is neither a blend with one colour nor
+/// a scale of one channel. So it is a second table, measured badge by badge.
+///
+/// Each entry is the modal pixel of a solid fill, and each was checked in
+/// more than one place: the four cues of the loaded track read the same in
+/// the overview badge, the HOT CUE panel chip and the pad row, and every
+/// index read the same across three rows of the track list's preview column,
+/// where the 2x capture draws the badges 14 px square. The nine here are the
+/// nine indices `MEASURED_CUE_COLOURS` has; the eight it lacks are unread in
+/// both tables, and `cue_colour_drawn` returns `None` for them so a caller
+/// falls back to one colour rather than painting a neighbour's.
+pub const DRAWN_CUE_COLOURS: &[(u8, [u8; 3])] = &[
+    (1, [0x3A, 0x59, 0xF6]),
+    (6, [0x6A, 0xAE, 0xEC]),
+    (18, [0x51, 0xAE, 0x7B]),
+    (21, [0x77, 0xE8, 0x66]),
+    (25, [0xA8, 0xD5, 0x4B]),
+    (33, [0xD9, 0xAC, 0x3A]),
+    (36, [0xF0, 0x92, 0x35]),
+    (46, [0xE1, 0x3A, 0x8A]),
+    (60, [0xA2, 0x74, 0xF7]),
+];
+
+/// The RGB rekordbox paints for a `ColorTableIndex`, or `None` where it has
+/// not been measured.
+pub fn cue_colour_drawn(index: u8) -> Option<[u8; 3]> {
+    DRAWN_CUE_COLOURS.iter().find(|&&(i, _)| i == index).map(|&(_, rgb)| rgb)
+}
+
 fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
     let mut entry = CueEntry {
         hot_cue: be32(e, 12),

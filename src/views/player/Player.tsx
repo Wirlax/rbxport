@@ -157,6 +157,20 @@ export interface PlayerProps {
 }
 
 /**
+ * A cue's colour, as the CSS variable the marker, pad and chip styles read.
+ *
+ * Only set when the cue has one; the stylesheet's `var(--cue-colour,
+ * var(--c-cue-hot))` falls back to the token green otherwise, so the default
+ * lives in one place.
+ */
+export function cueStyle(left: string | undefined, colour: string | null | undefined): React.CSSProperties {
+  const style: Record<string, string> = {};
+  if (left !== undefined) style.left = left;
+  if (colour) style["--cue-colour"] = colour;
+  return style;
+}
+
+/**
  * Cue points on a waveform.
  *
  * A hot cue is a lettered badge, not a line: measured off `docs/screenshots`,
@@ -169,11 +183,11 @@ export interface PlayerProps {
  * `djmdCue` says otherwise — the measured track carries a `Kind` 0 cue at the
  * same `InMsec` as each of its four hot cues, so the red belongs to those.
  *
- * One green for every slot, because that is what the data says rather than a
- * fallback: all four cues of the measured track carry `ColorTableIndex` 21,
- * and so do 735,427 of the library's 850,000 hot cues. The rest of the palette
- * stays unmapped — `cue_colours` found it in neither the database, the skins
- * nor the analysis files — so an index this has not seen still draws green.
+ * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`,
+ * which arrives with the cue from the nine indices measured off the captures.
+ * An index outside those arrives without one and draws the token green —
+ * index 21's colour, which 735,427 of the library's 850,000 hot cues carry —
+ * rather than a guess at a neighbour's.
  *
  * Exported for the simple player's overview, which is the same strip.
  */
@@ -223,7 +237,7 @@ export const CueMarkers = memo(function CueMarkers({
             className={cue.memory ? styles.memoryCue : styles.hotCue}
             data-band={band}
             data-cue={cue.memory ? "" : cue.letter}
-            style={{ left }}
+            style={cueStyle(left, cue.colour)}
             title={cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`}
             aria-hidden
           >
@@ -1310,17 +1324,17 @@ export const Player = memo(function Player({
           <div className={styles.padCluster}>
             <div className={styles.hotCues} aria-label="Hot cues">
               {PADS.map((letter) => {
-                const set = cues.some((cue) => !cue.memory && cue.letter === letter);
+                const cue = cues.find((c) => !c.memory && c.letter === letter);
                 return (
                   <button
                     key={letter}
                     type="button"
                     className={styles.pad}
-                    data-set={set || undefined}
+                    data-set={cue ? "" : undefined}
+                    style={cueStyle(undefined, cue?.colour)}
                     aria-label={`Hot cue ${letter}`}
-                    aria-pressed={set}
+                    aria-pressed={cue !== undefined}
                     onClick={() => {
-                      const cue = cues.find((c) => !c.memory && c.letter === letter);
                       if (cue) playback.seek(cue.positionMs / 1000);
                     }}
                   >
@@ -1498,7 +1512,13 @@ export const Player = memo(function Player({
                   disabled={!cue}
                   onClick={() => cue && playback.seek(cue.positionMs / 1000)}
                 >
-                  <span className={styles.cueChip} data-set={cue ? "" : undefined}>{letter}</span>
+                  <span
+                    className={styles.cueChip}
+                    data-set={cue ? "" : undefined}
+                    style={cueStyle(undefined, cue?.colour)}
+                  >
+                    {letter}
+                  </span>
                   {cue ? (
                     <>
                       <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>

@@ -26,8 +26,12 @@ export interface RowDto {
   analysed: number;
   dateAdded: string;
   releaseDate: string;
-  /** Hot cue letters present on the track, e.g. "ABCD". */
-  cues: string;
+  /**
+   * The track's hot cues, in slot order A to P, for the badges on the row's
+   * preview waveform. Tuples rather than objects so a page of 64 rows with
+   * every slot set stays inside the 64 KB response cap.
+   */
+  hotCues: RowCue[];
   artworkHue: number;
   /** Whether the backend can serve artwork for this track. */
   hasArtwork: boolean;
@@ -431,9 +435,10 @@ export interface DeckEvent {
 /**
  * One cue point.
  *
- * No colour: what colour rekordbox draws a cue is decided by
- * `djmdCue.ColorTableIndex`, which is not understood, so none is reported
- * rather than a guessed one.
+ * The colour is what rekordbox paints for the cue's `ColorTableIndex`, from
+ * the nine indices measured off the captures; an index outside those arrives
+ * as `null` and draws the default green rather than a guess. A memory cue has
+ * no colour of its own and is always `null`.
  */
 export interface Cue {
   /**
@@ -448,10 +453,15 @@ export interface Cue {
   /** `A` to `P` for a hot cue, empty for a memory cue. */
   letter: string;
   memory: boolean;
+  /** `#RRGGBB`, or `null` where unmeasured. */
+  colour: string | null;
 }
 
 /** Which slot a new cue goes in: a memory cue, or a hot cue by its letter. */
 export type CueKind = "memory" | { hot: string };
+
+/** A hot cue on a track-list row: letter, position in ms, drawn colour. */
+export type RowCue = readonly [letter: string, positionMs: number, colour: string | null];
 
 /** A volume an export could be written to. */
 export interface Device {

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use rbl_index::{BpmFilter, Library, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES};
 
-use crate::dto::{RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
+use crate::dto::{cue_colour_css, RowCueDto, RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
 
 /// Views are dropped oldest-first past this many, so a user clicking through
@@ -210,6 +210,26 @@ pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter 
     }
 }
 
+/// A row's hot cues in slot order, A to P, which is the order the badges are
+/// painted in so a later slot covers an earlier one where two share a
+/// position.
+///
+/// `[ASSUME]` from `player-1p-hotcue@1x.png`: "Love To Give" carries D and H
+/// one millisecond apart and the capture shows H, the later slot, on top. The
+/// index keeps cues in position order, so this is a sort of at most sixteen.
+fn hot_cues_in_slot_order(library: &Library, row: rbl_index::Row) -> Vec<RowCueDto> {
+    let mut hot: Vec<(u8, RowCueDto)> = library
+        .cues_of(row)
+        .iter()
+        .filter_map(|cue| {
+            let letter = cue.hot_letter()?;
+            Some((cue.kind, RowCueDto(letter, cue.position_ms, cue_colour_css(cue.colour))))
+        })
+        .collect();
+    hot.sort_by_key(|(kind, _)| *kind);
+    hot.into_iter().map(|(_, dto)| dto).collect()
+}
+
 /// Builds the wire rows for a window. `position` is the row's 1-based place in
 /// the view, which is what the `#` column shows.
 pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: usize) -> Vec<RowDto> {
@@ -233,7 +253,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 analysed: library.analysed.get(index).copied().unwrap_or(0),
                 date_added: library.date_added.get(index).to_owned(),
                 release_date: library.release_date.get(index).to_owned(),
-                cues: String::new(),
+                hot_cues: hot_cues_in_slot_order(library, row),
                 // Stable per track so the placeholder tint does not flicker on scroll.
                 has_artwork: !library.artwork_path.get(index).is_empty(),
                 artwork_hue: u16::try_from(
@@ -243,4 +263,66 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
+    use rbl_index::testing::{library_from, TestTrack};
+    use rbl_index::Cue;
+
+    use super::rows_to_dto;
+
+    fn cue(kind: u8, position_ms: u32, colour: u8) -> Cue {
+        Cue { position_ms, kind, colour, ..Cue::default() }
+    }
+
+    #[test]
+    fn a_row_carries_its_hot_cues_as_compact_tuples_and_no_memory_cues() {
+        let library = library_from(&[TestTrack {
+            id: 7,
+            title: "Take Me Home",
+            bpm_x100: 12_800,
+            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41)],
+            ..TestTrack::default()
+        }]);
+        let rows = rows_to_dto(&library, &[0], 0);
+        let json = serde_json::to_value(&rows[0]).unwrap();
+        // In slot order, letters from `Kind`, the measured drawn colour where
+        // there is one and `null` — not a guess — where there is not.
+        assert_eq!(
+            json["hotCues"],
+            serde_json::json!([["A", 46, "#77E866"], ["B", 165_046, null], ["E", 24, "#51AE7B"]])
+        );
+    }
+
+    #[test]
+    fn a_full_page_of_rows_with_every_hot_cue_set_stays_under_the_response_cap() {
+        // rekordbox 7 allows sixteen hot cues a track; a page is 64 rows. This
+        // is the worst case the row tuples were sized for.
+        let kinds: Vec<u8> = (1..=17).filter(|&k| k != 4).collect();
+        assert_eq!(kinds.len(), 16);
+        let tracks: Vec<TestTrack> = (0..64)
+            .map(|i| TestTrack {
+                id: i + 1,
+                title: "Something In The Air (Extended Mix) — a long enough title",
+                artist: "22Bullets & Pascal Letoublon ft. MER",
+                album: "Something In The Air",
+                comment: "8A - C - 128 and a comment of ordinary length",
+                bpm_x100: 12_800,
+                length_sec: 300,
+                cues: kinds
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &k)| cue(k, 20_000 * u32::try_from(n).unwrap(), 21))
+                    .collect(),
+                ..TestTrack::default()
+            })
+            .collect();
+        let library = library_from(&tracks);
+        let rows: Vec<u32> = (0..64).collect();
+        let bytes = serde_json::to_vec(&rows_to_dto(&library, &rows, 0)).unwrap();
+        assert!(bytes.len() < 64 * 1024, "{} bytes", bytes.len());
+    }
 }

@@ -7,7 +7,8 @@
  */
 import { memo, useEffect, useRef } from "react";
 import { getBackend } from "@/ipc/client";
-import { renderPreview, WaveformCache, type RenderedWaveform } from "@/canvas";
+import type { RowCue } from "@/ipc/types";
+import { drawPreviewCues, renderPreview, WaveformCache, type RenderedWaveform } from "@/canvas";
 
 /** Shared across every row: bounded, and released when entries fall out. */
 const cache = new WaveformCache(500);
@@ -99,12 +100,23 @@ export interface WaveformPreviewProps {
   trackId: string;
   width: number;
   height: number;
+  /**
+   * The track's hot cues, drawn as lettered badges over the waveform.
+   *
+   * Painted onto the canvas after the cached bitmap rather than into it: the
+   * bitmap is keyed by track and size and lives until evicted, and a cue
+   * edited in the app would otherwise keep its old badge until then.
+   */
+  hotCues: readonly RowCue[];
+  durationSec: number;
 }
 
 export const WaveformPreview = memo(function WaveformPreview({
   trackId,
   width,
   height,
+  hotCues,
+  durationSec,
 }: WaveformPreviewProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -120,6 +132,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
+      drawPreviewCues(ctx, hotCues, durationSec * 1000, canvas.width, dpr);
     };
 
     const cached = cache.get(key);
@@ -140,7 +153,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [trackId, width, height]);
+  }, [trackId, width, height, hotCues, durationSec]);
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return (

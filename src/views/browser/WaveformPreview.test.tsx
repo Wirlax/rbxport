@@ -70,7 +70,7 @@ afterEach(() => {
 });
 
 function mount(trackId: string) {
-  act(() => root.render(<WaveformPreview trackId={trackId} width={120} height={20} />));
+  act(() => root.render(<WaveformPreview trackId={trackId} width={120} height={20} hotCues={[]} durationSec={300} />));
 }
 
 describe("WaveformPreview", () => {
@@ -99,7 +99,7 @@ describe("WaveformPreview", () => {
       root.render(
         <>
           {Array.from({ length: 20 }, (_, i) => (
-            <WaveformPreview key={i} trackId={`row-${i}`} width={120} height={20} />
+            <WaveformPreview key={i} trackId={`row-${i}`} width={120} height={20} hotCues={[]} durationSec={300} />
           ))}
         </>,
       );

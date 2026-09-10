@@ -234,12 +234,14 @@
    the sleeve anyway. The tint comes back only once the image has given up. */
 .artwork:has(.artworkImage[data-state="pending"]) > span { visibility: hidden; }
 
+/* The waveform sits on a measured band 5pt down the row, not centred in it:
+   rekordbox leaves more room below the baseline than above the badges. */
 .preview {
-  padding: 0 3px;
+  padding: var(--s-preview-band-top) 3px 0;
   position: relative;
   background: var(--c-black);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .stars { letter-spacing: 1px; color: var(--c-text); display: flex; }

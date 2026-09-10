@@ -26,6 +26,9 @@ const ROW_H = 25; // --s-row-height
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
 const COL_HEADER_H = 23;
+/// --s-preview-band-h: the strip the row's waveform and its cue badges share.
+/// The canvas needs the number for its backing store; the cell's CSS places it.
+const PREVIEW_BAND_H = 15;
 
 export type Column = ColumnSpec;
 
@@ -235,7 +238,7 @@ const TrackRow = memo(function TrackRow({
           return (
             <div key={col.key} className={styles.attr} data-col={col.key} role="gridcell">
               {row.analysed ? <span className={styles.analysed} title="Analyzed" /> : null}
-              <span className={styles.cue}>{row.cues ? "CUE" : ""}</span>
+              <span className={styles.cue}>{row.hotCues.length > 0 ? "CUE" : ""}</span>
             </div>
           );
         }
@@ -272,7 +275,15 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "preview") {
           return (
             <div key={col.key} className={styles.preview} data-col={col.key} role="gridcell">
-              {row.analysed ? <WaveformPreview trackId={row.id} width={col.width - 6} height={19} /> : null}
+              {row.analysed ? (
+                <WaveformPreview
+                  trackId={row.id}
+                  width={col.width - 6}
+                  height={PREVIEW_BAND_H}
+                  hotCues={row.hotCues}
+                  durationSec={row.durationSec}
+                />
+              ) : null}
             </div>
           );
         }

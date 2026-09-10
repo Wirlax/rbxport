@@ -14,7 +14,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::link::LinkStatusDto;
 use crate::dto::{
-    AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
+    cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
     ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     CountedDto, FilterValuesDto, TagCategoryDto,
@@ -1057,10 +1057,10 @@ pub async fn deck_state(
 
 /// A track's cue points.
 ///
-/// Positions and kinds only. What colour rekordbox draws a cue is decided by
-/// `djmdCue.ColorTableIndex`, which is not understood — 735,427 of the
-/// reference library's cues use index 21 and nothing explains it — so no
-/// colour is reported rather than a guessed one.
+/// A hot cue's colour is what rekordbox paints for its `ColorTableIndex`,
+/// from the nine indices measured in `rbl_anlz::DRAWN_CUE_COLOURS`; an index
+/// outside those is reported without a colour, and the interface draws its
+/// default green rather than a guess. A memory cue never carries one.
 #[tauri::command]
 pub async fn track_cues(
     state: State<'_, Arc<AppState>>,
@@ -1078,6 +1078,7 @@ pub async fn track_cues(
                 out_ms: cue.out_ms,
                 letter: cue.hot_letter().map(String::from).unwrap_or_default(),
                 memory: cue.is_memory(),
+                colour: if cue.is_memory() { None } else { cue_colour_css(cue.colour) },
             })
             .collect())
     })

@@ -20,7 +20,7 @@
   --c-wave-high: #F5EAD6;
   --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
-  --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry */
+  --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry. The fallback for an index without a measured colour: the other eight measured indices come over the wire per cue from rbl_anlz::DRAWN_CUE_COLOURS */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
   --c-error: #E23B2E; /* UNMEASURED — failures in the status bar; the same red the meter's clip band uses, so the app has one alarm colour */
@@ -36,10 +36,6 @@
   --c-disc-placeholder: #2E2E2E; /* the record drawn where a sleeve is missing; a shade above the raised square it sits on */
   --c-playhead-armed: #EA3323; /* UNMEASURED — the armed playhead's red, described rather than sampled; the value is the cue head's */
   --c-cue-head: #EA3323; /* docs/screenshots at 2x: the 3x6px head at a cue, left of the hot cue badge sharing its position */
-  --c-cue-e: #11B176;
-  --c-cue-f: #FF8C00;
-  --c-cue-g: #305AFF;
-  --c-cue-h: #E2AA01;
   --c-downbeat: #FFFFFF; /* measured from docs/screenshots; the detail band runs y 358..650: every fourth marker's line, white where the others are grey */
   --c-phrase-intro: #B83F1D; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: INTRO */
   --c-phrase-up: #8138F6; /* sampled from the phrase bar in a 2x capture of rekordbox 7.2.11: UP 1 */
@@ -142,6 +138,9 @@
   --s-player-overview-h: 49px; /* docs/screenshots at 2x: artwork + vocal + overview + position bar, y 232..330 */
   --s-player-overview-wave-h: 30px; /* docs/screenshots at 2x: the overview waveform paints y 244..303, its baseline 303 */
   --s-cue-badge: 11px; /* docs/screenshots at 2x: the hot cue badge is 22x22px, x 1926..1947 y 244..265 */
+  --s-preview-band-top: 5px; /* design/reference/macos/playlist-player@2x.png: in the track list's Preview column the badges and the waveform's peaks both start 10px below the row's top edge (row 1: top 778, badge and wave 788) */
+  --s-preview-band-h: 15px; /* the same capture: the waveform's baseline is 39px below the row's top (row 1: 817, row 3: 917), so the band is 5..19.5pt; the half pixel goes to the baseline */
+  --s-preview-cue-badge: 7px; /* the same capture: a row's hot cue badge is 14x14px, x 926..939 y 788..801, its left edge on the cue */
   --s-cue-head-w: 1.5px; /* docs/screenshots at 2x: a memory cue's head spans 3px */
   --s-cue-head-h: 3px; /* docs/screenshots at 2x: a memory cue's head tapers away over 6px */
   --s-player-scrub-h: 3px; /* docs/screenshots at 2x: the position bar under the overview, y 310..315 */
@@ -283,6 +282,7 @@
   --f-size-sm: 12px; /* status bar 'Analyzing: 8319 Tracks', 128pt wide, bold */
   --f-size-bars: 14px; /* docs/screenshots at 2x: the bar count reads 20px tall over the detail band, which is a 14px face */
   --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
+  --f-size-preview-cue: 6px; /* design/reference/macos/playlist-player@2x.png: the letter in a row's hot cue badge is 8px tall at 2x, a 4pt cap, which against Arial's 0.716 em cap is a 6px face; bold, centred in the 7pt badge */
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
   --f-size-menu: 12.5px; /* the layout menu's 'SIMPLE PLAYER' in the same 2x capture: 194px wide with an 18px cap height, which Arial gives at 12.5px */
   --f-size-filter-strip: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): MASTER PLAYER, two lines with 15px cap height at 2x on a 25px pitch */

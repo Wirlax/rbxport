@@ -235,6 +235,62 @@ export function drawPreview(
   }
 }
 
+/**
+ * A hot cue on a row's preview: letter, position in ms, drawn colour.
+ *
+ * The `RowCue` tuple from the IPC contract, by shape rather than by import so
+ * the canvas module stays free of it.
+ */
+export type PreviewCue = readonly [letter: string, positionMs: number, colour: string | null];
+
+/**
+ * The row badge, from `src/styles/tokens.css`. The canvas cannot read a CSS
+ * variable, so these are duplicated here and a test holds them to the tokens.
+ */
+const PREVIEW_BADGE = 7; // --s-preview-cue-badge
+const PREVIEW_BADGE_FONT = 6; // --f-size-preview-cue
+const CUE_HOT = "#77E866"; // --c-cue-hot: the fallback for an unmeasured index
+const CUE_HOT_TEXT = "#000000"; // --c-cue-hot-text
+const UI_FONT = 'Arial, "Helvetica Neue", Helvetica, sans-serif'; // --f-ui
+
+/**
+ * Draws a row's hot cue badges over its preview.
+ *
+ * Measured off `design/reference/macos/playlist-player@2x.png`: a 7pt square
+ * at the top of the band with its left edge on the cue, filled with the
+ * colour rekordbox paints for the cue's `ColorTableIndex` and a bold black
+ * letter centred in it. The badges sit on the waveform, not above it — the
+ * band's top is where both begin — so they cover whatever peak is under
+ * them, as the capture's do.
+ *
+ * Painted in the order given, which the backend makes slot order, so where
+ * two cues share a position the later slot is on top. A badge at the far end
+ * of the track is pulled back inside the strip rather than cut off: the
+ * letter is the point of it.
+ */
+export function drawPreviewCues(
+  ctx: CanvasRenderingContext2D,
+  cues: readonly PreviewCue[],
+  durationMs: number,
+  width: number,
+  dpr: number,
+): void {
+  if (cues.length === 0 || durationMs <= 0 || width <= 0) return;
+  const size = PREVIEW_BADGE * dpr;
+  ctx.font = `700 ${PREVIEW_BADGE_FONT * dpr}px ${UI_FONT}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const [letter, positionMs, colour] of cues) {
+    const at = Math.min(Math.max(positionMs / durationMs, 0), 1);
+    // Whole device pixels, so the square has a crisp edge at every DPR.
+    const x = Math.round(Math.min(at * width, width - size));
+    ctx.fillStyle = colour ?? CUE_HOT;
+    ctx.fillRect(x, 0, size, size);
+    ctx.fillStyle = CUE_HOT_TEXT;
+    ctx.fillText(letter, x + size / 2, size / 2);
+  }
+}
+
 /** Renders a preview to an offscreen bitmap at device resolution. */
 export async function renderPreview(
   data: Uint8Array,

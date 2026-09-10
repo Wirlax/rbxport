@@ -36,6 +36,21 @@ const GENRES = ["House", "Tech House", "Melodic House", "Techno", "Trance", "Pro
 const LABELS = ["Spinnin'", "Musical Freedom", "Defected", "Armada", "Toolroom", "Drumcode", ""];
 
 /**
+ * The two hot-cue sets the reference playlist carries, in the colours
+ * rekordbox draws them — the default green on A–D, and the E–H set one DJ
+ * tool writes in teal, orange, blue and yellow — plus the coloured A–D set,
+ * so every measured colour is on screen somewhere.
+ */
+const CUE_SETS: readonly (readonly (readonly [string, number, string | null])[])[] = [
+  [["A", 0.12, "#77E866"], ["B", 0.34, "#77E866"], ["C", 0.61, "#77E866"], ["D", 0.83, "#77E866"]],
+  [["E", 0.12, "#51AE7B"], ["F", 0.29, "#F09235"], ["G", 0.46, "#3A59F6"], ["H", 0.70, "#D9AC3A"]],
+  [["A", 0.12, "#E13A8A"], ["B", 0.26, "#6AAEEC"], ["C", 0.61, "#A8D54B"], ["D", 0.79, "#A274F7"]],
+];
+
+/** What a hot cue added here draws: index 21, the default the writer stores. */
+const DEFAULT_CUE_COLOUR = "#77E866";
+
+/**
  * How long the mock pretends analysis takes.
  *
  * Long enough that a queue can be watched and stopped, short enough that a
@@ -116,23 +131,35 @@ function makeRows(count: number): RowDto[] {
     const bpmX100 = analysed ? (120 + Math.floor(rnd() * 20)) * 100 : 0;
     const month = 1 + Math.floor(rnd() * 12);
     const day = 1 + Math.floor(rnd() * 28);
+    // The draws stay in this order: the e2e suite picks rows by index and
+    // relies on which of them the seed makes analysed.
+    const title = `${TITLES[Math.floor(rnd() * TITLES.length)]} ${MIXES[Math.floor(rnd() * MIXES.length)]}`;
+    const album = rnd() > 0.6 ? "Single" : "";
+    const genre = GENRES[Math.floor(rnd() * GENRES.length)] ?? "";
+    const label = LABELS[Math.floor(rnd() * LABELS.length)] ?? "";
+    const comment = analysed && rnd() > 0.5 ? `${1 + Math.floor(rnd() * 12)}A - ${key.slice(0, 1)} - ${bpmX100 / 100}` : "";
+    const durationSec = 180 + Math.floor(rnd() * 240);
+    const rating = Math.floor(rnd() * 6);
+    const dateAdded = `2026-0${1 + Math.floor(rnd() * 9)}-${String(day).padStart(2, "0")}`;
+    const releaseDate = rnd() > 0.3 ? `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "";
+    const cueSet = analysed ? (CUE_SETS[Math.floor(rnd() * CUE_SETS.length)] ?? []) : [];
     rows[i] = {
       id: String(100000 + i),
       trackNo: i + 1,
-      title: `${TITLES[Math.floor(rnd() * TITLES.length)]} ${MIXES[Math.floor(rnd() * MIXES.length)]}`,
+      title,
       artist,
-      album: rnd() > 0.6 ? "Single" : "",
-      genre: GENRES[Math.floor(rnd() * GENRES.length)] ?? "",
-      label: LABELS[Math.floor(rnd() * LABELS.length)] ?? "",
-      comment: analysed && rnd() > 0.5 ? `${1 + Math.floor(rnd() * 12)}A - ${key.slice(0, 1)} - ${bpmX100 / 100}` : "",
+      album,
+      genre,
+      label,
+      comment,
       bpmX100,
       key,
-      durationSec: 180 + Math.floor(rnd() * 240),
-      rating: Math.floor(rnd() * 6),
+      durationSec,
+      rating,
       analysed,
-      dateAdded: `2026-0${1 + Math.floor(rnd() * 9)}-${String(day).padStart(2, "0")}`,
-      releaseDate: rnd() > 0.3 ? `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "",
-      cues: analysed ? (rnd() > 0.5 ? "EFGH" : "ABCD") : "",
+      dateAdded,
+      releaseDate,
+      hotCues: cueSet.map(([letter, at, colour]) => [letter, Math.round(durationSec * 1000 * at), colour]),
       artworkHue: Math.floor(rnd() * 360),
       // The mock has no files to serve, so every row falls back to the tint.
       hasArtwork: false,
@@ -413,6 +440,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const id = `cue-${nextCueId++}`;
       cuesOf(track).push({
         id, positionMs, outMs: 0, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",
+        colour: kind === "memory" ? null : DEFAULT_CUE_COLOUR,
       });
       return cuesChanged(track, id);
     },
@@ -422,6 +450,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const id = `cue-${nextCueId++}`;
       cuesOf(track).push({
         id, positionMs: inMs, outMs, letter: kind === "memory" ? "" : kind.hot, memory: kind === "memory",
+        colour: kind === "memory" ? null : DEFAULT_CUE_COLOUR,
       });
       return cuesChanged(track, id);
     },
@@ -453,19 +482,30 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     if (held) return held;
     const index = Number.parseInt(trackId, 10) - 100000;
     const row = all[index];
+    // A memory cue at 2% and the row's own hot cues from 12% on, so the
+    // detail's opening window holds exactly the one marker and the badges on
+    // the row are the cues the deck shows.
     const made: Cue[] = [];
     if (row && row.analysed !== 0) {
       const total = row.durationSec * 1000;
       made.push(
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true },
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.12), outMs: 0, letter: "A", memory: false },
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.34), outMs: 0, letter: "B", memory: false },
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.61), outMs: 0, letter: "C", memory: false },
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.83), outMs: 0, letter: "D", memory: false },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true, colour: null },
+        ...row.hotCues.map(([letter, positionMs, colour]) => (
+          { id: `cue-${nextCueId++}`, positionMs, outMs: 0, letter, memory: false, colour }
+        )),
       );
     }
     cueStore.set(trackId, made);
     return made;
+  };
+  /** The row's badges follow its cues, in slot order as the backend sends them. */
+  const syncRow = (trackId: string) => {
+    const row = all[Number.parseInt(trackId, 10) - 100000];
+    if (!row) return;
+    row.hotCues = cuesOf(trackId)
+      .filter((cue) => !cue.memory)
+      .sort((a, b) => a.letter.localeCompare(b.letter))
+      .map((cue) => [cue.letter, cue.positionMs, cue.colour]);
   };
   const findCue = (id: string): { track: string; cue: Cue } | null => {
     for (const [track, list] of cueStore) {
@@ -475,6 +515,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return null;
   };
   const cuesChanged = <T>(track: string, value: T): Promise<T> => {
+    syncRow(track);
     for (const listener of cueListeners) listener(track);
     return wait(value);
   };
@@ -676,9 +717,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(bytes);
     },
 
-    // A memory cue and four hot cues, so the player's markers and list have
-    // something to draw without a database behind them. A copy, ordered by
-    // position as the index orders them, so an edit cannot reach the store.
+    // The memory cue and the row's own hot cues, so the player's markers and
+    // list agree with the badges on the row that was loaded. A copy, ordered
+    // by position as the index orders them, so an edit cannot reach the store.
     trackCues: (trackId) =>
       wait(cuesOf(trackId).map((cue) => ({ ...cue })).sort((a, b) => a.positionMs - b.positionMs)),
 

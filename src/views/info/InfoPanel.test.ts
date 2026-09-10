@@ -19,7 +19,7 @@ const track: RowDto = {
   analysed: 1,
   dateAdded: "2026-09-06 10:00:00.000 +00:00",
   releaseDate: "",
-  cues: "ABC",
+  hotCues: [["A", 46, "#77E866"], ["B", 90_000, "#77E866"], ["C", 120_000, null]],
   artworkHue: 40,
   hasArtwork: true,
 };

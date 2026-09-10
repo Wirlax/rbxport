@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { bandStops, drawBands, ramp } from "./waveform";
+import { bandStops, drawBands, drawPreviewCues, ramp } from "./waveform";
 
 describe("the three-band colour ramp", () => {
   it("runs blue, amber, cream rather than blue to cream", () => {
@@ -197,5 +197,81 @@ describe("the three-band waveform", () => {
     const data = new Uint8Array([1, 0, 0, 127, 0, 0, 1, 0, 0, 1, 0, 0]);
     drawBands(ctx, data, 1, 100, "overview");
     expect(fills[0]!.h).toBeCloseTo(100, 5);
+  });
+});
+
+describe("the hot cue badges on a row preview", () => {
+  /** A 2D context that records fills and text, in the order they happened. */
+  function recorder() {
+    const ops: (
+      | { kind: "rect"; style: string; x: number; y: number; w: number; h: number }
+      | { kind: "text"; style: string; text: string; x: number; y: number }
+    )[] = [];
+    const ctx = {
+      fillStyle: "",
+      font: "",
+      textAlign: "",
+      textBaseline: "",
+      fillRect(x: number, y: number, w: number, h: number) {
+        ops.push({ kind: "rect", style: String(this.fillStyle), x, y, w, h });
+      },
+      fillText(text: string, x: number, y: number) {
+        ops.push({ kind: "text", style: String(this.fillStyle), text, x, y });
+      },
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, ops };
+  }
+
+  it("draws a 7pt square at the cue with a black letter centred in it", () => {
+    // Measured off the 2x capture: 14x14 device pixels, left edge on the cue.
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [["B", 90_000, "#F09235"]], 300_000, 200, 2);
+    expect(ops).toEqual([
+      { kind: "rect", style: "#F09235", x: 60, y: 0, w: 14, h: 14 },
+      { kind: "text", style: "#000000", text: "B", x: 67, y: 7 },
+    ]);
+    expect(ctx.font).toBe('700 12px Arial, "Helvetica Neue", Helvetica, sans-serif');
+    expect(ctx.textAlign).toBe("center");
+    expect(ctx.textBaseline).toBe("middle");
+  });
+
+  it("falls back to the one measured green for an index without a colour", () => {
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [["A", 0, null]], 300_000, 200, 1);
+    expect(ops[0]).toMatchObject({ kind: "rect", style: "#77E866" });
+  });
+
+  it("keeps a badge at the very end inside the strip rather than cutting it off", () => {
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [["H", 299_900, "#D9AC3A"]], 300_000, 200, 1);
+    expect(ops[0]).toMatchObject({ kind: "rect", x: 193, w: 7 });
+  });
+
+  it("paints in the order given, so a later slot covers an earlier one", () => {
+    // "Love To Give" carries D and H a millisecond apart, and the capture
+    // shows H on top. The backend hands the cues over in slot order.
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [["D", 162_486, "#77E866"], ["H", 162_485, "#D9AC3A"]], 288_000, 200, 1);
+    const letters = ops.flatMap((op) => (op.kind === "text" ? [op.text] : []));
+    expect(letters).toEqual(["D", "H"]);
+  });
+
+  it("draws nothing for a track with no cues, no length, or no width", () => {
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [], 300_000, 200, 1);
+    drawPreviewCues(ctx, [["A", 0, null]], 0, 200, 1);
+    drawPreviewCues(ctx, [["A", 0, null]], 300_000, 0, 1);
+    expect(ops).toEqual([]);
+  });
+
+  it("matches the tokens the stylesheet ships", () => {
+    const css = readFileSync("src/styles/tokens.css", "utf8");
+    const token = (name: string) => new RegExp(`${name}:\\s*([^;]+);`).exec(css)?.[1]?.trim();
+    const { ctx, ops } = recorder();
+    drawPreviewCues(ctx, [["A", 0, null]], 300_000, 200, 1);
+    expect(ops[0]).toMatchObject({ w: Number.parseFloat(token("--s-preview-cue-badge") ?? "") });
+    expect(ops[0]).toMatchObject({ style: token("--c-cue-hot")?.toUpperCase() });
+    expect(ops[1]).toMatchObject({ style: token("--c-cue-hot-text")?.toUpperCase() });
+    expect(ctx.font).toBe(`700 ${token("--f-size-preview-cue")} ${token("--f-ui")}`);
   });
 });

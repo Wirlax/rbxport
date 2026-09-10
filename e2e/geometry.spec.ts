@@ -142,7 +142,7 @@ test("hot cues are badges on the overview and red triangles at the top of the gr
   const overview = page.getByTestId("player-overview");
   // The marker itself is zero-width — the position is its left edge — so the
   // badge inside it is what there is to look at.
-  const badge = overview.locator('[title="Hot cue A"] b');
+  const badge = overview.locator('[title^="Hot cue"] b').first();
   await expect(badge).toBeVisible();
 
   const size = await token(page, "--s-cue-badge");
@@ -158,7 +158,7 @@ test("hot cues are badges on the overview and red triangles at the top of the gr
   // too, as a triangle at the very top of the band, against the phrase blocks.
   const out = page.getByRole("button", { name: "Zoom out", exact: true });
   for (let i = 0; i < 3; i++) await out.click();
-  const inDetail = page.getByTestId("player-detail").locator('[title="Hot cue A"] i');
+  const inDetail = page.getByTestId("player-detail").locator('[title^="Hot cue"] i').first();
   await expect(inDetail).toBeVisible();
   const detail = await page.getByTestId("player-detail").boundingBox();
   const triangle = await inDetail.boundingBox();
@@ -169,6 +169,58 @@ test("hot cues are badges on the overview and red triangles at the top of the gr
     getComputedStyle(e.parentElement as HTMLElement).zIndex,
   );
   expect(Number(layer)).toBeGreaterThan(0);
+});
+
+test("a hot cue's badge, pad and panel chip all take the colour rekordbox draws for it", async ({ page }) => {
+  // Measured off design/reference/macos/playlist-player@2x.png: the four cues
+  // of the loaded track read the same colour in the overview badge, the pad
+  // row and the HOT CUE chip, and each is one of the nine drawn colours
+  // rbl_anlz::DRAWN_CUE_COLOURS carries.
+  const drawn = [
+    "rgb(58, 89, 246)", "rgb(106, 174, 236)", "rgb(81, 174, 123)", "rgb(119, 232, 102)",
+    "rgb(168, 213, 75)", "rgb(217, 172, 58)", "rgb(240, 146, 53)", "rgb(225, 58, 138)",
+    "rgb(162, 116, 247)",
+  ];
+  const player = page.getByRole("region", { name: "Preview player" });
+  const overview = page.getByTestId("player-overview");
+  const background = (selector: string) =>
+    page.locator(selector).first().evaluate((e) => getComputedStyle(e).backgroundColor);
+
+  // A track whose cues are not all the default green, or the badge and the
+  // pad's own fallback would agree without a colour ever having been sent.
+  const green = "rgb(119, 232, 102)";
+  let markers: string[] = [];
+  for (let row = 0; row < 8 && markers.length === 0; row++) {
+    // An unanalysed row has no preview and no cues; the canvas is the tell.
+    const title = page.locator('[role="gridcell"][data-col="title"]').nth(row);
+    const analysed = await title.locator("xpath=..").locator('[data-col="preview"] canvas').count();
+    if (analysed === 0) continue;
+    await title.dblclick();
+    await expect.poll(async () => overview.locator('[title^="Hot cue"]').count()).toBe(4);
+    const letters = await overview.locator('[title^="Hot cue"]').evaluateAll((els) =>
+      els.map((e) => e.getAttribute("title")?.slice(-1) ?? ""),
+    );
+    const first = await background(`[data-testid="player-overview"] [title="Hot cue ${letters[0]}"] b`);
+    if (first !== green) markers = letters;
+  }
+  expect(markers).toHaveLength(4);
+  await player.getByRole("tab", { name: "HOT CUE" }).click();
+  for (const letter of markers) {
+    const badge = await background(`[data-testid="player-overview"] [title="Hot cue ${letter}"] b`);
+    expect(drawn).toContain(badge);
+    // The pad's inner square and the panel's letter chip are the same colour.
+    const pad = await player
+      .getByRole("button", { name: `Hot cue ${letter}`, exact: true })
+      .locator("span")
+      .evaluate((e) => getComputedStyle(e).backgroundColor);
+    expect(pad).toBe(badge);
+    const chip = await page
+      .getByRole("button", { name: new RegExp(`^${letter} `) })
+      .locator("span")
+      .first()
+      .evaluate((e) => getComputedStyle(e).backgroundColor);
+    expect(chip).toBe(badge);
+  }
 });
 
 test("every strip of the deck runs to the same edges", async ({ page }) => {

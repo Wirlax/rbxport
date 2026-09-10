@@ -4,10 +4,10 @@ import type { Cue } from "@/ipc/types";
 import { MEMORY_TOLERANCE_MS, memoryCueAt, nextMemoryCue, previousMemoryCue } from "./cues";
 
 const memory = (id: string, positionMs: number): Cue => ({
-  id, positionMs, outMs: 0, letter: "", memory: true,
+  id, positionMs, outMs: 0, letter: "", memory: true, colour: null,
 });
 const hot = (id: string, letter: string, positionMs: number): Cue => ({
-  id, positionMs, outMs: 0, letter, memory: false,
+  id, positionMs, outMs: 0, letter, memory: false, colour: null,
 });
 
 // Out of order on purpose: the list the backend hands over is sorted, but
