@@ -52,7 +52,6 @@
   --c-play-ring-on: #60D330; /* sampled from a capture of the PLAY button with the deck running: the ring lights from the resting green */
   --c-play-glyph-on: #FFFFFF; /* sampled from the same capture: the triangle is a flat 255,255,255 while the deck runs, against #A0A0A0 at rest */
   --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
-  --c-cue-memory: #9AA0A6; /* UNMEASURED — the line down the detail waveform. The head above it is measured; only the line is not */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
   --c-pad-set: #77E866; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
   --c-pad-well: #0F0F0F; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad's own background */
@@ -130,6 +129,7 @@
   --c-context-menu-text: #FFFFFF; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): an enabled entry's ink peaks at (255,255,255); so does its arrow */
   --c-context-menu-text-dim: #616161; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): a greyed entry's ink peaks at (97,97,97), its arrow at (98,98,98) */
   --c-context-menu-separator: #191919; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the 2px rule between groups, (25,25,25), a shade darker than the panel */
+  --c-cue-line: #FFFFFF; /* the user's 2x crop of a hot cue on the detail waveform (cue-badge.png, 268x406, rekordbox 7.2.11; the 28px phrase bar at its top is the 14pt one, so 2x): under the badge a 2px line of flat (255,255,255) runs y 126..333, over the waveform. It is the downbeat's white, and that cue sits on a downbeat, so whether a cue off the grid draws one is [ASSUME]d from the user's reading of the crop, not measured */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
@@ -379,6 +379,11 @@
   --s-context-menu-sep-inset-r: 16px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the rule ends 32px at 2x inside the hairline, 1pt past the arrow's right edge */
   --s-context-menu-sep-gap: 5px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): a row and its rule are 72px at 2x, 50 for the row and 22 for the 2px rule with 10px above and below */
   --s-context-menu-pad: 1px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the first row starts 2px at 2x inside the hairline and the last ends 2px above it; the inner line is drawn in that point */
+  --s-cue-marker-w: 16px; /* the user's 2x crop of a hot cue on the detail waveform (cue-badge.png, 268x406, rekordbox 7.2.11): the red triangle over the badge is 32px across its top edge (x 121.3..153.7 by coverage), centred on the cue's line */
+  --s-cue-marker-h: 11px; /* the same crop: the triangle narrows 1.46px a row from 31.1px at y 81; the badge covers it from y 94, and the slope reaches its point at y 102.2, 21.7px below the top edge at y 80.5 */
+  --s-cue-marker-top: 8.25px; /* the same crop: the triangle's top edge is at y 80.5 (row 80 is half covered) under a band that starts at y 64 where the phrase bar ends, 16.5px; the beat heads in the same crop start at y 116, the 26pt the beatMarkerTop token measures, so the band's top is the same one */
+  --s-cue-badge-top: 15px; /* the same crop: the badge is 22x22px at x 128..149 y 94..115, 30px under the band's top and centred on the cue's line (x 138..139), where the overview hangs its badge from the top with its left edge on the cue; the beat head under it starts at y 116, the row after the badge's last */
+  --s-cue-line-w: 1px; /* the same crop: the line under the badge is 2px wide at 2x, x 138..139, the width of a downbeat's */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
