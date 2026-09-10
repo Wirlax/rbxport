@@ -3,7 +3,7 @@
 //! Playback is here rather than on an `<audio>` element because the 2-player
 //! view rekordbox has needs phase-locked beat sync, key sync and audible
 //! drag-scrub, and a media element has a primitive for none of them. See
-//! `docs/player-engine.md`.
+//! `docs/pre-release/player-engine.md`.
 //!
 //! # Threads
 //!
@@ -18,7 +18,7 @@
 //!   messages and reads atomics. Nothing it does can block audio.
 //!
 //! Two decks, named rather than indexed. Going to four would rework the mixer
-//! and the event payload; that is accepted (`docs/player-engine.md` §4).
+//! and the event payload; that is accepted (`docs/pre-release/player-engine.md` §4).
 
 #![allow(
     clippy::cast_precision_loss,

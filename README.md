@@ -6,7 +6,7 @@ to CDJs over Pro DJ Link.
 
 macOS and Windows, built with Tauri 2 — Rust backend, React frontend.
 
-Design: [`docs/PLAN.md`](docs/PLAN.md) · Working notes: [`TODO.md`](TODO.md)
+Design: [`docs/pre-release/PLAN.md`](docs/pre-release/PLAN.md) · Working notes: [`TODO.md`](TODO.md)
 
 ## Principles, in priority order
 

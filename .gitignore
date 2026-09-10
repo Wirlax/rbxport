@@ -7,6 +7,14 @@ target/
 # Tauri
 src-tauri/gen/
 
+# IMPORTANT — before this repository goes public, uncomment the line below
+# and remove docs/pre-release/ from the index (`git rm -r --cached
+# docs/pre-release`). It holds Chris's private notes and grounding docs
+# for the pre-release phase — the plan, research appendices, measurements
+# off rekordbox — and is not for publication. It is tracked for now so it
+# survives across machines and worktrees.
+# docs/pre-release/
+
 # generated / local-only
 design/sketch/dist/
 design/reference/**/*@2x.png

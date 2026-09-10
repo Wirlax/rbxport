@@ -7,7 +7,7 @@
 //! backwards, and stops making a sound when the hand stops.
 //!
 //! What this was measured at when it was judged to sound right, and which test
-//! holds each of those numbers, is in `docs/design-notes/scrub-baseline.md`.
+//! holds each of those numbers, is in `docs/pre-release/design-notes/scrub-baseline.md`.
 //!
 //! So: a window of decoded audio around the cursor, and a read head that moves
 //! through it at the drag's own rate. Both halves are here and neither knows
