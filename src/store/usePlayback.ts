@@ -96,6 +96,19 @@ const LANDING_MS = 500;
 const FALLBACK = "This track could not be played.";
 
 /**
+ * Which track each deck was last told to hold.
+ *
+ * Kept outside the hook because the hook does not outlive the deck's view:
+ * FULL BROWSER unmounts the player, and 1 PLAYER puts deck B away. The engine
+ * keeps playing through both, and a remount used to load the same track
+ * again, which stopped it and put the head back at the start. A null is a
+ * deck that was told to hold nothing, or whose load failed. The engine does
+ * not report which track it holds, which is why this is remembered here
+ * rather than asked.
+ */
+const held = new Map<DeckId, string | null>();
+
+/**
  * The reason, not a shrug.
  *
  * Every one of these failures arrives carrying why: a command rejects with an
@@ -229,6 +242,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       const unlistenEvent = backend.onDeckEvent((event) => {
         if (!live || event.deck !== DECK) return;
         if (event.message !== null) {
+          // A deck that could not open the file holds nothing, so the next
+          // mount asks again rather than trusting a load that never landed.
+          held.set(DECK, null);
           setError(event.message.trim() === "" ? FALLBACK : event.message);
           return;
         }
@@ -258,6 +274,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   useEffect(() => {
     if (!canPlay) return;
     loading.current = trackId;
+    // The deck already holds this track: the view was put away and brought
+    // back around it, and the engine never stopped. Asking again would. Where
+    // it has got to arrives with `deckState` above, and with the next tick.
+    if (held.get(DECK) === trackId) return;
+    held.set(DECK, trackId);
     anchor.current = NO_ANCHOR;
     setPosition(0);
     setDuration(0);
@@ -274,7 +295,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         // A missing file, or no audio device at all. Either way the deck has
         // nothing, and which of the two it was is the whole of what the person
         // looking at it needs.
-        if (loading.current === trackId) setError(reasonFrom(failure));
+        if (loading.current === trackId) {
+          held.set(DECK, null);
+          setError(reasonFrom(failure));
+        }
       }
     })();
   }, [trackId, emit, DECK]);
