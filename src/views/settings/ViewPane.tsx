@@ -169,6 +169,26 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           onChange={(overviewWaveform) => set({ overviewWaveform })}
         />
       </Section>
+      <Section title="Traffic Light">
+        {/* rekordbox's own reaches, from its tooltip: for a track in 2A,
+            Same Key lights 2A; Related Key 1 adds 2B; 2 adds 1A and 3A; 3
+            adds 1B and 3B. */}
+        <Select
+          label="Traffic Light"
+          value={view.trafficLight}
+          choices={[
+            { value: "same", label: "Same Key" },
+            { value: "related1", label: "Related Key 1" },
+            { value: "related2", label: "Related Key 2" },
+            { value: "related3", label: "Related Key 3" },
+          ]}
+          onChange={(trafficLight) => set({ trafficLight })}
+        />
+        <Note>
+          Rows whose key goes with the loaded track&rsquo;s are lit green in
+          the browser; the MASTER menu above the track list picks which deck.
+        </Note>
+      </Section>
     </>
   );
 }

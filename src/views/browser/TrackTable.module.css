@@ -29,6 +29,78 @@
 /* The Track Filter button: an outlined square that goes blue when the bar is
    showing, the glyph white either way. Before the search box, which keeps
    `margin-left: auto`. */
+/* The Traffic Light's MASTER menu: a 79 by 16pt box on the head's grey with
+   a blue underline, the chevron beside it, and a menu of the three decks.
+   Measured from the 2-player capture; see design/tokens `trafficMaster*`. */
+.trafficBox {
+  position: relative;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.trafficBox + .filterToggle { margin-left: 0; }
+.trafficMaster {
+  width: var(--s-traffic-master-w);
+  height: var(--s-traffic-master-h);
+  padding: 0 0 1px;
+  border: 0;
+  border-bottom: 1px solid var(--c-pad-active);
+  background: var(--c-traffic-master);
+  color: var(--c-icon-on);
+  font: inherit;
+  font-size: var(--f-size-traffic-master);
+  font-weight: 700;
+  cursor: default;
+}
+.trafficChevron {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: var(--s-traffic-master-h);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-icon-off);
+  cursor: default;
+}
+.trafficChevron > span {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid currentColor;
+}
+.trafficMenu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 1px 0;
+  border: 1px solid var(--c-menu-border);
+  background: var(--c-menu);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 55%);
+}
+.trafficItem {
+  display: flex;
+  align-items: center;
+  height: var(--s-menu-row-h);
+  padding: 0 14px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-size: var(--f-size-menu);
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+.trafficItem:hover { background: var(--c-raised); }
+.trafficTick { display: grid; place-items: center; width: 26px; flex: none; }
+.trafficTickGlyph { width: 12px; height: 8px; }
+
 .filterToggle {
   margin-left: auto;
   margin-right: 8px;
@@ -239,6 +311,11 @@
   overflow: hidden;
   border-right: 1px solid var(--c-raised);
 }
+/* The Traffic Light: a key that goes with the loaded track's, lit green with
+   the text in black, selected or not. */
+.cell[data-lit],
+.row[data-selected] .cell[data-lit] { background: var(--c-traffic-light); color: var(--c-black); }
+
 .row[data-selected] .cell,
 .row[data-selected] .attr,
 .row[data-selected] .artwork,

@@ -22,6 +22,9 @@ import { Artwork } from "@/components/Artwork";
 import { RecordIcon } from "@/components/icons";
 import type { ColumnKey, ColumnSpec } from "@/lib/columns";
 import { browseScale, formatKey } from "@/lib/preferences";
+import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
+import { TickIcon } from "@/components/icons";
+import type { TrafficLightSource } from "@/lib/session";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
@@ -211,7 +214,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onMenu, keyDisplay, previewCues, clickToEdit, tooltips,
+  onComment, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -225,6 +228,9 @@ const TrackRow = memo(function TrackRow({
   /** Preferences: a comment opens on a click rather than a double click. */
   clickToEdit: boolean;
   tooltips: boolean;
+  /** The Traffic Light: the key rows light against, and how far around it. Null lights nothing. */
+  trafficKey: string | null;
+  trafficReach: TrafficLightReach;
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   /** Load the track into the player. A double-click, as in rekordbox. */
   onOpen: (index: number) => void;
@@ -335,6 +341,21 @@ const TrackRow = memo(function TrackRow({
             </div>
           );
         }
+        if (col.key === "key") {
+          // The Traffic Light: a key that goes with the loaded track's is lit.
+          const lit = trafficKey !== null && trafficLightLit(row.key, trafficKey, trafficReach);
+          return (
+            <div
+              key={col.key}
+              className={styles.cell}
+              data-col={col.key}
+              data-lit={lit || undefined}
+              role="gridcell"
+            >
+              {formatKey(row.key, keyDisplay)}
+            </div>
+          );
+        }
         return (
           <div
             key={col.key}
@@ -342,7 +363,7 @@ const TrackRow = memo(function TrackRow({
             data-col={col.key}
             role="gridcell"
           >
-            {col.key === "key" ? formatKey(row.key, keyDisplay) : cellText(row, col.key)}
+            {cellText(row, col.key)}
           </div>
         );
       })}
@@ -432,7 +453,22 @@ export interface TrackTableProps {
   onToggleFilter?: () => void;
   /** The bar itself, drawn between the header and the column header. */
   filterBar?: React.ReactNode;
+  /**
+   * The Traffic Light: which deck the browser reads, the MASTER menu above
+   * the list, and the key of the track on it. The main browser passes these;
+   * the sub-browser has no menu and lights nothing.
+   */
+  trafficLight?: TrafficLightSource;
+  onTrafficLight?: (source: TrafficLightSource) => void;
+  trafficKey?: string | null;
 }
+
+/** The MASTER menu's rows, in rekordbox's wording [OBS]. */
+const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: string }[] = [
+  { id: "master", label: "MASTER DECK - Traffic Light", short: "MASTER" },
+  { id: "a", label: "PLAYER A - Traffic Light", short: "PLAYER A" },
+  { id: "b", label: "PLAYER B - Traffic Light", short: "PLAYER B" },
+];
 
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
@@ -441,6 +477,7 @@ export function TrackTable({
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, readOnly = false,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
+  trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
   // Analysis is reachable from the keyboard rather than only a menu, since a
   // row context menu does not exist yet.
@@ -463,6 +500,25 @@ export function TrackTable({
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   const tip = useTooltip();
+  // The MASTER menu, open or not. Closed by anything outside it, as every
+  // other menu here is.
+  const [trafficMenu, setTrafficMenu] = useState(false);
+  const trafficBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!trafficMenu) return;
+    const onDown = (event: MouseEvent) => {
+      if (!trafficBox.current?.contains(event.target as Node)) setTrafficMenu(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTrafficMenu(false);
+    };
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [trafficMenu]);
   const clickToEdit = !preferences.advanced.doubleClickToEdit;
   // Browse › FontSize and Line Space scale the measured tokens; the
   // virtualizer has to be told the same height the CSS draws.
@@ -777,6 +833,55 @@ export function TrackTable({
           */}
           {view.loading ? title : `${title} (${view.count} Tracks)`}
         </span>
+        {trafficLight && onTrafficLight ? (
+          <div ref={trafficBox} className={styles.trafficBox}>
+            <button
+              type="button"
+              className={styles.trafficMaster}
+              aria-label="Traffic Light deck"
+              aria-haspopup="menu"
+              aria-expanded={trafficMenu}
+              // Transcribed from rekordbox: "Select the target deck for
+              // Traffic Light feature."
+              title={tip("Select the target deck for Traffic Light feature.")}
+              onClick={() => setTrafficMenu((open) => !open)}
+            >
+              {TRAFFIC_SOURCES.find((s) => s.id === trafficLight)?.short ?? "MASTER"}
+            </button>
+            <button
+              type="button"
+              className={styles.trafficChevron}
+              aria-label="Choose the Traffic Light deck"
+              aria-haspopup="menu"
+              aria-expanded={trafficMenu}
+              onClick={() => setTrafficMenu((open) => !open)}
+            >
+              <span aria-hidden />
+            </button>
+            {trafficMenu ? (
+              <div className={styles.trafficMenu} role="menu" aria-label="Traffic Light deck">
+                {TRAFFIC_SOURCES.map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={source.id === trafficLight}
+                    className={styles.trafficItem}
+                    onClick={() => {
+                      onTrafficLight(source.id);
+                      setTrafficMenu(false);
+                    }}
+                  >
+                    <span className={styles.trafficTick} aria-hidden>
+                      {source.id === trafficLight ? <TickIcon className={styles.trafficTickGlyph} /> : null}
+                    </span>
+                    {source.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {onToggleFilter ? (
           <button
             type="button"
@@ -839,6 +944,8 @@ export function TrackTable({
                 previewCues={previewCueMarkers}
                 clickToEdit={clickToEdit}
                 tooltips={tooltips}
+                trafficKey={trafficKey}
+                trafficReach={preferences.view.trafficLight}
                 top={item.start - COL_HEADER_H}
                 selected={row ? selection.ids.has(row.id) : false}
                 onSelect={handleSelect}

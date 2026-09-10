@@ -23,6 +23,7 @@ import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
   DEFAULT_SUB_TREE_WIDTH, DEFAULT_SUB_WIDTH, loadSession, saveSession, SEEDED_NODES, SEEDED_ROWS,
+  type TrafficLightSource,
 } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
@@ -258,6 +259,14 @@ export function App() {
   const stickDefaults = prefs.preferences.djSystem;
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
+  /**
+   * The Traffic Light: which deck's key the browser lights rows against —
+   * the MASTER menu above the track list. The key itself is that deck's
+   * loaded track's, so it follows the master when the master moves.
+   */
+  const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
+  const trafficDeck: DeckId = trafficLight === "master" ? syncMaster : trafficLight;
+  const trafficKey = (trafficDeck === "b" ? playerTrackB : playerTrack)?.key ?? null;
   const cost = useDiagnostics(true);
   const master = useMaster();
   // Read at start so the remembered setting reaches the engine before the
@@ -868,8 +877,9 @@ export function App() {
       layout,
       subWidth,
       subTreeWidth,
+      trafficLight,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement.
@@ -1066,6 +1076,9 @@ export function App() {
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
           readOnly={readOnly}
+          trafficLight={trafficLight}
+          onTrafficLight={setTrafficLight}
+          trafficKey={trafficKey}
           onFocusedRow={setPlayerTrack}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}

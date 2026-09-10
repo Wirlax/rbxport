@@ -10,7 +10,7 @@
  * the same way: a hand-edited value, a value from a build that spelt a choice
  * differently, or nothing at all must each come back as a working set.
  */
-import { toCamelot } from "./camelot";
+import { toCamelot, type TrafficLightReach } from "./camelot";
 import type {
   KeyDisplay, MenuSlot, OverviewWaveform, WaveformColor, WaveformPosition,
 } from "@/ipc/types";
@@ -79,6 +79,8 @@ export interface ViewPreferences {
   phraseLabels: boolean;
   /** Vocal › Vocal (Full Waveform): the vocal strip under the overview. */
   vocalFull: boolean;
+  /** Traffic Light: how far around the loaded track's key the browser lights. */
+  trafficLight: TrafficLightReach;
 }
 
 export interface AnalysisPreferences {
@@ -146,6 +148,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     phraseFull: true,
     phraseLabels: true,
     vocalFull: true,
+    trafficLight: "related3",
   },
   analysis: {
     auto: true,
@@ -215,6 +218,7 @@ const RATES: readonly WaveformRate[] = ["high", "medium", "low"];
 const WAVEFORM_COLORS: readonly WaveformColor[] = ["blue", "rgb", "3band"];
 const POSITIONS: readonly WaveformPosition[] = ["center", "left"];
 const SYNC_TYPES: readonly SyncType[] = ["beat", "bpm"];
+const REACHES: readonly TrafficLightReach[] = ["same", "related1", "related2", "related3"];
 
 type Raw<T> = Partial<Record<keyof T, unknown>>;
 
@@ -246,6 +250,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       phraseFull: bool(view.phraseFull, d.view.phraseFull),
       phraseLabels: bool(view.phraseLabels, d.view.phraseLabels),
       vocalFull: bool(view.vocalFull, d.view.vocalFull),
+      trafficLight: oneOf(view.trafficLight, REACHES, d.view.trafficLight),
     },
     analysis: {
       auto: bool(analysis.auto, d.analysis.auto),

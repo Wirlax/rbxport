@@ -136,6 +136,8 @@
   --c-pref-button-bottom: #19191C; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the bottom of that gradient, (25,25,28) */
   --c-pref-button-border: #0B0B0B; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the 1pt edge around that button, (11,11,11) */
   --c-pref-key-badge: #222222; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge beside a shortcut on the Keyboard pane, (34,34,34) */
+  --c-traffic-master: #282828; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER menu's box above the track list, (40,40,40); its 1pt underline is padActive */
+  --c-traffic-light: #64FF00; /* UNMEASURED - the lit key cell in a capture pasted into chat on 2026-09-10 that is not on disk: a bright green with black text; re-sample when the capture lands in docs/screenshots */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
@@ -501,6 +503,8 @@
   --s-pref-key-list-top: 58px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the list's top at y 232 under a section top of 116 */
   --s-pref-key-badge-w: 72px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the spacebar badge x 1398..1541 */
   --s-pref-key-badge-h: 21px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the badge y 322..364 */
+  --s-traffic-master-w: 79px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box x 2894..3051 */
+  --s-traffic-master-h: 16px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box y 1046..1077, the last point of it the blue underline */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -533,6 +537,7 @@
   --f-size-pref-side: 14px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a sidebar row (View): a 20 capture px cap */
   --f-size-pref-tab: 12.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a tab (Display Type): cap top to descender 23 capture px */
   --f-size-pref-badge: 11px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge's text (spacebar): an 18 capture px x-height-to-ascender span */
+  --f-size-traffic-master: 10px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): 'MASTER' in the box, a 14 capture px cap; bold */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than

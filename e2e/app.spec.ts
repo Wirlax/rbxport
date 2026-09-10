@@ -703,6 +703,66 @@ test("Library Protection refuses edits the way a running rekordbox does", async 
   await expect(page.getByRole("contentinfo")).toContainText("Library Protection");
 });
 
+test("the Traffic Light lights the keys that go with the loaded track's", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const keys = page.locator('[role="gridcell"][data-col="key"]');
+  // Nothing loaded: nothing lit.
+  await expect(page.locator('[role="gridcell"][data-col="key"][data-lit]')).toHaveCount(0);
+
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const loaded = (await keys.first().innerText()).trim();
+  // The loaded track's own key is lit, and so are the ones around it on the wheel.
+  await expect(keys.first()).toHaveAttribute("data-lit", "true");
+  const lit = page.locator('[role="gridcell"][data-col="key"][data-lit]');
+  await expect.poll(() => lit.count()).toBeGreaterThan(1);
+  for (const text of await lit.allInnerTexts()) {
+    expect(text.trim()).not.toBe("");
+  }
+
+  // The MASTER menu picks the deck. PLAYER B holds nothing, so nothing lights.
+  const menu = page.getByRole("button", { name: "Traffic Light deck", exact: true });
+  await expect(menu).toHaveText("MASTER");
+  await menu.click();
+  await page.getByRole("menuitemradio", { name: "PLAYER B - Traffic Light" }).click();
+  await expect(menu).toHaveText("PLAYER B");
+  await expect(lit).toHaveCount(0);
+  await menu.click();
+  await page.getByRole("menuitemradio", { name: "PLAYER A - Traffic Light" }).click();
+  await expect(keys.first()).toHaveAttribute("data-lit", "true");
+  expect((await keys.first().innerText()).trim()).toBe(loaded);
+
+  // Same Key in Preferences narrows it to the one key.
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("combobox", { name: "Traffic Light" }).selectOption("same");
+  await page.keyboard.press("Escape");
+  for (const text of await lit.allInnerTexts()) {
+    expect(text.trim()).toBe(loaded);
+  }
+});
+
+test("the # column sorts a playlist by its own order, and back", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+  const first = (await titles.first().innerText()).trim();
+  const second = (await titles.nth(1).innerText()).trim();
+
+  // The order it opens in is its own, and the heading says so.
+  const head = page.getByRole("columnheader", { name: /^#/ });
+  await head.click();
+  // Reversed: what was first is now last, and the numbers still count down the list.
+  await expect(titles.first()).not.toHaveText(first);
+  await expect(titles.last()).toHaveText(first);
+  await expect(page.locator('[role="gridcell"][data-col="trackNo"]').first()).toHaveText("1");
+  await head.click();
+  await expect(titles.first()).toHaveText(first);
+  await expect(titles.nth(1)).toHaveText(second);
+});
+
 test("the Layout tab hides the Explorer and shows playlist counts", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compatibleKeys, fromCamelot, normalizeKey, toCamelot } from "./camelot";
+import {
+  compatibleKeys, fromCamelot, normalizeKey, toCamelot, trafficLightCodes, trafficLightLit,
+} from "./camelot";
 
 describe("camelot", () => {
   it("maps minor and major keys", () => {
@@ -30,3 +32,23 @@ describe("camelot", () => {
     expect(compatibleKeys("Abm")).toContain(fromCamelot("12A"));
   });
 });
+
+describe("the Traffic Light's reach", () => {
+  it("lights what rekordbox's own definition says, for a track in 2A", () => {
+    // Ebm is 2A.
+    expect(trafficLightCodes("Ebm", "same")).toEqual(["2A"]);
+    expect(trafficLightCodes("Ebm", "related1")).toEqual(["2A", "2B"]);
+    expect(trafficLightCodes("Ebm", "related2")).toEqual(["2A", "2B", "1A", "3A"]);
+    expect(trafficLightCodes("Ebm", "related3")).toEqual(["2A", "2B", "1A", "3A", "1B", "3B"]);
+  });
+
+  it("wraps around the wheel and ignores keys it does not know", () => {
+    // Abm is 1A: its neighbours are 12A and 2A.
+    expect(trafficLightCodes("Abm", "related2")).toEqual(["1A", "1B", "12A", "2A"]);
+    expect(trafficLightCodes("Unknown", "related3")).toEqual([]);
+    expect(trafficLightLit("F#", "Ebm", "related1")).toBe(true);
+    expect(trafficLightLit("Am", "Ebm", "related3")).toBe(false);
+    expect(trafficLightLit("", "Ebm", "related3")).toBe(false);
+  });
+});
+

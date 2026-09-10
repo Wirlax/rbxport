@@ -61,7 +61,14 @@ export interface Session {
   /** The sub-browser's width, and its own tree's, both before clamping. */
   subWidth: number;
   subTreeWidth: number;
+  /** Which deck the browser's Traffic Light reads: the MASTER menu above the list. */
+  trafficLight: TrafficLightSource;
 }
+
+/** MASTER DECK, PLAYER A or PLAYER B, as the menu offers them. */
+export type TrafficLightSource = "master" | "a" | "b";
+
+const TRAFFIC_LIGHT_SOURCES: readonly TrafficLightSource[] = ["master", "a", "b"];
 
 export const DEFAULT_TREE_WIDTH = 305;
 /** Measured from the 2026-09-09 capture: --s-sub-browse-w and --s-sub-tree-w. */
@@ -81,6 +88,7 @@ export const DEFAULT_SESSION: Session = {
   layout: "one",
   subWidth: DEFAULT_SUB_WIDTH,
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
+  trafficLight: "master",
 };
 
 const SORT_COLUMNS: readonly string[] = [
@@ -136,6 +144,9 @@ export function sanitiseSession(value: unknown): Session {
     layout: asLayout(raw.layout),
     subWidth: widthOrDefault(raw.subWidth, DEFAULT_SUB_WIDTH),
     subTreeWidth: widthOrDefault(raw.subTreeWidth, DEFAULT_SUB_TREE_WIDTH),
+    trafficLight: TRAFFIC_LIGHT_SOURCES.includes(raw.trafficLight as TrafficLightSource)
+      ? (raw.trafficLight as TrafficLightSource)
+      : "master",
   };
 }
 

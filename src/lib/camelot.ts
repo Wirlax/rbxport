@@ -46,3 +46,42 @@ export function compatibleKeys(key: string): string[] {
   const wrap = (x: number) => ((x - 1 + 12) % 12) + 1;
   return [`${n}${other}`, `${wrap(n - 1)}${letter}`, `${wrap(n + 1)}${letter}`].map(fromCamelot).filter(Boolean);
 }
+
+/**
+ * How far the Traffic Light reaches around the loaded track's key.
+ *
+ * rekordbox's own definition, from its Preferences tooltip [DOC]: for a
+ * loaded track in 2A —
+ *   Same Key       2A
+ *   Related Key 1  2A/2B
+ *   Related Key 2  2A/2B/1A/3A
+ *   Related Key 3  2A/2B/1A/3A/1B/3B
+ */
+export type TrafficLightReach = "same" | "related1" | "related2" | "related3";
+
+/**
+ * The Camelot codes the Traffic Light lights for a track in `key`, or none
+ * when the key is not on the wheel.
+ */
+export function trafficLightCodes(key: string, reach: TrafficLightReach): string[] {
+  const code = toCamelot(key);
+  if (!code) return [];
+  const n = Number(code.slice(0, -1));
+  const letter = code.slice(-1);
+  const other = letter === "A" ? "B" : "A";
+  const wrap = (x: number) => ((x - 1 + 12) % 12) + 1;
+  const codes = [code];
+  if (reach !== "same") codes.push(`${n}${other}`);
+  if (reach === "related2" || reach === "related3") {
+    codes.push(`${wrap(n - 1)}${letter}`, `${wrap(n + 1)}${letter}`);
+  }
+  if (reach === "related3") codes.push(`${wrap(n - 1)}${other}`, `${wrap(n + 1)}${other}`);
+  return codes;
+}
+
+/** Whether a row in `key` lights up against a loaded track in `reference`. */
+export function trafficLightLit(key: string, reference: string, reach: TrafficLightReach): boolean {
+  const code = toCamelot(key);
+  return code !== "" && trafficLightCodes(reference, reach).includes(code);
+}
+

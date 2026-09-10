@@ -26,6 +26,7 @@ describe("sanitiseSession", () => {
       layout: "two",
       subWidth: 700,
       subTreeWidth: 240,
+      trafficLight: "b",
     };
     expect(sanitiseSession(session)).toEqual(session);
   });

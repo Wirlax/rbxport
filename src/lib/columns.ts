@@ -52,7 +52,9 @@ export const MAX_COLUMN_WIDTH = 1200;
  * never been visible to measure — so they take a default and are marked below.
  */
 export const CATALOGUE: readonly ColumnSpec[] = [
-  { key: "trackNo", label: "#", width: 47, align: "right", sortable: false, fixed: true },
+  // Sortable, as rekordbox's header shows `# ↑` by default: its order is the
+  // view's own — a playlist as somebody put it — and descending reverses it.
+  { key: "trackNo", label: "#", width: 47, align: "right", sortable: true, fixed: true },
   { key: "attr", label: "Attribute", width: 67, sortable: false },
   { key: "preview", label: "Preview", width: 128, sortable: false },
   { key: "artwork", label: "Artwork", width: 80, sortable: false },
