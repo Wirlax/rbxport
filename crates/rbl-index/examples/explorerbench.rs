@@ -51,6 +51,7 @@ fn main() {
         sort: SortColumn::TrackNo,
         descending: false,
         query: String::new(),
+        filter: rbl_index::TrackFilter::default(),
     };
     for sort in [SortColumn::TrackNo, SortColumn::Title, SortColumn::Bpm] {
         let started = Instant::now();

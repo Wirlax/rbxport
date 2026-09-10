@@ -217,7 +217,7 @@ function looseRow(folder: string, name: string, position: number): RowDto {
     analysed: 0,
     dateAdded: "",
     releaseDate: "",
-    cues: "",
+    hotCues: [],
     artworkHue: 0,
     hasArtwork: false,
     fileName: name,

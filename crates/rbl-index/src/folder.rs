@@ -336,7 +336,13 @@ mod tests {
     }
 
     fn spec(sort: SortColumn, descending: bool, query: &str) -> ViewSpec {
-        ViewSpec { source: crate::TrackSource::Collection, sort, descending, query: query.to_owned() }
+        ViewSpec {
+            source: crate::TrackSource::Collection,
+            sort,
+            descending,
+            query: query.to_owned(),
+            filter: crate::TrackFilter::default(),
+        }
     }
 
     fn listed(names: &[&str]) -> Vec<(String, PathBuf)> {

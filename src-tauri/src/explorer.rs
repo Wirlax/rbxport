@@ -85,6 +85,7 @@ pub async fn open_folder(
         sort: sort_from_wire(&spec.sort),
         descending: spec.descending,
         query: spec.query.clone(),
+        filter: rbl_index::TrackFilter::default(),
     };
     blocking("open_view", move || {
         let listing = if path.is_empty() {
@@ -193,7 +194,7 @@ fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::fol
         analysed: 0,
         date_added: String::new(),
         release_date: String::new(),
-        cues: String::new(),
+        hot_cues: Vec::new(),
         artwork_hue: 0,
         has_artwork: false,
         file_name: name.to_owned(),
