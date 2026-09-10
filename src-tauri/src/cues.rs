@@ -343,7 +343,9 @@ mod tests {
         let mut f = open();
         let track = track_id(1);
         let row = f.library.row_of(&track).unwrap();
-        let letters = |f: &Fixture| rows_to_dto(&f.library, &[row], 0).remove(0).cues;
+        let letters = |f: &Fixture| {
+            rows_to_dto(&f.library, &[row], 0).remove(0).hot_cues.iter().map(|c| c.0).collect::<String>()
+        };
         assert_eq!(letters(&f), "");
 
         let d = apply(

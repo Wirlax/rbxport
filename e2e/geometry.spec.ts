@@ -209,13 +209,17 @@ test("a hot cue's badge, pad and panel chip all take the colour rekordbox draws 
     const badge = await background(`[data-testid="player-overview"] [title="Hot cue ${letter}"] b`);
     expect(drawn).toContain(badge);
     // The pad's inner square and the panel's letter chip are the same colour.
+    // The pad row and the HOT CUE list both name their slots `Hot cue A`,
+    // so each is found inside its own cluster.
     const pad = await player
+      .locator('[aria-label="Hot cues"]')
       .getByRole("button", { name: `Hot cue ${letter}`, exact: true })
       .locator("span")
       .evaluate((e) => getComputedStyle(e).backgroundColor);
     expect(pad).toBe(badge);
     const chip = await page
-      .getByRole("button", { name: new RegExp(`^${letter} `) })
+      .getByRole("complementary", { name: "Cue list" })
+      .getByRole("button", { name: `Hot cue ${letter}`, exact: true })
       .locator("span")
       .first()
       .evaluate((e) => getComputedStyle(e).backgroundColor);
