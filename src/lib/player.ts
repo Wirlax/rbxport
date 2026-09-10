@@ -324,6 +324,34 @@ export interface BeatGrid {
   numbers: Uint8Array;
 }
 
+/**
+ * The grid with each beat split into `divisions` equal steps, for a quantize
+ * beat value finer than a beat: 1/2 gives the off-beats too, 1/8 every
+ * thirty-second. Each step carries the number of the beat it belongs to. One
+ * or fewer divisions, or an empty grid, is the grid itself.
+ */
+export function subdivideGrid(grid: BeatGrid, divisions: number): BeatGrid {
+  const steps = Math.floor(divisions);
+  if (steps <= 1 || grid.times.length < 2) return grid;
+  const beats = grid.times.length;
+  const times = new Uint32Array((beats - 1) * steps + 1);
+  const numbers = new Uint8Array(times.length);
+  let at = 0;
+  for (let i = 0; i < beats - 1; i++) {
+    const from = grid.times[i] ?? 0;
+    const to = grid.times[i + 1] ?? from;
+    const number = grid.numbers[i] ?? 1;
+    for (let step = 0; step < steps; step++) {
+      times[at] = Math.round(from + ((to - from) * step) / steps);
+      numbers[at] = number;
+      at++;
+    }
+  }
+  times[at] = grid.times[beats - 1] ?? 0;
+  numbers[at] = grid.numbers[beats - 1] ?? 1;
+  return { times, numbers };
+}
+
 /** Bytes one beat takes on the wire: a little-endian `u32`, then its number. */
 const BEAT_BYTES = 5;
 

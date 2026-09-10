@@ -30,6 +30,7 @@ import {
   pressCue,
   releaseCue,
   parseBeatGrid,
+  subdivideGrid,
   windowAround,
 } from "./player";
 
@@ -582,5 +583,31 @@ describe("waveSlice", () => {
     const slice = waveSlice(0.5, 0.05, 0, 1200);
     expect(slice.first).toBe(0);
     expect(slice.last).toBe(0);
+  });
+});
+
+describe("subdivideGrid", () => {
+  const grid = {
+    times: Uint32Array.from([0, 500, 1000, 1500]),
+    numbers: Uint8Array.from([1, 2, 3, 4]),
+  };
+
+  it("splits every beat into equal steps that keep their beat's number", () => {
+    const halves = subdivideGrid(grid, 2);
+    expect(Array.from(halves.times)).toEqual([0, 250, 500, 750, 1000, 1250, 1500]);
+    expect(Array.from(halves.numbers)).toEqual([1, 1, 2, 2, 3, 3, 4]);
+    const eighths = subdivideGrid(grid, 8);
+    expect(eighths.times.length).toBe(3 * 8 + 1);
+    expect(eighths.times[1]).toBe(63);
+    // The quantized cue snaps to a step, not to a beat.
+    expect(nearestBeatMs(halves, 260)).toBe(250);
+    expect(nearestBeatMs(grid, 260)).toBe(500);
+  });
+
+  it("leaves a whole-beat value, an empty grid and one beat alone", () => {
+    expect(subdivideGrid(grid, 1)).toBe(grid);
+    expect(subdivideGrid(NO_BEATS, 4)).toBe(NO_BEATS);
+    const one = { times: Uint32Array.from([100]), numbers: Uint8Array.from([1]) };
+    expect(subdivideGrid(one, 4)).toBe(one);
   });
 });
