@@ -124,6 +124,12 @@
   --c-scroll-track: #000000; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: the 12pt column each thumb runs in is black, x 3638..3661 beside the list and x 742..765 beside the tree, with no end buttons */
   --c-search-glyph: #5C5C5C; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the magnifier in the search field peaks at (97,97,97) on a 1pt stroke; the solid triangle beside it is (84,84,84). Between the two, since the stroke's peak is under its true colour */
   --c-status-text: #969696; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.26 PM: '1 List, 952.2 MB' at the bottom right of the window, (150,150,150) across its stems */
+  --c-context-menu: #1E1E1E; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the panel interior, a flat (30,30,30) in both. The scale: the tree's Latin row under the one menu and the selected track row above the other both read 50px, the 25pt row */
+  --c-context-menu-border: #979797; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the 2px hairline round the panel, (151,151,151), square corners */
+  --c-context-menu-inner: #272727; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the 1px line at 2x just inside the hairline, (39,39,39) on all four sides */
+  --c-context-menu-text: #FFFFFF; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): an enabled entry's ink peaks at (255,255,255); so does its arrow */
+  --c-context-menu-text-dim: #616161; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): a greyed entry's ink peaks at (97,97,97), its arrow at (98,98,98) */
+  --c-context-menu-separator: #191919; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the 2px rule between groups, (25,25,25), a shade darker than the panel */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
@@ -364,6 +370,15 @@
   --s-search-glyph-top: 5px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the magnifier's ink starts at y 764 in a field that starts at 754, 10px */
   --s-search-glyph-size: 13px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the magnifier's ink x 2118..2142 and y 764..789, 25 by 26px, handle included */
   --s-search-text-left: 37px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the placeholder's 'S' starts at x 2175 in a field that starts at 2100, 75px, with the search-mode triangle (x 2154..2165, absent here) between it and the magnifier */
+  --s-context-menu-text-inset: 25px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): 'Analyze Track' starts 52px in from the panel's outer edge at 2x, 25pt past the 1pt hairline */
+  --s-context-menu-arrow-w: 6px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the submenu arrow is 12px wide at 2x on every row that has one */
+  --s-context-menu-arrow-h: 8px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the submenu arrow is 16px tall at 2x, centred on the row */
+  --s-context-menu-arrow-inset: 17px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the arrow's right edge is 34px at 2x from the inside of the hairline in both menus */
+  --s-context-menu-arrow-gap: 9px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the longest label ends 18px (tree) and 20px (track) at 2x before the arrow column; the panel is as wide as that label plus this gap, the arrow and its inset */
+  --s-context-menu-sep-inset-l: 4px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the rule starts 8px at 2x inside the hairline */
+  --s-context-menu-sep-inset-r: 16px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the rule ends 32px at 2x inside the hairline, 1pt past the arrow's right edge */
+  --s-context-menu-sep-gap: 5px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): a row and its rule are 72px at 2x, 50 for the row and 22 for the 2px rule with 10px above and below */
+  --s-context-menu-pad: 1px; /* docs/screenshots context-menu-tree@2x / context-menu-track@2x (rekordbox 7.2.11, 2x): the first row starts 2px at 2x inside the hairline and the last ends 2px above it; the inner line is drawn in that point */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
