@@ -77,6 +77,7 @@
   --c-cue-point: #F1A84C; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the triangle under the overview marking the cue point, (241,168,76) */
   --c-simple-well: #0F0F0F; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the empty sleeve's ground and the rating box's field, both (15,15,15) */
   --c-simple-disc: #1E1E1E; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the record drawn on the empty sleeve, (30,30,30) with a (15,15,15) hole */
+  --c-rail-box: #606060; /* capture 2026-09-09 9.09.26 PM at 2x: the outline of each box in the right-hand icon column reads (96,96,96) across its stroke */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -96,10 +97,10 @@
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
   --s-tree-gutter-w: 5px; /* narrowed by request from the 7pt the capture measures — the tree ends at 282pt, its scrollbar runs to 292 and the track list starts at 299 */
   --s-rail-w: 36px;
-  --s-right-rail-w: 24px;
+  --s-right-rail-w: 28px; /* capture 2026-09-09 9.09.26 PM at 2x: the icon column right of the browser runs x 3654..3709 of a window whose content ends at 3711, 56px */
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
   --s-info-w: 557px; /* browseSetting.xml BrowseLayout ListInfo w=557 */
-  --s-sub-browse-w: 1107px; /* browseSetting.xml BrowseLayout SubBrowse w=1107 */
+  --s-sub-browse-w: 878px; /* capture 2026-09-09 9.09.26 PM at 2x: the sub-browser runs x 1898..3653 of a 1798pt window, 1756px, rail to list edge. browseSetting.xml recorded SubBrowse w=1107 for a different window; the capture is what rekordbox drew */
   --s-player-h: 279px; /* measured from a 2x capture of rekordbox 7.2.11 running; player spans y 56..335pt */
   --s-player-gutter-h: 3px; /* capture: the pad bar ends at 335pt and the browser starts at 338pt */
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
@@ -187,6 +188,11 @@
   --s-player-simple-star-h: 10px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): a star spans y 220..240; five of them on a 16pt pitch */
   --s-player-simple-play-glyph: 8px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the triangle in the PLAY ring is 8pt square, x 164..180, y 240..256, smaller than the full deck draws it */
   --s-player-simple-star-pitch: 16px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the five stars' tips at x 3341, 3373, 3405, 3437, 3469 */
+  --s-sub-tree-w: 298px; /* capture 2026-09-09 9.09.26 PM at 2x: the sub-browser's rail and tree run x 1898..2493, 596px, against the main tree's 626 */
+  --s-right-rail-button: 18px; /* capture 2026-09-09 9.09.26 PM at 2x: each outlined box in the right-hand icon column is 36px square, y 1270..1305 for the first */
+  --s-right-rail-pitch: 34px; /* capture 2026-09-09 9.09.26 PM at 2x: the boxes start at y 1270, 1338, 1406, 1474, 1540 — 68px apart */
+  --s-right-rail-inset: 7px; /* capture 2026-09-09 9.09.26 PM at 2x: the boxes start at x 3668 in a column that starts at 3654, 14px in; 6px is left on the right */
+  --s-right-rail-top: 259px; /* capture 2026-09-09 9.09.26 PM at 2x: the first box starts at y 1270 under a browser that starts at 752, 518px down. One capture, so whether that is a fixed offset or a proportion of the height is not known */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

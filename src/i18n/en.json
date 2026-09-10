@@ -96,5 +96,18 @@
     "Full Browser": "Full Browser",
     "Sub-Browser Window": "Sub-Browser Window",
     "Tree View": "Tree View"
+  },
+  "rail": {
+    "$comment": "The icon column at the right of the browser, top to bottom, with the tooltips german.lang gives them.",
+    "My Tag": "My Tag",
+    "Display My Tag configuration window.": "Display My Tag configuration window.",
+    "Related Tracks": "Related Tracks",
+    "Display related track list window.": "Display related track list window.",
+    "Track Suggestion": "Track Suggestion",
+    "Display Track Suggestion window.": "Display Track Suggestion window.",
+    "Information": "Information",
+    "Display information window.": "Display information window.",
+    "Sub-Browser Window": "Sub-Browser Window",
+    "Display sub-browser window.": "Display sub-browser window."
   }
 }

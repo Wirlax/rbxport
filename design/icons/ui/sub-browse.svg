@@ -1,0 +1,9 @@
+<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    The sub-browser: a window with its left half filled, the way the right-hand
+    icon column draws it. Measured from the 2026-09-09 capture at 2x: the frame
+    is 24x20px with a 2px stroke and the solid part is 11px of it.
+  -->
+  <rect x="3" y="4" width="6" height="10" fill="currentColor"/>
+  <rect x="3.5" y="4.5" width="11" height="9" fill="none" stroke="currentColor" stroke-width="1"/>
+</svg>
