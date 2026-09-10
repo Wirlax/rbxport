@@ -214,9 +214,12 @@ pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter 
 /// painted in so a later slot covers an earlier one where two share a
 /// position.
 ///
-/// `[ASSUME]` from `player-1p-hotcue@1x.png`: "Love To Give" carries D and H
-/// one millisecond apart and the capture shows H, the later slot, on top. The
-/// index keeps cues in position order, so this is a sort of at most sixteen.
+/// `[OBS]` from `player-1p-hotcue@1x.png`: "Love To Give" carries D at
+/// 162486 ms (index 21, green) and H at 162485 ms (index 33, yellow), and the
+/// capture shows yellow there. Position order would have painted D last and
+/// shown green; both cues were created 2025-10-15, a year before the capture,
+/// so D was not added afterwards. The index keeps cues in position order, so
+/// this is a sort of at most sixteen.
 fn hot_cues_in_slot_order(library: &Library, row: rbl_index::Row) -> Vec<RowCueDto> {
     let mut hot: Vec<(u8, RowCueDto)> = library
         .cues_of(row)
