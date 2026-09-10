@@ -1,13 +1,15 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal. */
 
-/* The column runs the full height of the browser row. The boxes start a
-   measured way down it — a spacer row that takes the measured height when
-   there is room and less when there is not, so a short window brings the
-   buttons up rather than hiding them — and sit in from the left edge by the
-   measured inset (7pt on the left, 3 on the right — not centred). */
+/* The column runs the full height of the browser row, 24pt wide, with the
+   18pt boxes centred in it (3pt either side). The boxes start a measured way
+   down it — a spacer row that takes the measured height when there is room
+   and less when there is not, so a short window brings the buttons up rather
+   than hiding them. The spacer is the Information box's own offset, 361pt:
+   rekordbox draws three more boxes above it, and with those left out the two
+   that remain stay put rather than climbing into the gap. */
 .rail {
   display: grid;
-  grid-template-rows: minmax(0, var(--s-right-rail-top)) auto 1fr;
+  grid-template-rows: minmax(0, var(--s-right-rail-info-top)) auto 1fr;
   width: var(--s-right-rail-w);
   padding-left: var(--s-right-rail-inset);
   background: var(--c-panel);
@@ -15,7 +17,7 @@
   overflow: hidden;
 }
 
-/* The five boxes, on the measured pitch. */
+/* The boxes, on the measured pitch. */
 .group {
   grid-row: 2;
   display: flex;
@@ -37,17 +39,21 @@
   color: var(--c-icon-on);
   cursor: default;
 }
-.button:hover:not(:disabled) { border-color: var(--c-icon-off); }
-/* Lit: the box fills with the accent, the outline turns white, and a further
-   point of accent surrounds it — the 20pt box the capture draws around the
-   open sub-browser's 18. */
+.button:hover { border-color: var(--c-icon-off); }
+/* Lit: the outline turns white over a blue fill that is not the box's own
+   square. The capture paints it a point above and below the box, two points
+   to its left, and clear through to the column's right edge — a 23 by 20
+   band behind an 18pt box. Two box-shadows of the fill colour, each spread
+   by the vertical padding and shifted sideways, add up to that band; a
+   shadow paints under the border, so the white outline stays visible. */
 .button[aria-pressed="true"] {
-  background: var(--c-accent);
+  --lit-right: calc(var(--s-right-rail-w) - var(--s-right-rail-inset) - var(--s-right-rail-button));
   border-color: var(--c-icon-on);
-  box-shadow: 0 0 0 1px var(--c-accent);
+  background: var(--c-rail-lit);
+  box-shadow:
+    calc(-1 * (var(--s-right-rail-lit-pad-left) - var(--s-right-rail-lit-pad-y))) 0 0 var(--s-right-rail-lit-pad-y) var(--c-rail-lit),
+    calc(var(--lit-right) - var(--s-right-rail-lit-pad-y)) 0 0 var(--s-right-rail-lit-pad-y) var(--c-rail-lit);
 }
-/* Drawn, not offered: the panel behind it does not exist here. */
-.button:disabled { opacity: .45; }
 .button:focus-visible { outline: 1px solid var(--c-accent); outline-offset: 1px; }
 
 /* The glyphs are drawn on the 18pt box, border included, so the icon is the
