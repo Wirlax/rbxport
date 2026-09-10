@@ -37,7 +37,28 @@ export type Action =
   | "memoryCue"
   | "previousMemoryCue"
   | "nextMemoryCue"
-  | "deleteMemoryCue";
+  | "deleteMemoryCue"
+  // The hot cue pads: the Export preset binds `1`, `2` and `3` to `Set Hot
+  // Cue A` to `C` and `command + 1`-`3` to `Clear Hot Cue A` to `C`, and
+  // nothing to D onwards.
+  | "hotCueA"
+  | "hotCueB"
+  | "hotCueC"
+  | "clearHotCueA"
+  | "clearHotCueB"
+  | "clearHotCueC";
+
+/**
+ * The pad a hot cue action names, and whether it clears rather than sets.
+ * `null` for any other action.
+ */
+export function hotCuePad(action: Action): { letter: string; clear: boolean } | null {
+  const set = /^hotCue([A-C])$/.exec(action);
+  if (set) return { letter: set[1] ?? "", clear: false };
+  const clear = /^clearHotCue([A-C])$/.exec(action);
+  if (clear) return { letter: clear[1] ?? "", clear: true };
+  return null;
+}
 
 /** The parts of a keyboard event the map reads. */
 export interface KeyChord {
@@ -78,6 +99,12 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
         return "focusSearch";
       case "a":
         return "selectAll";
+      case "1":
+        return "clearHotCueA";
+      case "2":
+        return "clearHotCueB";
+      case "3":
+        return "clearHotCueC";
       default:
         break;
     }
@@ -116,6 +143,12 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
         return "nextMemoryCue";
       case "x":
         return "deleteMemoryCue";
+      case "1":
+        return "hotCueA";
+      case "2":
+        return "hotCueB";
+      case "3":
+        return "hotCueC";
       default:
         break;
     }

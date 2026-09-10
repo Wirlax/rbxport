@@ -1,11 +1,12 @@
 /**
- * Memory cue navigation, as pure functions over a track's cue list.
+ * Memory and hot cue lookups, as pure functions over a track's cue list.
  *
  * The deck's MEMORY cluster is three buttons and a key each — `B` calls the
  * memory cue before the playhead, `N` the one after, `X` deletes the one it
  * is standing on, `M` stores the cue point as one — all from rekordbox's own
  * Export key map. What "before", "after" and "standing on" mean is decided
- * here, where it can be tested without a deck.
+ * here, where it can be tested without a deck. The hot cue pads are simpler:
+ * a slot is a letter, and a letter is set or it is not.
  */
 import type { Cue } from "@/ipc/types";
 
@@ -65,4 +66,38 @@ export function memoryCueAt(cues: readonly Cue[], positionMs: number): Cue | nul
     if (!best || distance < Math.abs(best.positionMs - positionMs)) best = cue;
   }
   return best;
+}
+
+/**
+ * The hot cue in a slot, or `null` when the pad is empty.
+ *
+ * A slot holds one cue. The writer does not stop a second row landing in the
+ * same `Kind`, and the pads never ask it to — an occupied pad calls its cue
+ * rather than setting over it — but a library is not ours alone, so if a slot
+ * ever does hold two the earlier one is the pad's, as it is the earlier one
+ * the list would have shown first.
+ */
+export function hotCue(cues: readonly Cue[], letter: string): Cue | null {
+  let found: Cue | null = null;
+  for (const cue of cues) {
+    if (cue.memory || cue.letter !== letter) continue;
+    if (!found || cue.positionMs < found.positionMs) found = cue;
+  }
+  return found;
+}
+
+/**
+ * The letters of a track's hot cues, in letter order: `"ABCD"`.
+ *
+ * The same string the backend puts in a browser row's `cues`, built the same
+ * way — letter order, each once — so a row patched from a deck's cue list
+ * reads exactly as one fetched afresh would.
+ */
+export function hotLetters(cues: readonly Cue[]): string {
+  const letters: string[] = [];
+  for (const cue of cues) {
+    if (cue.memory || cue.letter === "" || letters.includes(cue.letter)) continue;
+    letters.push(cue.letter);
+  }
+  return letters.sort().join("");
 }

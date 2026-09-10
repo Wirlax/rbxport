@@ -51,13 +51,14 @@ import {
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
 import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
-import { actionFor, detectPlatform, dispatch } from "@/lib/shortcuts";
+import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import { useTrackCues } from "./useTrackCues";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
+import { useHotCues } from "./useHotCues";
 import styles from "./Player.module.css";
 
 export interface PlayerProps {
@@ -341,6 +342,12 @@ const WAVE_INSET = { top: 11, bottom: 2 };
 
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+
+/**
+ * The key that sets each pad, for its tooltip: the Export preset binds `1`,
+ * `2` and `3` to `Set Hot Cue A` to `C` and nothing to the rest.
+ */
+const HOT_CUE_KEYS: Partial<Record<(typeof PADS)[number], string>> = { A: "1", B: "2", C: "3" };
 
 /**
  * What GRID puts in the pad row, read off `docs/screenshots`.
@@ -693,6 +700,10 @@ export const Player = memo(function Player({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, cuePoint, setCuePoint, readOnly, onError,
   });
+  const hot = useHotCues({
+    trackId: playback.idle ? null : track?.id ?? null,
+    cues, positionSeconds, seek, quantiseTo: quantize ? grid : null, readOnly, onError,
+  });
 
   /*
    * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
@@ -759,8 +770,17 @@ export const Player = memo(function Player({
         case "deleteMemoryCue":
           if (!event.repeat) memory.deleteAtHead();
           break;
-        default:
+        default: {
+          // `1`-`3` are the first three pads and `command + 1`-`3` their
+          // clears; a repeat on a held key is one press, as with M and X.
+          const pad = hotCuePad(action);
+          if (!pad || event.repeat) break;
+          // Command with a digit is a tab switch in a browser; not here.
+          event.preventDefault();
+          if (pad.clear) hot.clear(pad.letter);
+          else hot.press(pad.letter);
           break;
+        }
       }
     };
     /**
@@ -789,7 +809,7 @@ export const Player = memo(function Player({
       globalThis.removeEventListener("keyup", onKeyUp);
       globalThis.removeEventListener("blur", onBlur);
     };
-  }, [armed, jump, platform, playback, holdCue, dropCue, memory]);
+  }, [armed, jump, platform, playback, holdCue, dropCue, memory, hot]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding
@@ -1322,9 +1342,14 @@ export const Player = memo(function Player({
             </div>
           ) : (
           <div className={styles.padCluster}>
+            {/* A set pad calls its cue; an empty one sets `Hot Cue <letter>`
+                at the playhead — `Set Hot Cue A` in german.lang, on `1`-`3`
+                for the first three pads. An empty pad that cannot be set is
+                disabled with the reason the MEMORY cluster gives. */}
             <div className={styles.hotCues} aria-label="Hot cues">
               {PADS.map((letter) => {
-                const cue = cues.find((c) => !c.memory && c.letter === letter);
+                const cue = hot.at(letter);
+                const key = HOT_CUE_KEYS[letter];
                 return (
                   <button
                     key={letter}
@@ -1333,10 +1358,12 @@ export const Player = memo(function Player({
                     data-set={cue ? "" : undefined}
                     style={cueStyle(undefined, cue?.colour)}
                     aria-label={`Hot cue ${letter}`}
-                    aria-pressed={cue !== undefined}
-                    onClick={() => {
-                      if (cue) playback.seek(cue.positionMs / 1000);
-                    }}
+                    aria-pressed={cue !== null}
+                    title={cue
+                      ? undefined
+                      : readOnly ? READ_ONLY_REASON : `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`}
+                    disabled={!cue && !hot.canEdit}
+                    onClick={() => hot.press(letter)}
                   >
                     <span className={styles.padInner}>{letter}</span>
                   </button>
@@ -1398,10 +1425,16 @@ export const Player = memo(function Player({
               <button type="button" className={styles.chip} aria-pressed={false}>MA</button>
             </div>
 
-            <div className={styles.page} aria-label="Pad page">
-              <button type="button" className={styles.step} aria-label="Previous page" disabled>‹</button>
+            {/* Not a pad page. The capture's `‹ 2 ›` sits beside AU/MA,
+                which german.lang describes as "Change Auto Beat Loop/Manual
+                Loop display", and the arrows as "Switch the page of beat
+                length": it is the auto beat loop's length, in beats. The
+                pads are A to H whatever it reads. [ASSUME] Loops are not
+                built, so it is drawn and inert. */}
+            <div className={styles.page} aria-label="Beat loop length">
+              <button type="button" className={styles.step} aria-label="Shorter loop" disabled>‹</button>
               <span className={styles.pageNumber}>2</span>
-              <button type="button" className={styles.step} aria-label="Next page" disabled>›</button>
+              <button type="button" className={styles.step} aria-label="Longer loop" disabled>›</button>
             </div>
           </div>
           )}
@@ -1499,18 +1532,28 @@ export const Player = memo(function Player({
           </div>
         ) : panel === "hotCue" ? (
           /* Eight slots, always: an empty one is a slot you can fill, and
-             hiding it makes the list read as a shorter track. */
+             hiding it makes the list read as a shorter track. A row rather
+             than a button, as the memory list's are, because the ✕ inside a
+             set row is one: the row calls the cue, the ✕ clears it. */
           <div className={styles.cueList}>
             {PADS.map((letter) => {
-              const cue = cues.find((c) => !c.memory && c.letter === letter);
+              const cue = hot.at(letter);
               return (
-                <button
+                <div
                   key={letter}
-                  type="button"
+                  role="button"
+                  tabIndex={cue ? 0 : -1}
                   className={styles.cueRow}
+                  aria-label={`Hot cue ${letter}`}
+                  aria-disabled={cue ? undefined : true}
                   data-empty={cue ? undefined : ""}
-                  disabled={!cue}
-                  onClick={() => cue && playback.seek(cue.positionMs / 1000)}
+                  onClick={() => hot.press(letter)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      hot.press(letter);
+                    }
+                  }}
                 >
                   <span
                     className={styles.cueChip}
@@ -1523,10 +1566,24 @@ export const Player = memo(function Player({
                     <>
                       <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
                       <span className={styles.cueName}>CUE(Auto)</span>
-                      <span className={styles.cueDelete} aria-hidden>✕</span>
+                      <button
+                        type="button"
+                        className={styles.cueDelete}
+                        aria-label={`Clear hot cue ${letter}`}
+                        title={readOnly ? READ_ONLY_REASON : `Clear Hot Cue ${letter}`}
+                        disabled={!hot.canEdit || cue.id === ""}
+                        onClick={(event) => {
+                          // The row underneath calls the cue; a clear is not
+                          // also a jump.
+                          event.stopPropagation();
+                          hot.clear(letter);
+                        }}
+                      >
+                        ✕
+                      </button>
                     </>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </div>

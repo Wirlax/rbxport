@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { actionFor, dispatch, isTyping, type Platform } from "./shortcuts";
+import { actionFor, dispatch, hotCuePad, isTyping, type Platform } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
 const WIN: Platform = { mac: false };
@@ -124,6 +124,24 @@ describe("rekordbox's own Export key map", () => {
     expect(actionFor({ key: "x", metaKey: true }, mac)).not.toBe("deleteMemoryCue");
     expect(actionFor({ key: "m", metaKey: true }, mac)).not.toBe("memoryCue");
     expect(dispatch({ key: "x" }, mac, { tagName: "INPUT" })).toBeNull();
+  });
+
+  it("gives the first three pads 1, 2 and 3, and their clears the same with command", () => {
+    // `Set Hot Cue A`-`C` on `1`-`3`, `Clear Hot Cue A`-`C` on `command + 1`-`3`.
+    // The preset binds nothing past C, so 4 stays free.
+    expect(actionFor({ key: "1" }, mac)).toBe("hotCueA");
+    expect(actionFor({ key: "2" }, mac)).toBe("hotCueB");
+    expect(actionFor({ key: "3" }, mac)).toBe("hotCueC");
+    expect(actionFor({ key: "1", metaKey: true }, mac)).toBe("clearHotCueA");
+    expect(actionFor({ key: "3", metaKey: true }, mac)).toBe("clearHotCueC");
+    expect(actionFor({ key: "3", ctrlKey: true }, { mac: false })).toBe("clearHotCueC");
+    expect(actionFor({ key: "4" }, mac)).toBeNull();
+    expect(actionFor({ key: "4", metaKey: true }, mac)).toBeNull();
+    // Typing a digit into the search box is typing.
+    expect(dispatch({ key: "1" }, mac, { tagName: "INPUT" })).toBeNull();
+    expect(hotCuePad("hotCueB")).toEqual({ letter: "B", clear: false });
+    expect(hotCuePad("clearHotCueC")).toEqual({ letter: "C", clear: true });
+    expect(hotCuePad("cue")).toBeNull();
   });
 
   it("puts the three cue lists on F10, F11 and F12", () => {

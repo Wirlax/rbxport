@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { Cue } from "@/ipc/types";
-import { MEMORY_TOLERANCE_MS, memoryCueAt, nextMemoryCue, previousMemoryCue } from "./cues";
+import {
+  MEMORY_TOLERANCE_MS, hotCue, hotLetters, memoryCueAt, nextMemoryCue, previousMemoryCue,
+} from "./cues";
 
 const memory = (id: string, positionMs: number): Cue => ({
   id, positionMs, outMs: 0, letter: "", memory: true, colour: null,
@@ -77,5 +79,36 @@ describe("memoryCueAt", () => {
     const close = [memory("x", 1_000), memory("y", 1_010)];
     expect(memoryCueAt(close, 1_008)?.id).toBe("y");
     expect(memoryCueAt(close, 1_003)?.id).toBe("x");
+  });
+});
+
+describe("hotCue", () => {
+  it("is the cue in the slot, or null for an empty pad", () => {
+    expect(hotCue(cues, "A")?.id).toBe("a");
+    expect(hotCue(cues, "B")?.id).toBe("b");
+    expect(hotCue(cues, "C")).toBeNull();
+    expect(hotCue([], "A")).toBeNull();
+  });
+
+  it("never reads a memory cue as a slot", () => {
+    expect(hotCue([memory("m", 1)], "")).toBeNull();
+  });
+
+  it("takes the earlier of two rows in one slot", () => {
+    const doubled = [hot("late", "A", 9_000), hot("early", "A", 2_000)];
+    expect(hotCue(doubled, "A")?.id).toBe("early");
+  });
+});
+
+describe("hotLetters", () => {
+  it("lists the letters in letter order, whatever order the cues sit in", () => {
+    expect(hotLetters(cues)).toBe("AB");
+    expect(hotLetters([hot("d", "D", 1), memory("m", 2), hot("a", "A", 3)])).toBe("AD");
+  });
+
+  it("is empty with no hot cues, and lists a doubled slot once", () => {
+    expect(hotLetters([])).toBe("");
+    expect(hotLetters([memory("m", 1)])).toBe("");
+    expect(hotLetters([hot("x", "A", 1), hot("y", "A", 2)])).toBe("A");
   });
 });

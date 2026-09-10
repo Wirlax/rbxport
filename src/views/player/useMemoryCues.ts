@@ -8,19 +8,18 @@
  * removes the one the playhead is standing on. The list beside the deck has
  * a ✕ per row for the rest.
  *
- * Every write goes through the backend's cue commands and nothing is shown
- * ahead of it: the backend re-reads the track and says so, `useTrackCues`
- * refetches, and the markers and the list follow from the same array. A cue
- * write is one indexed row, so there is no reload to wait through.
+ * Every write goes through `useCueWriter`, which the hot cue pads share:
+ * nothing is shown ahead of the backend, which re-reads the track and says
+ * so, `useTrackCues` refetches, and the markers and the list follow from the
+ * same array.
  */
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 
 import type { Cue } from "@/ipc/types";
-import { getBackend } from "@/ipc/client";
 import { memoryCueAt, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
+import { useCueWriter } from "./useCueWriter";
 
-/** What the interface says when the library cannot be written to. */
-export const READ_ONLY_REASON = "rekordbox is running, so the library is open read-only.";
+export { READ_ONLY_REASON } from "./useCueWriter";
 
 export interface MemoryCueDeck {
   /** The loaded track's id, or `null` when the deck is empty. */
@@ -52,43 +51,10 @@ export interface MemoryCueActions {
   remove: (cue: Cue) => void;
 }
 
-function describe(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "That cue could not be saved.";
-}
-
 export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
   const { trackId, cues, positionSeconds, seek, cuePoint, setCuePoint, readOnly, onError } = deck;
   const canEdit = trackId !== null && !readOnly;
-  /**
-   * One write at a time. A held key repeats thirty times a second, and each
-   * repeat used to be another cue at the same point until the first came
-   * back; the guard drops everything after the first press.
-   */
-  const inFlight = useRef(false);
-
-  const write = useCallback(
-    (action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<unknown>) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      void (async () => {
-        try {
-          const backend = await getBackend();
-          await action(backend.edits);
-          onError?.(null);
-        } catch (error) {
-          onError?.(describe(error));
-        } finally {
-          inFlight.current = false;
-        }
-      })();
-    },
-    [onError],
-  );
+  const write = useCueWriter(onError);
 
   const store = useCallback(() => {
     if (!canEdit || trackId === null) return;
