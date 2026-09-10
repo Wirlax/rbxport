@@ -32,17 +32,25 @@ pub fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<()> {
         let _ = window.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(
-        &app,
-        WINDOW,
-        WebviewUrl::App(format!("index.html#preferences/{pane}").into()),
-    )
-    .title("Preferences")
-    .inner_size(WIDTH, HEIGHT)
-    .min_inner_size(WIDTH, 480.0)
-    .resizable(true)
-    .accept_first_mouse(true)
-    .build()
-    .map(|_| ())
-    .map_err(|e| AppError::new(ErrorKind::Internal, format!("the Preferences window could not open: {e}")))
+    // The page, then the pane. The pane used to ride in the URL as
+    // `index.html#preferences/<pane>`, which opened fine on macOS and a
+    // blank white window on Windows — the `#` inside an `App` path does
+    // not survive the `http://tauri.localhost` route there, and nothing
+    // loads at all (0.5.1, verified on chris-win11). Setting the hash from
+    // an initialization script runs before the page's own scripts on every
+    // platform and puts no fragment in a path.
+    WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::App("index.html".into()))
+        .initialization_script(format!(
+            "if (!location.hash) location.hash = '#preferences/{pane}';"
+        ))
+        .title("Preferences")
+        .inner_size(WIDTH, HEIGHT)
+        .min_inner_size(WIDTH, 480.0)
+        .resizable(true)
+        .accept_first_mouse(true)
+        .build()
+        .map(|_| ())
+        .map_err(|e| {
+            AppError::new(ErrorKind::Internal, format!("the Preferences window could not open: {e}"))
+        })
 }
