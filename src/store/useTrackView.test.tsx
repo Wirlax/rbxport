@@ -81,6 +81,9 @@ function makeBackend(): Backend {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);
     },
+    // The hook also listens for cue edits, to patch a cached row's letters
+    // in place. Nothing here edits a cue, so the subscription is inert.
+    onCuesChanged: () => () => {},
   } as unknown as Backend;
 }
 
