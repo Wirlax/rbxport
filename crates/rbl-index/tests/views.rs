@@ -27,7 +27,7 @@ fn sample() -> Vec<TestTrack> {
 }
 
 fn spec(sort: SortColumn, descending: bool, query: &str) -> ViewSpec {
-    ViewSpec { source: TrackSource::Collection, sort, descending, query: query.to_owned() }
+    ViewSpec { source: TrackSource::Collection, sort, descending, query: query.to_owned(), filter: Default::default() }
 }
 
 #[test]
@@ -128,6 +128,7 @@ fn a_playlist_view_holds_only_its_own_rows() {
         sort: SortColumn::Title,
         descending: false,
         query: String::new(),
+        filter: Default::default(),
     });
     let titles: Vec<&str> = view.rows.iter().map(|&r| lib.title.get(r as usize)).collect();
     assert_eq!(titles, ["Cherry (Extended Mix)", "Ébano", "Zebra"]);
@@ -142,6 +143,7 @@ fn searching_within_a_playlist_stays_within_it() {
         sort: SortColumn::Title,
         descending: false,
         query: "artbat".to_owned(),
+        filter: Default::default(),
     });
     // Row 3 ("Banana" / "artbat") also matches, but is not in this playlist.
     assert_eq!(view.len(), 1);
@@ -155,6 +157,7 @@ fn an_unknown_playlist_index_yields_an_empty_view_rather_than_panicking() {
         sort: SortColumn::Title,
         descending: false,
         query: String::new(),
+        filter: Default::default(),
     });
     assert!(view.is_empty());
 }
@@ -244,6 +247,7 @@ fn a_playlist_keeps_its_own_order_when_sorting_is_off() {
         sort: SortColumn::TrackNo,
         descending: false,
         query: String::new(),
+        filter: Default::default(),
     };
     assert_eq!(library.open_view(&natural).rows, members, "the membership order, untouched");
 

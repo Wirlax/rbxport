@@ -349,6 +349,7 @@ pub fn run() {
             cues::add_loop,
             cues::move_cue,
             cues::delete_cue,
+            commands::filter_values,
         ])
         .build(tauri::generate_context!());
 

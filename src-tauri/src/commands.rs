@@ -17,6 +17,7 @@ use crate::dto::{
     AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
     ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
+    CountedDto, FilterValuesDto, TagCategoryDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -1366,6 +1367,41 @@ pub async fn set_track_color(
 ) -> AppResult<u32> {
     edit(app, state, "set_track_color", Touched::Tracks, move |w| {
         w.set_color(&track, color.as_deref()).map(|_| ())
+    })
+    .await
+}
+
+/// The BPMs and keys the track filter bar can offer for a list.
+///
+/// Counted over the source and query alone — never over the filter's own
+/// result, or a picked value would hide the others. One pass over the rows
+/// in Rust; the frontend never scans a row array for this.
+#[tauri::command]
+pub async fn filter_values(
+    state: State<'_, Arc<AppState>>,
+    spec: ViewSpecDto,
+) -> AppResult<FilterValuesDto> {
+    let library = state.library()?;
+    let parsed = spec_from_wire(&library, &spec);
+    blocking("filter_values", move || {
+        let values = library.filter_values(&parsed);
+        Ok(FilterValuesDto {
+            bpms: values
+                .bpms
+                .into_iter()
+                .map(|c| CountedDto { value: c.value, count: c.count })
+                .collect(),
+            keys: values
+                .keys
+                .into_iter()
+                .map(|c| CountedDto { value: c.value, count: c.count })
+                .collect(),
+            tags: values
+                .tags
+                .into_iter()
+                .map(|c| TagCategoryDto { name: c.name, tags: c.tags })
+                .collect(),
+        })
     })
     .await
 }

@@ -32,11 +32,11 @@
 use std::path::Path;
 
 use crate::strings::{Interner, StrColumn};
-use crate::{Library, Playlists, Row};
+use crate::{Library, Playlists, Row, TagCategory};
 
 /// Bumped whenever the layout below changes. An older file is ignored, not
 /// misread.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -216,6 +216,18 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
         w.u32s(members);
     }
     drop(playlists);
+
+    // Format 2: the My Tag categories, a string column per category whose
+    // first row is the category's own name.
+    w.u64(library.my_tags().len() as u64);
+    for category in library.my_tags() {
+        let mut column = StrColumn::with_capacity(category.tags.len() + 1, 64);
+        column.push(&category.name);
+        for tag in &category.tags {
+            column.push(tag);
+        }
+        w.strings(&column);
+    }
     w.0
 }
 
@@ -364,6 +376,19 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         playlists.members.push(r.u32s()? as Vec<Row>);
     }
 
+    let categories = r.count(8)?;
+    let mut my_tags = Vec::with_capacity(categories);
+    for _ in 0..categories {
+        let column = r.strings()?;
+        if column.is_empty() {
+            return None;
+        }
+        my_tags.push(TagCategory {
+            name: column.get(0).to_owned(),
+            tags: (1..column.len()).map(|i| column.get(i).to_owned()).collect(),
+        });
+    }
+
     // Every per-row column has to be the same length, or a row index valid for
     // one would be out of range for another.
     if lib.ids.len() != count
@@ -376,6 +401,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     }
     lib.set_count(count);
     lib.set_playlists(playlists);
+    lib.set_my_tags(my_tags);
     // Derived, and cheap: rebuilding removes any chance of a stored rank array
     // disagreeing with the columns it claims to order.
     lib.build_ranks();

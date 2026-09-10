@@ -104,6 +104,10 @@ pub struct ViewSpecDto {
     pub sort: String,
     pub descending: bool,
     pub query: String,
+    /// The track filter bar's picks. Absent on the wire means no filter, so a
+    /// caller that predates the bar keeps working.
+    #[serde(default)]
+    pub filter: TrackFilterDto,
 }
 
 /// A track whose audio file is no longer where the library says.
@@ -207,4 +211,63 @@ pub struct PhraseDto {
     /// Where that beat falls, from the `PQTZ` grid. `None` when the grid does
     /// not reach the phrase — a phrase strip can still be drawn by beat.
     pub time_ms: Option<u32>,
+}
+
+/// The track filter bar's BPM column: picked whole BPMs (empty is `All`),
+/// the `MASTER PLAYER ± n%` pick, and the master player's BPM if a deck is
+/// loaded.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BpmFilterDto {
+    #[serde(default)]
+    pub values: Vec<u32>,
+    #[serde(default)]
+    pub tolerance_pct: u8,
+    #[serde(default)]
+    pub master_bpm_x100: Option<u32>,
+}
+
+/// One entry per column of the track filter bar; `None` is an unticked column.
+///
+/// Keys and colours travel as names — what the bar shows — and are resolved
+/// to ids against the library on the way in.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackFilterDto {
+    #[serde(default)]
+    pub bpm: Option<BpmFilterDto>,
+    #[serde(default)]
+    pub keys: Option<Vec<String>>,
+    #[serde(default)]
+    pub ratings: Option<Vec<u8>>,
+    #[serde(default)]
+    pub colors: Option<Vec<String>>,
+}
+
+/// A value the filter bar can offer, and how many tracks of the list carry it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountedDto<T> {
+    pub value: T,
+    pub count: u32,
+}
+
+/// A My Tag category and the tags under it, by name.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagCategoryDto {
+    pub name: String,
+    pub tags: Vec<String>,
+}
+
+/// What the filter bar's lists hold for a source and query.
+///
+/// A few kilobytes: the reference library has 133 whole BPMs, 28 keys and 99
+/// tags. The BPM list is capped in `rbl-index` so it cannot reach the cap.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterValuesDto {
+    pub bpms: Vec<CountedDto<u32>>,
+    pub keys: Vec<CountedDto<String>>,
+    pub tags: Vec<TagCategoryDto>,
 }

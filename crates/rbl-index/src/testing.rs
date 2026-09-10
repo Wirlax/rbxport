@@ -14,6 +14,9 @@ pub struct TestTrack {
     pub length_sec: u32,
     pub rating: u8,
     pub date_added: &'static str,
+    pub key: &'static str,
+    /// `ColorID`, 1 to 8; 0 is none.
+    pub color: u8,
 }
 
 /// Builds an index directly, bypassing SQL.
@@ -33,11 +36,13 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.album.push(lib.albums.push(t.album));
         lib.genre.push(lib.genres.push(""));
         lib.label.push(lib.labels.push(""));
-        lib.key.push(lib.keys.push(""));
+        // One interner entry per track, names repeating, which is what
+        // `djmdKey` does on the reference library (`A` under two ids).
+        lib.key.push(lib.keys.push(t.key));
         lib.bpm_x100.push(t.bpm_x100);
         lib.length_sec.push(t.length_sec);
         lib.rating.push(t.rating);
-        lib.color.push(0);
+        lib.color.push(t.color);
         lib.play_count.push(0);
         lib.analysed.push(u8::from(t.bpm_x100 > 0));
     }
@@ -59,4 +64,9 @@ pub fn add_playlist(lib: &mut Library, name: &str, rows: &[Row]) -> usize {
     playlists.members.push(rows.to_vec());
     lib.set_playlists(playlists);
     index
+}
+
+/// Sets the My Tag categories, which a fixture without a database cannot read.
+pub fn set_my_tags(lib: &mut Library, categories: Vec<crate::TagCategory>) {
+    lib.set_my_tags(categories);
 }

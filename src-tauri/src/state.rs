@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use rbl_index::{Library, SortColumn, TrackSource, View, ViewSpec};
+use rbl_index::{BpmFilter, Library, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES};
 
-use crate::dto::{RowDto, TrackSourceDto, ViewSpecDto};
+use crate::dto::{RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
 
 /// Views are dropped oldest-first past this many, so a user clicking through
@@ -178,6 +178,35 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
         sort: sort_from_wire(&dto.sort),
         descending: dto.descending,
         query: dto.query.clone(),
+        filter: filter_from_wire(library, &dto.filter),
+    }
+}
+
+/// Translates the filter bar's picks, resolving names to ids.
+///
+/// A key name the library does not hold resolves to no id, so a ticked key
+/// column with only unknown names matches nothing — which is what the list
+/// would show for it. A colour name outside the eight is dropped the same way.
+pub fn filter_from_wire(library: &Library, dto: &TrackFilterDto) -> TrackFilter {
+    TrackFilter {
+        bpm: dto.bpm.as_ref().map(|b| BpmFilter {
+            values: b.values.clone(),
+            tolerance_pct: b.tolerance_pct.min(6),
+            master_bpm_x100: b.master_bpm_x100.filter(|&bpm| bpm > 0),
+        }),
+        keys: dto.keys.as_ref().map(|names| library.key_ids_named(names)),
+        ratings: dto.ratings.clone(),
+        colors: dto.colors.as_ref().map(|names| {
+            names
+                .iter()
+                .filter_map(|name| {
+                    COLOR_NAMES
+                        .iter()
+                        .position(|&c| c == name)
+                        .and_then(|at| u8::try_from(at + 1).ok())
+                })
+                .collect()
+        }),
     }
 }
 

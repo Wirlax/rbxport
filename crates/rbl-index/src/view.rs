@@ -4,7 +4,7 @@
 //! rather than strings, and searching scans one packed folded haystack, so both
 //! stay well inside the budgets on a 38k-track library.
 
-use crate::{strings::fold, Library, Row};
+use crate::{filter::TrackFilter, strings::fold, Library, Row};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
@@ -63,6 +63,8 @@ pub struct ViewSpec {
     pub sort: SortColumn,
     pub descending: bool,
     pub query: String,
+    /// The track filter bar's picks. Default is no constraint.
+    pub filter: TrackFilter,
 }
 
 #[derive(Debug)]
@@ -89,19 +91,19 @@ impl View {
 impl Library {
     /// Builds a view. This is the only place ordering is decided.
     pub fn open_view(&self, spec: &ViewSpec) -> View {
-        let mut rows: Vec<Row> = match &spec.source {
-            TrackSource::Collection => (0..u32::try_from(self.count).unwrap_or(u32::MAX)).collect(),
-            TrackSource::Playlist(index) => {
-                self.playlists().members.get(*index).cloned().unwrap_or_default()
-            }
-            TrackSource::History(index) => {
-                self.histories().members.get(*index).cloned().unwrap_or_default()
-            }
-        };
+        let mut rows: Vec<Row> = self.source_rows(&spec.source);
 
         let query = fold(spec.query.trim());
         if !query.is_empty() {
             rows.retain(|&r| self.row_matches(r, &query));
+        }
+
+        // The filter bar, in the same pass as the search: a handful of integer
+        // compares per row against masks built once, so a ticked column costs
+        // about what a one-letter query does.
+        if !spec.filter.is_empty() {
+            let compiled = spec.filter.compile();
+            rows.retain(|&r| compiled.matches(self, r));
         }
 
         // `TrackNo` is not a column to sort by — it *is* the view's own order:

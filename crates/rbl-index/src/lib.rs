@@ -15,9 +15,13 @@
 pub mod cache;
 pub mod strings;
 pub mod testing;
+mod filter;
 mod load;
 mod view;
 
+pub use filter::{
+    whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
+};
 pub use load::{content_version, load, reload_cues_of, reload_playlists, LoadStats};
 pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
@@ -97,6 +101,16 @@ pub struct Library {
 
     /// One folded haystack per row: title, artist, album, comment.
     pub(crate) search: StrColumn,
+
+    /// The My Tag categories and their tags, by name only.
+    ///
+    /// `djmdMyTag` is 181 rows on the reference library (99 live), read so
+    /// the filter bar can head its tag columns the way rekordbox does. Which
+    /// tracks carry which tag — `djmdSongMyTag` — is **not** read: it holds no
+    /// rows at all on the reference library, so what it would cost on a
+    /// tagged one is `[UNKNOWN]`, and the tag columns stay inert until a
+    /// library with tags in it has been measured.
+    pub(crate) my_tags: Vec<TagCategory>,
 }
 
 /// One cue point.
@@ -337,6 +351,15 @@ impl Library {
         })
     }
 
+    /// The My Tag categories, for the filter bar's tag columns.
+    pub fn my_tags(&self) -> &[TagCategory] {
+        &self.my_tags
+    }
+
+    pub(crate) fn set_my_tags(&mut self, tags: Vec<TagCategory>) {
+        self.my_tags = tags;
+    }
+
     /// Reads the playlist tree. The guard is held only for the read.
     pub fn playlists(&self) -> parking_lot::RwLockReadGuard<'_, Playlists> {
         self.playlists.read()
@@ -406,9 +429,14 @@ impl Library {
             let table = self.cues();
             table.cues.capacity() * std::mem::size_of::<Cue>() + table.index.capacity() * 4
         };
+        let tags: usize = self
+            .my_tags
+            .iter()
+            .map(|c| c.name.capacity() + c.tags.iter().map(String::capacity).sum::<usize>())
+            .sum();
         let playlists = self.playlists().ids.capacity() * 8
             + self.playlists().names.heap_bytes()
             + self.playlists().members.iter().map(|m| m.capacity() * 4).sum::<usize>();
-        vecs + strings + interners + ranks + cues + playlists
+        vecs + strings + interners + ranks + cues + tags + playlists
     }
 }

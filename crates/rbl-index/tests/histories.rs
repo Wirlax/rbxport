@@ -24,7 +24,7 @@ fn open(shape: Shape) -> Fixture {
 }
 
 fn spec(source: TrackSource) -> ViewSpec {
-    ViewSpec { source, sort: SortColumn::TrackNo, descending: false, query: String::new() }
+    ViewSpec { source, sort: SortColumn::TrackNo, descending: false, query: String::new(), filter: Default::default() }
 }
 
 #[test]

@@ -60,6 +60,7 @@ fn the_rebuilt_ranks_and_search_still_work() {
         sort,
         descending: false,
         query: query.to_owned(),
+        filter: Default::default(),
     };
     let by_title: Vec<&str> = restored
         .open_view(&spec(SortColumn::Title, ""))

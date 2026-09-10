@@ -10,7 +10,7 @@ use std::time::Instant;
 use rbl_db::Library as Db;
 use rusqlite::Connection;
 
-use crate::{strings::StrColumn, Cue, Cues, Library, Playlists, Row, NO_ID};
+use crate::{strings::StrColumn, Cue, Cues, Library, Playlists, Row, TagCategory, NO_ID};
 
 /// Converts a REAL to an integer without a lossy cast: NaN becomes 0 and
 /// out-of-range values saturate.
@@ -218,6 +218,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     load_cues(conn, &mut lib, &content_row)?;
     load_playlists(conn, &mut lib, &content_row, &mut stats)?;
     load_histories(conn, &mut lib, &content_row, &mut stats)?;
+    lib.set_my_tags(read_my_tags(conn)?);
     stats.read_ms = t0.elapsed().as_millis();
 
     let t1 = Instant::now();
@@ -343,6 +344,52 @@ pub fn reload_playlists(db: &Db, library: &Library) -> rusqlite::Result<Playlist
     }
     let (playlists, _) = read_playlists(db.connection(), &content_row)?;
     Ok(playlists)
+}
+
+/// Reads the My Tag categories and the tags under each, by name.
+///
+/// `djmdMyTag` is one table holding both: a category is a row with
+/// `Attribute = 1` under `ParentID = 'root'`, a tag a row with `Attribute = 0`
+/// under its category's id. Read-only on the reference library: 181 rows, 99
+/// live, four categories — `Lexicon Tags` and three named `Empty Category`,
+/// which is rekordbox's own name for an unused slot, not a placeholder of
+/// ours. Memberships (`djmdSongMyTag`) are deliberately not read; see
+/// `Library::my_tags`.
+///
+/// A library without the table opens with no categories rather than an error.
+fn read_my_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCategory>> {
+    if !has_table(conn, "djmdMyTag") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT ID, Name, Attribute, ParentID FROM djmdMyTag
+         WHERE rb_local_deleted = 0 ORDER BY Seq, ID",
+    )?;
+    let mut categories: Vec<TagCategory> = Vec::new();
+    let mut index_by_id: HashMap<String, usize> = HashMap::new();
+    let mut tags: Vec<(String, String)> = Vec::new();
+    let mut rows = stmt.query([])?;
+    while let Some(r) = rows.next()? {
+        let Some(id): Option<String> = r.get(0)? else { continue };
+        let name = r.get::<_, Option<String>>(1)?.unwrap_or_default();
+        let parent = r.get::<_, Option<String>>(3)?.unwrap_or_default();
+        if num(r, 2)? == 1 {
+            index_by_id.insert(id, categories.len());
+            categories.push(TagCategory { name, tags: Vec::new() });
+        } else {
+            tags.push((parent, name));
+        }
+    }
+    // Tags after every category is known: `Seq` numbers restart per parent, so
+    // a tag can precede its category in the read order.
+    for (parent, name) in tags {
+        if let Some(&at) = index_by_id.get(&parent) {
+            if let Some(category) = categories.get_mut(at) {
+                category.tags.push(name);
+            }
+        }
+    }
+    Ok(categories)
 }
 
 /// Which pair of tables a list tree is read from.

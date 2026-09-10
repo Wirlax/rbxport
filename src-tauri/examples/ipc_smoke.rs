@@ -28,6 +28,7 @@ fn main() {
         sort: rbl_index::SortColumn::Title,
         descending: false,
         query: String::new(),
+        filter: Default::default(),
     };
     let view = library.open_view(&spec);
     let t = Instant::now();
@@ -64,6 +65,7 @@ fn main() {
         sort: rbl_index::SortColumn::Artist,
         descending: true,
         query: "mix".to_owned(),
+        filter: Default::default(),
     });
     println!("\"{}\": {} of {} tracks match \"mix\", sorted desc in {} ms",
              playlists.name(biggest), pv.len(),
