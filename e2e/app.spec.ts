@@ -1770,10 +1770,11 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   await choose("2 PLAYER");
   await expect(decks).toHaveCount(2);
 
-  // The simple player is the same deck without the pad row or the cue list.
+  // The simple player is one strip: no pad row, no cue list, no detail.
   await choose("SIMPLE PLAYER");
   await expect(decks).toHaveCount(1);
   await expect(page.getByRole("tab", { name: "CUE/LOOP" })).toBeHidden();
+  await expect(page.getByTestId("player-detail")).toHaveCount(0);
   const short = await decks.first().boundingBox();
 
   await choose("1 PLAYER");
@@ -1849,6 +1850,95 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   await expect(page.getByRole("button", { name: "Layout" })).toBeVisible();
   await page.getByRole("button", { name: "Layout" }).click();
   await expect(page.getByRole("menuitemradio", { name: "FULL BROWSER" })).toHaveAttribute("aria-checked", "true");
+});
+
+test("the simple player is one strip, the way rekordbox draws it", async ({ page }) => {
+  // Measured off the SIMPLE PLAYER capture (docs/screenshots, 2026-09-09
+  // 9.03.41 PM, 2x): PLAY, the sleeve, the title over the overview with its
+  // hot cue badges, the artist, the two times, key, BPM, the rating — and
+  // nothing of the full deck's rail, detail waveform or cue list.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const row = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  const title = (await row.textContent()) ?? "";
+  await row.dblclick();
+
+  // Set the deck running first: the switch must not stop or reload it.
+  const clock = page.getByTestId("player-time");
+  const start = await clock.textContent();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(clock).not.toHaveText(start ?? "");
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "SIMPLE PLAYER" }).click();
+
+  const strip = page.getByTestId("simple-player");
+  await expect(strip).toBeVisible();
+  await expect(page.getByRole("region", { name: /^Preview player/ })).toHaveCount(1);
+
+  // Still running, and still the same track.
+  await expect(strip.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(page.getByTestId("simple-player-title")).toHaveText(title);
+  const simpleClock = page.getByTestId("simple-player-time");
+  await expect(simpleClock).toHaveText(/^-\d?\d:\d\d\.\d$/);
+  const shown = await simpleClock.textContent();
+  await expect(simpleClock).not.toHaveText(shown ?? "");
+
+  // What the strip holds.
+  await expect(page.getByTestId("simple-player-artist")).not.toHaveText("");
+  await expect(page.getByTestId("simple-player-key")).not.toHaveText("");
+  await expect(page.getByTestId("simple-player-bpm")).toHaveText(/^\d+\.\d\d$/);
+  await expect(page.getByTestId("simple-player-stars")).toHaveText(/^[★☆]{5}$/);
+  const overview = page.getByTestId("simple-player-overview");
+  await expect(overview).toHaveAttribute("role", "progressbar");
+  // Four lettered badges and the memory cue's head beside the first.
+  await expect(overview.locator('[data-cue]:not([data-cue=""])')).toHaveCount(4);
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(1);
+  await expect(page.getByTestId("simple-player-head")).toBeAttached();
+  await expect(page.getByTestId("simple-player-cue-point")).toBeAttached();
+  await expect(strip.getByRole("button", { name: "Eject" })).toBeVisible();
+
+  // What it does not: the full deck's rail, waveforms and panels.
+  await expect(strip.getByRole("button", { name: "Cue", exact: true })).toHaveCount(0);
+  await expect(strip.getByRole("button", { name: /Beat jump/ })).toHaveCount(0);
+  await expect(page.getByTestId("player-detail")).toHaveCount(0);
+  await expect(page.getByTestId("player-phrase")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "CUE/LOOP" })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "Cue list" })).toHaveCount(0);
+
+  // The measured geometry: a 59pt strip (1pt black over a 58pt row), the
+  // browser 3pt under it, the 40pt ring centred in a 58pt column, a 48pt
+  // sleeve 8pt on from it, and the overview 16.5pt tall from 30pt down.
+  const box = await strip.boundingBox();
+  expect(box?.height).toBeCloseTo(59, 0);
+  const body = await page.getByTestId("body").boundingBox();
+  expect((body?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(62, 0);
+  const play = await strip.getByRole("button", { name: "Pause", exact: true }).boundingBox();
+  expect(play?.width).toBeCloseTo(40, 0);
+  expect((play?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(9, 0);
+  expect((play?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(10, 0);
+  const sleeve = await strip.getByRole("button", { name: "Eject" }).boundingBox();
+  expect(sleeve?.width).toBeCloseTo(48, 0);
+  expect((sleeve?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(66, 0);
+  expect((sleeve?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(6, 0);
+  const wave = await overview.boundingBox();
+  expect(wave?.height).toBeCloseTo(16.5, 0);
+  expect((wave?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(119, 0);
+  expect((wave?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(31, 0);
+  const rating = await strip.getByLabel("Rating").boundingBox();
+  expect(rating?.width).toBeCloseTo(206, 0);
+  expect((box?.x ?? 0) + (box?.width ?? 0) - ((rating?.x ?? 0) + (rating?.width ?? 0))).toBeCloseTo(3, 0);
+  // The overview stops 13pt short of the rating box; the readouts run to it.
+  expect((rating?.x ?? 0) - ((wave?.x ?? 0) + (wave?.width ?? 0))).toBeCloseTo(13, 0);
+  const bpm = await page.getByTestId("simple-player-bpm").boundingBox();
+  expect((bpm?.x ?? 0) + (bpm?.width ?? 0)).toBeCloseTo(rating?.x ?? 0, 0);
+
+  // Back to the full deck, still playing the same track.
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "1 PLAYER" }).click();
+  await expect(page.getByTestId("player-detail")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(page.getByTestId("player-title")).toHaveText(title);
 });
 
 test("hovering the sleeve shows what clicking it does", async ({ page }) => {
