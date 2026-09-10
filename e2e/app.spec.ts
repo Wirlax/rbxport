@@ -706,6 +706,55 @@ test("a track dragged onto a deck loads there", async ({ page }) => {
   ).toHaveText(title);
 });
 
+test("a track dragged onto the deck loads it in every layout that draws one", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const pick = async (n: number) => ({
+    row: rows.nth(n),
+    title: (await rows.nth(n).locator('[data-col="title"]').innerText()).trim(),
+  });
+  const choose = async (layout: string) => {
+    await page.getByRole("button", { name: "Layout" }).click();
+    await page.getByRole("menuitemradio", { name: layout }).click();
+  };
+
+  // 1 PLAYER: the only deck is A, and dragging to it must not depend on the
+  // row being the selected one — the hand is on row 5, the selection stays
+  // where it was.
+  await choose("1 PLAYER");
+  const deckA = page.getByRole("region", { name: "Preview player", exact: true });
+  const first = await pick(5);
+  await first.row.dragTo(deckA);
+  await expect(deckA.getByTestId("player-title")).toHaveText(first.title);
+
+  // SIMPLE PLAYER: the strip is the same deck A, and shows the sleeve as the
+  // drop target while a row is in the air.
+  await choose("SIMPLE PLAYER");
+  const strip = page.getByTestId("simple-player");
+  await expect(strip.getByTestId("simple-player-title")).toHaveText(first.title);
+  const second = await pick(6);
+  await second.row.hover();
+  await page.mouse.down();
+  await strip.hover();
+  await expect(strip).toHaveAttribute("data-droppable", "true");
+  await page.mouse.up();
+  await expect(strip).not.toHaveAttribute("data-droppable");
+  await expect(strip.getByTestId("simple-player-title")).toHaveText(second.title);
+
+  // 2 PLAYER: each deck takes its own drop, and one does not disturb the other.
+  await choose("2 PLAYER");
+  const deckB = page.getByRole("region", { name: "Preview player B" });
+  const third = await pick(7);
+  await third.row.dragTo(deckB);
+  await expect(deckB.getByTestId("player-title")).toHaveText(third.title);
+  await expect(deckA.getByTestId("player-title")).toHaveText(second.title);
+  const fourth = await pick(8);
+  await fourth.row.dragTo(deckA);
+  await expect(deckA.getByTestId("player-title")).toHaveText(fourth.title);
+  await expect(deckB.getByTestId("player-title")).toHaveText(third.title);
+});
+
 test("the track menu loads a track into either player", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
