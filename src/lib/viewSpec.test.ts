@@ -58,3 +58,15 @@ describe("nextSort", () => {
     });
   });
 });
+
+describe("the Explorer's views", () => {
+  it("opens a folder as itself", () => {
+    const node: TreeNode = { id: "dir:0:/Users/x/Music", name: "Music", kind: "directory", depth: 1, lazy: true };
+    expect(specForNode(node, "", null).source).toEqual({ kind: "folder", path: "/Users/x/Music" });
+  });
+
+  it("opens the heading as an empty folder, which is what rekordbox shows there", () => {
+    const node: TreeNode = { id: "explorer", name: "Explorer", kind: "explorer", depth: 0, expanded: true };
+    expect(specForNode(node, "", null).source).toEqual({ kind: "folder", path: "" });
+  });
+});

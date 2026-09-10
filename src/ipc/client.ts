@@ -6,7 +6,7 @@
  */
 import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics,
-  ExportReport, FilterValues, Phrase, ImportReport,
+  ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
@@ -187,6 +187,8 @@ async function realBackend(): Promise<Backend> {
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
     saveDeviceSettings: (path, settings) =>
       invoke<DeviceSettings>("save_device_settings", { path, settings }),
+    explorerRoots: () => invoke<ExplorerRoot[]>("explorer_roots"),
+    explorerChildren: (path) => invoke<ExplorerChildren>("explorer_children", { path }),
     onLibraryChanged: (listener) => {
       // Tauri's listen resolves asynchronously; unsubscribing before it does
       // has to still work, so the flag is checked when it lands.

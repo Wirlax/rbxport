@@ -12,6 +12,7 @@ import {
   autoSizeAll,
   autoSizeColumn,
   defaultLayout,
+  folderLayout,
   moveColumn,
   resizeColumn,
   resolve,
@@ -32,7 +33,12 @@ import {
  */
 /// The sub-browser keeps its own set: it is usually left narrow, and sharing
 /// the main table's widths would make it unusable.
-export type ColumnContext = "collection" | "playlist" | "history" | "subBrowser";
+export type ColumnContext = "collection" | "playlist" | "history" | "subBrowser" | "folder";
+
+/** What each context opens with. Only the Explorer's differs from the rest. */
+function defaultFor(context: ColumnContext): () => Layout {
+  return context === "folder" ? folderLayout : defaultLayout;
+}
 
 const STORAGE_PREFIX = "rbl.columns.v2";
 
@@ -44,11 +50,11 @@ function load(context: ColumnContext): Layout {
   try {
     const raw = localStorage.getItem(keyFor(context));
     // sanitise handles null, so a first run needs no special case.
-    return sanitise(raw === null ? null : JSON.parse(raw));
+    return sanitise(raw === null ? null : JSON.parse(raw), defaultFor(context));
   } catch {
     // Private browsing, a disabled store, or a half-written value: the table
     // must still render, so fall back rather than throw on the way up.
-    return defaultLayout();
+    return defaultFor(context)();
   }
 }
 
@@ -99,7 +105,7 @@ export function useColumns(context: ColumnContext): Columns {
   );
   const autoSize = useCallback((key: ColumnKey) => setLayout((l) => autoSizeColumn(l, key)), []);
   const autoSizeEvery = useCallback(() => setLayout(autoSizeAll), []);
-  const reset = useCallback(() => setLayout(defaultLayout()), []);
+  const reset = useCallback(() => setLayout(defaultFor(context)()), [context]);
 
   // Memoised as a whole, not just its callbacks. A fresh object on every
   // render is a changed dependency for everything that takes the hook's value

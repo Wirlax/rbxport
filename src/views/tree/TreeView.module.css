@@ -10,6 +10,9 @@
 
 
 .nodes { flex: 1; min-width: 0; overflow: auto; }
+/* One row short of the pane, so a section jumped to can sit at the top with
+   nothing under it, whatever comes last in the tree. */
+.tail { height: calc(100% - var(--s-row-height)); flex: none; }
 
 .node {
   display: flex;
@@ -41,6 +44,9 @@
 .twisty[data-leaf] { border-left-color: transparent; width: 10px; }
 
 .icon { width: 14px; height: 12px; flex: none; color: var(--c-text); }
+/* The Explorer's folders are drawn in the dimmer icon grey [OBS], measured
+   at rgb(160,160,160) in the capture against the row text's white. */
+.node[data-kind="directory"] .icon { color: var(--c-icon-off); }
 .label { overflow: hidden; text-overflow: ellipsis; }
 
 /* A section with nothing in it says so, rather than showing a blank panel. */

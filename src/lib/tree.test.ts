@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { TreeNode } from "@/ipc/types";
-import { branchIds, emptySources, hasChildren, nodesForSource, sourceOf, toggle, visibleNodes } from "./tree";
+import {
+  branchIds, emptySources, hasChildren, newlyClosed, nodesForSource, sourceOf, toggle, visibleNodes,
+} from "./tree";
 
 /** `"a"` at depth 0, `"  b"` at depth 1, and so on. */
 function tree(...spec: string[]): TreeNode[] {
@@ -166,7 +168,7 @@ describe("emptySources", () => {
   });
 
   it("calls everything empty for an empty tree", () => {
-    expect(emptySources([]).size).toBe(3);
+    expect(emptySources([]).size).toBe(4);
   });
 });
 
@@ -210,5 +212,56 @@ describe("devices in the tree", () => {
 
   it("puts the rail on Devices when a volume is selected", () => {
     expect(sourceOf(nodes, "device:/Volumes/DJ STICK")).toBe("devices");
+  });
+});
+
+describe("the Explorer in the tree", () => {
+  const nodes: TreeNode[] = [
+    { id: "playlists", name: "Playlists", kind: "collection", depth: 0 },
+    { id: "pl-1", name: "Warm Up", kind: "playlist", depth: 1 },
+    { id: "explorer", name: "Explorer", kind: "explorer", depth: 0, expanded: true },
+    { id: "dir:0:/Users/x/Music", name: "Music", kind: "directory", depth: 1, expanded: false, lazy: true },
+    { id: "dir:2:/", name: "Macintosh HD", kind: "directory", depth: 1, expanded: false, lazy: true },
+  ];
+
+  it("is its own section, heading first", () => {
+    expect(nodesForSource(nodes, "explorer").map((n) => n.name)).toEqual([
+      "Explorer", "Music", "Macintosh HD",
+    ]);
+    expect(nodesForSource(nodes, "playlists").map((n) => n.name)).toEqual(["Playlists", "Warm Up"]);
+    expect(emptySources(nodes).has("explorer")).toBe(false);
+    expect(emptySources(nodes.slice(0, 2)).has("explorer")).toBe(true);
+  });
+
+  it("puts the rail on Explorer for the heading and for a folder", () => {
+    expect(sourceOf(nodes, "explorer")).toBe("explorer");
+    expect(sourceOf(nodes, "dir:2:/")).toBe("explorer");
+  });
+
+  it("treats a lazy folder as a branch before anything is under it", () => {
+    const ids = branchIds(nodes);
+    expect(ids.has("dir:2:/")).toBe(true);
+    expect(ids.has("dir:0:/Users/x/Music")).toBe(true);
+    // The heading has children in the array, so it is a branch the usual way.
+    expect(ids.has("explorer")).toBe(true);
+    expect(ids.has("pl-1")).toBe(false);
+  });
+});
+
+describe("newlyClosed", () => {
+  const first: TreeNode[] = [
+    { id: "a", name: "a", kind: "folder", depth: 0, expanded: true },
+    { id: "b", name: "b", kind: "folder", depth: 0, expanded: false },
+    { id: "c", name: "c", kind: "playlist", depth: 1 },
+  ];
+
+  it("names the closed nodes the tree has not seen", () => {
+    expect(newlyClosed(first, new Set())).toEqual(["b"]);
+  });
+
+  it("leaves alone what has been seen, whatever the user did to it since", () => {
+    const later = [...first, { id: "d", name: "d", kind: "directory" as const, depth: 1, expanded: false }];
+    expect(newlyClosed(later, new Set(["a", "b", "c"]))).toEqual(["d"]);
+    expect(newlyClosed(later, new Set(["a", "b", "c", "d"]))).toEqual([]);
   });
 });

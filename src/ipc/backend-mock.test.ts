@@ -92,3 +92,40 @@ describe("mock edits", () => {
     expect(rows[0]?.comment).toBe("5A - Am - 128");
   });
 });
+
+describe("the mock's Explorer", () => {
+  it("starts from the four roots of the capture and opens one level at a time", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const roots = await backend.explorerRoots();
+    expect(roots.map((r) => r.name)).toEqual(["Music", "mock", "Macintosh HD", "SD"]);
+    expect((await backend.explorerChildren("/")).names).toEqual(["Applications", "Library", "System", "Users"]);
+    expect((await backend.explorerChildren("/no/such")).names).toEqual([]);
+  });
+
+  it("lists a folder's files: library rows where it holds them, loose files where not", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const spec = { source: { kind: "folder", path: "/Users/mock/Music/Downloads" }, sort: "trackNo", descending: false, query: "" } as const;
+    const view = await backend.openView(spec);
+    expect(view.len).toBe(12);
+    const rows = await backend.fetchRows(view.viewId, 0, 12);
+    expect(rows.slice(0, 6).every((r) => /^\d+$/.test(r.id))).toBe(true);
+    expect(rows.slice(6).every((r) => r.id.startsWith("file:"))).toBe(true);
+    expect(rows[6]?.fileName).toBe("Untitled Bounce 1.wav");
+    expect(rows.map((r) => r.trackNo)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(await backend.viewIdsInRange(view.viewId, 10, 11)).toEqual([rows[10]?.id, rows[11]?.id]);
+  });
+
+  it("opens an unknown folder, and the heading, empty", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    for (const path of ["", "/Users/mock/Music/Rekordbox", "/nope"]) {
+      const view = await backend.openView({ source: { kind: "folder", path }, sort: "trackNo", descending: false, query: "" });
+      expect(view.len).toBe(0);
+    }
+  });
+
+  it("searches a folder by title and by file name", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    const view = await backend.openView({ source: { kind: "folder", path: "/Users/mock/Music/Downloads" }, sort: "trackNo", descending: false, query: "bounce" });
+    expect(view.len).toBe(2);
+  });
+});

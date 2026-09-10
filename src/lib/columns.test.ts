@@ -6,8 +6,10 @@ import {
   CATALOGUE,
   DEFAULT_VISIBLE,
   FIXED,
+  FOLDER_VISIBLE,
   MENU_COLUMNS,
   defaultLayout,
+  folderLayout,
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
   moveColumn,
@@ -230,5 +232,28 @@ describe("sanitise", () => {
   it("clamps a stored width that is out of range", () => {
     const got = sanitise({ order: ["title"], widths: { title: 99_999 } });
     expect(got.widths.title).toBe(MAX_COLUMN_WIDTH);
+  });
+});
+
+describe("the Explorer's layout", () => {
+  it("is the FolderTracks header, in the capture's order and widths", () => {
+    const columns = resolve(folderLayout()).map((c) => [c.key, c.width]);
+    expect(columns).toEqual([
+      ["trackNo", 47],
+      ["preview", 200], ["artwork", 80], ["title", 128], ["artist", 128], ["album", 128],
+      ["genre", 128], ["bpm", 80], ["rating", 90], ["duration", 80], ["key", 128],
+      ["fileName", 128],
+    ]);
+  });
+
+  it("names only real columns", () => {
+    for (const key of FOLDER_VISIBLE) expect(specOf(key)).toBeDefined();
+  });
+
+  it("is what a broken stored layout falls back to when asked", () => {
+    expect(sanitise(null, folderLayout).order).toEqual([...FOLDER_VISIBLE]);
+    expect(sanitise({ order: [] }, folderLayout).widths.preview).toBe(200);
+    // And not otherwise: the collection's table keeps its own default.
+    expect(sanitise(null).order).toEqual(defaultLayout().order);
   });
 });

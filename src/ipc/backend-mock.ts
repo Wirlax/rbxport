@@ -10,9 +10,9 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, FilterValues,
-  LibrarySummary, RowDto, SortColumn, Tick, TrackFilter, TreeNode, ViewHandle, ViewSpec,
-  WaveformKind,
+  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
+  FilterValues, LibrarySummary, RowDto, SortColumn, Tick, TrackFilter, TreeNode, ViewHandle,
+  ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
 import { toCamelot } from "@/lib/camelot";
@@ -163,9 +163,64 @@ function makeRows(count: number): RowDto[] {
       artworkHue: Math.floor(rnd() * 360),
       // The mock has no files to serve, so every row falls back to the tint.
       hasArtwork: false,
+      fileName: `${String(i + 1).padStart(2, "0")} ${artist} - track.mp3`,
     };
   }
   return rows;
+}
+
+/**
+ * A fake disk for the Explorer.
+ *
+ * The shape of the capture: the music and home folders, the system volume,
+ * one stick. The music folder's Downloads holds twelve files, the first six
+ * of them library rows — so a folder view shows both kinds — and Sets holds
+ * three loose files. Everything else is folders, and a folder not listed here
+ * has nothing under it, which is what the real backend answers for a folder
+ * it cannot read.
+ */
+const EXPLORER_ROOTS: readonly ExplorerRoot[] = [
+  { name: "Music", path: "/Users/mock/Music" },
+  { name: "mock", path: "/Users/mock" },
+  { name: "Macintosh HD", path: "/" },
+  { name: "SD", path: "/Volumes/SD" },
+];
+const EXPLORER_CHILDREN: ReadonlyMap<string, readonly string[]> = new Map([
+  ["/Users/mock/Music", ["Downloads", "Rekordbox", "Sets"]],
+  ["/Users/mock", ["Desktop", "Documents", "Music"]],
+  ["/", ["Applications", "Library", "System", "Users"]],
+  ["/Users", ["mock", "Shared"]],
+  ["/Volumes/SD", ["Contents", "PIONEER"]],
+]);
+/** Files per folder: a library row index, or a loose file's name. */
+const EXPLORER_FILES: ReadonlyMap<string, readonly (number | string)[]> = new Map([
+  ["/Users/mock/Music/Downloads", [0, 1, 2, 3, 4, 5, "Untitled Bounce 1.wav", "Untitled Bounce 2.wav", "demo_128.aiff", "live edit.mp3", "promo (radio).mp3", "voice memo.m4a"]],
+  ["/Users/mock/Music/Sets", ["Set 2026-08-30.mp3", "Set 2026-09-04.mp3", "Warmup.flac"]],
+]);
+
+/** A row for a file the library does not hold: its name, and nothing else. */
+function looseRow(folder: string, name: string, position: number): RowDto {
+  return {
+    id: `file:${folder}/${name}`,
+    trackNo: position,
+    title: name.replace(/\.[^.]+$/, ""),
+    artist: "",
+    album: "",
+    genre: "",
+    label: "",
+    comment: "",
+    bpmX100: 0,
+    key: "",
+    durationSec: 0,
+    rating: 0,
+    analysed: 0,
+    dateAdded: "",
+    releaseDate: "",
+    cues: "",
+    artworkHue: 0,
+    hasArtwork: false,
+    fileName: name,
+  };
 }
 
 const FOLDERS = ["CURRENT", "USB", "DOWNLOADS"];
@@ -266,6 +321,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const tree = makeTree();
 
   const views = new Map<number, { order: Uint32Array; gen: number }>();
+  // A folder's rows, held whole: a folder is a few files here and a few
+  // thousand at most on a disk, which is why the real backend keeps the list
+  // and pages it out rather than sending it.
+  const folderViews = new Map<number, RowDto[]>();
   let nextViewId = 1;
 
   // The mock owns the tree the same way Rust does, so the edit flows can be
@@ -617,6 +676,28 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // answer before the library is up. A mock that served rows while the
       // summary was still failing would not be standing in for anything.
       if (!ready) return notReady();
+      if (spec.source.kind === "folder") {
+        const folder = spec.source.path;
+        const q = fold(spec.query.trim());
+        const rows = (EXPLORER_FILES.get(folder) ?? [])
+          .map((entry, at) =>
+            typeof entry === "number"
+              ? { ...(all[entry] ?? looseRow(folder, "", at + 1)), trackNo: at + 1 }
+              : looseRow(folder, entry, at + 1),
+          )
+          .filter((row) => q === "" || fold(`${row.title} ${row.artist} ${row.fileName ?? ""}`).includes(q));
+        if (spec.sort !== "trackNo") {
+          rows.sort((x, y) => {
+            const c = compare(x, y, spec.sort);
+            return spec.descending ? -c : c;
+          });
+        } else if (spec.descending) {
+          rows.reverse();
+        }
+        const viewId = nextViewId++;
+        folderViews.set(viewId, rows);
+        return wait<ViewHandle>({ viewId, len: rows.length, gen: 1 });
+      }
       let candidates = candidatesFor(spec);
       const filter = spec.filter;
       if (filter) {
@@ -642,6 +723,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
 
     fetchRows: (viewId, offset, len) => {
+      const folder = folderViews.get(viewId);
+      if (folder) return wait(folder.slice(Math.max(0, offset), Math.max(0, offset) + len));
       const view = views.get(viewId);
       if (!view) return Promise.reject(new Error(`unknown view ${viewId}`));
       const out: RowDto[] = [];
@@ -686,9 +769,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
 
     viewIdsInRange: (viewId, from, to) => {
+      const [lo, hi] = from <= to ? [from, to] : [to, from];
+      const folder = folderViews.get(viewId);
+      if (folder) return wait(folder.slice(Math.max(0, lo), hi + 1).map((row) => row.id));
       const view = views.get(viewId);
       if (!view) return Promise.reject(new Error(`unknown view ${viewId}`));
-      const [lo, hi] = from <= to ? [from, to] : [to, from];
       const out: string[] = [];
       for (let i = Math.max(0, lo); i <= Math.min(view.order.length - 1, hi); i++) {
         const row = all[view.order[i] ?? 0];
@@ -1051,6 +1136,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       cueListeners.add(listener);
       return () => cueListeners.delete(listener);
     },
+    // The fake disk above. Copies, as with the tree: the map is the mock's.
+    explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
+    explorerChildren: (path) =>
+      wait({ names: [...(EXPLORER_CHILDREN.get(path) ?? [])], truncated: false }),
   };
 }
 

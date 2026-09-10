@@ -119,6 +119,27 @@ export function defaultLayout(): Layout {
   return { order: [...DEFAULT_VISIBLE], widths: {} };
 }
 
+/**
+ * The Explorer's columns: `TableHeader-FolderTracks` in browseSetting.xml,
+ * which the 9.10.55 PM capture draws in this order at these widths — Preview
+ * 200, Artwork 80, then 128 each with BPM 80, Rating 90 and Time 80. The
+ * column ids there are not mapped to names; the capture is what says which
+ * width is which.
+ */
+export const FOLDER_VISIBLE: readonly ColumnKey[] = [
+  "preview", "artwork", "title", "artist", "album", "genre", "bpm", "rating", "duration", "key",
+  "fileName",
+];
+
+const FOLDER_WIDTHS: Partial<Record<ColumnKey, number>> = {
+  preview: 200, artwork: 80, title: 128, artist: 128, album: 128, genre: 128, bpm: 80,
+  rating: 90, duration: 80, key: 128, fileName: 128,
+};
+
+export function folderLayout(): Layout {
+  return { order: [...FOLDER_VISIBLE], widths: { ...FOLDER_WIDTHS } };
+}
+
 const BY_KEY = new Map(CATALOGUE.map((c) => [c.key, c]));
 
 export function specOf(key: ColumnKey): ColumnSpec | undefined {
@@ -211,10 +232,11 @@ export function autoSizeAll(layout: Layout): Layout {
  *
  * A stored layout can name a column that no longer exists, or repeat one, or
  * be empty — all of which would otherwise render a broken table rather than
- * simply falling back.
+ * simply falling back. `fallback` is what it falls back to: the table's own
+ * default, which is not the same for every context.
  */
-export function sanitise(value: unknown): Layout {
-  if (typeof value !== "object" || value === null) return defaultLayout();
+export function sanitise(value: unknown, fallback: () => Layout = defaultLayout): Layout {
+  if (typeof value !== "object" || value === null) return fallback();
   const raw = value as Partial<Layout>;
   const seen = new Set<ColumnKey>();
   const order = (Array.isArray(raw.order) ? raw.order : []).filter(
@@ -225,7 +247,7 @@ export function sanitise(value: unknown): Layout {
       return true;
     },
   );
-  if (order.length === 0) return defaultLayout();
+  if (order.length === 0) return fallback();
 
   const widths: Partial<Record<ColumnKey, number>> = {};
   const rawWidths = typeof raw.widths === "object" && raw.widths !== null ? raw.widths : {};

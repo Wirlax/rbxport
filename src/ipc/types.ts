@@ -35,12 +35,21 @@ export interface RowDto {
   artworkHue: number;
   /** Whether the backend can serve artwork for this track. */
   hasArtwork: boolean;
+  /**
+   * The file's own name, for the Explorer's File Name column.
+   *
+   * Optional only so a row built before the column existed still type-checks;
+   * the backend always sends it.
+   */
+  fileName?: string;
 }
 
 export type TrackSource =
   | { kind: "collection" }
   | { kind: "playlist"; id: string }
-  | { kind: "history"; id: string };
+  | { kind: "history"; id: string }
+  /** A folder on disk, for the Explorer. An empty path is the heading, which lists nothing. */
+  | { kind: "folder"; path: string };
 
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
@@ -70,11 +79,19 @@ export interface ViewHandle {
 export interface TreeNode {
   id: string;
   name: string;
-  kind: "collection" | "histories" | "folder" | "playlist" | "history" | "allTracks" | "device";
+  kind:
+    | "collection" | "histories" | "folder" | "playlist" | "history" | "allTracks" | "device"
+    /** The Explorer heading, and a folder on disk under it. */
+    | "explorer" | "directory";
   depth: number;
   /** Undefined for leaves. */
   expanded?: boolean;
   childCount?: number;
+  /**
+   * Its children are read when it is opened, not before, so it is a branch
+   * whether or not anything sits under it yet. The Explorer's folders.
+   */
+  lazy?: true;
 }
 
 export interface LibrarySummary {
@@ -363,6 +380,17 @@ export interface Backend {
   deviceSettings(path: string): Promise<DeviceSettings>;
   /** Writes them back and resolves to what the stick now holds. */
   saveDeviceSettings(path: string, settings: DeviceSettings): Promise<DeviceSettings>;
+
+  /**
+   * The Explorer.
+   *
+   * Where it starts, and one folder's subfolders when that folder is opened.
+   * Nothing is read ahead: a volume costs one directory read of its top
+   * level until somebody opens something under it. A folder that cannot be
+   * read answers with no children rather than an error.
+   */
+  explorerRoots(): Promise<ExplorerRoot[]>;
+  explorerChildren(path: string): Promise<ExplorerChildren>;
 }
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
@@ -606,6 +634,20 @@ export interface Edits {
   addLoop(track: string, kind: CueKind, inMs: number, outMs: number, beats?: number): Promise<string>;
   moveCue(cue: string, positionMs: number): Promise<void>;
   deleteCue(cue: string): Promise<void>;
+}
+
+/** One of the folders the Explorer starts from. */
+export interface ExplorerRoot {
+  /** What to show: `Music`, the user's name, `Macintosh HD`, a stick's name. */
+  name: string;
+  path: string;
+}
+
+/** The folders directly under one folder, by name. */
+export interface ExplorerChildren {
+  names: string[];
+  /** True when the folder held more than the cap and the rest were left out. */
+  truncated: boolean;
 }
 
 /** `ParentID` of a playlist or folder at the top of the tree. */

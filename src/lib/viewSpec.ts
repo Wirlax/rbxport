@@ -6,6 +6,7 @@
  * drift the moment a source kind was added.
  */
 import type { SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import { explorerPath } from "./explorer";
 
 export interface SortState {
   column: SortColumn;
@@ -37,12 +38,18 @@ export function specForNode(
     // rather than tracks — including a history year or month, which opens
     // empty because that is what it holds — and a device is not a track source
     // at all.
+    // The Explorer's folders open as themselves, and its heading as an empty
+    // folder: rekordbox shows an Explorer with nothing in it there.
     source:
       node?.kind === "playlist"
         ? { kind: "playlist", id: node.id }
         : node?.kind === "history"
           ? { kind: "history", id: node.id }
-          : { kind: "collection" },
+          : node?.kind === "directory"
+            ? { kind: "folder", path: explorerPath(node.id) ?? "" }
+            : node?.kind === "explorer"
+              ? { kind: "folder", path: "" }
+              : { kind: "collection" },
     sort: order.column,
     descending: order.descending,
     query,

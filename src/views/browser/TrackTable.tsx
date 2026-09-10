@@ -73,6 +73,7 @@ function cellText(row: RowDto, key: Column["key"]): string {
     case "dateAdded": return formatShortDate(row.dateAdded);
     case "releaseDate": return formatShortDate(row.releaseDate);
     case "rating": return "";
+    case "fileName": return row.fileName ?? "";
     default: return "";
   }
 }

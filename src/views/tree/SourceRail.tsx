@@ -12,7 +12,7 @@ import type { SVGProps } from "react";
 
 import type { Source } from "@/lib/tree";
 
-import { DeviceIcon, FolderIcon, HistoryIcon } from "@/components/icons";
+import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon } from "@/components/icons";
 import styles from "./SourceRail.module.css";
 
 const SOURCES: ReadonlyArray<{
@@ -22,6 +22,9 @@ const SOURCES: ReadonlyArray<{
 }> = [
   { id: "playlists", label: "Playlists", Icon: FolderIcon },
   { id: "histories", label: "Histories", Icon: HistoryIcon },
+  // Above Devices, as rekordbox's rail has it: its tooltip there is
+  // `Display Explorer` (german.lang); the label is the section's own name.
+  { id: "explorer", label: "Explorer", Icon: ExplorerIcon },
   { id: "devices", label: "Devices", Icon: DeviceIcon },
 ];
 

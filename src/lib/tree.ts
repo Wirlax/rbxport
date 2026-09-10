@@ -22,14 +22,35 @@ export function hasChildren(nodes: readonly TreeNode[], index: number): boolean 
  * Asking `hasChildren` per rendered row means finding that row's index first,
  * which is a scan — O(n²) over the whole tree, and this library has 683
  * playlists.
+ *
+ * A lazy node is a branch whether or not its children have arrived: the
+ * Explorer's folders open on demand, and a folder with no twisty could never
+ * be asked.
  */
 export function branchIds(nodes: readonly TreeNode[]): Set<string> {
   const out = new Set<string>();
   for (let i = 0; i < nodes.length; i++) {
-    if (hasChildren(nodes, i)) {
-      const node = nodes[i];
-      if (node) out.add(node.id);
-    }
+    const node = nodes[i];
+    if (node && (node.lazy === true || hasChildren(nodes, i))) out.add(node.id);
+  }
+  return out;
+}
+
+/**
+ * The closed nodes among those the tree has not seen before.
+ *
+ * The backend marks what should open — histories closed, playlists open — and
+ * a node arriving later, the way the Explorer's folders do when their parent
+ * is opened, has to be seeded the same way. Only new ids, so the user's own
+ * toggles on everything already in the tree are left alone.
+ */
+export function newlyClosed(
+  nodes: readonly TreeNode[],
+  seen: ReadonlySet<string>,
+): string[] {
+  const out: string[] = [];
+  for (const node of nodes) {
+    if (node.expanded === false && !seen.has(node.id)) out.push(node.id);
   }
   return out;
 }
@@ -76,7 +97,7 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
  * sight, so a button whose whole job is to scroll to the first row is a
  * shortcut to where you already are.
  */
-export type Source = "playlists" | "histories" | "devices";
+export type Source = "playlists" | "histories" | "explorer" | "devices";
 
 /**
  * The nodes belonging to one source.
@@ -93,6 +114,10 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
       return nodes.filter((n) => n.kind === "histories" || n.kind === "history");
     case "devices":
       return nodes.filter((n) => n.kind === "device");
+    case "explorer":
+      // The heading first, as with histories: jumping there lands on the
+      // section, which rekordbox opens as an empty Explorer.
+      return nodes.filter((n) => n.kind === "explorer" || n.kind === "directory");
     case "playlists":
       return nodes.filter((n) => n.kind === "folder" || n.kind === "playlist" || n.kind === "collection");
   }
@@ -101,7 +126,7 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
 /** Sources with nothing under them, so the rail can dim rather than hide them. */
 export function emptySources(nodes: readonly TreeNode[]): Set<Source> {
   const empty = new Set<Source>();
-  for (const source of ["playlists", "histories", "devices"] as const) {
+  for (const source of ["playlists", "histories", "explorer", "devices"] as const) {
     if (nodesForSource(nodes, source).length === 0) empty.add(source);
   }
   return empty;
@@ -122,6 +147,9 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
       return "histories";
     case "device":
       return "devices";
+    case "explorer":
+    case "directory":
+      return "explorer";
     default:
       return "playlists";
   }

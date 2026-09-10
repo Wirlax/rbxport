@@ -33,6 +33,8 @@ import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
 import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
+import { useExplorer } from "@/store/useExplorer";
+import { isLooseId } from "@/lib/explorer";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -182,7 +184,9 @@ export function App() {
       ? "playlist"
       : selectedNode?.kind === "history"
         ? "history"
-        : "collection";
+        : selectedNode?.kind === "directory" || selectedNode?.kind === "explorer"
+          ? "folder"
+          : "collection";
   const cols = useColumns(columnContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** How much of the window the deck takes, kept across restarts. */
@@ -439,22 +443,37 @@ export function App() {
     setPendingEdits((edits) => new Map(edits).set(id, { ...edits.get(id), ...patch }));
   }, []);
 
+  /**
+   * A file the Explorer lists that the library does not hold cannot be
+   * edited: the write would match no row. Said once, here, for every edit.
+   */
+  const refuseLoose = useCallback(
+    (id: string) => {
+      if (!isLooseId(id)) return false;
+      refuse("That file is not in the collection. Import it first.");
+      return true;
+    },
+    [refuse],
+  );
+
   const rateTrack = useCallback(
     (id: string, stars: number) => {
+      if (refuseLoose(id)) return;
       showPending(id, { rating: stars });
       void runEdit(stars === 0 ? "Rating cleared." : `Rated ${stars} of 5.`, (b) =>
         b.edits.setTrackRating(id, stars),
       );
     },
-    [runEdit, showPending],
+    [runEdit, showPending, refuseLoose],
   );
 
   const commentTrack = useCallback(
     (id: string, comment: string) => {
+      if (refuseLoose(id)) return;
       showPending(id, { comment });
       void runEdit("Comment saved.", (b) => b.edits.setTrackComment(id, comment));
     },
-    [runEdit, showPending],
+    [runEdit, showPending, refuseLoose],
   );
 
   const addDraggedTo = useCallback(
@@ -462,6 +481,7 @@ export function App() {
       const ids = draggedTracks?.ids;
       setDraggedTracks(null);
       if (!ids || ids.length === 0) return;
+      if (ids.some(refuseLoose)) return;
       void (async () => {
         const backend = await getBackend();
         try {
@@ -475,7 +495,7 @@ export function App() {
         }
       })();
     },
-    [draggedTracks, tree, report, refuse],
+    [draggedTracks, tree, report, refuse, refuseLoose],
   );
 
   /**
@@ -681,8 +701,12 @@ export function App() {
   }, []);
 
   // Devices join the tree as nodes so the Devices section renders through the
-  // same path as every other section.
-  const treeNodes = useMemo(() => [...tree, ...deviceNodes(devices)], [tree, devices]);
+  // same path as every other section, and the Explorer's folders after them.
+  const explorer = useExplorer();
+  const treeNodes = useMemo(
+    () => [...tree, ...deviceNodes(devices), ...explorer.nodes],
+    [tree, devices, explorer.nodes],
+  );
   const selectedDevice = useMemo(
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],
@@ -895,6 +919,7 @@ export function App() {
           onCreateFolder={createFolderIn}
           onDeleteNode={deleteNode}
           readOnly={summary?.readOnly ?? false}
+          onExpand={explorer.expand}
         />
         <div
           className={styles.splitter}
