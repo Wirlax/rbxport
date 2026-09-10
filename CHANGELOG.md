@@ -5,6 +5,20 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-09-10
+
+### Added
+- The app keeps itself up to date. Check for Updates… in the application
+  menu, or Preferences › Advanced › Others, opens the Update Manager: it
+  shows the version running and the latest one, what changed between them,
+  and downloads the new version with a progress bar, installs it and
+  restarts. A check runs on its own shortly after launch and only opens the
+  window when there is something new; that can be switched off in the same
+  Preferences pane. Every download is checked against a signing key built
+  into the app before it is installed.
+- On Windows the update installs behind a small progress window rather
+  than the full installer.
+
 ## [0.4.0] — 2026-09-10
 
 Everything tagged as 0.3.0 plus the work below. 0.3.0's build was cancelled
@@ -174,6 +188,7 @@ Pro DJ Link and writes USB exports. Everything below landed between
 - Signed builds for macOS (opens without Gatekeeper refusing it) and Windows,
   published with readable download URLs.
 
+[0.5.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.1.0...v0.2.0
