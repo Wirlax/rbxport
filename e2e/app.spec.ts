@@ -1257,7 +1257,8 @@ test("the memory, hot cue and info tabs change the panel beside the deck", async
   await expect(panel.getByText(/^\d\d:\d\d:\d\d\d$/)).toHaveCount(0);
 
   await panel.getByRole("tab", { name: "INFO" }).click();
-  await expect(panel.getByText(/BPM/)).toBeVisible();
+  // The file's kind, from the record — the manual's INFO tab has no BPM line.
+  await expect(panel.getByText(/ File$/)).toBeVisible();
   await expect(panel.getByText("CUE(Auto)")).toHaveCount(0);
 });
 
