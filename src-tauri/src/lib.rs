@@ -9,6 +9,7 @@ mod link;
 pub mod menu;
 mod player;
 mod protocol;
+mod device_settings;
 mod dto;
 mod error;
 mod state;
@@ -350,6 +351,8 @@ pub fn run() {
             cues::move_cue,
             cues::delete_cue,
             commands::filter_values,
+            device_settings::device_settings,
+            device_settings::save_device_settings,
         ])
         .build(tauri::generate_context!());
 
