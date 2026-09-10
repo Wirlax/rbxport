@@ -37,6 +37,8 @@ export interface DualHeadProps {
   sleeve: ReactNode;
   /** BEAT SYNC: pull this deck to the master. Disabled while this deck is it. */
   onBeatSync: () => void;
+  /** BEAT SYNC is lit: the deck is following the master's tempo. */
+  synced: boolean;
   isMaster: boolean;
   onMaster: (() => void) | undefined;
 }
@@ -50,7 +52,7 @@ export interface DualHeadProps {
  * it there, and the row itself is the same either way up.
  */
 export const DualHead = memo(function DualHead({
-  track, remaining, elapsed, sleeve, onBeatSync, isMaster, onMaster,
+  track, remaining, elapsed, sleeve, onBeatSync, synced, isMaster, onMaster,
 }: DualHeadProps) {
   const tip = useTooltip();
   const { keyDisplay } = usePreferences().view;
@@ -106,11 +108,15 @@ export const DualHead = memo(function DualHead({
           type="button"
           className={styles.syncButton}
           aria-label="Beat sync"
+          aria-pressed={synced}
+          data-on={synced ? "" : undefined}
           disabled={!track || isMaster}
           title={tip(
             isMaster
               ? "This deck is the master; sync the other one to it."
-              : "Match this deck to the master's tempo and bar.",
+              : synced
+                ? "Following the master's tempo; press to stop."
+                : "Match this deck to the master's tempo and bar, and keep its tempo.",
           )}
           onClick={onBeatSync}
         >
@@ -152,6 +158,8 @@ export interface DualControlsProps {
   /** The BPM the deck is playing at, already formatted. */
   bpm: string;
   onNudgeTempo: (direction: number) => void;
+  /** Following the master: the tempo is not this deck's to step. */
+  synced: boolean;
   masterTempo: boolean;
   onMasterTempo: (on: boolean) => void;
   /** RST is inert once the tempo is back at 1. */
@@ -171,7 +179,7 @@ export interface DualControlsProps {
  * loops are not built — with the reason on each.
  */
 export const DualControls = memo(function DualControls({
-  idle, readOnly, memory, bpm, onNudgeTempo, masterTempo, onMasterTempo,
+  idle, readOnly, memory, bpm, onNudgeTempo, synced, masterTempo, onMasterTempo,
   atUnity, onResetTempo, quantize, onQuantize,
 }: DualControlsProps) {
   const gridReason = "Grid editing needs the PQT2 tag, which is not yet understood";
@@ -222,7 +230,8 @@ export const DualControls = memo(function DualControls({
           type="button"
           className={styles.tempoStep}
           aria-label="Slower"
-          disabled={idle}
+          disabled={idle || synced}
+          title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
           onClick={() => onNudgeTempo(-1)}
         >
           −
@@ -232,7 +241,8 @@ export const DualControls = memo(function DualControls({
           type="button"
           className={styles.tempoStep}
           aria-label="Faster"
-          disabled={idle}
+          disabled={idle || synced}
+          title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
           onClick={() => onNudgeTempo(1)}
         >
           +

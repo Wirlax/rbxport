@@ -43,6 +43,12 @@ describe("tempoFor", () => {
     expect(tempoFor(deck(70, 0), deck(174, 0), off)).toBe(MIN_TEMPO);
   });
 
+  it("follows the tempo the leader is playing at, not the one on its file", () => {
+    // A 128 nudged up to 131.2 is followed at 131.2.
+    expect(tempoFor({ ...deck(128, 0), tempo: 1.025 }, deck(128, 0))).toBeCloseTo(1.025, 6);
+    expect(tempoFor(deck(128, 0), deck(128, 0))).toBe(1);
+  });
+
   it("takes a double or half BPM as the same tempo, unless told not to", () => {
     // 140 beside 70 is a match at twice the leader's tempo — the follower
     // stays at its own speed rather than being slowed to half.

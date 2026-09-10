@@ -14,8 +14,14 @@ import { BEATS_PER_BAR, type BeatGrid } from "./player";
 
 /** What a deck brings to the calculation. */
 export interface Deck {
-  /** Hundredths of a BPM, as the library stores it. */
+  /** Hundredths of a BPM, as the library stores it: the file's own tempo. */
   bpmX100: number;
+  /**
+   * The multiple of the file's speed the deck is playing at; 1 when absent.
+   * A leader that has been nudged is followed at the tempo it is playing,
+   * not the one printed on its file.
+   */
+  tempo?: number;
   /** Where the playhead is, in seconds. */
   position: number;
   /** The analysed grid, or an empty one. */
@@ -49,7 +55,7 @@ export const MAX_TEMPO = 2.0;
  */
 export function tempoFor(leader: Deck, follower: Deck, options?: SyncOptions): number {
   if (leader.bpmX100 <= 0 || follower.bpmX100 <= 0) return 1;
-  let ratio = leader.bpmX100 / follower.bpmX100;
+  let ratio = (leader.bpmX100 * (leader.tempo ?? 1)) / follower.bpmX100;
   if (!Number.isFinite(ratio)) return 1;
   // "Allow BEAT/BPM SYNC with double/half BPM": a 140 next to a 70 is a
   // match at twice the leader's tempo, not a track slowed to half speed.

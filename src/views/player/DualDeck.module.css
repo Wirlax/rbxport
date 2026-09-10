@@ -118,6 +118,9 @@
   cursor: default;
 }
 .syncButton:disabled { color: var(--c-pad-label); }
+/* BEAT SYNC lit while the deck follows the master: the capture has deck A's
+   filled the pad blue, (53,113,227), and deck B's on the button grey. */
+.syncButton[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
 
 /* MASTER is an outlined box on the panel until this deck is the master, when
    it fills the pad blue: the capture has both, one per deck. */

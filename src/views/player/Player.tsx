@@ -53,7 +53,7 @@ import {
 import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
-import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
+import { syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
@@ -163,6 +163,21 @@ export interface PlayerProps {
   /** Whether this deck is the one the other syncs to. */
   isMaster?: boolean;
   onMaster?: () => void;
+  /**
+   * BEAT SYNC held on: the deck follows the master's tempo for as long as
+   * it is lit, as a CDJ's does, rather than matching once. The shell holds
+   * the flag, since the master is the shell's to name.
+   */
+  synced?: boolean;
+  onSyncToggle?: (() => void) | undefined;
+  /**
+   * The tempo the master is playing at, in hundredths of a BPM, or null
+   * with no master track. A synced deck re-matches whenever it changes —
+   * a nudge on the master, a reset, a new track.
+   */
+  leaderBpmX100?: number | null;
+  /** What this deck is playing at, for the shell to hand to a synced deck. */
+  onPlayingBpm?: ((bpmX100: number | null) => void) | undefined;
   /**
    * Load whatever the browser has selected.
    *
@@ -453,7 +468,8 @@ export const Player = memo(function Player({
   track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
-  publishSync, peerSync, isMaster = false, onMaster, readOnly = false,
+  publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
+  leaderBpmX100 = null, onPlayingBpm, readOnly = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck);
   // The waveforms follow their containers, which change with the window and
@@ -916,7 +932,7 @@ export const Player = memo(function Player({
   const syncState = useRef<() => SyncDeck | null>(() => null);
   syncState.current = () =>
     track
-      ? { bpmX100: track.bpmX100, position: playback.positionRef.current, grid }
+      ? { bpmX100: track.bpmX100, tempo: playback.tempo, position: playback.positionRef.current, grid }
       : null;
   useEffect(() => {
     publishSync?.(() => syncState.current());
@@ -925,8 +941,15 @@ export const Player = memo(function Player({
     publishZoom?.(zoom);
   }, [publishZoom, zoom]);
 
+  // What this deck is playing at, for a synced deck to follow: the file's
+  // tempo times the deck's. Reported when either changes and nothing else.
+  const playingBpmX100 = track && track.bpmX100 > 0 ? Math.round(track.bpmX100 * playback.tempo) : null;
+  useEffect(() => {
+    onPlayingBpm?.(playingBpmX100);
+  }, [onPlayingBpm, playingBpmX100]);
+
   /** Match this deck to the other one: its tempo, then its bar. */
-  const beatSync = useCallback(() => {
+  const matchLeader = useCallback(() => {
     const leader = peerSync?.();
     const follower = syncState.current();
     if (!leader || !follower) return;
@@ -941,6 +964,41 @@ export const Player = memo(function Player({
     // the tempo does not move the playhead.
     if (Math.abs(nudge) > 0.001) playback.seek(follower.position + nudge);
   }, [peerSync, playback, advancedPrefs.syncType, advancedPrefs.syncDoubleHalf]);
+
+  /**
+   * BEAT SYNC: lights and matches, or goes out. Lit, the deck keeps the
+   * master's tempo — the effect below re-matches on every change to it — and
+   * the bar is matched once, now, as a CDJ does on the press.
+   */
+  const beatSync = useCallback(() => {
+    if (!onSyncToggle) {
+      matchLeader();
+      return;
+    }
+    if (!synced) matchLeader();
+    onSyncToggle();
+  }, [onSyncToggle, synced, matchLeader]);
+
+  // Following: the tempo alone, with the bar left where the press put it.
+  // The master's BPM arrives from the shell rather than being read through
+  // the getter, so this runs exactly when that BPM changes and never on a
+  // frame.
+  const fileBpmX100 = track?.bpmX100 ?? 0;
+  useEffect(() => {
+    if (!synced || leaderBpmX100 === null || leaderBpmX100 <= 0 || fileBpmX100 <= 0) return;
+    const tempo = tempoFor(
+      { bpmX100: leaderBpmX100, position: 0, grid: NO_BEATS },
+      { bpmX100: fileBpmX100, position: 0, grid: NO_BEATS },
+      { doubleHalf: advancedPrefs.syncDoubleHalf },
+    );
+    if (Math.abs(tempo - playback.tempo) > 1e-4) playback.setTempo(tempo);
+  }, [synced, leaderBpmX100, fileBpmX100, advancedPrefs.syncDoubleHalf, playback]);
+
+  /** RST: the file's own speed, and no longer following anything. */
+  const resetTempo = useCallback(() => {
+    if (synced) onSyncToggle?.();
+    playback.setTempo(1);
+  }, [synced, onSyncToggle, playback]);
 
   const takesDrop = dragging && Boolean(onDropTrack);
 
@@ -1235,6 +1293,7 @@ export const Player = memo(function Player({
             elapsed={elapsed}
             sleeve={sleeve}
             onBeatSync={beatSync}
+            synced={synced}
             isMaster={isMaster}
             onMaster={onMaster}
           />
@@ -1266,11 +1325,15 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.chip}
                 aria-label="Beat sync"
+                aria-pressed={synced}
+                data-on={synced ? "" : undefined}
                 disabled={!track || isMaster}
                 title={tip(
                   isMaster
                     ? "This deck is the master; sync the other one to it."
-                    : "Match this deck to the master's tempo and bar.",
+                    : synced
+                      ? "Following the master's tempo; press to stop."
+                      : "Match this deck to the master's tempo and bar, and keep its tempo.",
                 )}
                 onClick={beatSync}
               >
@@ -1317,10 +1380,11 @@ export const Player = memo(function Player({
             memory={memory}
             bpm={formatBpm(Math.round((track?.bpmX100 ?? 0) * playback.tempo))}
             onNudgeTempo={playback.nudgeTempo}
+            synced={synced}
             masterTempo={playback.masterTempo}
             onMasterTempo={playback.setMasterTempo}
-            atUnity={playback.tempo === 1}
-            onResetTempo={() => playback.setTempo(1)}
+            atUnity={playback.tempo === 1 && !synced}
+            onResetTempo={resetTempo}
             quantize={quantize}
             onQuantize={() => setQuantize((on) => !on)}
           />
@@ -1568,7 +1632,8 @@ export const Player = memo(function Player({
               type="button"
               className={styles.step}
               aria-label="Slower"
-              disabled={playback.idle}
+              disabled={playback.idle || synced}
+              title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
               onClick={() => playback.nudgeTempo(-1)}
             >
               −
@@ -1580,7 +1645,8 @@ export const Player = memo(function Player({
               type="button"
               className={styles.step}
               aria-label="Faster"
-              disabled={playback.idle}
+              disabled={playback.idle || synced}
+              title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
               onClick={() => playback.nudgeTempo(1)}
             >
               +
@@ -1602,8 +1668,8 @@ export const Player = memo(function Player({
               type="button"
               className={styles.chip}
               aria-label="Reset tempo"
-              disabled={playback.idle || playback.tempo === 1}
-              onClick={() => playback.setTempo(1)}
+              disabled={playback.idle || (playback.tempo === 1 && !synced)}
+              onClick={resetTempo}
             >
               RST
             </button>

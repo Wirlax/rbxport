@@ -1842,6 +1842,64 @@ test("beat sync belongs to two decks, and pulls the follower to the master", asy
   await expect(a.getByRole("button", { name: "Beat sync" })).toBeEnabled();
 });
 
+test("BEAT SYNC stays lit and follows the master's tempo until RST or MASTER ends it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(1);
+  await cell.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
+
+  const a = page.getByRole("region", { name: "Preview player" }).first();
+  const b = page.getByRole("region", { name: "Preview player B" });
+  const sync = b.getByRole("button", { name: "Beat sync" });
+  const bpmA = a.getByTestId("player-bpm");
+  const bpmB = b.getByTestId("player-bpm");
+
+  // Lit once pressed, and the follower's own tempo steps are not its to take.
+  await sync.click();
+  await expect(sync).toHaveAttribute("aria-pressed", "true");
+  await expect(b.getByRole("button", { name: "Faster" })).toBeDisabled();
+  await expect.poll(async () => Number(await bpmB.innerText())).toBeCloseTo(
+    Number(await bpmA.innerText()),
+    0,
+  );
+
+  // Nudging the master moves the follower with it.
+  const leaderBefore = Number(await bpmA.innerText());
+  await a.getByRole("button", { name: "Faster" }).click();
+  await expect.poll(async () => Number(await bpmA.innerText())).toBeGreaterThan(leaderBefore);
+  await expect.poll(async () => Number(await bpmB.innerText())).toBeCloseTo(
+    Number(await bpmA.innerText()),
+    0,
+  );
+
+  // RST puts the follower back at its file's speed and takes it off sync.
+  await b.getByRole("button", { name: "Reset tempo" }).click();
+  await expect(sync).toHaveAttribute("aria-pressed", "false");
+  await expect(bpmB).toHaveText("129.00");
+  await expect(b.getByRole("button", { name: "Faster" })).toBeEnabled();
+
+  // Synced again, then made master: a master follows nobody, so its light goes out.
+  await sync.click();
+  await expect(sync).toHaveAttribute("aria-pressed", "true");
+  await b.getByRole("button", { name: "Sync master" }).click();
+  await expect(sync).toBeDisabled();
+  await expect(sync).toHaveAttribute("aria-pressed", "false");
+
+  // MT is the engine's key lock, held per deck.
+  const mt = a.getByRole("button", { name: "Master tempo" });
+  await mt.click();
+  await expect(mt).toHaveAttribute("aria-pressed", "true");
+  await expect(b.getByRole("button", { name: "Master tempo" })).toHaveAttribute("aria-pressed", "false");
+});
+
 test("the tempo control moves the deck's BPM, and MT and RST are real", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

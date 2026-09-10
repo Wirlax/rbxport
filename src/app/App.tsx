@@ -136,7 +136,37 @@ export function App() {
    * and the one a first track lands on. Only ever one, which is what MASTER
    * means.
    */
-  const [syncMaster, setSyncMaster] = useState<DeckId>("a");
+  const [syncMaster, setSyncMasterState] = useState<DeckId>("a");
+  /**
+   * BEAT SYNC held on, per deck. A deck follows the master's tempo for as
+   * long as its button is lit; the master itself never follows, so making a
+   * deck the master puts its own light out.
+   */
+  const [synced, setSynced] = useState<Record<DeckId, boolean>>({ a: false, b: false });
+  const setSyncMaster = useCallback((deck: DeckId) => {
+    setSyncMasterState(deck);
+    setSynced((s) => (s[deck] ? { ...s, [deck]: false } : s));
+  }, []);
+  const toggleSync = useMemo(
+    () => ({
+      a: () => setSynced((s) => ({ ...s, a: !s.a })),
+      b: () => setSynced((s) => ({ ...s, b: !s.b })),
+    }),
+    [],
+  );
+  /**
+   * What each deck is playing at — its file's BPM times its tempo — so the
+   * synced deck can be handed the master's and re-match when it moves.
+   */
+  const [playingBpm, setPlayingBpm] = useState<Record<DeckId, number | null>>({ a: null, b: null });
+  const reportPlayingBpm = useMemo(
+    () => ({
+      a: (bpm: number | null) => setPlayingBpm((p) => (p.a === bpm ? p : { ...p, a: bpm })),
+      b: (bpm: number | null) => setPlayingBpm((p) => (p.b === bpm ? p : { ...p, b: bpm })),
+    }),
+    [],
+  );
+  const leaderBpmX100 = playingBpm[syncMaster];
   /**
    * How each deck reads the other for sync.
    *
@@ -939,6 +969,10 @@ export function App() {
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
             onMaster={() => setSyncMaster("a")}
+            synced={synced.a && syncMaster !== "a"}
+            onSyncToggle={deckCount(layout) > 1 ? toggleSync.a : undefined}
+            leaderBpmX100={syncMaster === "a" ? null : leaderBpmX100}
+            onPlayingBpm={reportPlayingBpm.a}
             readOnly={readOnly}
           />
           {deckCount(layout) > 1 ? (
@@ -960,6 +994,10 @@ export function App() {
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}
               onMaster={() => setSyncMaster("b")}
+              synced={synced.b && syncMaster !== "b"}
+              onSyncToggle={toggleSync.b}
+              leaderBpmX100={syncMaster === "b" ? null : leaderBpmX100}
+              onPlayingBpm={reportPlayingBpm.b}
               readOnly={readOnly}
             />
           ) : null}
