@@ -367,9 +367,17 @@ test("deck B reads bottom-up, and its waveforms are the mirror of deck A's", asy
   // detail waveforms meeting in the middle.
   await page.getByRole("button", { name: "Layout" }).click();
   await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  // A track on each deck, so both draw their waveforms.
+  await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(1);
+  await cell.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  await menu.getByRole("menuitem", { name: "Load", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Load track to player 2" }).click();
 
   const a = page.getByRole("region", { name: "Preview player" }).first();
   const b = page.getByRole("region", { name: "Preview player B" });
+  await expect(b.getByTestId("player-title")).not.toHaveText("");
   const box = async (region: typeof a, testid: string) =>
     (await region.getByTestId(testid).boundingBox()) ?? { y: 0, height: 0 };
 
@@ -384,16 +392,17 @@ test("deck B reads bottom-up, and its waveforms are the mirror of deck A's", asy
   // And the whole of deck B sits below the whole of deck A.
   expect(titleB.y).toBeGreaterThan(titleA.y);
 
-  // Its waveforms are drawn upside down, which is the only part of a deck
-  // that can be mirrored rather than reordered.
-  const flip = await b
-    .locator("canvas")
-    .first()
-    .evaluate((el) => getComputedStyle(el).transform);
-  expect(flip).toBe("matrix(1, 0, 0, -1, 0, 0)");
-  const upright = await a
-    .locator("canvas")
-    .first()
-    .evaluate((el) => getComputedStyle(el).transform);
-  expect(upright === "none" || upright === "matrix(1, 0, 0, 1, 0, 0)").toBe(true);
+  // Its detail waveform is drawn upside down, which is the only part of a
+  // deck that can be mirrored rather than reordered; its overview is not —
+  // the capture draws deck B's overview the same way up as deck A's.
+  const transform = (region: typeof a, testid: string) =>
+    region
+      .getByTestId(testid)
+      .locator("canvas")
+      .first()
+      .evaluate((el) => getComputedStyle(el).transform);
+  const isUpright = (value: string) => value === "none" || value === "matrix(1, 0, 0, 1, 0, 0)";
+  expect(await transform(b, "player-detail")).toBe("matrix(1, 0, 0, -1, 0, 0)");
+  expect(isUpright(await transform(b, "player-overview"))).toBe(true);
+  expect(isUpright(await transform(a, "player-detail"))).toBe(true);
 });
