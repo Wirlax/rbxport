@@ -1354,6 +1354,11 @@ export const Player = memo(function Player({
                   width={detail.width * OVERDRAW}
                   height={detail.height}
                   detail
+                  // In the 2 PLAYER layout the two details are halves that
+                  // meet at the line between the decks: deck A's rises from
+                  // it and deck B's, whose canvas is flipped, hangs from it
+                  // [OBS]. On its own the deck draws the centred waveform.
+                  half={dual ? "overlaid" : false}
                   inset={WAVE_INSET}
                 />
               ) : null}

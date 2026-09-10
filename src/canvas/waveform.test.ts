@@ -121,6 +121,25 @@ describe("the three-band waveform", () => {
     ]);
   });
 
+  it("overlays the bands from the baseline for the 2 PLAYER detail", () => {
+    // The two decks' details meet at the line between them, each a half
+    // drawn from that line: blue behind as the envelope, amber over it, the
+    // near-white core last — the centred waveform's layering, one-sided.
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([127, 64, 32]), 1, 100, "detail", "overlaid", { top: 8, bottom: 2 });
+    expect(fills).toHaveLength(3);
+    // Every band stands on the floor, and the loudest reaches the top inset.
+    for (const fill of fills) expect(fill.y + fill.h).toBeCloseTo(98, 5);
+    expect(fills[0]!.y).toBeCloseTo(8, 5);
+    expect(fills[1]!.h).toBeCloseTo(90 * (64 / 127), 5);
+    expect(fills[2]!.h).toBeCloseTo(90 * (32 / 127), 5);
+    expect(fills.map((f) => f.style)).toEqual([
+      ramp(bandStops("detail"), 0),
+      ramp(bandStops("detail"), 0.5),
+      ramp(bandStops("detail"), 1),
+    ]);
+  });
+
   it("weighs the three bands the way rekordbox paints them", () => {
     // Not one scale for all three. Matched column for column against a 2x
     // capture, the blue rises v/128 of the band, the amber v/256 and the

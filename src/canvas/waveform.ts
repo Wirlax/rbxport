@@ -24,6 +24,9 @@ const WHITENESS_SHIFT = 5;
  */
 export type WaveBand = "overview" | "detail";
 
+/** How a waveform is drawn: centred, or a half from the bottom — see `drawBands`. */
+export type HalfWaveform = boolean | "overlaid";
+
 /**
  * The three bands, from `src/styles/tokens.css`.
  *
@@ -101,15 +104,20 @@ export function drawBands(
   height: number,
   band: WaveBand = "overview",
   /**
-   * Half height, growing from the bottom, with the bands stacked rather than
-   * centred and overlaid.
+   * Half height, growing from the bottom.
    *
-   * This is the row preview in the track list. Stacking is what gives the blue
+   * `true` stacks the bands: blue, then amber on it, then near-white. This is
+   * the row preview in the track list, where stacking is what gives the blue
    * its flat top with the amber riding above it — overlaying from a baseline
    * would hide the amber entirely whenever the lows are louder, which is most
    * of the time.
+   *
+   * `"overlaid"` draws each band from the baseline over the last, blue first
+   * as the outer envelope and near-white last as the core — the centred
+   * waveform's own layering, single-sided. This is the 2 PLAYER detail, where
+   * the two decks' halves meet at the line between them [OBS].
    */
-  half = false,
+  half: HalfWaveform = false,
   /**
    * Rows left clear at the top and bottom, in device pixels.
    *
@@ -152,6 +160,18 @@ export function drawBands(
       [mid, stops[1], STACK_SCALE[1]],
       [high, stops[2], STACK_SCALE[2]],
     ] as const;
+
+    if (half === "overlaid") {
+      // From the baseline, each band over the last, reaching the whole band
+      // at full scale as the centred waveform reaches half of it each way.
+      for (const [value, colour] of bands) {
+        if (value === 0) continue;
+        const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * usable);
+        ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
+        ctx.fillRect(x, floor - reach, 1, reach);
+      }
+      continue;
+    }
 
     if (half) {
       // Stacked from the bottom: blue, then amber on it, then near-white.

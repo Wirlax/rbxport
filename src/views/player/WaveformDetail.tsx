@@ -12,7 +12,7 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { drawBands } from "@/canvas";
+import { drawBands, type HalfWaveform } from "@/canvas";
 import { getBackend } from "@/ipc/client";
 import { backingSize } from "@/lib/canvasSize";
 import { waveSlice } from "@/lib/player";
@@ -55,8 +55,8 @@ export interface WaveformDetailProps {
   /** The space the canvas occupies, in CSS pixels. */
   width: number;
   height: number;
-  /** Half height from the baseline, bands stacked — the overview's form. */
-  half?: boolean;
+  /** Half height from the baseline: stacked for the overview, overlaid for the 2 PLAYER detail. */
+  half?: HalfWaveform;
   /** Read the full-resolution `PWV7` rather than the 1,200-column `PWV6`. */
   detail?: boolean;
   /** Rows to leave clear at the top and bottom, in CSS pixels. */
