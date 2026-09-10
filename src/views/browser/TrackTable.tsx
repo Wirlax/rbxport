@@ -19,6 +19,7 @@ import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
+import { RecordIcon } from "@/components/icons";
 import type { ColumnKey, ColumnSpec } from "@/lib/columns";
 import { ColumnMenu } from "./ColumnMenu";
 
@@ -247,16 +248,13 @@ const TrackRow = memo(function TrackRow({
           return (
             <div key={col.key} className={styles.artwork} data-col={col.key} role="gridcell">
               {/*
-                The tint sits underneath as the fallback: a little under half
-                the reference library has no artwork, and it also covers the
-                gap while the image decodes. `loading="lazy"` keeps a fast
-                scroll from queueing a fetch for every row it passes.
+                The record sits underneath as the fallback, the way rekordbox
+                draws a cell without artwork: a little under half the
+                reference library has none, and it also covers the gap while
+                the image decodes. `loading="lazy"` keeps a fast scroll from
+                queueing a fetch for every row it passes.
               */}
-              <span
-                style={{
-                  background: `linear-gradient(135deg, hsl(${row.artworkHue} 40% 26%), hsl(${(row.artworkHue + 70) % 360} 55% 12%))`,
-                }}
-              />
+              <RecordIcon className={styles.record} aria-hidden />
               {row.hasArtwork ? (
                 <Artwork trackId={row.id} className={styles.artworkImage} lazy />
               ) : null}

@@ -214,10 +214,22 @@
 }
 .cue { font-size: var(--f-size-xs); color: var(--c-text-dim); }
 
-.artwork { padding: 0; position: relative; }
-.artwork > span { position: absolute; inset: 0; }
-/* Over the tint, so a track without artwork still shows something and a track
-   with it shows nothing else while the image decodes. */
+.artwork { padding: 0; position: relative; overflow: hidden; background: var(--c-simple-well); }
+/* The record a cell without artwork shows: `design/icons/ui/record.svg`,
+   drawn in a square the column's width and anchored at the row's top. The
+   row crops it — a short row shows the disc's top arc, a tall one the whole
+   record — which is what rekordbox does at every artwork size. */
+.record {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  color: var(--c-simple-disc);
+}
+/* Over the record, so a track without artwork still shows something and a
+   track with it shows nothing else while the image decodes. */
 .artworkImage {
   position: absolute;
   inset: 0;
@@ -230,9 +242,10 @@
   visibility: hidden;
 }
 .artworkImage[data-state="shown"] { visibility: visible; }
-/* Nothing at all while it decodes — not a tint that is about to be covered by
-   the sleeve anyway. The tint comes back only once the image has given up. */
-.artwork:has(.artworkImage[data-state="pending"]) > span { visibility: hidden; }
+/* Nothing at all while it decodes — not a record that is about to be covered
+   by the sleeve anyway. The record comes back only once the image has given
+   up. */
+.artwork:has(.artworkImage[data-state="pending"]) > .record { visibility: hidden; }
 
 /* The waveform sits on a measured band 5pt down the row, not centred in it:
    rekordbox leaves more room below the baseline than above the badges. */
