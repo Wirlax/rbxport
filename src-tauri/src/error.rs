@@ -1,7 +1,7 @@
 //! The single error type that crosses the IPC boundary.
 //!
 //! Commands never panic into the webview: `run_command` catches unwinds and
-//! converts them here (docs/PLAN.md §Stability).
+//! converts them here (docs/pre-release/PLAN.md §Stability).
 
 use serde::Serialize;
 

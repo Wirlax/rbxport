@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    // To evaluate Preact at the Milestone 1 gate (see docs/PLAN.md appendix), add:
+    // To evaluate Preact at the Milestone 1 gate (see docs/pre-release/PLAN.md appendix), add:
     //   react: "preact/compat", "react-dom": "preact/compat"
   },
   clearScreen: false,

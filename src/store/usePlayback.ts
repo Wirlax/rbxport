@@ -4,7 +4,7 @@
  * The audio itself is in Rust — `crates/rbl-deck` — rather than on an
  * `<audio>` element. A media element has no primitive for phase-locked beat
  * sync, key sync or audible drag-scrub, which is what the 2-player view needs;
- * see `docs/player-engine.md`.
+ * see `docs/pre-release/player-engine.md`.
  *
  * Position does not come back from a command. The engine emits one tick ten
  * times a second carrying both decks' frame counters, and every frame in
