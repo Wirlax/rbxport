@@ -86,6 +86,14 @@ jobs:
       # setup-node, never the host's node: the arc hosts have node under nvm or
       # in a location the runner's environment does not see.
       - uses: pnpm/action-setup@v4
+        with:
+          # Its default is `~/setup-pnpm`, one fixed path per host. Two jobs on
+          # the same Mac — a CI run and a release, say — both installing there
+          # at once is how the first release's macOS build failed before it had
+          # done anything: `ENOTEMPTY: directory not empty` from the loser of
+          # the race. RUNNER_TEMP belongs to one runner, and each arc runner is
+          # its own throwaway.
+          dest: ${{ runner.temp }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
