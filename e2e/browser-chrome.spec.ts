@@ -240,6 +240,11 @@ test("the title bar and the status bar carry the measured greys, and the status 
 });
 
 test("the top bar's right-hand items keep their places without the info button and the badge", async ({ page }) => {
+  // The clock sits at the right edge and the gear hangs off the clock, so a
+  // one-digit hour moves the gear by one tabular digit. Pinned to the
+  // two-digit hour the capture was taken at.
+  await page.clock.setFixedTime(new Date("2026-09-09T12:01:00"));
+  await page.goto("/");
   const bar = page.getByRole("banner");
   await expect(bar.getByRole("button", { name: "Information" })).toHaveCount(0);
   await expect(bar.getByText("Professional")).toHaveCount(0);
