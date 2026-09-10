@@ -32,4 +32,4 @@ recordings/*.json
 recordings/*.json.gz
 
 # Integration-check evidence: screenshots of somebody's desktop
-verification/
+/verification/

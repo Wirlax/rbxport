@@ -26,7 +26,7 @@ import {
   type TrafficLightSource,
 } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
-import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
+import { AppCost } from "@/views/topbar/AppCost";
 import { useLimiter } from "@/store/useLimiter";
 import { useUpdater } from "@/store/useUpdater";
 import { UpdateManager } from "@/views/update/UpdateManager";
@@ -281,7 +281,6 @@ export function App() {
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
   const trafficDeck: DeckId = trafficLight === "master" ? syncMaster : trafficLight;
   const trafficKey = (trafficDeck === "b" ? playerTrackB : playerTrack)?.key ?? null;
-  const cost = useDiagnostics(true);
   const master = useMaster();
   // Read at start so the remembered setting reaches the engine before the
   // first thing plays, not when Settings is next opened.
@@ -967,18 +966,9 @@ export function App() {
         onMouseDown={startWindowDrag}
         onDoubleClick={toggleWindowMaximise}
       >
-        {/* What the app is costing, in the corner. A dash is a figure the
-            platform will not give rather than a zero, which would be a claim. */}
-        <div className={styles.cost} data-testid="app-cost">
-          {/* Processor lives in the top bar's own meter now, and GPU was
-              always a dash: macOS accounts it per process only to root. */}
-          <span title={tip("Resident memory")}>MEM {formatMemory(cost.memoryMb)}</span>
-          <span title={tip("Threads in the process")}>THR {formatCount(cost.threads)}</span>
-          <span title={tip("Open file descriptors")}>FD {formatCount(cost.openFiles)}</span>
-          <span title={tip("Frames a second, timed in the window")}>
-            FPS {formatCount(cost.fps)}
-          </span>
-        </div>
+        {/* What the app is costing, in the corner: its own component, so a
+            reading does not re-render the window around it. */}
+        <AppCost className={styles.cost} />
         <span className={styles.appName}>rekordbox-lite</span>
       </div>
       <TopBar
@@ -990,7 +980,6 @@ export function App() {
         onLevelChange={master.setLevel}
         peakLeft={master.peakLeft}
         peakRight={master.peakRight}
-        cpu={cost.cpu / 100}
       />
       {/* Full Browser draws no deck at all, and no gutter under one. */}
       {deckCount(layout) > 0 ? (

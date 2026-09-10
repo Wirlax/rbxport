@@ -1,25 +1,34 @@
 /**
  * What the app is costing, for the title bar's readout.
  *
- * A second between readings, chained with `setTimeout` rather than run on an
- * interval: an interval that outlives the page keeps firing, and a reading is
- * only worth taking once the last one has come back.
+ * Readings are chained with `setTimeout` rather than run on an interval: an
+ * interval that outlives the page keeps firing, and a reading is only worth
+ * taking once the last one has come back.
  *
- * Frames are counted here rather than asked for. The backend cannot see the
- * webview's refresh rate, and a permanent `requestAnimationFrame` loop is the
- * exact thing the idle budget rules out — so each reading runs the loop for a
- * short burst, times the frames it saw, and stops.
+ * The readout must cost less than the budget it reports. At one reading a
+ * second with ten frames timed per reading, it was the idle load: ten forced
+ * composites, a process walk in the backend and a re-render every second
+ * came to 0.8 % of a core in the app and 2.6 % in the webview against a
+ * budget of 0.5 % (measured on a compiled 0.5.1 with the library loaded).
+ * So: a reading every four seconds, and the frame rate from two frames
+ * rather than ten — the interval between two consecutive frames is the
+ * refresh period, which is all ten frames were averaging.
  */
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { Diagnostics } from "@/ipc/types";
 
-/** Between readings. */
-const PERIOD_MS = 1000;
+/** Between readings. Five seconds is a readout that still moves, at a
+ * fortieth of the idle cost a reading a second had. */
+const PERIOD_MS = 5000;
 
-/** Frames timed per reading. Enough to be steady, short enough to be idle. */
-const FRAMES = 10;
+/**
+ * Frames timed per reading: two, the least that gives an interval. Every
+ * frame asked for here is a frame the compositor has to draw, so this is the
+ * whole cost of the FPS figure.
+ */
+const FRAMES = 2;
 
 export interface AppCost extends Diagnostics {
   /** Frames a second, measured in the webview, or `null` before the first. */
@@ -35,52 +44,91 @@ const NOTHING: AppCost = {
   fps: null,
 };
 
-/** Times `FRAMES` frames and returns the rate they arrived at. */
+/**
+ * Times `FRAMES` frames and returns the rate they arrived at.
+ *
+ * The first frame's timestamp is the start, so the rate is over the gaps
+ * between frames rather than from the moment of asking — which included the
+ * wait for the first frame and read low.
+ */
 function measureFps(): Promise<number> {
   return new Promise((resolve) => {
-    const start = performance.now();
+    let start = 0;
     let seen = 0;
-    const step = () => {
+    const step = (now: number) => {
       seen += 1;
+      if (seen === 1) {
+        start = now;
+        requestAnimationFrame(step);
+        return;
+      }
       if (seen < FRAMES) {
         requestAnimationFrame(step);
         return;
       }
-      const elapsed = performance.now() - start;
-      resolve(elapsed > 0 ? (seen / elapsed) * 1000 : 0);
+      const elapsed = now - start;
+      resolve(elapsed > 0 ? ((seen - 1) / elapsed) * 1000 : 0);
     };
     requestAnimationFrame(step);
   });
 }
 
-export function useDiagnostics(enabled: boolean): AppCost {
-  const [cost, setCost] = useState<AppCost>(NOTHING);
+/**
+ * One poller for the whole window, shared by whoever shows a figure.
+ *
+ * A store rather than a hook holding state in the shell: with `cost` a
+ * value of `App`, every reading re-rendered the entire shell — the browser,
+ * the deck, the tree — to change four short strings, and that render was
+ * most of what the webview did all day. Now a reading changes this store,
+ * and only the readout and the processor meter, which subscribe to it,
+ * render again. The poller runs while anything subscribes and stops when
+ * nothing does.
+ */
+let current: AppCost = NOTHING;
+const listeners = new Set<() => void>();
+let live = false;
+let timer: ReturnType<typeof setTimeout> | null = null;
 
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+function publish(next: AppCost) {
+  current = next;
+  for (const listener of listeners) listener();
+}
 
-    const read = async () => {
-      try {
-        const backend = await getBackend();
-        const [sample, fps] = await Promise.all([backend.appDiagnostics(), measureFps()]);
-        if (live) setCost({ ...sample, fps });
-      } catch {
-        // A build with no backend behind it simply shows nothing.
-        if (live) setCost(NOTHING);
-      }
-      if (live) timer = setTimeout(() => void read(), PERIOD_MS);
-    };
+async function read() {
+  try {
+    const backend = await getBackend();
+    const [sample, fps] = await Promise.all([backend.appDiagnostics(), measureFps()]);
+    if (live) publish({ ...sample, fps });
+  } catch {
+    // A build with no backend behind it simply shows nothing.
+    if (live) publish(NOTHING);
+  }
+  if (live) timer = setTimeout(() => void read(), PERIOD_MS);
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  if (!live) {
+    live = true;
     void read();
-
-    return () => {
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
       live = false;
       if (timer !== null) clearTimeout(timer);
-    };
-  }, [enabled]);
+      timer = null;
+    }
+  };
+}
 
-  return cost;
+function snapshot(): AppCost {
+  return current;
+}
+
+/** What the app is costing now, updated every few seconds while mounted. */
+export function useAppCost(): AppCost {
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /** `1.2 GB`, `312 MB` — the readout has no room for six digits of bytes. */

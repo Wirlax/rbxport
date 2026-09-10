@@ -14,6 +14,7 @@
  * so nobody restores them in the name of matching 7.2.11.
  */
 import { GearIcon } from "@/components/icons";
+import { useAppCost } from "@/store/useDiagnostics";
 import { VolumeKnob } from "./VolumeKnob";
 import type { PlayerLayout } from "@/lib/layout";
 import { LayoutMenu } from "./LayoutMenu";
@@ -33,7 +34,11 @@ export interface TopBarProps {
   /** The loudest sample the device was given, per channel, 0 to 1. */
   peakLeft?: number;
   peakRight?: number;
-  /** Processor, as a fraction of one core. */
+  /**
+   * Processor, as a fraction of one core. Left out, the meter reads the
+   * app's own cost store — the shell passes nothing, so a reading re-renders
+   * this meter and not the window around it.
+   */
   cpu?: number;
   /** How much of the window the deck takes. rekordbox puts this at the left. */
   layout?: PlayerLayout;
@@ -52,7 +57,7 @@ export function TopBar({
   onLevelChange,
   peakLeft = 0,
   peakRight = 0,
-  cpu = 0,
+  cpu,
   layout = "one",
   onLayoutChange,
 }: TopBarProps) {
@@ -92,18 +97,27 @@ export function TopBar({
         ))}
       </div>
 
-      <div
-        className={`${styles.meter} ${styles.cpu}`}
-        role="meter"
-        aria-label="Processor"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(clamp(cpu) * 100)}
-      >
-        <span className={styles.meterFill} style={{ width: `${clamp(cpu) * 100}%` }} />
-      </div>
+      <ProcessorMeter cpu={cpu} />
 
       <span className={styles.clock} data-testid="clock">{clock}</span>
     </header>
+  );
+}
+
+/** The processor meter: the given fraction, or the app's own reading. */
+function ProcessorMeter({ cpu }: { cpu: number | undefined }) {
+  const cost = useAppCost();
+  const fraction = cpu ?? cost.cpu / 100;
+  return (
+    <div
+      className={`${styles.meter} ${styles.cpu}`}
+      role="meter"
+      aria-label="Processor"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(clamp(fraction) * 100)}
+    >
+      <span className={styles.meterFill} style={{ width: `${clamp(fraction) * 100}%` }} />
+    </div>
   );
 }
