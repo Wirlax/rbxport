@@ -52,9 +52,13 @@ jobs:
             # same SDK, which is all pure Rust here.
             target: universal-apple-darwin
             bundles: dmg
+            # The platform segment of the published filename, so a URL says
+            # which build it serves without anything having to be opened.
+            slug: darwin-universal
           - host: [self-hosted, windows, x64]
             target: x86_64-pc-windows-msvc
             bundles: nsis
+            slug: windows-x86_64
     runs-on: ${{ matrix.host }}
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
@@ -315,6 +319,23 @@ jobs:
           find target src-tauri/target -type f ! -name 'rw.*' \
             \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \) \
             -exec cp {} out/ \; 2>/dev/null || true
+
+          # Renamed here, not at upload time, so the artifact and the object in
+          # the bucket carry the same name. The bundlers produce
+          # `rekordbox-lite_0.1.0_universal.dmg` and
+          # `rekordbox-lite_0.1.0_x64-setup.exe`; what gets published is
+          # `rekordbox-lite-<semver>-<platform>[-setup].<ext>`, which is the
+          # one shape a person can read, type and grep. Bare semver, because
+          # the leading `v` belongs to the tag and nothing else.
+          for f in out/*; do
+            case "$f" in
+              *.dmg)       want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.dmg" ;;
+              *-setup.exe) want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
+              *) echo "::error::unexpected bundle $f"; exit 1 ;;
+            esac
+            [ "$f" = "$want" ] || mv "$f" "$want"
+          done
+
           ls -l out
           # A release that uploads nothing is worse than one that fails: it
           # looks like it worked.
@@ -431,18 +452,83 @@ jobs:
         # S3-compatible, so the AWS CLI is the whole client. The endpoint is
         # the account's; the bucket is a variable so this file names no account
         # of anyone's.
+        #
+        # Object keys are FLAT — no `<version>/` or `latest/` prefix, ever. The
+        # version is already in every filename, so a folder per version buys
+        # nothing and costs a URL nobody can read, type or grep for; one
+        # namespace also means a stale prefix cannot shadow a new upload. The
+        # build job has already named the files
+        # `rekordbox-lite-<semver>-<platform>[-setup].<ext>`.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          # Recent AWS CLI versions attach CRC32 integrity headers that R2
+          # rejects with a 400 whose message says nothing useful.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           BUCKET: ${{ vars.R2_BUCKET }}
+          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           test -n "$BUCKET"
           ls -l out
-          aws s3 sync out "s3://$BUCKET/$version/" --endpoint-url "$ENDPOINT" --no-progress
-          # A stable path as well as the versioned one, so a download link on a
-          # page does not have to be edited for every release.
-          aws s3 sync out "s3://$BUCKET/latest/" --endpoint-url "$ENDPOINT" --no-progress --delete
+
+          # Payloads first, feed second: latest.json must never name a file
+          # that has not finished uploading. Immutable caching is safe because
+          # a name is never reused — a new version is a new key.
+          for f in out/*; do
+            aws s3 cp "$f" "s3://$BUCKET/$(basename "$f")" \
+              --endpoint-url "$ENDPOINT" --no-progress \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
+          # The one fixed path in the bucket, and what replaces the `latest/`
+          # folder: something a page or a script can read to find the newest
+          # version without a folder listing. `url` appears only once
+          # CDN_BASE_URL names how the bucket is served publicly.
+          node -e '
+            const fs = require("fs");
+            const [, version, base] = process.argv;
+            const files = fs.readdirSync("out");
+            const platforms = {};
+            for (const [slug, match] of [
+              ["darwin-universal", (f) => f.endsWith(".dmg")],
+              ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
+            ]) {
+              const file = files.find(match);
+              if (!file) continue;
+              platforms[slug] = base ? { file, url: base + "/" + file } : { file };
+            }
+            const feed = { version, pub_date: new Date().toISOString(), platforms };
+            fs.writeFileSync("latest.json", JSON.stringify(feed, null, 2) + "\n");
+            console.log(JSON.stringify(feed, null, 2));
+          ' "$version" "${CDN_BASE_URL:-}"
+
+          # Short TTL: this is the file anything checking for a new version
+          # reads, and a long one delays the rollout by exactly that much.
+          aws s3 cp latest.json "s3://$BUCKET/latest.json" \
+            --endpoint-url "$ENDPOINT" --no-progress \
+            --content-type application/json --cache-control "public, max-age=60"
+
+      - name: Re-fetch what was just published
+        # The same request a download page makes, so a bucket that uploaded
+        # fine but serves nothing fails the release instead of being found by
+        # the first person who clicks a link. Only possible once the bucket has
+        # a public base URL; without one there is nothing to fetch.
+        if: vars.CDN_BASE_URL != ''
+        env:
+          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          curl -fsSL "$CDN_BASE_URL/latest.json" -o published.json
+          cat published.json
+          test "$(node -p 'require("./published.json").version')" = "$version"
+          for url in $(node -p '
+            Object.values(require("./published.json").platforms).map((p) => p.url).join("\n")
+          '); do
+            curl -fsI "$url" > /dev/null
+          done
