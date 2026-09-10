@@ -31,7 +31,13 @@ export type Action =
   | "jumpForward"
   | "showMemory"
   | "showHotCues"
-  | "showInfo";
+  | "showInfo"
+  // The MEMORY cluster: M stores the cue point as a memory cue, B and N call
+  // the one before and after the playhead, X deletes the one it is on.
+  | "memoryCue"
+  | "previousMemoryCue"
+  | "nextMemoryCue"
+  | "deleteMemoryCue";
 
 /** The parts of a keyboard event the map reads. */
 export interface KeyChord {
@@ -102,6 +108,14 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
         return "cue";
       case "q":
         return "quantize";
+      case "m":
+        return "memoryCue";
+      case "b":
+        return "previousMemoryCue";
+      case "n":
+        return "nextMemoryCue";
+      case "x":
+        return "deleteMemoryCue";
       default:
         break;
     }

@@ -109,5 +109,14 @@
     "Display information window.": "Display information window.",
     "Sub-Browser Window": "Sub-Browser Window",
     "Display sub-browser window.": "Display sub-browser window."
+  },
+  "deck": {
+    "Memory Cue": "Memory Cue",
+    "Set Memory Cue": "Set Memory Cue",
+    "Call Previous Memory Cue": "Call Previous Memory Cue",
+    "Call Next Memory Cue": "Call Next Memory Cue",
+    "Delete Memory Cue": "Delete Memory Cue",
+    "Show Memory Cues": "Show Memory Cues",
+    "Show Hot Cues": "Show Hot Cues"
   }
 }

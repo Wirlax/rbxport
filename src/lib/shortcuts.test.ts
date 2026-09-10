@@ -55,7 +55,7 @@ describe("actionFor", () => {
       { key: "q", metaKey: true },
       { key: "r", metaKey: true },
       { key: "Tab" },
-      { key: "x" },
+      { key: "z" },
       { key: "F5" },
       { key: "a", metaKey: true, altKey: true },
     ]) {
@@ -111,6 +111,19 @@ describe("rekordbox's own Export key map", () => {
     expect(actionFor({ key: "q" }, mac)).toBe("quantize");
     expect(actionFor({ key: "ArrowLeft" }, mac)).toBe("jumpBack");
     expect(actionFor({ key: "ArrowRight" }, mac)).toBe("jumpForward");
+  });
+
+  it("gives the MEMORY cluster M, B, N and X", () => {
+    // `M` Memory Cue, `B` Call Previous Memory Cue, `N` Call Next Memory
+    // Cue, `X` Delete Memory Cue — the Export preset's own bindings.
+    expect(actionFor({ key: "m" }, mac)).toBe("memoryCue");
+    expect(actionFor({ key: "b" }, mac)).toBe("previousMemoryCue");
+    expect(actionFor({ key: "n" }, mac)).toBe("nextMemoryCue");
+    expect(actionFor({ key: "x" }, mac)).toBe("deleteMemoryCue");
+    // ⌘X is cut, and ⌘M minimises the window.
+    expect(actionFor({ key: "x", metaKey: true }, mac)).not.toBe("deleteMemoryCue");
+    expect(actionFor({ key: "m", metaKey: true }, mac)).not.toBe("memoryCue");
+    expect(dispatch({ key: "x" }, mac, { tagName: "INPUT" })).toBeNull();
   });
 
   it("puts the three cue lists on F10, F11 and F12", () => {
