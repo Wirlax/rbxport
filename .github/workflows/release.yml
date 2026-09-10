@@ -174,6 +174,16 @@ jobs:
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        # Not on Windows. That host builds into a persistent C:/rbl-target
+        # (above) with a persistent ~/.cargo beside it, so it already has
+        # both caches; rust-cache adds nothing there and takes something
+        # away: on save it deletes ~/.cargo/registry/src, and the next build
+        # finds the target directory "fresh" while the source trees its
+        # cached build-script outputs link against are gone —
+        # `LNK1181: cannot open input file 'windows.0.52.0.lib'`. On the Mac
+        # the workspace is wiped with the runner, so the cache is the only
+        # thing that carries `target` from one release to the next.
+        if: runner.os != 'Windows'
         with:
           # No `workspaces:` — this repo's workspace root is the repository
           # root and it builds into `target` there, which is the default.
