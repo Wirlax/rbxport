@@ -573,19 +573,22 @@ jobs:
     needs: build
     runs-on: [self-hosted, linux, x64]
     steps:
+      # For CHANGELOG.md, which rides along in the feed as the release
+      # notes: the app shows the sections between the version it is and the
+      # version on offer. Nothing else here needs the tree. FIRST, before
+      # the installers are downloaded: checkout cleans the workspace, and
+      # placed after the download it deleted `out/` — 0.5.1's publish died
+      # on `ls: cannot access 'out'` after both builds had passed.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: installers-*
           merge-multiple: true
           path: out
-
-      # For CHANGELOG.md, which rides along in the feed as the release
-      # notes: the app shows the sections between the version it is and the
-      # version on offer. Nothing else here needs the tree.
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: CHANGELOG.md
-          sparse-checkout-cone-mode: false
 
       # The steps below build and read latest.json with node. The checkout
       # above puts nothing on PATH, and the arc Linux host's own node is not
