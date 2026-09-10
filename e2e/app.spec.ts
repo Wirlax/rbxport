@@ -811,6 +811,44 @@ test("only playlists offer themselves as a drop target", async ({ page }) => {
   await expect.poll(async () => playlists.count()).toBeGreaterThan(0);
   const folders = page.getByRole("treeitem").filter({ hasText: "CURRENT" });
   await expect(folders.first()).not.toHaveAttribute("data-droppable", "true");
+  // Offering is not lighting up: while the pointer is over the list, no
+  // playlist is marked, and none carries the outline every one of them used
+  // to get for the whole drag.
+  await expect(page.locator('[role="treeitem"][data-over]')).toHaveCount(0);
+  const outlined = await playlists.evaluateAll((els) =>
+    els.filter((el) => getComputedStyle(el).outlineStyle !== "none").length,
+  );
+  expect(outlined).toBe(0);
+  await page.mouse.up();
+});
+
+test("only the playlist under a dragged track lights up, and it goes dark when the drag leaves", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const row = page.getByRole("row").filter({ has: page.getByRole("gridcell") }).first();
+  const playlists = page.locator('[role="treeitem"][data-kind="playlist"]');
+  const first = playlists.nth(0);
+  const second = playlists.nth(1);
+
+  // Stepped moves, not `hover()`: a native drag only follows the pointer
+  // through the moves the browser sees.
+  const into = async (target: typeof first) => {
+    const box = await target.boundingBox();
+    await page.mouse.move((box?.x ?? 0) + 40, (box?.y ?? 0) + 10, { steps: 6 });
+  };
+  await row.hover();
+  await page.mouse.down();
+  await page.mouse.move(200, 400, { steps: 4 });
+  await into(first);
+  await expect(first).toHaveAttribute("data-over", "true");
+  await expect(page.locator('[role="treeitem"][data-over]')).toHaveCount(1);
+  await into(second);
+  await expect(second).toHaveAttribute("data-over", "true");
+  await expect(first).not.toHaveAttribute("data-over");
+  await page.mouse.move(600, 600, { steps: 6 });
+  await expect(page.locator('[role="treeitem"][data-over]')).toHaveCount(0);
   await page.mouse.up();
 });
 
