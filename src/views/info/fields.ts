@@ -34,6 +34,28 @@ export function fileTypeLabel(code: number): string {
   }
 }
 
+/** The file's four facts, printed. */
+export interface FileFacts {
+  type: string;
+  size: string;
+  sampleRate: string;
+  bitrate: string;
+}
+
+/**
+ * The file's facts as the Summary tab prints them — "WAV File", "45.1 MB",
+ * "44100 Hz", "1411 kbps" in the capture — and as the deck's INFO tab
+ * reuses them. A value the library does not hold is blank.
+ */
+export function fileFacts(d: TrackDetails): FileFacts {
+  return {
+    type: fileTypeLabel(d.fileType),
+    size: d.fileSize > 0 ? formatBytes(d.fileSize) : "",
+    sampleRate: d.sampleRate > 0 ? `${d.sampleRate} Hz` : "",
+    bitrate: d.bitrate > 0 ? `${d.bitrate} kbps` : "",
+  };
+}
+
 /**
  * The Summary tab's table, in the captured order.
  *
@@ -43,13 +65,14 @@ export function fileTypeLabel(code: number): string {
  */
 export function summaryFacts(row: RowDto, details: TrackDetails | null): Fact[] {
   const d = details && details.id === row.id ? details : null;
+  const file = d ? fileFacts(d) : null;
   return [
     { label: "Time", value: formatDuration(d?.durationSec ?? row.durationSec) },
-    { label: "File Type", value: d ? fileTypeLabel(d.fileType) : "" },
-    { label: "Size", value: d && d.fileSize > 0 ? formatBytes(d.fileSize) : "" },
+    { label: "File Type", value: file?.type ?? "" },
+    { label: "Size", value: file?.size ?? "" },
     { label: "Date Created", value: d ? formatShortDate(d.dateCreated) : "" },
-    { label: "Sample Rate", value: d && d.sampleRate > 0 ? `${d.sampleRate} Hz` : "" },
-    { label: "Bitrate", value: d && d.bitrate > 0 ? `${d.bitrate} kbps` : "" },
+    { label: "Sample Rate", value: file?.sampleRate ?? "" },
+    { label: "Bitrate", value: file?.bitrate ?? "" },
     { label: "DJ Play Count", value: d ? String(d.playCount) : "" },
     { label: "Location", value: d?.path ?? "" },
   ];
