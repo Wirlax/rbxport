@@ -352,6 +352,7 @@
   --s-browser-head-gap: 1px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the black line between the title row and the column headings, y 804..805 */
   --s-scroll-thumb-inset: 2px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: the thumb x 3642..3657 in a column x 3638..3661, 4px either side; the horizontal thumb y 2260..2275 in a band y 2256..2279 */
   --s-scroll-thumb-radius: 1px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: one pixel at each corner of a thumb is dimmed (7,7,7) and the next (34,34,34), a 2px corner at 2x */
+  --s-scroll-corner-inset: 1px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: where the list's two scrollbars meet, a 20px square of the thumb grey at x 3640..3659, y 2258..2277, one point inside the 12pt corner on every side */
   --s-status-inset-right: 34.5px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.26 PM: '1 List, 952.2 MB' ends at x 3640 in a window whose content ends at 3709, 69px */
   --s-right-rail-info-top: 361px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the Information box starts at y 1474 under a browser that starts at 752, 722px down: the top box's 259pt plus three 34pt pitches, which is where it stays with the three above it gone */
   --s-right-rail-lit-pad-y: 1px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the lit fill y 1472..1511 around a box y 1474..1509, 2px above and below */
