@@ -317,7 +317,8 @@ pub struct ExplorerRootDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExplorerChildrenDto {
+    /// The first of them by name, up to the cap.
     pub names: Vec<String>,
-    /// True when the folder held more than the cap and the rest were left out.
-    pub truncated: bool,
+    /// How many there were: more than `names` holds when the cap cut it.
+    pub total: u32,
 }

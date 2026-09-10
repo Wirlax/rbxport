@@ -191,6 +191,7 @@ const EXPLORER_CHILDREN: ReadonlyMap<string, readonly string[]> = new Map([
   ["/", ["Applications", "Library", "System", "Users"]],
   ["/Users", ["mock", "Shared"]],
   ["/Volumes/SD", ["Contents", "PIONEER"]],
+  ["/Volumes/SD/PIONEER", ["rekordbox", "USBANLZ"]],
 ]);
 /** Files per folder: a library row index, or a loose file's name. */
 const EXPLORER_FILES: ReadonlyMap<string, readonly (number | string)[]> = new Map([
@@ -1138,8 +1139,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     // The fake disk above. Copies, as with the tree: the map is the mock's.
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),
-    explorerChildren: (path) =>
-      wait({ names: [...(EXPLORER_CHILDREN.get(path) ?? [])], truncated: false }),
+    explorerChildren: (path) => {
+      const names = [...(EXPLORER_CHILDREN.get(path) ?? [])];
+      // The stick's PIONEER folder stands in for one the cap cut: the real
+      // backend keeps the first two thousand of a 14,503-folder card.
+      return wait({ names, total: path === "/Volumes/SD/PIONEER" ? 14_503 : names.length });
+    },
   };
 }
 

@@ -82,7 +82,9 @@ export interface TreeNode {
   kind:
     | "collection" | "histories" | "folder" | "playlist" | "history" | "allTracks" | "device"
     /** The Explorer heading, and a folder on disk under it. */
-    | "explorer" | "directory";
+    | "explorer" | "directory"
+    /** A line of information in the tree, not a place: nothing opens when it is clicked. */
+    | "note";
   depth: number;
   /** Undefined for leaves. */
   expanded?: boolean;
@@ -645,9 +647,10 @@ export interface ExplorerRoot {
 
 /** The folders directly under one folder, by name. */
 export interface ExplorerChildren {
+  /** The first of them by name, up to the backend's cap. */
   names: string[];
-  /** True when the folder held more than the cap and the rest were left out. */
-  truncated: boolean;
+  /** How many there were: more than `names` holds when the cap cut it. */
+  total: number;
 }
 
 /** `ParentID` of a playlist or folder at the top of the tree. */

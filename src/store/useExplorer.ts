@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { ExplorerRoot, TreeNode } from "@/ipc/types";
+import type { ExplorerChildren, ExplorerRoot, TreeNode } from "@/ipc/types";
 import { explorerNodes, explorerPath } from "@/lib/explorer";
 
 export interface Explorer {
@@ -23,7 +23,7 @@ export function useExplorer(): Explorer {
   // A new map on every change rather than a mutated one, so the memo below
   // sees it. A folder answered with nothing is in here too — an empty array —
   // which is what stops an unreadable folder being asked for on every open.
-  const [children, setChildren] = useState<ReadonlyMap<string, readonly string[]>>(
+  const [children, setChildren] = useState<ReadonlyMap<string, ExplorerChildren>>(
     () => new Map(),
   );
   // Folders asked for and not yet answered, so a double-click on a twisty
@@ -55,15 +55,15 @@ export function useExplorer(): Explorer {
       pending.current.add(path);
       void (async () => {
         const backend = await getBackend();
-        let names: string[] = [];
+        let found: ExplorerChildren = { names: [], total: 0 };
         try {
-          names = (await backend.explorerChildren(path)).names;
+          found = await backend.explorerChildren(path);
         } catch {
           // Unreadable, or gone: an empty branch, as the backend itself
           // answers for a folder it may not open.
         }
         pending.current.delete(path);
-        setChildren((known) => new Map(known).set(path, names));
+        setChildren((known) => new Map(known).set(path, found));
       })();
     },
     [children],

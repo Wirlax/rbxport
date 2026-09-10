@@ -9,6 +9,9 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("grid")).toBeVisible();
+  // The library, not just the window: its arrival selects the first playlist,
+  // and a click on the rail before that would be selected over.
+  await expect(page.getByRole("treeitem", { name: /Melodic Vox/ })).toBeVisible();
 });
 
 /** The tree, the rail, and the Explorer's own rows. */
@@ -135,4 +138,18 @@ test("a loose file cannot be rated: the library does not hold it", async ({ page
   await expect(rows).toHaveCount(12);
   await rows.nth(7).getByRole("radio", { name: "3 of 5" }).click();
   await expect(page.getByRole("alert")).toContainText("not in the collection");
+});
+
+test("a folder cut at the backend's cap says how many folders were left out", async ({ page }) => {
+  const { rail, item, open, tree } = parts(page);
+  await rail.getByRole("tab", { name: "Explorer" }).click();
+  await open("SD").click();
+  await open("PIONEER").click();
+  await expect(item("rekordbox")).toBeVisible();
+  const note = tree.getByRole("treeitem", { name: /14,501 more folders not shown/ });
+  await expect(note).toBeVisible();
+  // A line of information, not a place: clicking it selects nothing.
+  await note.click();
+  await expect(note).toHaveAttribute("aria-selected", "false");
+  await expect(item("Explorer")).toHaveAttribute("aria-selected", "true");
 });

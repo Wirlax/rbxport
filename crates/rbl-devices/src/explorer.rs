@@ -28,10 +28,19 @@ pub struct Entry {
 /// What one directory read produced.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Listing {
+    /// The first `cap` by name.
     pub entries: Vec<Entry>,
-    /// True when the folder held more than the cap and the rest were left
-    /// out. The tree says so rather than pretending the folder is smaller.
-    pub truncated: bool,
+    /// How many there were, so a folder cut at the cap can say how many
+    /// more it holds rather than pretending to be smaller.
+    pub total: usize,
+}
+
+impl Listing {
+    /// Whether the folder held more than were kept.
+    #[must_use]
+    pub fn truncated(&self) -> bool {
+        self.total > self.entries.len()
+    }
 }
 
 /// Extensions rekordbox plays. Mirrors `rbl_db::import::AUDIO_EXTENSIONS`,
@@ -119,51 +128,52 @@ fn last_component(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// The folders directly under `path`, by name, at most `cap` of them.
+/// The folders directly under `path`, by name, the first `cap` of them.
+///
+/// The whole directory is read and sorted before the cap is applied, so
+/// what is kept is the first `cap` by name and not the first `cap` the disk
+/// happened to hand back. A folder of 14,503 subfolders — the reference
+/// library's card has one [OBS] — reads in 24 ms warm.
 ///
 /// A folder that cannot be read — permission denied, gone, not a folder —
 /// lists as empty rather than as an error: the tree shows an empty branch,
 /// which is what a folder you may not look inside is.
 #[must_use]
 pub fn subfolders(path: &Path, cap: usize) -> Listing {
-    read(path, cap, std::fs::FileType::is_dir)
+    read(path, cap, |file_type, _| file_type.is_dir())
 }
 
-/// The audio files directly under `path`, by name, at most `cap` of them.
+/// The audio files directly under `path`, by name, the first `cap` of them.
 ///
 /// One level only. Rekordbox's Explorer shows a folder's own files and the
 /// tree shows its subfolders; recursing here would turn a click on a volume
 /// into a walk of the disk.
 #[must_use]
 pub fn audio_files(path: &Path, cap: usize) -> Listing {
-    let mut listing = read(path, cap, std::fs::FileType::is_file);
-    listing.entries.retain(|entry| is_audio(&entry.path));
-    listing
+    read(path, cap, |file_type, name| file_type.is_file() && is_audio(Path::new(name)))
 }
 
-fn read(path: &Path, cap: usize, wanted: impl Fn(&std::fs::FileType) -> bool) -> Listing {
+fn read(path: &Path, cap: usize, wanted: impl Fn(&std::fs::FileType, &str) -> bool) -> Listing {
     let Ok(dir) = std::fs::read_dir(path) else { return Listing::default() };
     let mut entries: Vec<Entry> = Vec::new();
-    let mut truncated = false;
     for entry in dir.filter_map(Result::ok) {
         // From the directory read itself where the platform gives it there,
         // so this is not a stat per entry on the platforms that matter.
         let Ok(file_type) = entry.file_type() else { continue };
         // A symlink is skipped whatever it points at: `/Volumes/Macintosh HD`
         // points back at `/`, and a tree that follows it never ends.
-        if file_type.is_symlink() || !wanted(&file_type) {
+        if file_type.is_symlink() {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
+        if !wanted(&file_type, &name) || is_hidden_name(&name) {
+            continue;
+        }
         // The flag needs a stat, so it is read for folders only: a hidden
         // audio file is a dot-name in practice, and a folder of three
         // thousand tracks on a slow card should not pay three thousand stats.
-        if is_hidden_name(&name) || (file_type.is_dir() && is_flagged_hidden(&entry)) {
+        if file_type.is_dir() && is_flagged_hidden(&entry) {
             continue;
-        }
-        if entries.len() >= cap {
-            truncated = true;
-            break;
         }
         entries.push(Entry { name, path: entry.path() });
     }
@@ -172,7 +182,9 @@ fn read(path: &Path, cap: usize, wanted: impl Fn(&std::fs::FileType) -> bool) ->
     entries.sort_by(|a, b| {
         a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.name.cmp(&b.name))
     });
-    Listing { entries, truncated }
+    let total = entries.len();
+    entries.truncate(cap);
+    Listing { entries, total }
 }
 
 fn is_hidden_name(name: &str) -> bool {
@@ -227,7 +239,8 @@ mod tests {
         std::fs::create_dir(dir.path().join(".hidden")).unwrap();
         let listing = subfolders(dir.path(), 100);
         assert_eq!(names(&listing), ["Alpha", "beta", "zeta"]);
-        assert!(!listing.truncated);
+        assert!(!listing.truncated());
+        assert_eq!(listing.total, 3);
         assert_eq!(listing.entries[0].path, dir.path().join("Alpha"));
     }
 
@@ -242,14 +255,15 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_past_the_cap_is_cut_and_says_so() {
+    fn a_folder_past_the_cap_keeps_the_first_by_name_and_says_how_many_there_were() {
         let dir = tempfile::tempdir().unwrap();
-        for i in 0..10 {
-            std::fs::create_dir(dir.path().join(format!("f{i}"))).unwrap();
+        for name in ["j", "b", "h", "a", "f", "d", "c", "g", "e", "i"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
         }
         let listing = subfolders(dir.path(), 4);
-        assert_eq!(listing.entries.len(), 4);
-        assert!(listing.truncated);
+        assert_eq!(names(&listing), ["a", "b", "c", "d"]);
+        assert_eq!(listing.total, 10);
+        assert!(listing.truncated());
     }
 
     #[test]

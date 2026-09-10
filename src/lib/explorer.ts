@@ -7,7 +7,7 @@
  * and collapses the same way the playlists do. Pure functions over plain data,
  * so the shape is testable without a backend or a DOM.
  */
-import type { ExplorerRoot, TreeNode } from "@/ipc/types";
+import type { ExplorerChildren, ExplorerRoot, TreeNode } from "@/ipc/types";
 
 /** The heading's id. Selecting it opens an empty Explorer, as rekordbox does. */
 export const EXPLORER_ROOT_ID = "explorer";
@@ -71,8 +71,12 @@ export function joinPath(parent: string, name: string): string {
  */
 export function explorerNodes(
   roots: readonly ExplorerRoot[],
-  children: ReadonlyMap<string, readonly string[]>,
+  children: ReadonlyMap<string, ExplorerChildren>,
 ): TreeNode[] {
+  // No roots, no section: before the backend has answered, and on a machine
+  // where it answers with nothing, a heading would lead nowhere — and the
+  // rail dims what has nothing in it.
+  if (roots.length === 0) return [];
   const out: TreeNode[] = [
     { id: EXPLORER_ROOT_ID, name: "Explorer", kind: "explorer", depth: 0, expanded: true },
   ];
@@ -91,6 +95,10 @@ export function explorerNodes(
     const id = explorerId(next.root, next.path);
     if (seen.has(id)) continue;
     seen.add(id);
+    if (next.path.endsWith("\u0000more")) {
+      out.push({ id, name: next.name, kind: "note", depth: next.depth });
+      continue;
+    }
     out.push({
       id,
       name: next.name,
@@ -104,8 +112,15 @@ export function explorerNodes(
     });
     const under = children.get(next.path);
     if (!under) continue;
-    for (let i = under.length - 1; i >= 0; i--) {
-      const name = under[i];
+    // A folder the backend cut at its cap says how many more it holds, as a
+    // line under the last one shown, so a card with fourteen thousand
+    // folders does not look as if it had two.
+    const left = under.total - under.names.length;
+    if (left > 0) {
+      stack.push({ root: next.root, name: moreNote(left), path: `${next.path}\u0000more`, depth: next.depth + 1 });
+    }
+    for (let i = under.names.length - 1; i >= 0; i--) {
+      const name = under.names[i];
       if (name !== undefined) {
         stack.push({
           root: next.root, name, path: joinPath(next.path, name), depth: next.depth + 1,
@@ -114,4 +129,9 @@ export function explorerNodes(
     }
   }
   return out;
+}
+
+/** What the tree says under a folder the backend cut at its cap. */
+export function moreNote(left: number): string {
+  return `${left.toLocaleString("en")} more folder${left === 1 ? "" : "s"} not shown`;
 }

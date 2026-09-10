@@ -50,7 +50,8 @@ const Row = memo(function Row({
       data-selected={selected || undefined}
       data-kind={node.kind}
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
-      onMouseDown={() => onSelect(node)}
+      // A note is information, not a place: nothing to select.
+      onMouseDown={() => node.kind !== "note" && onSelect(node)}
       onDragOver={(e) => {
         // Only a playlist takes tracks: a folder holds playlists, and dropping
         // into one would have to invent which.
@@ -91,7 +92,8 @@ const Row = memo(function Row({
         role={branch ? "button" : undefined}
         aria-label={branch ? `${open ? "Collapse" : "Expand"} ${node.name}` : undefined}
       />
-      {node.kind === "collection" || node.kind === "histories" || node.kind === "explorer" ? null : (
+      {node.kind === "collection" || node.kind === "histories" || node.kind === "explorer" ||
+      node.kind === "note" ? null : (
         <Icon className={styles.icon} />
       )}
       <span className={styles.label}>{node.name}</span>
