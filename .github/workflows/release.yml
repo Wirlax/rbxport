@@ -207,6 +207,23 @@ jobs:
             }
           ' "$version"
 
+      - name: Ensure the Azure CLI for the signing tool
+        # artifact-signing-cli does not authenticate on its own: it shells out
+        # to `az`, and without it fails with "azure cli … does not exist",
+        # which the bundler reports only as "failed to run
+        # artifact-signing-cli". Hosted images ship the Azure CLI; the
+        # desktop did not, and the second release attempt died on exactly
+        # that line after a ten-minute build.
+        if: runner.os == 'Windows' && env.HAVE_AZURE == 'true'
+        shell: pwsh
+        run: |
+          $az = "$env:ProgramFiles\Microsoft SDKs\Azure\CLI2\wbin\az.cmd"
+          if (-not (Test-Path $az)) {
+            winget install --id Microsoft.AzureCLI --exact --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            if (-not (Test-Path $az)) { throw "Azure CLI installed but $az is missing" }
+          }
+
       - name: Teach the Windows bundler to sign
         # Tauri has no Windows equivalent of `APPLE_CERTIFICATE`: checked
         # against the CLI binary (2.11.4) and against `tauri-action`, and
