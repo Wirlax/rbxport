@@ -19,6 +19,7 @@ describe("sanitiseSession", () => {
       sort: { column: "bpm", descending: true },
       infoOpen: true,
       subOpen: false,
+      filterOpen: true,
       tree: [{ id: "pl-7", name: "Set", kind: "playlist", depth: 1 }],
       rows: [{ id: "100", title: "One" }],
       count: 14,
@@ -85,6 +86,7 @@ describe("sanitiseSession", () => {
     const session = sanitiseSession({ infoOpen: "yes" });
     expect(session.infoOpen).toBe(false);
     expect(session.subOpen).toBe(false);
+    expect(session.filterOpen).toBe(false);
   });
 
   it("keeps a selected node only when it is an id", () => {

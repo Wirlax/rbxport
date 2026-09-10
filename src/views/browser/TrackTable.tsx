@@ -17,7 +17,7 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor } from "@/lib/contextMenus";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
-import { SortDownIcon, SortUpIcon } from "@/components/icons";
+import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
 import type { ColumnKey, ColumnSpec } from "@/lib/columns";
 import { ColumnMenu } from "./ColumnMenu";
@@ -372,6 +372,14 @@ export interface TrackTableProps {
   onFirstRows?: (rows: RowDto[], count: number) => void;
   /** Lets the keyboard shortcut put the caret here from anywhere. */
   searchRef?: React.RefObject<HTMLInputElement | null>;
+  /**
+   * The Track Filter, opt-in: the header's filter button and the bar it drops
+   * down. The main browser passes these; the sub-browser has neither.
+   */
+  filterOpen?: boolean;
+  onToggleFilter?: () => void;
+  /** The bar itself, drawn between the header and the column header. */
+  filterBar?: React.ReactNode;
 }
 
 export function TrackTable({
@@ -380,7 +388,7 @@ export function TrackTable({
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, readOnly = false,
-  players = 0, onLoadTrack, onSelectedRow,
+  players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
 }: TrackTableProps) {
   // Analysis is reachable from the keyboard rather than only a menu, since a
   // row context menu does not exist yet.
@@ -698,6 +706,20 @@ export function TrackTable({
           */}
           {view.loading ? title : `${title} (${view.count} Tracks)`}
         </span>
+        {onToggleFilter ? (
+          <button
+            type="button"
+            className={styles.filterToggle}
+            data-on={filterOpen || undefined}
+            aria-pressed={filterOpen}
+            aria-label="Display/Hide Track Filter"
+            title="Display/Hide Track Filter"
+            data-testid="filter-toggle"
+            onClick={onToggleFilter}
+          >
+            <FilterIcon className={styles.filterGlyph} />
+          </button>
+        ) : null}
         <div className={styles.search} role="search">
           <span className={styles.searchIcon} aria-hidden />
           <input
@@ -715,6 +737,8 @@ export function TrackTable({
           />
         </div>
       </div>
+
+      {filterOpen ? filterBar : null}
 
       <div className={styles.scroll} ref={scrollRef} data-testid="track-scroll" role="grid" aria-rowcount={view.count}>
         {/*

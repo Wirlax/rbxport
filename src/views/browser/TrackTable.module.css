@@ -1,8 +1,9 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal. */
 .browser {
   display: grid;
-  /* The column header lives inside the scroller now, so it is not a row here. */
-  grid-template-rows: var(--s-browser-head-h) 1fr;
+  /* The column header lives inside the scroller now, so it is not a row here.
+     The middle row is the Track Filter bar, nothing when it is closed. */
+  grid-template-rows: var(--s-browser-head-h) auto 1fr;
   min-width: 0;
   /* Without this a grid item floors at its content height, so .scroll would be
      as tall as the whole list and the virtualizer would render every row. */
@@ -19,6 +20,32 @@
 }
 
 .title { font-size: var(--f-size-ui); color: var(--c-text); }
+
+/* The Track Filter button: an outlined square that goes blue when the bar is
+   showing, the glyph white either way. Before the search box, which keeps
+   `margin-left: auto`. */
+.filterToggle {
+  margin-left: auto;
+  margin-right: 8px;
+  flex: none;
+  width: var(--s-filter-toggle);
+  height: var(--s-filter-toggle);
+  padding: 0;
+  border: 1px solid var(--c-outline);
+  border-radius: 2px;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.filterToggle[data-on] { border-color: var(--c-tab-active); }
+.filterGlyph {
+  width: var(--s-filter-toggle-glyph);
+  height: var(--s-filter-toggle-glyph);
+  color: var(--c-filter-text);
+}
+.filterToggle + .search { margin-left: 0; }
 
 .search {
   margin-left: auto;

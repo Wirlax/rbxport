@@ -40,6 +40,9 @@ import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { Settings } from "@/views/settings/Settings";
 import { useAnalysis } from "@/store/useAnalysis";
+import { TrackFilter } from "@/views/browser/TrackFilter";
+import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
+import type { FilterValues } from "@/ipc/types";
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -78,6 +81,11 @@ export function App() {
   // window by the panel itself, so these are what was asked for.
   const [subWidth, setSubWidth] = useState(restored.subWidth);
   const [subTreeWidth, setSubTreeWidth] = useState(restored.subTreeWidth);
+  // The Track Filter bar. Its open state is kept across runs, its picks are
+  // not: a library that comes back already narrowed reads as a broken one.
+  const [filterOpen, setFilterOpen] = useState(restored.filterOpen);
+  const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const [filterValues, setFilterValues] = useState<FilterValues | null>(null);
   // Why the library is not there, when it is not. Shown instead of "Loading…",
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -278,10 +286,39 @@ export function App() {
     // and the id is genuinely read here.
   }, [restored.selectedNodeId]);
 
-  const spec: ViewSpec = useMemo(
-    () => specForNode(selectedNode, query, sortState),
-    [selectedNode, sortState, query],
-  );
+  // The master player's BPM for the filter's `MASTER PLAYER ±` list: the
+  // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not
+  // the deck's tempo-adjusted one — the tempo lives in the player and the
+  // capture cannot say which rekordbox uses.
+  const masterBpmX100 = (syncMaster === "b" ? playerTrackB : playerTrack)?.bpmX100 ?? null;
+  const spec: ViewSpec = useMemo(() => {
+    const base = specForNode(selectedNode, query, sortState);
+    // Only while the bar is showing: hiding it puts the whole list back,
+    // so a closed bar can never be silently narrowing the library.
+    const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
+    return filter ? { ...base, filter } : base;
+  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100]);
+
+  // What the bar's lists offer, from Rust, for the source and query alone.
+  // Re-asked when either changes or the library does, and only while the bar
+  // is open — a closed bar costs nothing.
+  useEffect(() => {
+    if (!filterOpen) return;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      try {
+        const values = await backend.filterValues(specForNode(selectedNode, query, null));
+        if (live) setFilterValues(values);
+      } catch {
+        // The library is not up yet; the ready event re-runs this through
+        // `libraryGeneration`.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [filterOpen, selectedNode, query, libraryGeneration]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortState((s) => nextSort(s, column));
@@ -708,6 +745,7 @@ export function App() {
       sort: sortState,
       infoOpen,
       subOpen,
+      filterOpen,
       // Only once the real library is up: storing the seed back over itself
       // would keep the first run's rows alive forever.
       tree: [...tree].slice(0, SEEDED_NODES),
@@ -717,7 +755,7 @@ export function App() {
       subWidth,
       subTreeWidth,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, tree, screen, layout, subWidth, subTreeWidth]);
+  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement.
@@ -911,6 +949,16 @@ export function App() {
           onColumnAutoSizeAll={cols.autoSizeEvery}
           seed={seed}
           onFirstRows={onFirstRows}
+          filterOpen={filterOpen}
+          onToggleFilter={() => setFilterOpen((was) => !was)}
+          filterBar={
+            <TrackFilter
+              state={filterState}
+              onChange={setFilterState}
+              values={filterValues}
+              masterBpmX100={masterBpmX100}
+            />
+          }
         />
         )}
         {subOpen ? (

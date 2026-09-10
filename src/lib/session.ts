@@ -40,6 +40,9 @@ export interface Session {
   sort: SortState;
   infoOpen: boolean;
   subOpen: boolean;
+  /** Whether the track filter bar was showing. Its picks are not kept: a
+   * library that opens already narrowed reads as a broken one. */
+  filterOpen: boolean;
   /**
    * The last screen, kept so the window can draw itself before the backend has
    * finished reading the library.
@@ -71,6 +74,7 @@ export const DEFAULT_SESSION: Session = {
   sort: DEFAULT_SORT,
   infoOpen: false,
   subOpen: false,
+  filterOpen: false,
   tree: [],
   rows: [],
   count: 0,
@@ -122,6 +126,7 @@ export function sanitiseSession(value: unknown): Session {
     sort: sortOrDefault(raw.sort),
     infoOpen: raw.infoOpen === true,
     subOpen: raw.subOpen === true,
+    filterOpen: raw.filterOpen === true,
     tree: records<TreeNode>(raw.tree, SEEDED_NODES),
     rows: records<RowDto>(raw.rows, SEEDED_ROWS),
     count:

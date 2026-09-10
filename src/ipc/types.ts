@@ -48,6 +48,11 @@ export interface ViewSpec {
   descending: boolean;
   /** Free-text search, matched the way the Rust index folds it. */
   query: string;
+  /**
+   * The track filter bar's picks, applied by Rust after the search. Absent
+   * means no filter; the sub-browser never sends one.
+   */
+  filter?: TrackFilter;
 }
 
 export interface ViewHandle {
@@ -335,6 +340,14 @@ export interface Backend {
    * there is no picker, so it resolves to `null` immediately.
    */
   relocateTrack(trackId: string): Promise<string | null>;
+
+  /**
+   * The values the track filter bar can offer for a list: which whole BPMs
+   * and which keys it holds, counted over the source and query alone so a
+   * picked value never hides the others. Rust tallies them in one pass; the
+   * frontend never scans rows for this.
+   */
+  filterValues(spec: ViewSpec): Promise<FilterValues>;
 }
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
@@ -576,3 +589,49 @@ export interface Edits {
 
 /** `ParentID` of a playlist or folder at the top of the tree. */
 export const TREE_ROOT = "root";
+
+/**
+ * The BPM column of the track filter bar.
+ *
+ * `values` are whole BPMs picked from the list, empty for `All`. With values
+ * picked, `tolerancePct` widens each into a band; with none, it is a band
+ * around the master player's BPM — and with no master player it is inert.
+ */
+export interface BpmFilter {
+  values: number[];
+  /** 0 to 6, the `MASTER PLAYER ± n%` list. */
+  tolerancePct: number;
+  /** The master player's BPM x100, or `null` when no deck is loaded. */
+  masterBpmX100: number | null;
+}
+
+/**
+ * The track filter bar's picks: one entry per ticked column, combined with
+ * AND. Keys and colours travel by name, which is what the bar shows.
+ */
+export interface TrackFilter {
+  bpm?: BpmFilter;
+  keys?: string[];
+  ratings?: number[];
+  colors?: string[];
+}
+
+/** A value the bar can offer, with how many tracks of the list carry it. */
+export interface Counted<T> {
+  value: T;
+  count: number;
+}
+
+/** A My Tag category and the tags under it, by name. Drawn, not filtered on. */
+export interface TagCategory {
+  name: string;
+  tags: string[];
+}
+
+export interface FilterValues {
+  /** Whole BPMs present, ascending. */
+  bpms: Counted<number>[];
+  /** Keys present, in Camelot order. */
+  keys: Counted<string>[];
+  tags: TagCategory[];
+}

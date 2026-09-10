@@ -10,10 +10,12 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  AppErrorDto, Backend, Cue, DeckEvent, Device, Edits, LibrarySummary, RowDto, SortColumn, Tick,
-  TreeNode, ViewHandle, ViewSpec, WaveformKind,
+  AppErrorDto, Backend, Cue, DeckEvent, Device, Edits, FilterValues, LibrarySummary, RowDto,
+  SortColumn, Tick, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
+import { toCamelot } from "@/lib/camelot";
+import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 
 const ARTISTS = [
   "MORTEN", "ARTBAT", "Meduza", "Vintage Culture", "Tujamo", "UMEK", "Kryder", "Joel Corry",
@@ -48,6 +50,58 @@ function mulberry32(seed: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/**
+ * Each row's `ColorID`, 0 for none and 1 to 8 for the colour comments.
+ *
+ * Beside the rows rather than on them: the row DTO carries no colour yet, and
+ * the filter bar needs one to filter by. Roughly one row in six is coloured,
+ * so a ticked colour narrows the list visibly without emptying it.
+ */
+function makeColors(count: number): Uint8Array {
+  const rnd = mulberry32(20260909);
+  const out = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    out[i] = rnd() > 0.85 ? 1 + Math.floor(rnd() * 8) : 0;
+  }
+  return out;
+}
+
+/**
+ * The filter bar's semantics, as `rbl-index` has them.
+ *
+ * Whole BPMs at ±0% match by rounded bucket; a tolerance widens each picked
+ * BPM into a band, or with `All` picked, a band around the master player —
+ * and with no master player the BPM column matches everything. The other
+ * columns are sets, and every ticked column has to agree.
+ */
+function passesFilter(row: RowDto, color: number, filter: TrackFilter): boolean {
+  if (filter.bpm) {
+    const { values, tolerancePct, masterBpmX100 } = filter.bpm;
+    const within = (centre: number) =>
+      Math.abs(row.bpmX100 - centre) <= Math.floor((centre * tolerancePct) / 100);
+    if (values.length > 0) {
+      const hit =
+        tolerancePct === 0
+          ? values.includes(wholeBpm(row.bpmX100))
+          : values.some((v) => within(v * 100));
+      if (!hit) return false;
+    } else if (masterBpmX100 !== null && masterBpmX100 > 0 && !within(masterBpmX100)) {
+      return false;
+    }
+  }
+  if (filter.keys && !filter.keys.includes(row.key)) return false;
+  if (filter.ratings && !filter.ratings.includes(row.rating)) return false;
+  if (filter.colors && !filter.colors.includes(COLOR_NAMES[color - 1] ?? "")) return false;
+  return true;
+}
+
+/** Camelot number then letter, unknown names last: the order the bar lists keys in. */
+function keyOrder(key: string): [number, number, string] {
+  const code = toCamelot(key);
+  if (!code) return [99, 2, key.toLowerCase()];
+  return [Number(code.slice(0, -1)), code.endsWith("A") ? 0 : 1, ""];
 }
 
 function makeRows(count: number): RowDto[] {
@@ -161,7 +215,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
   const writable = options.writable ?? readWritableFromUrl();
   const all = makeRows(trackCount);
+  const colors = makeColors(trackCount);
   const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
+
+  /** The rows a source and query leave, before sorting and before the filter. */
+  const candidatesFor = (spec: ViewSpec): number[] => {
+    // A playlist or a history session shows a deterministic slice, so the
+    // mock stays stable across runs.
+    let candidates: number[];
+    if (spec.source.kind === "playlist" || spec.source.kind === "history") {
+      const seed = [...spec.source.id].reduce((a, c) => a + c.charCodeAt(0), 0);
+      const size = 14 + (seed % 30);
+      candidates = Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
+    } else {
+      candidates = Array.from({ length: trackCount }, (_, i) => i);
+    }
+    const q = fold(spec.query.trim());
+    if (q) candidates = candidates.filter((i) => (folded[i] ?? "").includes(q));
+    return candidates;
+  };
   const tree = makeTree();
 
   const views = new Map<number, { order: Uint32Array; gen: number }>();
@@ -289,8 +361,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return bump();
     },
     setTrackColor: (track, color) => {
-      const row = all.find((r) => r.id === track);
-      if (row) row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
+      const at = all.findIndex((r) => r.id === track);
+      const row = all[at];
+      if (row) {
+        row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
+        colors[at] = color === null ? 0 : Number.parseInt(color, 10);
+      }
       return bump();
     },
     addCue: (track, kind, positionMs) => {
@@ -464,19 +540,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // answer before the library is up. A mock that served rows while the
       // summary was still failing would not be standing in for anything.
       if (!ready) return notReady();
-      // A playlist or a history session shows a deterministic slice, so the
-      // mock stays stable across runs.
-      let candidates: number[];
-      if (spec.source.kind === "playlist" || spec.source.kind === "history") {
-        const seed = [...spec.source.id].reduce((a, c) => a + c.charCodeAt(0), 0);
-        const size = 14 + (seed % 30);
-        candidates = Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
-      } else {
-        candidates = Array.from({ length: trackCount }, (_, i) => i);
+      let candidates = candidatesFor(spec);
+      const filter = spec.filter;
+      if (filter) {
+        candidates = candidates.filter((i) => {
+          const row = all[i];
+          return row ? passesFilter(row, colors[i] ?? 0, filter) : false;
+        });
       }
-
-      const q = fold(spec.query.trim());
-      if (q) candidates = candidates.filter((i) => (folded[i] ?? "").includes(q));
 
       const order = Uint32Array.from(candidates);
       const rows = all;
@@ -827,6 +898,48 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+
+    filterValues: (spec) => {
+      if (!ready) return notReady();
+      // Over the source and query alone, never the filter's own result.
+      const bpms = new Map<number, number>();
+      const keys = new Map<string, number>();
+      for (const i of candidatesFor(spec)) {
+        const row = all[i];
+        if (!row) continue;
+        const whole = wholeBpm(row.bpmX100);
+        if (whole > 0) bpms.set(whole, (bpms.get(whole) ?? 0) + 1);
+        if (row.key !== "") keys.set(row.key, (keys.get(row.key) ?? 0) + 1);
+      }
+      const values: FilterValues = {
+        bpms: [...bpms].map(([value, count]) => ({ value, count })).sort((x, y) => x.value - y.value),
+        keys: [...keys]
+          .map(([value, count]) => ({ value, count }))
+          .sort((x, y) => {
+            const [nx, lx, sx] = keyOrder(x.value);
+            const [ny, ly, sy] = keyOrder(y.value);
+            return nx - ny || lx - ly || sx.localeCompare(sy);
+          }),
+        // What the reference library holds, read once: one used category and
+        // rekordbox's three unused ones, which it names `Empty Category`.
+        tags: [
+          {
+            name: "Lexicon Tags",
+            tags: [
+              "Components ▶ Synth", "Components ▶ Vocal", "Components ▶ Beat",
+              "Components ▶ Sub Bass", "Components ▶ Percussion", "Components ▶ Piano",
+              "Components ▶ Upper", "Situation ▶ Main Floor", "Situation ▶ Second Floor",
+              "Situation ▶ Lounge",
+            ],
+          },
+          { name: "Empty Category", tags: [] },
+          { name: "Empty Category", tags: [] },
+          { name: "Empty Category", tags: [] },
+        ],
+      };
+      return wait(values);
+    },
+
     onCuesChanged: (listener) => {
       cueListeners.add(listener);
       return () => cueListeners.delete(listener);

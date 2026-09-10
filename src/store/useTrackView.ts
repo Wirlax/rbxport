@@ -72,8 +72,11 @@ export function useTrackView(
   // a spec that has not itself changed, and without this the view would keep
   // serving the pages it cached before the edit.
   const specKey = useMemo(
-    () => JSON.stringify([spec.source, spec.sort, spec.descending, spec.query, libraryGeneration]),
-    [spec.source, spec.sort, spec.descending, spec.query, libraryGeneration],
+    () =>
+      JSON.stringify([
+        spec.source, spec.sort, spec.descending, spec.query, spec.filter ?? null, libraryGeneration,
+      ]),
+    [spec.source, spec.sort, spec.descending, spec.query, spec.filter, libraryGeneration],
   );
 
   // View identity for the cache: a new view id, or a library change, invalidates pages.

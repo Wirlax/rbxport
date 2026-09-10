@@ -6,7 +6,7 @@
  */
 import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, Diagnostics, ExportReport,
-  Phrase, ImportReport,
+  FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeer, Meters,
   LinkStatus, MissingTracks, RowDto, Tick,
   TreeNode, ViewHandle,
@@ -220,6 +220,7 @@ async function realBackend(): Promise<Backend> {
       moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
     },
+    filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
   };
 }
 
