@@ -380,7 +380,13 @@ jobs:
           # (-1712) and every macOS release built there died at
           # bundle_dmg.sh (0.5.1, three times). The disk image keeps the app
           # and its Applications link; only the icon layout is default.
+          #
+          # Both lines are needed. tauri-action sets
+          # TAURI_BUNDLER_DMG_IGNORE_CI=true on macOS unless it is already
+          # set, which tells the bundler to ignore CI and drive Finder
+          # anyway — so CI=true alone changed nothing (found in its dist).
           CI: "true"
+          TAURI_BUNDLER_DMG_IGNORE_CI: "false"
           # artifact-signing-cli logs in with `az`, and on Windows `az` keeps
           # its token cache DPAPI-encrypted — a key that exists only for a
           # console logon with a password behind it. The runner is started
