@@ -5,7 +5,13 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
-## [0.5.0] — 2026-09-10
+## [0.5.1] — 2026-09-10
+
+Everything in 0.5.0, which never published: its macOS build produced a disk
+image but no update the app could take, so this is the release that ships
+both.
+
+## [0.5.0] — 2026-09-10 — not published
 
 ### Added
 - The app keeps itself up to date. Check for Updates… in the application
@@ -188,6 +194,7 @@ Pro DJ Link and writes USB exports. Everything below landed between
 - Signed builds for macOS (opens without Gatekeeper refusing it) and Windows,
   published with readable download URLs.
 
+[0.5.1]: https://github.com/chrisle/rekordbox-lite/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.2.0...v0.3.0
