@@ -13,8 +13,12 @@
  * and are not exercised here.
  */
 import { readFileSync } from "node:fs";
+import process from "node:process";
 
 import { expect, test } from "@playwright/test";
+
+/** The preview server, one port above the dev server (see playwright.config.ts). */
+const preview = `http://localhost:${(Number(process.env.E2E_PORT) || 1420) + 1}/`;
 
 /** The policy the shell ships, read from the config so the two cannot drift. */
 function shippedPolicy(): string {
@@ -34,7 +38,7 @@ test("the built app runs under the policy the shell ships", async ({ page }) => 
 
   // Injected into the document itself: a policy delivered any later than the
   // first byte of the HTML does not govern the scripts in it.
-  await page.route("http://localhost:1421/", async (route) => {
+  await page.route(preview, async (route) => {
     const response = await route.fetch();
     const html = await response.text();
     await route.fulfill({
@@ -53,7 +57,7 @@ test("the built app runs under the policy the shell ships", async ({ page }) => 
     });
   });
 
-  await page.goto("http://localhost:1421/");
+  await page.goto(preview);
 
   // The app has to actually run: a policy that blocks the bundle produces a
   // blank page and no violations worth the name.

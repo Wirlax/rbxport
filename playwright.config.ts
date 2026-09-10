@@ -1,10 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
+import process from "node:process";
 
 /**
  * Runs the real components against the mock backend in a plain browser.
  * `webkit` approximates WKWebView (macOS shell), `chromium` approximates
  * WebView2 (Windows shell).
+ *
+ * `E2E_PORT` moves the dev server (and the preview, one port up) so two
+ * checkouts can run this at once: `reuseExistingServer` would otherwise have
+ * one worktree's tests attach to another worktree's server.
  */
+const port = Number(process.env.E2E_PORT) || 1420;
+const previewPort = port + 1;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -17,7 +25,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
-    baseURL: "http://localhost:1420",
+    baseURL: `http://localhost:${port}`,
     trace: "on-first-retry",
     // Matches the reference captures so screenshots compare like for like.
     viewport: { width: 1800, height: 1130 },
@@ -29,8 +37,8 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm exec vite --port 1420 --strictPort",
-      url: "http://localhost:1420",
+      command: `pnpm exec vite --port ${port} --strictPort`,
+      url: `http://localhost:${port}`,
       reuseExistingServer: true,
       timeout: 60_000,
     },
@@ -38,8 +46,8 @@ export default defineConfig({
       // The built assets, which is what the shell actually ships. The dev
       // server injects inline scripts of its own, so a policy tested against
       // it would be testing Vite rather than the app.
-      command: "pnpm exec vite preview --port 1421 --strictPort --outDir dist",
-      url: "http://localhost:1421",
+      command: `pnpm exec vite preview --port ${previewPort} --strictPort --outDir dist`,
+      url: `http://localhost:${previewPort}`,
       reuseExistingServer: true,
       timeout: 60_000,
     },
