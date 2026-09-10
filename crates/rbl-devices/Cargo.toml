@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 rbl-export = { path = "../rbl-export" }
+rbl-onelibrary = { path = "../rbl-onelibrary" }
 rbl-pdb = { path = "../rbl-pdb" }
 sysinfo = { version = "0.32", default-features = false, features = ["disk"] }
 thiserror = { workspace = true }

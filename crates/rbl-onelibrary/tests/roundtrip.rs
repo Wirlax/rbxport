@@ -255,3 +255,48 @@ fn text_that_would_break_naive_sql_round_trips() {
         .unwrap();
     assert_eq!(title, awkward);
 }
+
+#[test]
+fn the_stick_settings_read_back_as_the_reference_and_update_in_place() {
+    use rbl_onelibrary::settings::StickSettings;
+
+    let (dir, path) = built();
+    let mut settings = StickSettings::read(&path).expect("read");
+    assert_eq!(settings.device_name, "REKORDBOX-LITE");
+    // Untouched, a fresh export carries exactly the reference rows.
+    let reference = StickSettings::default();
+    assert_eq!(settings.categories, reference.categories);
+    assert_eq!(settings.sorts, reference.sorts);
+    assert_eq!(settings.colors, reference.colors);
+    assert_eq!(settings.sub_column, reference.sub_column);
+    assert_eq!(settings.categories.iter().find(|s| s.menu_item == 2).unwrap().name, "ARTIST");
+
+    // Rename a colour, hide ARTIST, show GENRE first, pick a sub-column.
+    settings.colors[0].name = "Vocal".to_owned();
+    settings.device_name = "FRIDAY".to_owned();
+    for slot in &mut settings.categories {
+        match slot.menu_item {
+            2 => {
+                slot.visible = false;
+                slot.seq = 0;
+            }
+            1 => {
+                slot.visible = true;
+                slot.seq = 1;
+            }
+            _ => {}
+        }
+    }
+    settings.sub_column = Some(5);
+    settings.write(&path).expect("write");
+
+    let again = StickSettings::read(&path).expect("re-read");
+    assert_eq!(again, settings);
+
+    // And a database rebuilt from them keeps every one of the changes.
+    let rebuilt = dir.path().join("rebuilt.db");
+    let builder = Builder::create_with(&rebuilt, &again).expect("create_with");
+    builder.finish(&again.device_name, "2026-09-09").unwrap();
+    let carried = StickSettings::read(&rebuilt).expect("read rebuilt");
+    assert_eq!(carried, again);
+}

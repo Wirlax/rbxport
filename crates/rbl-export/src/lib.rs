@@ -582,14 +582,24 @@ fn write_one_library(
     export_ids: &[Option<u32>],
 ) -> Result<()> {
     use rbl_onelibrary::build::{Builder, LookupTable, Track};
+    use rbl_onelibrary::settings::StickSettings;
 
     let path = db_dir.join("exportLibrary.db");
+    // The database is rebuilt from scratch, but the settings the stick already
+    // carries — its name, which browse categories and sorts are on, the colour
+    // comments — are the user's and survive the rebuild. A stick that holds
+    // none, or one that cannot be read, starts from the reference rows.
+    let settings = if path.exists() {
+        StickSettings::read(&path).unwrap_or_default()
+    } else {
+        StickSettings::default()
+    };
     // An export is written into a fresh directory, but a resumed one may find
     // the previous attempt's file; replacing it is correct, keeping it is not.
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
-    let mut builder = Builder::create(&path).map_err(|e| one_library_error(&e))?;
+    let mut builder = Builder::create_with(&path, &settings).map_err(|e| one_library_error(&e))?;
 
     for track in tracks {
         let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(|e| one_library_error(&e))?;
@@ -639,7 +649,12 @@ fn write_one_library(
 
     // The date only, which is what rekordbox's own export carries.
     let created = rbl_core::time::now().get(..10).unwrap_or("").to_owned();
-    builder.finish("REKORDBOX-LITE", &created).map_err(|e| one_library_error(&e))
+    let device_name = if settings.device_name.is_empty() {
+        "REKORDBOX-LITE"
+    } else {
+        settings.device_name.as_str()
+    };
+    builder.finish(device_name, &created).map_err(|e| one_library_error(&e))
 }
 
 fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {

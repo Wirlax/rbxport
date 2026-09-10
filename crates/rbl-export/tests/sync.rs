@@ -270,3 +270,29 @@ fn a_file_deleted_off_the_stick_is_put_back() {
     assert!(anlz.is_file());
     assert!(verify(dest.path()).unwrap().is_ok());
 }
+
+#[test]
+fn a_sync_keeps_the_settings_the_stick_already_carries() {
+    use rbl_onelibrary::settings::StickSettings;
+
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
+    export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+
+    // What the device panel writes between two syncs.
+    let db = dest.path().join("PIONEER/rekordbox/exportLibrary.db");
+    let mut settings = StickSettings::read(&db).unwrap();
+    settings.device_name = "FRIDAY".to_owned();
+    settings.colors[2].name = "Peak time".to_owned();
+    let genre = settings.categories.iter_mut().find(|s| s.menu_item == 1).unwrap();
+    genre.visible = true;
+    genre.seq = 11;
+    settings.sub_column = Some(11);
+    settings.write(&db).unwrap();
+
+    // The database is rebuilt, and every one of those survives.
+    export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    let after = StickSettings::read(&db).unwrap();
+    assert_eq!(after, settings);
+}

@@ -7,6 +7,8 @@
 //! - [`inspect`] reads a stick to see what export it holds. That is disk I/O
 //!   over USB, so it happens per device, on request, never in a loop.
 
+pub mod settings;
+
 use std::path::{Path, PathBuf};
 
 /// Set to a `:`-separated list of directories to use those instead of the real
@@ -140,7 +142,8 @@ fn is_drive_root(text: &str) -> bool {
 /// megabytes, and it is the thing that says whether a sync can be incremental.
 #[must_use]
 pub fn inspect(mount_point: &Path) -> Option<DeviceExport> {
-    let pdb = mount_point.join("PIONEER/rekordbox/export.pdb");
+    // `PIONEER` or `.PIONEER`: rekordbox 7 can write the export hidden.
+    let pdb = settings::export_root(mount_point).join("rekordbox/export.pdb");
     if !pdb.is_file() {
         return None;
     }

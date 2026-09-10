@@ -13,7 +13,10 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 
+use crate::settings::StickSettings;
 use crate::{key, unlock, Error, Result};
+
+use reference::{COLORS, MENU_ITEMS};
 
 /// `dbVersion` written into `property`, as the reference export carries it.
 pub const DB_VERSION: &str = "1000";
@@ -45,13 +48,17 @@ const SCHEMA: &[&str] = &[
     "CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer, isSelectedAsSubColumn integer)",
 ];
 
+/// The reference stick's browse tables: what a fresh export writes, and what
+/// [`StickSettings::default`] is built from so a stick's own settings can
+/// replace them row for row.
+pub mod reference {
 /// Browse menu definitions.
 ///
 /// The names are wrapped in U+FFFA and U+FFFB — interlinear annotation
 /// markers, which is how rekordbox flags a string for translation at display
 /// time. Writing the bare word instead leaves a player showing English
 /// whatever its language is set to, so the wrapping is reproduced.
-const MENU_ITEMS: &[(i64, i64, &str)] = &[
+pub const MENU_ITEMS: &[(i64, i64, &str)] = &[
     (1, 128, "GENRE"),
     (2, 129, "ARTIST"),
     (3, 130, "ALBUM"),
@@ -81,8 +88,9 @@ const MENU_ITEMS: &[(i64, i64, &str)] = &[
     (27, 170, "MATCHING"),
 ];
 
-/// Which menu items appear as browse categories, and in what order.
-const CATEGORIES: &[(i64, i64, i64, i64)] = &[
+/// Which menu items appear as browse categories, and in what order:
+/// `(category_id, menuItem_id, sequenceNo, isVisible)`.
+pub const CATEGORIES: &[(i64, i64, i64, i64)] = &[
     (1, 1, 0, 0),
     (2, 2, 1, 1),
     (3, 3, 2, 1),
@@ -107,8 +115,9 @@ const CATEGORIES: &[(i64, i64, i64, i64)] = &[
     (27, 22, 10, 1),
 ];
 
-/// Which menu items appear as sort columns.
-const SORTS: &[(i64, i64, i64, i64, i64)] = &[
+/// Which menu items appear as sort columns:
+/// `(sort_id, menuItem_id, sequenceNo, isVisible, isSelectedAsSubColumn)`.
+pub const SORTS: &[(i64, i64, i64, i64, i64)] = &[
     (0, 25, 1, 1, 0),
     (1, 26, 2, 1, 0),
     (2, 2, 3, 1, 0),
@@ -130,7 +139,7 @@ const SORTS: &[(i64, i64, i64, i64, i64)] = &[
 
 /// The eight colours in rekordbox's own order, so `color_id` lines up with the
 /// `ColorID` stored against a track.
-const COLORS: &[&str] = &[
+pub const COLORS: &[&str] = &[
     "Pink",
     "Red",
     "Orange",
@@ -140,6 +149,7 @@ const COLORS: &[&str] = &[
     "Blue",
     "Purple",
 ];
+}
 
 /// Wraps a menu name in the annotation markers rekordbox uses.
 fn annotated(name: &str) -> String {
@@ -180,12 +190,26 @@ pub struct Track {
 pub struct Builder {
     conn: Connection,
     tracks: i64,
+    /// Carried from the settings into `property` when the database is
+    /// finished; never interpreted here.
+    background_color_type: i64,
 }
 
 impl Builder {
     /// Creates a database at `path` with the schema and reference tables in
     /// place. Refuses to overwrite an existing file.
     pub fn create(path: &Path) -> Result<Self> {
+        Self::create_with(path, &StickSettings::default())
+    }
+
+    /// Like [`Builder::create`], with the browse tables and colour names
+    /// taken from `settings` — what a sync reads off the stick beforehand, so
+    /// a rebuilt database keeps the categories, sorts and colour comments the
+    /// stick already had.
+    ///
+    /// `menuItem` always comes from the reference: names are never
+    /// user-edited, and a slot naming an item the reference lacks is skipped.
+    pub fn create_with(path: &Path, settings: &StickSettings) -> Result<Self> {
         if path.exists() {
             return Err(Error::Exists(path.display().to_string()));
         }
@@ -204,29 +228,39 @@ impl Builder {
                 params![id, kind, annotated(name)],
             )?;
         }
-        for (id, menu_item, seq, visible) in CATEGORIES {
+        let known = |menu_item: i64| MENU_ITEMS.iter().any(|(id, _, _)| *id == menu_item);
+        for slot in settings.categories.iter().filter(|s| known(s.menu_item)) {
             conn.execute(
                 "INSERT INTO category (category_id, menuItem_id, sequenceNo, isVisible)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![id, menu_item, seq, visible],
+                params![slot.id, slot.menu_item, slot.seq, i64::from(slot.visible)],
             )?;
         }
-        for (id, menu_item, seq, visible, sub_column) in SORTS {
+        for slot in settings.sorts.iter().filter(|s| known(s.menu_item)) {
+            let sub_column = i64::from(settings.sub_column == Some(slot.menu_item));
             conn.execute(
                 "INSERT INTO sort
                     (sort_id, menuItem_id, sequenceNo, isVisible, isSelectedAsSubColumn)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, menu_item, seq, visible, sub_column],
+                params![slot.id, slot.menu_item, slot.seq, i64::from(slot.visible), sub_column],
             )?;
         }
+        // Always eight rows in rekordbox's order; a stick's own names replace
+        // the reference names where it has them.
         for (index, name) in COLORS.iter().enumerate() {
+            let id = i64::try_from(index + 1).unwrap_or(1);
+            let name = settings
+                .colors
+                .iter()
+                .find(|c| c.id == id)
+                .map_or(*name, |c| c.name.as_str());
             conn.execute(
                 "INSERT INTO color (color_id, name) VALUES (?1, ?2)",
-                params![i64::try_from(index + 1).unwrap_or(1), name],
+                params![id, name],
             )?;
         }
 
-        Ok(Self { conn, tracks: 0 })
+        Ok(Self { conn, tracks: 0, background_color_type: settings.background_color_type })
     }
 
     /// Adds a lookup row and returns its id, reusing one that already matches.
@@ -340,8 +374,8 @@ impl Builder {
             "INSERT INTO property
                 (deviceName, dbVersion, numberOfContents, createdDate,
                  backGroundColorType, myTagMasterDBID)
-             VALUES (?1, ?2, ?3, ?4, 0, 0)",
-            params![device_name, DB_VERSION, self.tracks, created],
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            params![device_name, DB_VERSION, self.tracks, created, self.background_color_type],
         )?;
         // A stick must not be left with pages only in the WAL: a device that
         // does not replay it would read a database missing everything written.
