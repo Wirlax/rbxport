@@ -3,6 +3,7 @@
 
 mod windowfit;
 mod commands;
+mod cues;
 mod diagnostics;
 mod link;
 pub mod menu;
@@ -344,6 +345,10 @@ pub fn run() {
             commands::set_track_rating,
             commands::set_track_comment,
             commands::set_track_color,
+            cues::add_cue,
+            cues::add_loop,
+            cues::move_cue,
+            cues::delete_cue,
         ])
         .build(tauri::generate_context!());
 

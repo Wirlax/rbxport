@@ -129,7 +129,13 @@ pub struct MissingTracksDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CueDto {
+    /// `djmdCue.ID`, which `move_cue` and `delete_cue` take. Empty for a cue
+    /// whose id is not a number under 2^32 — none in the reference library —
+    /// which the interface shows but cannot edit.
+    pub id: String,
     pub position_ms: u32,
+    /// Where a loop ends, or 0 for a plain cue.
+    pub out_ms: u32,
     /// `A` to `P` for a hot cue, empty for a memory cue.
     pub letter: String,
     pub memory: bool,

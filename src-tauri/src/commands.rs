@@ -36,7 +36,7 @@ const MAX_BEATS: usize = 65_536;
 const MAX_PHRASES: usize = 512;
 
 /// Runs `f` on a blocking thread and converts a panic there into an `AppError`.
-async fn blocking<T, F>(name: &'static str, f: F) -> AppResult<T>
+pub(crate) async fn blocking<T, F>(name: &'static str, f: F) -> AppResult<T>
 where
     F: FnOnce() -> AppResult<T> + Send + 'static,
     T: Send + 'static,
@@ -452,14 +452,14 @@ async fn reload_playlists(app: tauri::AppHandle, state: Arc<AppState>) -> AppRes
 }
 
 /// Where backups of the library go before the first write of a session.
-fn backup_dir() -> std::path::PathBuf {
+pub(crate) fn backup_dir() -> std::path::PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("rekordbox-lite/backups")
 }
 
 /// Maps a database refusal onto the error kind the frontend distinguishes.
-fn write_error(error: rbl_db::DbError) -> AppError {
+pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
     match error {
         rbl_db::DbError::WriteRefused(reason) => AppError::new(ErrorKind::ReadOnly, reason),
         other => AppError::new(ErrorKind::Internal, other.to_string()),
@@ -1072,7 +1072,9 @@ pub async fn track_cues(
             .cues_of(row)
             .iter()
             .map(|cue| CueDto {
+                id: if cue.id == 0 { String::new() } else { cue.id.to_string() },
                 position_ms: cue.position_ms,
+                out_ms: cue.out_ms,
                 letter: cue.hot_letter().map(String::from).unwrap_or_default(),
                 memory: cue.is_memory(),
             })
