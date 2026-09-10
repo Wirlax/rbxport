@@ -25,9 +25,9 @@ export function deckCount(layout: PlayerLayout): number {
 /**
  * Whether a layout draws the whole deck.
  *
- * The simple player keeps the transport and the waveforms and drops the pad
- * row and the cue list beside them — the parts you set a track up with, rather
- * than the parts you read it with.
+ * The simple player is one strip: PLAY, the sleeve, the readouts over the
+ * overview waveform, the rating — the parts you read a track with, without
+ * the detail waveform, the transport rail and the cue list you set it up with.
  */
 export function isFullDeck(layout: PlayerLayout): boolean {
   return layout !== "simple";

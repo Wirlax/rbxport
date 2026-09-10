@@ -1,12 +1,6 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal.
    Every size was measured off a 2x capture of rekordbox 7.2.11 running — see
    the `source` on each token in design/tokens/tokens.json. */
-/* The simple player keeps the transport and the waveforms and drops the pad
-   row and the cue list, and is shorter by exactly the row it no longer draws. */
-.player[data-simple] { height: calc(var(--s-player-h) - var(--s-player-pad-h)); }
-.player[data-simple] .pads,
-.player[data-simple] .side { display: none; }
-
 /* Nothing loaded: no playhead and no position bar. A head at zero over an
    empty strip reads as a track sitting at its start, which it is not. */
 .player[data-empty] .playhead,

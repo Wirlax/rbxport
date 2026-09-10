@@ -53,6 +53,7 @@ import { usePlayback } from "@/store/usePlayback";
 import { syncTo, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch } from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
+import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
 import { VocalStrip } from "./VocalStrip";
 import styles from "./Player.module.css";
@@ -63,9 +64,9 @@ export interface PlayerProps {
   /** Which engine deck this drives. The 2-player layout adds a second. */
   deck?: DeckId;
   /**
-   * The simple player: the transport and the waveforms, without the pad row
-   * and the cue list beside them — what a track is read with rather than what
-   * it is set up with.
+   * The simple player: one strip — PLAY, the sleeve, the readouts over the
+   * overview, the rating — drawn by `SimplePlayer` from this deck's state, so
+   * the layout switch changes what is on screen and not what is playing.
    */
   simple?: boolean;
   /**
@@ -166,8 +167,10 @@ export interface PlayerProps {
  * and so do 735,427 of the library's 850,000 hot cues. The rest of the palette
  * stays unmapped — `cue_colours` found it in neither the database, the skins
  * nor the analysis files — so an index this has not seen still draws green.
+ *
+ * Exported for the simple player's overview, which is the same strip.
  */
-const CueMarkers = memo(function CueMarkers({
+export const CueMarkers = memo(function CueMarkers({
   cues, totalMs, band = "overview", window,
 }: {
   cues: readonly Cue[];
@@ -831,6 +834,52 @@ export const Player = memo(function Player({
 
   const takesDrop = dragging && Boolean(onDropTrack);
 
+  const dragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (!takesDrop) return;
+    // Without the preventDefault the browser refuses the drop and the
+    // cursor says so, whatever the handler below would have done.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const drop = (event: React.DragEvent<HTMLElement>) => {
+    if (!takesDrop) return;
+    event.preventDefault();
+    onDropTrack?.();
+  };
+
+  // The simple player is this deck drawn as one strip. Everything above —
+  // the engine, the cues, the frame loop, the keys — is still this
+  // component's, which is what keeps the track playing across the switch.
+  if (simple) {
+    return (
+      <SimplePlayer
+        track={track}
+        deck={deck}
+        shell={shell}
+        armed={armed}
+        droppable={takesDrop}
+        onDragOver={dragOver}
+        onDrop={drop}
+        playing={playback.playing}
+        idle={playback.idle}
+        onToggle={playback.toggle}
+        position={playback.position}
+        total={total}
+        cues={cues}
+        cuePoint={cuePoint}
+        overviewRef={overviewRef}
+        overview={overview}
+        overviewHead={overviewHead}
+        scrubFill={scrubFill}
+        onScrubStart={scrubOverview}
+        onScrubMove={dragOverview}
+        onScrubEnd={endDrag}
+        onEject={onEject}
+        onLoadSelected={onLoadSelected}
+      />
+    );
+  }
+
   // The track skips, which the two-deck column does not draw: rekordbox
   // drops them there, and half a deck's height has no room for them.
   const skips = (
@@ -969,7 +1018,6 @@ export const Player = memo(function Player({
       className={styles.player}
       aria-label={deck === "b" ? "Preview player B" : "Preview player"}
       data-armed={armed ? "" : undefined}
-      data-simple={simple ? "" : undefined}
       data-empty={track ? undefined : ""}
       // The transport is drawn elsewhere, so the deck is two columns wide
       // rather than three.
@@ -978,18 +1026,8 @@ export const Player = memo(function Player({
       // line between them.
       data-flipped={flipped || undefined}
       data-droppable={takesDrop || undefined}
-      onDragOver={(event) => {
-        if (!takesDrop) return;
-        // Without the preventDefault the browser refuses the drop and the
-        // cursor says so, whatever the handler below would have done.
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-      }}
-      onDrop={(event) => {
-        if (!takesDrop) return;
-        event.preventDefault();
-        onDropTrack?.();
-      }}
+      onDragOver={dragOver}
+      onDrop={drop}
     >
       {transportSlot ? createPortal(transport, transportSlot) : transport}
 
