@@ -396,7 +396,11 @@ impl Worker {
             }
         }
         samples.truncate(filled * 2);
-        self.window = PcmWindow { start, samples };
+        // A short fill is the end of the track; a start of 0 is its top. On
+        // either the window can go no further, and the head is not asked to
+        // keep a margin from an edge that is the track's own.
+        let at_end = filled < wanted;
+        self.window = PcmWindow { start, samples, at_start: start == 0, at_end };
     }
 
     /// One block of a drag. False when there is nothing to add.

@@ -171,11 +171,22 @@ pub struct PcmWindow {
     pub start: u64,
     /// Interleaved stereo. Its length decides how much the window covers.
     pub samples: Vec<f32>,
+    /// The window begins where the track does: there is nothing before it
+    /// to want a margin of.
+    pub at_start: bool,
+    /// The window reaches the end of the track: nothing after it either.
+    pub at_end: bool,
 }
 
 impl PcmWindow {
     pub fn empty() -> Self {
-        Self { start: 0, samples: Vec::new() }
+        Self { start: 0, samples: Vec::new(), at_start: false, at_end: false }
+    }
+
+    /// A window over `samples` from `start`, with room on both sides.
+    #[cfg(test)]
+    pub fn new(start: u64, samples: Vec<f32>) -> Self {
+        Self { start, samples, at_start: false, at_end: false }
     }
 
     pub fn frames(&self) -> u64 {
@@ -187,12 +198,21 @@ impl PcmWindow {
     /// Not merely whether it holds it: a head one frame from the edge is a
     /// head that will be off it before the next block, and refilling takes a
     /// demuxer seek.
+    ///
+    /// No margin is asked for on a side the track itself ends on. A head at
+    /// the top of a freshly loaded track sits at frame 0 of a window that
+    /// starts at frame 0, and asking for room before it refilled the window
+    /// on every block of the drag — a demuxer seek and seconds of decoding
+    /// each time, which crawled the head along at a twentieth of the hand's
+    /// speed until the deck had been played once and dragged from further in.
     pub fn comfortable(&self, frame: f64, margin: u64) -> bool {
         if self.samples.is_empty() {
             return false;
         }
         let end = self.start + self.frames();
-        frame >= (self.start + margin) as f64 && frame + margin as f64 <= end as f64
+        let left = if self.at_start { self.start } else { self.start + margin };
+        let right = if self.at_end { end } else { end.saturating_sub(margin) };
+        frame >= left as f64 && frame <= right as f64
     }
 
     /// The stereo pair at a fractional frame, interpolated between neighbours.
@@ -547,7 +567,7 @@ mod tests {
             samples.push((start + i) as f32);
             samples.push(0.0);
         }
-        PcmWindow { start, samples }
+        PcmWindow::new(start, samples)
     }
 
     #[test]
@@ -593,6 +613,23 @@ mod tests {
         assert!(!window.comfortable(150.0, 100));
         assert!(!window.comfortable(1050.0, 100));
         assert!(!PcmWindow::empty().comfortable(0.0, 1));
+    }
+
+    #[test]
+    fn a_window_at_the_top_of_the_track_is_comfortable_at_frame_zero() {
+        // The first drag on a freshly loaded track reads from frame 0 of a
+        // window that starts at frame 0. There is nothing before it to keep a
+        // margin of, and asking for one refilled the window on every block.
+        let mut window = ramp(0, 1000);
+        assert!(!window.comfortable(0.0, 100));
+        window.at_start = true;
+        assert!(window.comfortable(0.0, 100));
+        assert!(window.comfortable(50.0, 100));
+        // The far edge still wants its margin — unless the track ends there.
+        assert!(!window.comfortable(950.0, 100));
+        window.at_end = true;
+        assert!(window.comfortable(950.0, 100));
+        assert!(window.comfortable(1000.0, 100));
     }
 
     #[test]
@@ -642,7 +679,7 @@ mod tests {
             samples.push(value);
             samples.push(value);
         }
-        PcmWindow { start, samples }
+        PcmWindow::new(start, samples)
     }
 
     /// The largest step between neighbouring output samples.

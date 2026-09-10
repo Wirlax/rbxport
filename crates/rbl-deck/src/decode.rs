@@ -521,6 +521,29 @@ mod tests {
     }
 
     #[test]
+    fn a_seek_back_to_the_start_after_the_first_blocks_still_decodes() {
+        // The first drag on a freshly loaded track: the worker has decoded the
+        // ring's worth from the top, then the drag seeks back to 0 and fills
+        // its window from there. At both a matching and a different device
+        // rate, that window must hold audio.
+        for device_rate in [44_100_u32, 48_000] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tone.wav");
+            tone(&path, 44_100, 1.0);
+            let mut streamer = Streamer::open(&path, device_rate).unwrap();
+            let mut out = vec![0.0_f32; 512];
+            for _ in 0..16 {
+                assert!(streamer.fill(&mut out).unwrap() > 0);
+            }
+            assert_eq!(streamer.seek(0).unwrap(), 0);
+            let mut window = vec![0.0_f32; 8192];
+            let frames = streamer.fill(&mut window).unwrap();
+            assert!(frames > 0, "no audio after seeking back to 0 at {device_rate} Hz");
+            assert!(window.iter().any(|s| *s != 0.0), "silence after seeking back to 0 at {device_rate} Hz");
+        }
+    }
+
+    #[test]
     fn a_file_at_another_rate_is_resampled_to_the_device() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tone48.wav");
