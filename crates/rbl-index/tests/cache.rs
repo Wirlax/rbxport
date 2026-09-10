@@ -4,7 +4,7 @@
 
 use rbl_index::cache::{decode, encode, Fingerprint};
 use rbl_index::testing::{add_playlist, library_from, TestTrack};
-use rbl_index::{SortColumn, TrackSource, ViewSpec};
+use rbl_index::{Cue, SortColumn, TrackSource, ViewSpec};
 
 fn fingerprint() -> Fingerprint {
     Fingerprint {
@@ -20,9 +20,21 @@ fn fingerprint() -> Fingerprint {
 
 fn sample() -> Vec<TestTrack> {
     vec![
-        TestTrack { id: 1, title: "Zebra", artist: "ARTBAT", bpm_x100: 12800, rating: 4, comment: "hi", ..TestTrack::default() },
+        TestTrack {
+            id: 1, title: "Zebra", artist: "ARTBAT", bpm_x100: 12800, rating: 4, comment: "hi",
+            cues: vec![
+                Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21 },
+                Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46 },
+                Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0 },
+            ],
+            ..TestTrack::default()
+        },
         TestTrack { id: 2, title: "apple", artist: "Meduza", bpm_x100: 13000, ..TestTrack::default() },
-        TestTrack { id: 3, title: "Ébano", artist: "Tujamo", bpm_x100: 12400, rating: 2, ..TestTrack::default() },
+        TestTrack {
+            id: 3, title: "Ébano", artist: "Tujamo", bpm_x100: 12400, rating: 2,
+            cues: vec![Cue { id: 30, position_ms: 24, out_ms: 0, kind: 6, colour: 18 }],
+            ..TestTrack::default()
+        },
     ]
 }
 
@@ -48,6 +60,40 @@ fn a_snapshot_reproduces_the_library_it_came_from() {
     }
     assert_eq!(restored.playlists().members, original.playlists().members);
     assert_eq!(restored.playlists().names.get(0), "Set");
+}
+
+#[test]
+fn a_snapshot_keeps_every_track_s_cues_with_their_colours() {
+    // Format 1 dropped these, and a start that hit the snapshot drew a player
+    // with no cues at all.
+    let original = built();
+    let restored = decode(&encode(&original, fingerprint()), fingerprint()).expect("decodes");
+    for row in 0..original.len() as u32 {
+        assert_eq!(restored.cues_of(row), original.cues_of(row), "row {row}");
+    }
+    assert_eq!(
+        restored.cues_of(0),
+        &[
+            Cue { id: 10, position_ms: 46, out_ms: 8_046, kind: 0, colour: 0 },
+            Cue { id: 11, position_ms: 46, out_ms: 0, kind: 1, colour: 46 },
+            Cue { id: 12, position_ms: 165_046, out_ms: 0, kind: 2, colour: 21 },
+        ]
+    );
+    assert!(restored.cues_of(1).is_empty());
+    assert_eq!((restored.cues_of(2)[0].colour, restored.cues_of(2)[0].id), (18, 30));
+    assert_eq!(restored.cues_of(0)[0].out_ms, 8_046, "a loop keeps its end");
+}
+
+#[test]
+fn cue_bounds_out_of_order_are_refused() {
+    // The cue index is the last thing in the file: the second-to-last u32 is
+    // the last track's start, and pushing it past the end bound would hand
+    // that track a slice `cues_of` clamps to nothing while an earlier one
+    // silently gained cues. Refuse the file instead.
+    let mut bytes = encode(&built(), fingerprint());
+    let at = bytes.len() - 8;
+    bytes[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(decode(&bytes, fingerprint()).is_none());
 }
 
 #[test]

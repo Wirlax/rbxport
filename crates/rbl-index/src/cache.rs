@@ -32,11 +32,15 @@
 use std::path::Path;
 
 use crate::strings::{Interner, StrColumn};
-use crate::{Library, Playlists, Row, TagCategory};
+use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 
 /// Bumped whenever the layout below changes. An older file is ignored, not
 /// misread.
-pub const FORMAT: u32 = 2;
+///
+/// 2 added the My Tag categories. 3 added the cues: formats 1 and 2 left them
+/// out, so every start that hit the snapshot — which is most of them — drew a
+/// player with no cue markers and an empty HOT CUE list.
+pub const FORMAT: u32 = 3;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -228,6 +232,29 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
         }
         w.strings(&column);
     }
+
+    // Format 3: cues, as five columns rather than a struct per cue, so a
+    // damaged length is caught by `count` the same way every other column's is.
+    let table = library.cues();
+    let (cues, index) = table.parts();
+    w.u64(cues.len() as u64);
+    for cue in cues {
+        w.u32(cue.id);
+    }
+    for cue in cues {
+        w.u32(cue.position_ms);
+    }
+    for cue in cues {
+        w.u32(cue.out_ms);
+    }
+    for cue in cues {
+        w.0.push(cue.kind);
+    }
+    for cue in cues {
+        w.0.push(cue.colour);
+    }
+    w.u32s(index);
+    drop(table);
     w.0
 }
 
@@ -389,6 +416,27 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         });
     }
 
+    // Fourteen bytes a cue: the length is checked against the file once for
+    // all five columns before any of them is reserved.
+    let cue_count = r.count(14)?;
+    let mut cues = Vec::with_capacity(cue_count);
+    for _ in 0..cue_count {
+        cues.push(Cue { id: r.u32()?, ..Cue::default() });
+    }
+    for cue in &mut cues {
+        cue.position_ms = r.u32()?;
+    }
+    for cue in &mut cues {
+        cue.out_ms = r.u32()?;
+    }
+    for cue in &mut cues {
+        cue.kind = *r.take(1)?.first()?;
+    }
+    for cue in &mut cues {
+        cue.colour = *r.take(1)?.first()?;
+    }
+    let cue_index = r.u32s()?;
+
     // Every per-row column has to be the same length, or a row index valid for
     // one would be out of range for another.
     if lib.ids.len() != count
@@ -396,10 +444,21 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         || lib.artist.len() != count
         || lib.rating.len() != count
         || lib.play_count.len() != count
+        || cue_index.len() != count + 1
     {
         return None;
     }
+    // A slice bound past the cue array would be clamped to nothing by
+    // `Cues::of`, but a bound out of order would hand a track another's cues.
+    let mut previous = 0;
+    for &bound in &cue_index {
+        if bound < previous || bound as usize > cues.len() {
+            return None;
+        }
+        previous = bound;
+    }
     lib.set_count(count);
+    lib.set_cues(Cues::from_parts(cues, cue_index));
     lib.set_playlists(playlists);
     lib.set_my_tags(my_tags);
     // Derived, and cheap: rebuilding removes any chance of a stored rank array

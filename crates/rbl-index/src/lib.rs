@@ -132,6 +132,10 @@ pub struct Cue {
     pub out_ms: u32,
     /// `djmdCue.Kind`, raw. Use [`Cue::hot_letter`] to read it.
     pub kind: u8,
+    /// `djmdCue.ColorTableIndex`, raw; 0 where the column is NULL. What it
+    /// paints is `rbl_anlz::cue_colour_drawn`, which knows only the indices
+    /// that have been measured — this stores the number, not a guess at it.
+    pub colour: u8,
 }
 
 /// Every cue, grouped by track and ordered by position within each.
@@ -199,6 +203,17 @@ impl Cues {
 
     pub fn is_empty(&self) -> bool {
         self.cues.is_empty()
+    }
+
+    /// The flat cue list and the per-track bounds, for the on-disk snapshot.
+    pub(crate) fn parts(&self) -> (&[Cue], &[u32]) {
+        (&self.cues, &self.index)
+    }
+
+    /// Rebuilds from a snapshot. The bounds are validated by the reader, not
+    /// here: a slice out of order would hand one track another's cues.
+    pub(crate) fn from_parts(cues: Vec<Cue>, index: Vec<u32>) -> Self {
+        Self { cues, index }
     }
 }
 

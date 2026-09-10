@@ -144,11 +144,11 @@ fn a_library_built_without_cues_takes_its_first_track_s_cues() {
         TestTrack { id: 3, title: "three", ..TestTrack::default() },
     ]);
     assert!(lib.cues_of(1).is_empty());
-    lib.set_cues_of(1, vec![Cue { id: 7, position_ms: 500, out_ms: 0, kind: 0 }]);
+    lib.set_cues_of(1, vec![Cue { id: 7, position_ms: 500, out_ms: 0, kind: 0, colour: 0 }]);
     assert_eq!(lib.cues_of(1).len(), 1);
     assert!(lib.cues_of(0).is_empty());
     assert!(lib.cues_of(2).is_empty());
-    lib.set_cues_of(2, vec![Cue { id: 8, position_ms: 900, out_ms: 0, kind: 1 }]);
+    lib.set_cues_of(2, vec![Cue { id: 8, position_ms: 900, out_ms: 0, kind: 1, colour: 21 }]);
     assert_eq!(lib.cues_of(1)[0].id, 7);
     assert_eq!(lib.cues_of(2)[0].id, 8);
     // Out of range is a no-op, not a panic.
@@ -156,4 +156,41 @@ fn a_library_built_without_cues_takes_its_first_track_s_cues() {
     assert_eq!(lib.cues().len(), 2);
     let table: &Cues = &lib.cues();
     assert!(!table.is_empty());
+}
+
+#[test]
+fn a_track_s_cues_come_back_in_position_order_with_their_colour_index() {
+    let mut f = open();
+    let track = track_id(0);
+    f.writer.add_cue(&track, 2, 90_000).unwrap(); // hot cue B, later
+    f.writer.add_cue(&track, 1, 46).unwrap(); // hot cue A, first
+    f.writer.add_cue(&track, 0, 46).unwrap(); // memory cue beside it
+    f.writer.add_cue(&track_id(2), 6, 24).unwrap(); // hot cue E on another track
+    f.reload(&track);
+    f.reload(&track_id(2));
+
+    let shape: Vec<(u32, Option<char>, u8)> =
+        f.cues(&track).iter().map(|c| (c.position_ms, c.hot_letter(), c.colour)).collect();
+    // The writer stores rekordbox's default index 21 on a hot cue and 0 on a
+    // memory cue; the loader must hand both back untouched.
+    assert_eq!(shape, vec![(46, None, 0), (46, Some('A'), 21), (90_000, Some('B'), 21)]);
+
+    assert!(f.cues(&track_id(1)).is_empty());
+    let other = f.cues(&track_id(2));
+    assert_eq!((other.len(), other[0].hot_letter(), other[0].colour), (1, Some('E'), 21));
+}
+
+#[test]
+fn adding_a_cue_moves_the_content_version() {
+    // The snapshot carries the cues, so a cue the app writes has to change the
+    // number the snapshot is keyed to, or the next start would show the
+    // library without it.
+    let mut f = open();
+    let version = |f: &Fixture| {
+        let db = Db::open(f.writer.library().location().clone(), OpenMode::ReadOnly).unwrap();
+        rbl_index::content_version(&db).unwrap()
+    };
+    let before = version(&f);
+    f.writer.add_cue(&track_id(0), 1, 1_000).unwrap();
+    assert_ne!(before, version(&f));
 }

@@ -109,6 +109,18 @@ fn load_lookup(
 /// This exists because rekordbox rewrites the write-ahead log constantly
 /// without changing a row, so a snapshot keyed to the file was refused on
 /// every start rekordbox happened to be running for.
+///
+/// `djmdCue` is in the mix because the snapshot carries the cues, but it is
+/// read differently: its `rb_local_usn` is NULL on every one of the reference
+/// library's 1,041,056 cues, so rekordbox does not move it, and its live row
+/// count is a 300 ms scan rather than an index hit. What is cheap — 17 µs
+/// warm, both indexed — is `MAX(rowid)`, which moves when rekordbox adds a
+/// cue, and `MAX(rb_local_usn)`, which moves when *this app's* writer edits
+/// one. A cue rekordbox moves or recolours in place is the gap: it changes
+/// neither, and the snapshot keeps the old cue until something else in the
+/// library changes. `[UNKNOWN]` whether rekordbox bumps the track's own usn
+/// when it edits a cue, which would close the gap for free; the hot-cue diff
+/// recording answers that.
 pub fn content_version(db: &Db) -> rusqlite::Result<u64> {
     let conn = db.connection();
     let mut mixed: u64 = 0;
@@ -122,13 +134,21 @@ pub fn content_version(db: &Db) -> rusqlite::Result<u64> {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         // Order matters, so a row moving between tables cannot cancel out.
-        mixed = mixed
-            .rotate_left(17)
-            .wrapping_add(usn.unsigned_abs())
-            .rotate_left(17)
-            .wrapping_add(rows.unsigned_abs());
+        mixed = mix(mixed, usn, rows);
     }
-    Ok(mixed)
+    let (usn, last_row): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(MAX(rb_local_usn), 0), COALESCE(MAX(rowid), 0) FROM djmdCue",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(mix(mixed, usn, last_row))
+}
+
+fn mix(acc: u64, a: i64, b: i64) -> u64 {
+    acc.rotate_left(17)
+        .wrapping_add(a.unsigned_abs())
+        .rotate_left(17)
+        .wrapping_add(b.unsigned_abs())
 }
 
 /// Builds the index from an open (read-only is fine) library.
@@ -261,7 +281,7 @@ fn load_cues(
 }
 
 /// The columns a cue is read from, after whatever names its track.
-const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec";
+const CUE_COLUMNS: &str = "ID, Kind, InMsec, OutMsec, ColorTableIndex";
 
 /// One cue from a row whose [`CUE_COLUMNS`] start at `first`.
 fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
@@ -276,7 +296,9 @@ fn read_cue(r: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Cue> {
     // -1 or NULL on a plain cue; `num` reads NULL as 0 and the max folds -1
     // into it.
     let out_ms = u32::try_from(num(r, first + 3)?.max(0)).unwrap_or(0);
-    Ok(Cue { id, position_ms, out_ms, kind })
+    // NULL and 0 both mean "no colour chosen"; the writer stores 0 too.
+    let colour = u8::try_from(num(r, first + 4)?).unwrap_or(0);
+    Ok(Cue { id, position_ms, out_ms, kind, colour })
 }
 
 /// Re-reads one track's cues after an edit, leaving everything else in place.

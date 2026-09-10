@@ -1,6 +1,6 @@
 //! Builders for tests and fixtures. Never used against the real library.
 
-use crate::{strings::fold, Library, Playlists, Row};
+use crate::{strings::fold, Cue, Cues, Library, Playlists, Row};
 
 /// Minimal track description for constructing an index without a database.
 #[derive(Debug, Clone, Default)]
@@ -17,6 +17,8 @@ pub struct TestTrack {
     pub key: &'static str,
     /// `ColorID`, 1 to 8; 0 is none.
     pub color: u8,
+    /// In any order; the index sorts them by position as the loader does.
+    pub cues: Vec<Cue>,
 }
 
 /// Builds an index directly, bypassing SQL.
@@ -47,6 +49,7 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.analysed.push(u8::from(t.bpm_x100 > 0));
     }
     lib.count = tracks.len();
+    lib.set_cues(Cues::from_per_track(tracks.iter().map(|t| t.cues.clone()).collect()));
     lib.set_playlists(Playlists::default());
     lib.build_ranks();
     lib.build_search();
