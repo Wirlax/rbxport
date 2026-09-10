@@ -1,30 +1,17 @@
 /**
  * The icon column at the right edge of the browser.
  *
- * Five outlined boxes, top to bottom: My Tag, Related Tracks, Track
- * Suggestion, Information, Sub-Browser — measured from the 2026-09-09
- * capture (`docs/screenshots`, `9.09.26 PM`) [OBS], where the sub-browser's
- * box is lit blue because it is open. The wording is german.lang's.
- *
- * Only the last two do anything here. My Tag, Related Tracks and Track
- * Suggestion open panels this app does not have, so their boxes are drawn
- * and disabled rather than left out: a column with two buttons in it reads as
- * a different program.
+ * Two outlined boxes: Information and Sub-Browser. rekordbox draws five —
+ * My Tag, Related Tracks and Track Suggestion above these — and they are
+ * left out by request, recorded in TODO.md under "Deliberate divergences".
+ * The two that remain sit where rekordbox puts them, not moved up into the
+ * room the missing three would have taken: the 2026-09-09 capture
+ * (`docs/screenshots`, `9.09.33 PM`) [OBS] has the Information box 361pt
+ * under the browser's top, and that is where it is drawn here. The wording
+ * is german.lang's.
  */
-import type { SVGProps } from "react";
-
-import {
-  InfoIcon, MyTagIcon, RelatedIcon, SubBrowseIcon, SuggestIcon,
-} from "@/components/icons";
+import { InfoIcon, SubBrowseIcon } from "@/components/icons";
 import styles from "./RightRail.module.css";
-
-type Icon = (props: SVGProps<SVGSVGElement>) => React.ReactElement;
-
-const INERT: ReadonlyArray<{ label: string; title: string; Icon: Icon }> = [
-  { label: "My Tag", title: "Display My Tag configuration window.", Icon: MyTagIcon },
-  { label: "Related Tracks", title: "Display related track list window.", Icon: RelatedIcon },
-  { label: "Track Suggestion", title: "Display Track Suggestion window.", Icon: SuggestIcon },
-];
 
 export interface RightRailProps {
   /** Where the shell puts it, since the shell's grid decides that. */
@@ -39,18 +26,6 @@ export function RightRail({ className, infoOpen, onToggleInfo, subOpen, onToggle
   return (
     <div className={className ? `${styles.rail} ${className}` : styles.rail} role="toolbar" aria-label="Browser panels" aria-orientation="vertical">
       <div className={styles.group}>
-        {INERT.map(({ label, title, Icon }) => (
-          <button
-            key={label}
-            type="button"
-            className={styles.button}
-            title={title}
-            aria-label={label}
-            disabled
-          >
-            <Icon className={styles.icon} />
-          </button>
-        ))}
         <button
           type="button"
           className={styles.button}

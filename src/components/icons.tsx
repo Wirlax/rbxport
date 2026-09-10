@@ -153,12 +153,6 @@ export const MetronomeIcon = (props: IconProps) => (
   </svg>
 );
 
-export const MyTagIcon = (props: IconProps) => (
-  <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
-    <path fillRule="evenodd" d="M13.6 4.4 8.7 4 2 10.7 7.4 16l6.7-6.7zM11 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" fill="currentColor"/>
-  </svg>
-);
-
 export const NoteIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <path d="M9 0v8.2a2.3 2.3 0 1 1-1.4-2.1V2.2L4 3.2v6.2a2.3 2.3 0 1 1-1.4-2.1V1.6z" fill="currentColor"/>
@@ -168,12 +162,6 @@ export const NoteIcon = (props: IconProps) => (
 export const RecordIcon = (props: IconProps) => (
   <svg viewBox="0 0 100 100" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" fillRule="evenodd" d="M50 7a43 43 0 1 0 0 86 43 43 0 0 0 0-86zm0 31a12 12 0 1 0 0 24 12 12 0 0 0 0-24z"/>
-  </svg>
-);
-
-export const RelatedIcon = (props: IconProps) => (
-  <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
-    <circle cx="12" cy="6" r="2" fill="currentColor"/> <circle cx="6" cy="12" r="2" fill="currentColor"/> <path d="M6 12 12 6" stroke="currentColor" strokeWidth="1"/>
   </svg>
 );
 
@@ -204,12 +192,6 @@ export const SpinnerIcon = (props: IconProps) => (
 export const SubBrowseIcon = (props: IconProps) => (
   <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
     <rect x="3" y="4" width="6" height="10" fill="currentColor"/> <rect x="3.5" y="4.5" width="11" height="9" fill="none" stroke="currentColor" strokeWidth="1"/>
-  </svg>
-);
-
-export const SuggestIcon = (props: IconProps) => (
-  <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
-    <path d="M9 3v12M3.8 6l10.4 6M3.8 12l10.4-6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/> <circle cx="9" cy="9" r="2.6" fill="none" stroke="currentColor" strokeWidth="1"/>
   </svg>
 );
 
