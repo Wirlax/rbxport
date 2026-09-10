@@ -92,6 +92,9 @@ export function ContextMenu<A extends string>({
               role="menuitem"
               className={styles.item}
               disabled={!enabled(row, context)}
+              // Said as well as done: a greyed entry is still read out as one
+              // rekordbox has, just one this cannot choose.
+              aria-disabled={enabled(row, context) ? undefined : true}
               aria-haspopup={row.items ? "menu" : undefined}
               aria-expanded={row.items ? open === row.label : undefined}
               onClick={() => {
@@ -120,6 +123,7 @@ export function ContextMenu<A extends string>({
                       role="menuitem"
                       className={styles.item}
                       disabled={!enabled(child, context)}
+                      aria-disabled={enabled(child, context) ? undefined : true}
                       onClick={() => {
                         if (child.action !== null) onChoose(child.action);
                         onClose();
