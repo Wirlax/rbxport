@@ -71,6 +71,12 @@
   --c-mixer-knob-pointer: #D0D0D0; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the knob's tick, the one bright thing in the gain block */
   --c-mixer-label: #414141; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the 0.0dB readout and the A-GAIN caption, both greyed */
   --c-mixer-ab: #969696; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the A and B letters above and below the crossfader */
+  --c-simple-dim: #878787; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the artist and the elapsed time, solid (135,135,135) inside the strokes */
+  --c-simple-head: #707070; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the position marker over the overview, a 1pt (112,112,112) line while the deck sits paused; whether it lights when the deck runs is not captured */
+  --c-play-glyph: #646464; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the triangle inside the resting PLAY ring, a flat (100,100,100) */
+  --c-cue-point: #F1A84C; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the triangle under the overview marking the cue point, (241,168,76) */
+  --c-simple-well: #0F0F0F; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the empty sleeve's ground and the rating box's field, both (15,15,15) */
+  --c-simple-disc: #1E1E1E; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the record drawn on the empty sleeve, (30,30,30) with a (15,15,15) hole */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -147,6 +153,40 @@
   --s-mixer-fader-handle-h: 3px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the handle y 265..268pt */
   --s-player-dual-h: 420px; /* measured from the 2-player capture docs/screenshots (rekordbox 7.2.11, 2x): the two-deck band y 56.5..476.5pt, mirrored about its own centre at 266.5 */
   --s-menu-row-h: 25px; /* the layout menu open in a capture of rekordbox 7.2.11 at 2x: five rows on a 50px pitch inside a 258px panel */
+  --s-player-simple-h: 59px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the strip y 188..306 under the top bar, a 1pt black line and then the 58pt panel row; the 3pt gutter to the browser follows */
+  --s-player-simple-top-gap: 1px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): black y 188..190 between the top bar and the panel row */
+  --s-player-simple-transport-w: 58px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the PLAY column x 0..58pt, the window's own 1pt frame over its first point */
+  --s-player-simple-artwork-gap: 8px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): black x 228..244 between the PLAY column and the sleeve */
+  --s-player-simple-artwork-size: 48px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the sleeve x 244..340, y 200..296 */
+  --s-player-simple-artwork-inset: 5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the sleeve sits 5pt under the panel's top edge and 5pt above its bottom */
+  --s-player-simple-disc-d: 43px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the record on the empty sleeve spans y 205..291 */
+  --s-player-simple-disc-hole: 11px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): its hole spans y 237..259 */
+  --s-player-simple-wave-gap: 5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): black x 340..350 between the sleeve and the title/overview column */
+  --s-player-simple-text-top: 7px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the readout row's hairlines start at y 204, 7pt under the panel top at 190 */
+  --s-player-simple-text-h: 16.5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the hairlines between the readouts span y 204..237 */
+  --s-player-simple-wave-top: 30px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): hot cue badge A hangs from y 250, 30pt under the panel top; the overview's band starts there */
+  --s-player-simple-wave-h: 16.5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the overview paints down to its baseline at y 283 from the badge top at 250 */
+  --s-player-simple-scrub-gap: 2.5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): black y 283..288 between the overview's baseline and the position bar */
+  --s-player-simple-head-top: 1px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the position marker starts at y 252, 1pt under the badge top, and runs to the panel's bottom edge */
+  --s-player-simple-cue-point-w: 12px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the cue point triangle x 351..375, its apex on the overview's baseline */
+  --s-player-simple-cue-point-h: 9px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the cue point triangle y 282..300 */
+  --s-player-simple-wave-right-gap: 13px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the overview and the position bar end at x 3268, 13pt short of the rating box at 3294; the readout row above runs on to the box */
+  --s-player-simple-artist-w: 371px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the artist's cell runs from its hairline at x 1968 to the next at 2710. One capture at one window width, so whether the cell is fixed or a fraction of the strip is [ASSUME] fixed */
+  --s-player-simple-artist-inset: 17px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): hairline x 1968, the artist's first letter at 2002 */
+  --s-player-simple-time-w: 157px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the remaining and elapsed times share a cell x 2710..3024, centred in it */
+  --s-player-simple-time-gap: 16.5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the remaining time ends at x 2858, the elapsed time starts at 2891 */
+  --s-player-simple-key-w: 56px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the key's cell x 3024..3136, the key centred */
+  --s-player-simple-bpm-w: 79px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the BPM's cell from its hairline at x 3136 to the rating box at 3294, the number centred */
+  --s-player-simple-right-w: 206px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the rating box x 3294..3706, 3pt narrower than the full deck's 209pt panel */
+  --s-player-simple-right-margin: 3px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): black x 3706..3712 between the rating box and the window's edge */
+  --s-player-simple-field-inset-x: 8px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the dark field inside the rating box starts 8pt in from its left edge, x 3294..3310 */
+  --s-player-simple-field-inset-right: 13px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the field ends at x 3680, 13pt short of the box's right edge, with a 2pt scrollbar track at 3686..3690 in that margin */
+  --s-player-simple-field-inset-y: 5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the field y 200..296 inside the panel row 190..306 */
+  --s-player-simple-field-row-h: 31px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the field's first row, holding the stars, y 200..262; a 1pt panel-coloured line at 262..264 and an empty row under it */
+  --s-player-simple-stars-inset: 10.5px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the first star's left edge at x 3331, 10.5pt in from the field's edge at 3310 */
+  --s-player-simple-star-h: 10px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): a star spans y 220..240; five of them on a 16pt pitch */
+  --s-player-simple-play-glyph: 8px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the triangle in the PLAY ring is 8pt square, x 164..180, y 240..256, smaller than the full deck draws it */
+  --s-player-simple-star-pitch: 16px; /* the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the five stars' tips at x 3341, 3373, 3405, 3437, 3469 */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
