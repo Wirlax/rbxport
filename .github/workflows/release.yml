@@ -7,6 +7,17 @@ name: Release
 #
 # `workflow_dispatch` builds the same way without publishing, which is how a
 # change to this file is tried before a tag depends on it.
+#
+# Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
+# one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
+# VM. A hosted image preinstalls a toolchain; an arc host is somebody's actual
+# machine, so anything a job needs it installs itself in an idempotent
+# "Ensure …" step — a no-op on the second run, and the record of what the host
+# needs if it is ever rebuilt.
+#
+# The macOS host being a real person's Mac is why the signing identity is
+# imported into a throwaway keychain under RUNNER_TEMP and removed again on the
+# way out, rather than being left in a login keychain.
 on:
   push:
     tags: ["v*"]
@@ -21,36 +32,103 @@ env:
 
 jobs:
   build:
-    # GitHub-hosted for both, deliberately. macOS signing and notarisation need
-    # a real macOS with Xcode's notarytool, and the self-hosted fleet (`arc`)
-    # is Linux — which can cross-compile neither target. Putting a signing
-    # certificate on a shared runner to save minutes is the wrong trade.
+    # Native on both, deliberately. macOS signing and notarisation need a real
+    # macOS with Xcode's notarytool, and neither target cross-compiles from the
+    # other; the fleet has a host for each.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - host: [self-hosted, macos, arm64]
             # One binary for both Apple architectures, which is what a
-            # download page should be able to offer without asking.
+            # download page should be able to offer without asking. The host is
+            # Apple Silicon; the x86_64 half is a cross-compile against the
+            # same SDK, which is all pure Rust here.
             target: universal-apple-darwin
             bundles: dmg
-          - os: windows-latest
+          - host: [self-hosted, windows, x64]
             target: x86_64-pc-windows-msvc
             bundles: nsis
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.host }}
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
       # anything to sign with is decided once, here.
       HAVE_APPLE: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
       HAVE_AZURE: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME != '' }}
     steps:
+      # First, before any `shell: bash` step: bash resolves from PATH, and on a
+      # Windows desktop the WindowsApps WSL stub shadows Git's bash. WSL bash
+      # cannot see the runner's workspace under its Windows path, so the
+      # version step below would fail on a path that plainly exists.
+      - name: Put Git Bash ahead of the WSL stub
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $gitBin = "$env:ProgramFiles\Git\bin"
+          if (-not (Test-Path "$gitBin\bash.exe")) {
+            throw "Git for Windows is not installed at $gitBin - bash steps cannot run."
+          }
+          $gitBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
       - uses: actions/checkout@v4
 
+      # setup-node, never the host's node: the arc hosts have node under nvm or
+      # in a location the runner's environment does not see.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+
+      # dtolnay/rust-toolchain drives rustup; it does not install it. Hosted
+      # images ship rustup, an arc host need not — the Windows desktop had a
+      # rustup-less Rust in ~/.cargo/bin, which is exactly the shape that
+      # action cannot work with.
+      - name: Ensure rustup
+        if: runner.os == 'macOS'
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure rustup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cargoBin = "$env:USERPROFILE\.cargo\bin"
+          if (-not (Test-Path "$cargoBin\rustup.exe")) {
+            $init = "$env:TEMP\rustup-init.exe"
+            Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $init
+            & $init -y --no-modify-path --profile minimal --default-toolchain stable
+            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE" }
+          }
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - name: Ensure perl for the vendored OpenSSL
+        # rusqlite's `bundled-sqlcipher-vendored-openssl` builds OpenSSL from
+        # source, and OpenSSL is configured by a perl script.
+        #
+        # Strawberry rather than the perl inside Git for Windows: OpenSSL's
+        # Configure emits msys-style paths under that one and the MSVC build
+        # then cannot find its own files. OPENSSL_SRC_PERL is read by
+        # openssl-src and points it at this interpreter specifically.
+        #
+        # nasm is deliberately not installed: openssl-src falls back to
+        # `no-asm` when it is absent, which is slower crypto in a build that
+        # only ever opens a local SQLite file.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = "C:\Strawberry\perl\bin\perl.exe"
+          if (-not (Test-Path $perl)) {
+            winget install --id StrawberryPerl.StrawberryPerl --exact --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            if (-not (Test-Path $perl)) { throw "Strawberry Perl installed but $perl is missing" }
+          }
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -59,6 +137,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # cache-bin caches ~/.cargo/bin and prunes it on restore, which on a
+          # self-hosted host means deleting the rustup the step above installed
+          # — and the shims every later step resolves through.
+          cache-bin: false
 
       - run: pnpm install --frozen-lockfile
 
@@ -126,13 +208,76 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
           '
 
+      - name: Set up the signing keychain
+        # Put the Developer ID identity somewhere codesign can reach it
+        # UNATTENDED. Without a partition list on the imported key, codesign
+        # asks the window server for permission and nobody ever answers: the
+        # job hangs for about five minutes and then fails with
+        # errSecInternalComponent.
+        #
+        # This runs on a real person's Mac, so the job behaves as a guest. The
+        # keychain is created under RUNNER_TEMP, prepended to the search list
+        # rather than made the default — codesign searches the whole list, so
+        # there is no reason to displace what the machine's owner has set — and
+        # the original list is put back by the teardown step below.
+        if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/rekordbox-lite-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+
+          # Remember the search list verbatim so teardown can restore it.
+          security list-keychains -d user | sed 's/^ *"//;s/"$//' > "$RUNNER_TEMP/keychains.before"
+
+          # A keychain left behind by a killed run would still be on the list,
+          # holding a password this run cannot know.
+          security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # The default idle lock is five minutes, and notarisation alone
+          # outlasts that while the keychain sits untouched.
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          # On a trap, not a trailing rm: with `set -e` a failed import would
+          # otherwise leave the Developer ID private key in a temp directory on
+          # a machine that is somebody's daily driver.
+          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          chmod 600 "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+
+          # The line that fixes errSecInternalComponent.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+
+          # Prepended, with the machine's own keychains kept after it.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(cat "$RUNNER_TEMP/keychains.before")
+
+          echo "Identities visible to codesign:"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
-          # Present only on the repository, so a fork builds unsigned rather
-          # than failing. Tauri skips signing when they are empty.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Note what is NOT here: APPLE_CERTIFICATE. On a hosted runner Tauri
+          # imports it into a keychain of its own, which is fine on a machine
+          # that exists for one build. Here the identity is already on the
+          # search list, and letting Tauri import it a second time recreates
+          # the unattended-signing hang the step above just solved — observed
+          # as a 5m39s stall ending in errSecInternalComponent, after Tauri had
+          # printed a perfectly healthy "Signing with identity" line.
+          #
+          # APPLE_SIGNING_IDENTITY stays: it is what Tauri matches against the
+          # keychain. It is present only on the repository, so a fork builds
+          # unsigned rather than failing.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -234,12 +379,28 @@ jobs:
           path: out/
           retention-days: 14
 
+      - name: Tear down the signing keychain
+        # Always, and last: the search list is machine-wide state on a Mac
+        # somebody else uses, so leaving a deleted keychain listed — or a live
+        # one holding a Developer ID key — is not an option, whatever the build
+        # did.
+        if: always() && runner.os == 'macOS' && env.HAVE_APPLE == 'true'
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/rekordbox-lite-signing.keychain-db"
+          if [ -f "$RUNNER_TEMP/keychains.before" ]; then
+            # shellcheck disable=SC2046
+            security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
+          fi
+          security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12"
+
   publish:
     # Only a tag publishes. A manual run builds and stops, so this file can be
     # changed without a bucket write to prove it.
     if: github.event_name == 'push'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -247,10 +408,23 @@ jobs:
           merge-multiple: true
           path: out
 
+      - name: Ensure the AWS CLI
+        # A hosted Ubuntu image ships it; the arc Linux host does not. Into
+        # ~/.local so no step here needs sudo.
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/aws" ]; then
+            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+            unzip -qo /tmp/awscliv2.zip -d /tmp
+            /tmp/aws/install --update -i "$HOME/.local/aws-cli" -b "$HOME/.local/bin"
+            rm -rf /tmp/aws /tmp/awscliv2.zip
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Publish to R2
-        # S3-compatible, so the AWS CLI already on the runner is the whole
-        # client. The endpoint is the account's; the bucket is a variable so
-        # this file names no account of anyone's.
+        # S3-compatible, so the AWS CLI is the whole client. The endpoint is
+        # the account's; the bucket is a variable so this file names no account
+        # of anyone's.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
