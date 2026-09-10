@@ -406,6 +406,106 @@ mod tests {
         assert_eq!(settings.release_ms(), DEFAULT_RELEASE_MS);
     }
 
+    /// The tests/engine.rs measure, restated here: steps that stand out from
+    /// the two milliseconds either side of them by more than twelve times.
+    fn clicks(frames: &[(f32, f32)]) -> usize {
+        const NEIGHBOURHOOD: usize = 96;
+        const CLICK_RATIO: f32 = 12.0;
+        let steps: Vec<f32> = frames.windows(2).map(|pair| (pair[1].0 - pair[0].0).abs()).collect();
+        (NEIGHBOURHOOD..steps.len().saturating_sub(NEIGHBOURHOOD))
+            .filter(|&i| {
+                let around: f32 = steps[i - NEIGHBOURHOOD..i]
+                    .iter()
+                    .chain(&steps[i + 1..i + 1 + NEIGHBOURHOOD])
+                    .sum::<f32>()
+                    / (NEIGHBOURHOOD * 2) as f32;
+                around > 1e-4 && steps[i] > around * CLICK_RATIO
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_ceiling_lowered_mid_stream_holds_from_a_lookahead_on() {
+        let mut limiter = Limiter::new(RATE);
+        let settings = LimiterSettings::default();
+        let delay = limiter.latency_frames();
+        // Settled under the default ceiling, then the ceiling drops by six.
+        run(&mut limiter, &settings, &tone(2.0, 4_800));
+        settings.set_ceiling_db(-6.0);
+        let lower = db_to_gain(-6.0);
+        let output = run(&mut limiter, &settings, &tone(2.0, 4_800));
+        // The frames still in the delay line were let through under the old
+        // ceiling; every frame that entered under the new one leaves under it.
+        let loudest =
+            output.iter().skip(delay).map(|&(l, r)| l.abs().max(r.abs())).fold(0.0, f32::max);
+        assert!(loudest <= lower + 1e-6, "{loudest} is over the new ceiling {lower}");
+        assert!(loudest > lower * 0.9, "{loudest}: the new ceiling is not being reached");
+    }
+
+    #[test]
+    fn switching_on_over_a_loud_signal_ramps_rather_than_steps() {
+        let mut limiter = Limiter::new(RATE);
+        let settings = LimiterSettings::default();
+        settings.set_enabled(false);
+        let lookahead = limiter.latency_frames();
+        let amplitude = 2.0;
+        let mut output = run(&mut limiter, &settings, &tone(amplitude, 4_800));
+        settings.set_enabled(true);
+        output.extend(run(&mut limiter, &settings, &tone(amplitude, 4_800)));
+        // A straight switch would step by the whole reduction at once. The
+        // ramp spreads it over the lookahead, so no step is larger than the
+        // tone's own plus that share of the reduction.
+        let floor = db_to_gain(DEFAULT_CEILING_DB) / amplitude;
+        let tone_step = amplitude * 2.0 * std::f32::consts::PI * 100.0 / RATE as f32;
+        let allowed = tone_step + amplitude * (1.0 - floor) / lookahead as f32;
+        let largest =
+            output.windows(2).map(|pair| (pair[1].0 - pair[0].0).abs()).fold(0.0, f32::max);
+        assert!(largest <= allowed + 1e-4, "a step of {largest} where the ramp allows {allowed}");
+        assert_eq!(clicks(&output), 0);
+        // And it did switch on: the tail is at the ceiling, not at two.
+        let tail = output[8_000..].iter().map(|&(l, _)| l.abs()).fold(0.0, f32::max);
+        assert!(tail <= db_to_gain(DEFAULT_CEILING_DB) + 1e-6, "still off: {tail}");
+    }
+
+    #[test]
+    fn the_floor_is_reset_by_reading_it() {
+        let mut limiter = Limiter::new(RATE);
+        let settings = LimiterSettings::default();
+        run(&mut limiter, &settings, &tone(2.0, 4_800));
+        let loud = limiter.take_floor();
+        assert!(loud < 0.6, "the loud buffer was not measured: {loud}");
+        // Nothing processed since: the reading is unity, not the old floor.
+        assert_eq!(limiter.take_floor(), 1.0);
+        // A quiet second after the loud one measures as its own: the release
+        // starts it under unity, and nothing in it asks for less than the
+        // loud buffer did.
+        run(&mut limiter, &settings, &tone(0.1, RATE as usize));
+        let after = limiter.take_floor();
+        assert!(after < 1.0, "the release had not started: {after}");
+        assert!(after >= loud - 1e-6, "quiet audio was reduced further: {after} under {loud}");
+        // And once the release has run its course, a quiet buffer reads as
+        // unity to within the exponential's tail.
+        run(&mut limiter, &settings, &tone(0.1, 480));
+        let released = limiter.take_floor();
+        assert!(released > 0.999, "the release never finished: {released}");
+    }
+
+    #[test]
+    fn a_silent_channel_is_turned_down_with_its_loud_partner() {
+        let mut limiter = Limiter::new(RATE);
+        let settings = LimiterSettings::default();
+        // Loud on the left, nothing on the right: linked on the louder, so
+        // the left is held to the ceiling, and the right stays at nothing.
+        let input: Vec<(f32, f32)> = tone(2.0, 4_800).into_iter().map(|(l, _)| (l, 0.0)).collect();
+        let output = run(&mut limiter, &settings, &input);
+        let ceiling = db_to_gain(DEFAULT_CEILING_DB);
+        let loudest_left = output.iter().map(|&(l, _)| l.abs()).fold(0.0, f32::max);
+        assert!(loudest_left <= ceiling + 1e-6, "{loudest_left} is over the ceiling");
+        assert!(loudest_left > ceiling * 0.9, "{loudest_left}: the left was not limited to the ceiling");
+        assert!(output.iter().all(|&(_, r)| r == 0.0), "silence came out as something");
+        assert!(limiter.take_floor() < 0.6, "the left's peak did not drive the gain");
+    }
+
     #[test]
     fn a_long_run_does_not_drift_the_gain() {
         // The box filter's running sum, resummed each wrap: an hour of quiet

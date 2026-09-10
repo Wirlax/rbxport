@@ -303,11 +303,79 @@ mod tests {
     }
 
     #[test]
+    fn a_heading_without_a_date_is_a_release_with_none() {
+        let (version, date) = release_heading("## [0.1.0]").unwrap();
+        assert_eq!(version, v("0.1.0"));
+        assert_eq!(date, None);
+        assert_eq!(release_heading("## [0.1.0] — first build"), Some((v("0.1.0"), None)));
+    }
+
+    #[test]
+    fn a_pre_release_version_is_a_release_heading_and_sorts_before_the_release() {
+        let (version, date) = release_heading("## [0.5.0-rc1] — 2026-09-10").unwrap();
+        assert_eq!(version, v("0.5.0-rc1"));
+        assert_eq!(date.as_deref(), Some("2026-09-10"));
+        let log = "## [0.5.0] — 2026-09-11\n\nfinal\n\n## [0.5.0-rc1] — 2026-09-10\n\ncandidate\n";
+        let versions: Vec<String> =
+            changes_between(log, &v("0.4.0"), &v("0.5.0")).into_iter().map(|c| c.version).collect();
+        assert_eq!(versions, ["0.5.0", "0.5.0-rc1"]);
+        // Somebody on the candidate gets the release alone.
+        let versions: Vec<String> = changes_between(log, &v("0.5.0-rc1"), &v("0.5.0"))
+            .into_iter()
+            .map(|c| c.version)
+            .collect();
+        assert_eq!(versions, ["0.5.0"]);
+    }
+
+    #[test]
+    fn the_first_date_is_found_wherever_it_sits_and_a_near_miss_is_not_one() {
+        assert_eq!(first_date(" — 2026-09-10").as_deref(), Some("2026-09-10"));
+        assert_eq!(first_date("pulled; see 2026-09-11 for the fix").as_deref(), Some("2026-09-11"));
+        assert_eq!(first_date(" — 2026-09-10 and 2026-09-12").as_deref(), Some("2026-09-10"));
+        assert_eq!(first_date(""), None);
+        assert_eq!(first_date(" — 2026-09"), None, "a month is not a day");
+        assert_eq!(first_date(" — 20260910"), None, "no dashes, no date");
+        assert_eq!(first_date(" — 2026/09/10"), None, "the wrong separators");
+    }
+
+    #[test]
     fn a_heading_that_is_not_a_version_is_body_not_a_section() {
         let log = "## [0.2.0] — 2026-09-09\n\n## [Unreleased]\n- not yet\n\n## [0.1.0]\n\nfirst\n";
         let changes = changes_between(log, &v("0.0.0"), &v("9.0.0"));
         assert_eq!(changes.len(), 2);
         assert!(changes[0].body.contains("[Unreleased]"));
         assert_eq!(changes[1].date, None);
+    }
+
+    #[test]
+    fn the_very_next_version_is_one_section_and_a_version_not_in_the_log_is_none() {
+        let changes = changes_between(LOG, &v("0.1.0"), &v("0.2.0"));
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].version, "0.2.0");
+        // A target the changelog has no section for: nothing to show, and
+        // nothing older shown in its place.
+        assert!(changes_between(LOG, &v("0.4.0"), &v("0.4.1")).is_empty());
+    }
+
+    #[test]
+    fn a_link_definition_inside_a_section_is_dropped_but_a_link_in_prose_is_kept() {
+        let log = "## [0.2.0] — 2026-09-09\n\n- One.\n[0.2.0]: https://example.com/v0.2.0\n- Two.\n\n\
+See [the notes](https://example.com) — and `[x]: y` inline is prose.\n";
+        let changes = changes_between(log, &v("0.1.0"), &v("0.2.0"));
+        assert_eq!(changes.len(), 1);
+        let body = &changes[0].body;
+        assert!(!body.contains("]: https://"), "the definition stayed: {body}");
+        assert!(body.contains("- One.\n- Two."), "the bullets around it moved: {body}");
+        assert!(body.contains("See [the notes](https://example.com)"));
+        assert!(body.contains("`[x]: y` inline"));
+    }
+
+    #[test]
+    fn windows_line_endings_read_the_same_as_unix_ones() {
+        let crlf = LOG.replace('\n', "\r\n");
+        let from_crlf = changes_between(&crlf, &v("0.1.0"), &v("0.4.0"));
+        let from_lf = changes_between(LOG, &v("0.1.0"), &v("0.4.0"));
+        assert_eq!(from_crlf, from_lf);
+        assert!(from_crlf.iter().all(|c| !c.body.contains('\r')), "a carriage return leaked");
     }
 }
