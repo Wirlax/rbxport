@@ -372,6 +372,15 @@ jobs:
           # update.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The DMG bundler arranges the disk image's window by driving
+          # Finder with AppleScript unless `CI` is "true", when it skips
+          # that. A hosted runner sets CI; an arc runner does not pass it on,
+          # and on chris-m2-mac — where arc is a LaunchAgent nobody has
+          # granted Automation consent — the AppleEvent to Finder times out
+          # (-1712) and every macOS release built there died at
+          # bundle_dmg.sh (0.5.1, three times). The disk image keeps the app
+          # and its Applications link; only the icon layout is default.
+          CI: "true"
           # artifact-signing-cli logs in with `az`, and on Windows `az` keeps
           # its token cache DPAPI-encrypted — a key that exists only for a
           # console logon with a password behind it. The runner is started
