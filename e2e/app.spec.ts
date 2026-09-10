@@ -1781,12 +1781,74 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   const full = await decks.first().boundingBox();
   expect(short?.height).toBeLessThan(full?.height ?? 0);
 
+  // Full Browser puts the deck away, and the deck alone. Set the rest of the
+  // screen up first — a playlist open, a track playing, the list scrolled and
+  // a row selected — so the switch there and back can be seen to keep it.
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
+  const scroller = page.getByTestId("track-scroll");
+  await scroller.evaluate((el) => { el.scrollTop = 600; });
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(600);
+  const row = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  const loaded = await row.innerText();
+  await row.dblclick();
+  await expect(page.getByTestId("player-title")).toHaveText(loaded);
+  await page.keyboard.press(" ");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  // "-M:SS.t", in seconds, so the readout can be compared across the switch.
+  const remaining = async () => {
+    const text = await page.getByTestId("player-time").innerText();
+    const [, minutes, seconds] = /^-(\d+):(\d\d\.\d)$/.exec(text.trim()) ?? [];
+    return Number(minutes) * 60 + Number(seconds);
+  };
+  const before = await remaining();
+  await expect.poll(remaining).toBeLessThan(before);
+  const left = await remaining();
+  // Read back rather than assumed: the double-click brought its row into
+  // view, which is a scroll of its own. What matters is that the switch adds
+  // none.
+  const scrolled = await scroller.evaluate((el) => el.scrollTop);
+  expect(scrolled).toBeGreaterThan(0);
+
+  await choose("FULL BROWSER");
+  await expect(decks).toHaveCount(0);
+  // The browser takes everything under the top bar down to the status bar:
+  // no deck, no gutter, and no strip left over where the deck row was.
+  const top = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    return parseFloat(style.getPropertyValue("--s-title-bar-h")) + parseFloat(style.getPropertyValue("--s-top-bar-h"));
+  });
+  const body = await page.getByTestId("body").boundingBox();
+  const status = await page.locator("footer").boundingBox();
+  const viewport = page.viewportSize();
+  expect(body?.y).toBe(top);
+  expect((body?.y ?? 0) + (body?.height ?? 0)).toBe(status?.y);
+  expect((status?.y ?? 0) + (status?.height ?? 0)).toBe(viewport?.height);
+  // Nothing else moved: the playlist, the scroll and the selection are where
+  // they were.
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
+  await expect(page.locator('[role="row"][aria-selected="true"]')).toContainText(loaded);
+
+  // And the deck comes back still playing the same track from where it had
+  // got to, rather than reloaded and stopped at the start.
+  await choose("1 PLAYER");
+  await expect(decks).toHaveCount(1);
+  await expect(page.getByTestId("player-title")).toHaveText(loaded);
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect.poll(remaining).toBeLessThan(left);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
+  await expect(page.locator('[role="row"][aria-selected="true"]')).toContainText(loaded);
+
   await choose("FULL BROWSER");
   await expect(decks).toHaveCount(0);
   // And it survives a restart, like the rest of the screen.
   await page.reload();
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await expect(page.getByRole("region", { name: /^Preview player/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Layout" })).toBeVisible();
+  await page.getByRole("button", { name: "Layout" }).click();
+  await expect(page.getByRole("menuitemradio", { name: "FULL BROWSER" })).toHaveAttribute("aria-checked", "true");
 });
 
 test("hovering the sleeve shows what clicking it does", async ({ page }) => {
