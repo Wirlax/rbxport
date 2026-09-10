@@ -141,13 +141,37 @@ jobs:
           "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
           "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
 
+      - name: Keep the Windows target directory short
+        # The first release died here with OpenSSL's Configure reporting
+        # dozens of its own source files "missing". They were not missing;
+        # their paths were too long. The runner's workspace already sits ~95
+        # characters deep (`C:\Users\…\.arc\instances\windows\<runner>\_work\
+        # rekordbox-lite\rekordbox-lite`), openssl-src copies its tree under
+        # `target\<triple>\release\build\openssl-sys-<hash>\out\openssl-build\`
+        # on top of that, and the deepest files then cross MAX_PATH (260) and
+        # silently fail to copy. A short target directory outside the
+        # workspace keeps the longest path near 180.
+        #
+        # It is also this host's build cache: the directory outlives the
+        # ephemeral runner, so the second release does not rebuild OpenSSL.
+        # rust-cache cannot cache it (it only knows paths relative to the
+        # workspace), and does not need to.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # No `workspaces:` — this repo's workspace root is the repository
+          # root and it builds into `target` there, which is the default.
+          # `src-tauri` used to be named here, which made the action look for
+          # `src-tauri/target` and cache nothing.
+          #
           # cache-bin caches ~/.cargo/bin and prunes it on restore, which on a
           # self-hosted host means deleting the rustup the step above installed
           # — and the shims every later step resolves through.
@@ -309,15 +333,17 @@ jobs:
           mkdir -p out
           # Both bundlers put their output under a target directory, and which
           # one that is depends on the workspace: this repo builds into `target`
-          # at the root, not `src-tauri/target`. Found by running the macOS
-          # build locally, where a step that looked only under `src-tauri`
-          # collected nothing at all. Both are searched rather than one being
-          # picked, since either can be right depending on cargo's config.
+          # at the root, not `src-tauri/target` — or wherever CARGO_TARGET_DIR
+          # points, which on Windows is outside the workspace entirely. Found
+          # by running the macOS build locally, where a step that looked only
+          # under `src-tauri` collected nothing at all. All are searched rather
+          # than one being picked, since any can be right depending on cargo's
+          # config.
           # By path, and never the bundler's own working files: a failed DMG
           # run leaves `rw.NNNNN.<name>.dmg` scratch images beside the real
           # one, and a plain *.dmg glob picks those up. Found locally, with
           # two of them sitting in the bundle directory.
-          find target src-tauri/target -type f ! -name 'rw.*' \
+          find "${CARGO_TARGET_DIR:-target}" src-tauri/target -type f ! -name 'rw.*' \
             \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \) \
             -exec cp {} out/ \; 2>/dev/null || true
 
