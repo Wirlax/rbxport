@@ -1,13 +1,17 @@
+/* The strip under the browser, measured from the 2026-09-09 capture: 27pt of
+   black, and its text — '1 List, 952.2 MB' at the right — the grey and the
+   11.5px bold Arial the capture's stems and cap height fit, ending 34.5pt
+   short of the window's edge. */
 .statusBar {
   display: flex;
   align-items: center;
   gap: 16px;
   height: var(--s-status-bar-h);
-  padding: 0 12px;
+  padding: 0 var(--s-status-inset-right) 0 12px;
   background: var(--c-black);
-  font-size: var(--f-size-sm);
+  font-size: var(--f-size-status);
   font-weight: 700;
-  color: var(--c-text-dim);
+  color: var(--c-status-text);
 }
 .logo { color: var(--c-text); }
 .readOnly {

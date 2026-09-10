@@ -11,10 +11,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--c-black);
-  font-size: var(--f-size-xs);
+  /* The grey macOS paints rekordbox's title bar, measured from the capture,
+     and its name in it: the system's own face, bold at 13px, in the grey the
+     capture draws it. Not Arial — the title bar is the window's, not the
+     app's, and rekordbox's is drawn by macOS. */
+  background: var(--c-titlebar);
+  font-family: var(--f-window-title);
+  font-size: var(--f-size-window-title);
   font-weight: 700;
-  color: var(--c-text-dim);
+  color: var(--c-titlebar-text);
   /* The strip drags the window: `data-tauri-drag-region` on the element is how
      that is asked for, not the `-webkit-app-region` a Chromium app would use.
      Room at the left for the traffic lights, which float over the webview
@@ -31,12 +36,14 @@
   display: flex;
   gap: 12px;
   color: var(--c-text-dim);
+  font-family: var(--f-ui);
+  font-size: var(--f-size-xs);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.appName { color: var(--c-text-dim); }
+.appName { color: var(--c-titlebar-text); }
 
 .window {
   display: grid;
