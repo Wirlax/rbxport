@@ -135,7 +135,7 @@ test("the overview waveform is the measured height, not the whole band", async (
   expect(band).toBeCloseTo(await token(page, "--s-player-overview-h"), 0);
 });
 
-test("hot cues are badges on the overview and red triangles at the top of the grid", async ({ page }) => {
+test("hot cues are badges on the overview, and the same badge centred lower on the detail", async ({ page }) => {
   // Measured off docs/screenshots: four hot cues draw four 11pt badges along
   // the top of the overview, letter inside, and no line through the waveform.
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
@@ -155,15 +155,18 @@ test("hot cues are badges on the overview and red triangles at the top of the gr
   expect((box?.y ?? 0) - (strip?.y ?? 0)).toBeCloseTo(0, 1);
 
   // Widening the detail window until the cue falls inside it draws it there
-  // too, as a triangle at the very top of the band, against the phrase blocks.
+  // too: the same 11pt badge, 15pt under the band's top and centred on the
+  // cue, as the user's crop of rekordbox has it. e2e/cue-badges.spec.ts
+  // measures the rest of that marker.
   const out = page.getByRole("button", { name: "Zoom out", exact: true });
   for (let i = 0; i < 3; i++) await out.click();
-  const inDetail = page.getByTestId("player-detail").locator('[title^="Hot cue"] i').first();
+  const inDetail = page.getByTestId("player-detail").locator('[title^="Hot cue"] b').first();
   await expect(inDetail).toBeVisible();
   const detail = await page.getByTestId("player-detail").boundingBox();
-  const triangle = await inDetail.boundingBox();
-  expect(triangle?.y).toBeCloseTo(detail?.y ?? 0, 1);
-  expect(triangle?.height).toBeCloseTo(await token(page, "--s-beat-head-h"), 1);
+  const badgeInDetail = await inDetail.boundingBox();
+  expect((badgeInDetail?.y ?? 0) - (detail?.y ?? 0)).toBeCloseTo(await token(page, "--s-cue-badge-top"), 1);
+  expect(badgeInDetail?.width).toBeCloseTo(size, 1);
+  expect(badgeInDetail?.height).toBeCloseTo(size, 1);
   // And over the grid, not behind a downbeat line.
   const layer = await inDetail.evaluate((e) =>
     getComputedStyle(e.parentElement as HTMLElement).zIndex,
