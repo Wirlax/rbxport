@@ -5,6 +5,22 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [0.5.3] — 2026-09-10
+
+### Fixed
+- On Windows, the Preferences window opens with its contents instead of a
+  blank white frame, without the application menu bar on it, and closing the
+  main window with Preferences open quits the app rather than leaving it
+  running with only Preferences.
+- On Windows, the menu's keyboard shortcuts — Ctrl+, for Preferences,
+  Ctrl+O, Ctrl+I, Ctrl+B, Ctrl+7 to Ctrl+0 for the layouts — work while the
+  app has keyboard focus.
+- A window that could not open the library shows an empty list, not the
+  previous session's tracks.
+- The app idles within its processor budget: the cost readout in the title
+  bar cost more than the budget it reports, and now reads every five seconds
+  and re-renders only itself.
+
 ## [0.5.2] — 2026-09-10
 
 Everything in 0.5.0 and 0.5.1, neither of which published — 0.5.0's macOS
@@ -201,6 +217,7 @@ Pro DJ Link and writes USB exports. Everything below landed between
 - Signed builds for macOS (opens without Gatekeeper refusing it) and Windows,
   published with readable download URLs.
 
+[0.5.3]: https://github.com/chrisle/rekordbox-lite/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/chrisle/rekordbox-lite/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/chrisle/rekordbox-lite/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/chrisle/rekordbox-lite/compare/v0.4.0...v0.5.0
