@@ -103,6 +103,17 @@
   --c-label-aqua: #56BDF3; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Aqua dot */
   --c-label-blue: #204FEF; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Blue dot */
   --c-label-purple: #8B1EEF; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Purple dot */
+  --c-info-tab-active: #3571E3; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the selected tab's fill, (53,113,227) */
+  --c-info-tab-active-text: #000000; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the selected tab's label is black on the blue */
+  --c-info-tab-text: #969696; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): an unselected tab's label, (150,150,150); its fill is the raised #323232 */
+  --c-info-label: #878787; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's field labels, (135,135,135) */
+  --c-info-value: #FFFFFF; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's values, a flat (255,255,255) */
+  --c-info-form-text: #969696; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's labels, field text and empty stars, all (150,150,150) */
+  --c-info-field: #0F0F0F; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's input boxes and the Summary sleeve's fill, (15,15,15) */
+  --c-info-sleeve-border: #4B4B4B; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the 1px border of the Summary tab's sleeve, (75,75,75) */
+  --c-info-spinner: #646464; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the up/down chevrons in the Key, Genre, Color and Release Date boxes, (100,100,100) */
+  --c-info-check-off: #282828; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the unticked Publish box, (40,40,40); the ticked one is the active-tab blue with a white tick */
+  --c-info-button: #7D7D7D; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's import and delete buttons, (125,125,125) with a black glyph */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -276,6 +287,34 @@
   --s-device-color-row-pitch: 27px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): one colour row to the next, 54 capture px */
   --s-device-color-dot: 8px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the colour dot, 16 capture px, 5pt in from the row's edge */
   --s-device-column-w: 261px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the Default right column dropdown, x 398..658.5pt */
+  --s-info-tab-h: 20px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the tab strip is 40px tall at 2x, y 13..52 below the panel's top */
+  --s-info-tab-top: 6.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 13px at 2x between the panel's top and the tabs */
+  --s-info-tab-inset: 14px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the first tab starts 28px at 2x from the panel's left edge */
+  --s-info-tab-gap: 4px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 8px at 2x between tabs; each of the three is 332px wide in a 1114px panel */
+  --s-info-reload-w: 12px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the circular-arrows glyph right of the tabs, 24x30px at 2x, its right edge 22px from the panel's */
+  --s-info-reload-h: 15px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
+  --s-info-inset: 9px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the sleeve and the Summary table's labels start 18px at 2x from the panel's left edge */
+  --s-info-sleeve: 111px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary sleeve is 222px square at 2x, 26px below the tabs */
+  --s-info-sleeve-top: 13px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
+  --s-info-value-x: 174px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's title/artist/album text and every table value start 348px at 2x from the panel's left; the table's divider is 10px before that */
+  --s-info-head-row-h: 39px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): Track Title, Artist and Album repeat on a 78px pitch at 2x — label, value 34px lower, a 2px rule 67px down */
+  --s-info-row-h: 24px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary table's rows are 48px apart at 2x, each closed by a 2px rule */
+  --s-info-form-top: 20px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info tab's first label sits 40px at 2x below the tabs */
+  --s-info-form-inset: 12px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info form starts 24px at 2x from the panel's left edge and ends 18px from its right */
+  --s-info-form-inset-right: 9px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
+  --s-info-form-gap: 10.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 21px at 2x between boxes on one row, every row */
+  --s-info-form-row-h: 48px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Info form's rows are 96px apart at 2x */
+  --s-info-field-h: 22px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each input box is 44px tall at 2x */
+  --s-info-comments-h: 150px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Comments box is 300px tall at 2x */
+  --s-info-star-size: 18px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Rating stars are 26px tall at 2x, 157px across the five */
+  --s-info-check-size: 13px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the two checkboxes are 26px square at 2x */
+  --s-info-artwork-inset: 3px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's black area sits 5-6px at 2x inside the panel's sides */
+  --s-info-artwork-top: 7px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the black area starts 14px at 2x below the tabs */
+  --s-info-artwork-size: 200px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the picture is 400px square at 2x, centred; picture, gap and buttons are centred as a group in the black area */
+  --s-info-artwork-gap: 20.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 41px at 2x between the picture and the buttons */
+  --s-info-artwork-btn-w: 40px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each button is 80x68px at 2x */
+  --s-info-artwork-btn-h: 34px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): as above */
+  --s-info-artwork-btn-gap: 52.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 105px at 2x between the two buttons */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -289,6 +328,9 @@
   --f-size-device: 14px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the device tabs' captions, values and list items: Device Name reads a 20 capture px cap height, which Arial gives at 14px */
   --f-size-device-radio: 11px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the radio labels (BLUE, CENTER, TIMESCALE): a 16 capture px cap height */
   --f-size-device-tab: 10.5px; /* measured from the device-panel captures docs/screenshots (rekordbox 7.2.11, 2x, 9.08.22 to 9.08.41 PM): the tab labels (General, Category): 15 capture px tall */
+  --f-size-info: 14px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Summary' 120px wide and 'Age of Love' 151px at 2x, which Arial gives at 14px; the Summary values, the tab labels and the Info tab's field text all fit it */
+  --f-size-info-label: 12px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): 'Date Created' 144px and 'Release Date' 148px wide at 2x, Arial at 12px; every label on both tabs fits it */
+  --f-size-info-title: 12.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Summary tab's Track Title value is 551px wide at 2x where 14px would give 618 — a smaller face than the artist beneath it, Arial at 12.5px */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than

@@ -9,6 +9,24 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
+export const ArtworkDeleteIcon = (props: IconProps) => (
+  <svg viewBox="0 0 20 22" aria-hidden focusable="false" {...props}>
+    <path d="M10 10 6 5h2.6V0h2.8v5H14z" fill="currentColor"/> <rect x="4" y="11" width="12" height="1.6" fill="currentColor"/> <path fillRule="evenodd" fill="currentColor" d="M5.5 13.6h9l-.8 8.4H6.3zM7.6 15v5.5h.8V15zm2 0v5.5h.8V15zm2 0v5.5h.8V15z"/>
+  </svg>
+);
+
+export const ArtworkImportIcon = (props: IconProps) => (
+  <svg viewBox="0 0 20 22" aria-hidden focusable="false" {...props}>
+    <path d="M10 1 14 6h-2.6v5h-2.8V6H6z" fill="currentColor"/> <path d="M1 12h6l1.6 1.6H19V21H1z" fill="currentColor"/>
+  </svg>
+);
+
+export const ClearCircleIcon = (props: IconProps) => (
+  <svg viewBox="0 0 11 11" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" fill="currentColor" d="M5.5 0a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Zm2.83 3.38-.71-.71L5.5 4.79 3.38 2.67l-.71.71L4.79 5.5 2.67 7.62l.71.71L5.5 6.21l2.12 2.12.71-.71L6.21 5.5Z"/>
+  </svg>
+);
+
 export const CollectionIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" strokeWidth="1.4"/> <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
@@ -147,6 +165,12 @@ export const RelatedIcon = (props: IconProps) => (
   </svg>
 );
 
+export const ReloadIcon = (props: IconProps) => (
+  <svg viewBox="0 0 12 15" aria-hidden focusable="false" {...props}>
+    <path d="M9.6 4.2A4.6 4.6 0 0 0 2 5.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M2.4 9.8A4.6 4.6 0 0 0 10 8.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M8.2 1.2 10.2 4.4 6.6 4.6z" fill="currentColor"/> <path d="M3.8 13.8 1.8 10.6 5.4 10.4z" fill="currentColor"/>
+  </svg>
+);
+
 export const SortDownIcon = (props: IconProps) => (
   <svg viewBox="0 0 12 12" aria-hidden focusable="false" {...props}>
     <path d="M6 0.6v9.9M2.2 6.7 6 10.5l3.8-3.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -156,6 +180,12 @@ export const SortDownIcon = (props: IconProps) => (
 export const SortUpIcon = (props: IconProps) => (
   <svg viewBox="0 0 12 12" aria-hidden focusable="false" {...props}>
     <path d="M6 11.4V1.5M2.2 5.3 6 1.5l3.8 3.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+export const SpinnerIcon = (props: IconProps) => (
+  <svg viewBox="0 0 10 16" aria-hidden focusable="false" {...props}>
+    <path d="m1.5 5.5 3.5-3.5 3.5 3.5M1.5 10.5 5 14l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
 
