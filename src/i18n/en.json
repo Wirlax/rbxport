@@ -118,5 +118,28 @@
     "Delete Memory Cue": "Delete Memory Cue",
     "Show Memory Cues": "Show Memory Cues",
     "Show Hot Cues": "Show Hot Cues"
+  },
+  "filter": {
+    "Display/Hide Track Filter": "Display/Hide Track Filter",
+    "Tick/untick to enable/disable Filter": "Tick/untick to enable/disable Filter",
+    "BPM": "BPM",
+    "Key": "Key",
+    "Rating": "Rating",
+    "Color": "Color",
+    "MASTER PLAYER": "MASTER PLAYER",
+    "All": "All",
+    "My Tag": "My Tag",
+    "Pink": "Pink",
+    "Red": "Red",
+    "Orange": "Orange",
+    "Yellow": "Yellow",
+    "Green": "Green",
+    "Aqua": "Aqua",
+    "Blue": "Blue",
+    "Purple": "Purple",
+    "$comment": "AND, OR and RST are not in german.lang; they are transcribed from the capture (docs/screenshots 9.10.17 PM). The column headings KEY, RATING and COLOR are Key, Rating and Color drawn in capitals. Empty Category is a djmdMyTag row name, not a string of ours.",
+    "AND": "AND",
+    "OR": "OR",
+    "RST": "RST"
   }
 }

@@ -78,6 +78,20 @@
   --c-simple-well: #0F0F0F; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the empty sleeve's ground and the rating box's field, both (15,15,15) */
   --c-simple-disc: #1E1E1E; /* sampled from the simple player capture docs/screenshots (Screenshot 2026-09-09 at 9.03.41 PM, rekordbox 7.2.11, 2x): the record drawn on the empty sleeve, (30,30,30) with a (15,15,15) hole */
   --c-rail-box: #606060; /* capture 2026-09-09 9.09.26 PM at 2x: the outline of each box in the right-hand icon column reads (96,96,96) across its stroke */
+  --c-filter-label: #969696; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the BPM / KEY / RATING / COLOR / tag headings, MASTER PLAYER, OR and RST */
+  --c-filter-text: #FFFFFF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): list rows (123, Abm, Pink) and the toggle glyph */
+  --c-filter-accent: #3571E3; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the picked row, the tick boxes and AND; the same value the pads' AU / Q use */
+  --c-filter-strip: #282828; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the MASTER PLAYER strip behind the arrows, x 920..1634 */
+  --c-filter-chip: #040404; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's ground */
+  --c-filter-chip-text: #4F4F4F; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a My Tag chip's text */
+  --c-comment-pink: #E778F1; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the colour comment dots, sampled at each dot's centre */
+  --c-comment-red: #E33122; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-orange: #EBA44A; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-yellow: #F4E458; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-green: #66DD42; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-aqua: #56BDF3; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-blue: #204FEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
+  --c-comment-purple: #8B1EEF; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM) */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -193,6 +207,30 @@
   --s-right-rail-pitch: 34px; /* capture 2026-09-09 9.09.26 PM at 2x: the boxes start at y 1270, 1338, 1406, 1474, 1540 — 68px apart */
   --s-right-rail-inset: 7px; /* capture 2026-09-09 9.09.26 PM at 2x: the boxes start at x 3668 in a column that starts at 3654, 14px in; 6px is left on the right */
   --s-right-rail-top: 259px; /* capture 2026-09-09 9.09.26 PM at 2x: the first box starts at y 1270 under a browser that starts at 752, 518px down. One capture, so whether that is a fixed offset or a proportion of the height is not known */
+  --s-filter-head-h: 25px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the tick-box row y 812..862 */
+  --s-filter-list-gap: 4px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): tick-box row to list top, y 862..870 */
+  --s-filter-list-h: 261px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the lists y 870..1392 */
+  --s-filter-foot-h: 5px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the strip under the lists y 1392..1402, before a 1px black line and the column header */
+  --s-filter-row-h: 27px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): list row pitch, digit ink every 54px */
+  --s-filter-col-gap: 3px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the panel-coloured gap between lists, 6px at 2x */
+  --s-filter-bpm-w: 212px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the BPM list x 778..1190 plus its 6pt scrollbar to 1202 */
+  --s-filter-pct-w: 213px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the ± list x 1208..1634 */
+  --s-filter-key-w: 80px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the KEY list x 1640..1788 plus its scrollbar to 1800 */
+  --s-filter-rating-w: 110px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the RATING list x 1806..2026 */
+  --s-filter-color-w: 100px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the COLOR list x 2032..2232 */
+  --s-filter-tag-w: 176px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): one tag column, AND every 352px at 2x */
+  --s-filter-check: 13px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the tick box y 823..849 including its 1px edge */
+  --s-filter-check-inset: 9px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): tick-box left edge 19px at 2x from the column's left */
+  --s-filter-and-or-h: 32px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the AND / OR row y 862..926 under a tag heading */
+  --s-filter-and-x: 51px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): AND's left edge 102px at 2x from the column's left */
+  --s-filter-or-x: 120px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): OR's left edge 240px at 2x from the column's left */
+  --s-filter-strip-label-w: 77px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): MASTER PLAYER between the arrow lines, x 1200..1354 */
+  --s-filter-rst-w: 34px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the RST button x 3580..3648 */
+  --s-filter-rst-h: 20px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the RST button y 820..860 */
+  --s-filter-dot: 8px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): a colour dot, 16px across at 2x */
+  --s-filter-toggle: 18px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the header's filter button x 3122..3158, y 760..796 */
+  --s-filter-toggle-glyph: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the glyph inside it, x 3129..3151 */
+  --s-filter-scrollbar-w: 6px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): the list scrollbar column x 1190..1202, with a 4pt thumb */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -201,6 +239,7 @@
   --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
   --f-size-menu: 12.5px; /* the layout menu's 'SIMPLE PLAYER' in the same 2x capture: 194px wide with an 18px cap height, which Arial gives at 12.5px */
+  --f-size-filter-strip: 11px; /* measured from the track-filter capture docs/screenshots (rekordbox 7.2.11, 2x, 9.10.17 PM): MASTER PLAYER, two lines with 15px cap height at 2x on a 25px pitch */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than
