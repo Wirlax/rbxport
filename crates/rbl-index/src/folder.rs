@@ -428,6 +428,14 @@ mod tests {
     }
 
     #[test]
+    fn a_loose_files_id_answers_with_its_path_wherever_a_track_id_would() {
+        let lib = library();
+        assert_eq!(lib.audio_path_of("1"), Some("/music/zebra.mp3"));
+        assert_eq!(lib.audio_path_of("file:/loose/one.mp3"), Some("/loose/one.mp3"));
+        assert_eq!(lib.audio_path_of("nope"), None);
+    }
+
+    #[test]
     fn a_loose_file_that_cannot_be_read_still_has_a_title() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("not really.mp3");
