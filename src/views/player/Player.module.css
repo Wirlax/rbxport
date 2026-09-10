@@ -415,7 +415,9 @@
   flex: none;
   padding: 0;
   border: 0;
-  background: var(--c-raised);
+  /* The well the record sits in: the (15,15,15) the simple player's empty
+     sleeve and the track list's cells were sampled at. */
+  background: var(--c-simple-well);
   overflow: hidden;
   cursor: pointer;
 }
@@ -456,6 +458,7 @@
 /* Hidden until it has decoded, so the square is empty rather than carrying
    WebKit's broken-file glyph while the library is still opening. */
 .sleeve {
+  position: relative;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -464,15 +467,19 @@
 }
 .sleeve[data-state="shown"] { visibility: visible; }
 
-/* A record, drawn where the sleeve would be: no artwork, and no track at all,
-   both leave the square empty otherwise. */
+/* The record under the sleeve: `design/icons/ui/record.svg`, the disc the
+   track list draws in a cell without artwork, filling the square in the
+   colour it was sampled at. No artwork, and no track at all, both show it;
+   artwork covers it once it has decoded, and while it is decoding the square
+   is empty rather than a record that is about to be covered. */
 .disc {
-  width: 78%;
-  height: 78%;
-  margin: auto;
-  display: block;
-  color: var(--c-disc-placeholder);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--c-simple-disc);
 }
+.artwork:has(.sleeve[data-state="pending"]) > .disc { visibility: hidden; }
 
 /* The band is not one waveform stretched to fill it. In the capture it is the
    vocal strip, then a 30pt waveform, then the position bar, with the rest of

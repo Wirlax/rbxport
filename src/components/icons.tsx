@@ -51,12 +51,6 @@ export const DeviceIcon = (props: IconProps) => (
   </svg>
 );
 
-export const DiscIcon = (props: IconProps) => (
-  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <path fill="currentColor" fillRule="evenodd" d="M8 2.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6zm0 4.1a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/>
-  </svg>
-);
-
 export const EjectIcon = (props: IconProps) => (
   <svg viewBox="0 0 26 29" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" d="M13 0 26 18H0z"/> <rect fill="currentColor" x="0" y="23" width="26" height="6"/>

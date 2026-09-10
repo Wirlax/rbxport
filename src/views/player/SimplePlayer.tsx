@@ -18,7 +18,7 @@ import { memo } from "react";
 
 import type { Cue, DeckId, RowDto } from "@/ipc/types";
 import { Artwork } from "@/components/Artwork";
-import { EjectIcon } from "@/components/icons";
+import { EjectIcon, RecordIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import { splitTime } from "@/lib/player";
 import { CueMarkers } from "./Player";
@@ -106,13 +106,12 @@ export const SimplePlayer = memo(function SimplePlayer({
         onClick={track ? onEject : onLoadSelected}
         disabled={track ? !onEject : !onLoadSelected}
       >
+        {/* The record on the dark well: the capture's empty sleeve, and the
+            same asset the track list and the full deck draw. */}
+        <RecordIcon className={styles.disc} aria-hidden />
         {track?.hasArtwork ? (
           <Artwork trackId={track.id} className={styles.sleeve} />
-        ) : (
-          // A record on a dark ground: the capture's empty sleeve, drawn to
-          // its measure rather than with the full deck's smaller icon.
-          <span className={styles.disc} aria-hidden />
-        )}
+        ) : null}
         {track ? <EjectIcon className={styles.eject} /> : null}
       </button>
 

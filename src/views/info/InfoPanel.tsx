@@ -31,7 +31,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { Artwork } from "@/components/Artwork";
 import {
-  ArtworkDeleteIcon, ArtworkImportIcon, ClearCircleIcon, DiscIcon, ReloadIcon, SpinnerIcon,
+  ArtworkDeleteIcon, ArtworkImportIcon, ClearCircleIcon, RecordIcon, ReloadIcon, SpinnerIcon,
 } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import type { Backend, RowDto, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
@@ -196,7 +196,7 @@ const Summary = memo(function Summary({
           {track.hasArtwork ? (
             <Artwork trackId={track.id} className={styles.sleeveImage} />
           ) : (
-            <DiscIcon className={styles.disc} />
+            <RecordIcon className={styles.disc} aria-hidden />
           )}
         </div>
         <dl className={styles.headFields}>
@@ -683,7 +683,7 @@ function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails |
         ) : (
           // What rekordbox draws here without artwork is not captured; the
           // Summary tab's record stands in.
-          <DiscIcon className={styles.disc} />
+          <RecordIcon className={styles.disc} aria-hidden />
         )}
       </div>
       <div className={styles.artworkButtons}>

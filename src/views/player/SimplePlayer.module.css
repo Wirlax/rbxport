@@ -115,28 +115,22 @@
   outline-offset: -1px;
 }
 
-/* The record on the empty sleeve: a 43pt disc with an 11pt hole, both
-   measured, in the panel colour on the well. */
+/* The record on the empty sleeve: `design/icons/ui/record.svg` filling the
+   48pt square, which puts its disc at 41pt and its hole at 11.5 against the
+   43 and 11 measured off the capture — the track list's proportions, kept so
+   one record looks the same everywhere. Under the artwork, which covers it
+   once decoded; hidden while it is decoding, as the list does. */
 .disc {
-  width: var(--s-player-simple-disc-d);
-  height: var(--s-player-simple-disc-d);
-  border-radius: 50%;
-  background: var(--c-simple-disc);
-  position: relative;
-}
-.disc::after {
-  content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  translate: -50% -50%;
-  width: var(--s-player-simple-disc-hole);
-  height: var(--s-player-simple-disc-hole);
-  border-radius: 50%;
-  background: var(--c-simple-well);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--c-simple-disc);
 }
+.artwork:has(.sleeve[data-state="pending"]) > .disc { visibility: hidden; }
 
 .sleeve {
+  position: relative;
   width: 100%;
   height: 100%;
   object-fit: cover;

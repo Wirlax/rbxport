@@ -19,7 +19,7 @@ import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { Artwork } from "@/components/Artwork";
-import { CutIcon, DiscIcon, EjectIcon, LockIcon, MetronomeIcon } from "@/components/icons";
+import { CutIcon, EjectIcon, LockIcon, MetronomeIcon, RecordIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
@@ -1116,11 +1116,13 @@ export const Player = memo(function Player({
             onClick={track ? onEject : onLoadSelected}
             disabled={track ? !onEject : !onLoadSelected}
           >
+            {/* The record underneath, the way the track list draws a row
+                without artwork: the same asset, so one record looks the same
+                everywhere. */}
+            <RecordIcon className={styles.disc} aria-hidden />
             {track?.hasArtwork ? (
               <Artwork trackId={track.id} className={styles.sleeve} />
-            ) : (
-              <DiscIcon className={styles.disc} />
-            )}
+            ) : null}
             {/* Shown on hover, over a scrim: what the sleeve does when clicked
                 is not otherwise guessable from a sleeve. */}
             {track ? <EjectIcon className={styles.eject} /> : null}
