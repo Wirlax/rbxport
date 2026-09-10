@@ -413,7 +413,7 @@ pub async fn analyse_track(
 /// user's own thinking time between edits.
 /// What an edit changed, and therefore how much has to be re-read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Touched {
+pub(crate) enum Touched {
     /// Only the playlist tree. Re-reading it costs 24 ms against 233 ms for
     /// the whole library, and it is by far the most common kind of edit.
     Playlists,
@@ -421,7 +421,7 @@ enum Touched {
     Tracks,
 }
 
-async fn edit<F>(
+pub(crate) async fn edit<F>(
     app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     name: &'static str,

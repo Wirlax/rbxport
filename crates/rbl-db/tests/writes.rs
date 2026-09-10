@@ -6,7 +6,7 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_db::fixture::{self, playlist_id, track_id, Shape};
-use rbl_db::write::{Changed, Unsupported, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
+use rbl_db::write::{Changed, TrackField, Unsupported, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
 use rbl_db::{DbError, Library, OpenMode};
 use rusqlite::params;
 
@@ -406,6 +406,198 @@ fn a_colour_can_be_set_and_cleared() {
     f.writer.set_color(&track_id(3), None).unwrap();
     let cleared: Option<String> = f.one("SELECT ColorID FROM djmdContent WHERE ID = ?1", &[&track_id(3)]);
     assert_eq!(cleared, None);
+}
+
+// --------------------------------------------------- the information panel
+
+#[test]
+fn a_plain_field_is_written_to_its_own_column() {
+    let mut f = fixture();
+    let t = track_id(4);
+    f.writer.set_field(&t, TrackField::Title, "Renamed (Extended Mix)").unwrap();
+    f.writer.set_field(&t, TrackField::Lyricist, "Words").unwrap();
+    f.writer.set_field(&t, TrackField::Year, "2023").unwrap();
+    f.writer.set_field(&t, TrackField::TrackNumber, " 7 ").unwrap();
+    f.writer.set_field(&t, TrackField::DiscNumber, "2").unwrap();
+    f.writer.set_field(&t, TrackField::PlayCount, "12").unwrap();
+    let title: String = f.one("SELECT Title FROM djmdContent WHERE ID = ?1", &[&t]);
+    let lyricist: String = f.one("SELECT Lyricist FROM djmdContent WHERE ID = ?1", &[&t]);
+    let numbers: (i64, i64, i64, i64) = f
+        .conn()
+        .query_row(
+            "SELECT ReleaseYear, TrackNo, DiscNo, DJPlayCount FROM djmdContent WHERE ID = ?1",
+            params![t],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(title, "Renamed (Extended Mix)");
+    assert_eq!(lyricist, "Words");
+    assert_eq!(numbers, (2023, 7, 2, 12));
+}
+
+#[test]
+fn a_number_that_is_not_one_is_refused_rather_than_zeroed() {
+    let mut f = fixture();
+    let t = track_id(4);
+    f.writer.set_field(&t, TrackField::Year, "2019").unwrap();
+    for bad in ["", "abc", "-1", "20x", "10000"] {
+        assert!(
+            matches!(f.writer.set_field(&t, TrackField::Year, bad), Err(DbError::WriteRefused(_))),
+            "{bad:?} must be refused"
+        );
+    }
+    let year: i64 = f.one("SELECT ReleaseYear FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(year, 2019, "a refused write leaves the year alone");
+}
+
+#[test]
+fn a_reference_field_makes_its_lookup_row_once_and_shares_it() {
+    let mut f = fixture();
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdArtist"), 0);
+
+    f.writer.set_field(&track_id(0), TrackField::Artist, "TRIODE").unwrap();
+    f.writer.set_field(&track_id(1), TrackField::Artist, "TRIODE").unwrap();
+    f.writer.set_field(&track_id(1), TrackField::Remixer, "TRIODE").unwrap();
+    f.writer.set_field(&track_id(2), TrackField::Composer, "Someone Else").unwrap();
+    f.writer.set_field(&track_id(2), TrackField::OriginalArtist, "TRIODE").unwrap();
+
+    // One artist row per distinct name, whatever column pointed at it.
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdArtist"), 2);
+    let triode: String = f.one("SELECT ID FROM djmdArtist WHERE Name = 'TRIODE'", &[]);
+    for (track, column) in [
+        (track_id(0), "ArtistID"),
+        (track_id(1), "ArtistID"),
+        (track_id(1), "RemixerID"),
+        (track_id(2), "OrgArtistID"),
+    ] {
+        let id: String =
+            f.one(&format!("SELECT {column} FROM djmdContent WHERE ID = ?1"), &[&track]);
+        assert_eq!(id, triode, "{column} of {track}");
+    }
+
+    // The new lookup row has the local-creation shape, as an import's does.
+    let (status, usn, uuid): (i64, Option<i64>, String) = f
+        .conn()
+        .query_row(
+            "SELECT rb_data_status, usn, UUID FROM djmdArtist WHERE ID = ?1",
+            params![triode],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(status, 0);
+    assert_eq!(usn, None);
+    assert_eq!(uuid.len(), 36);
+}
+
+#[test]
+fn album_genre_and_label_go_through_their_own_tables() {
+    let mut f = fixture();
+    let t = track_id(6);
+    f.writer.set_field(&t, TrackField::Album, "An Album").unwrap();
+    f.writer.set_field(&t, TrackField::Genre, "Tech House").unwrap();
+    f.writer.set_field(&t, TrackField::Label, "Anjuna").unwrap();
+    let (album, genre, label): (String, String, String) = f
+        .conn()
+        .query_row(
+            "SELECT al.Name, g.Name, l.Name FROM djmdContent c
+             JOIN djmdAlbum al ON al.ID = c.AlbumID
+             JOIN djmdGenre g ON g.ID = c.GenreID
+             JOIN djmdLabel l ON l.ID = c.LabelID
+             WHERE c.ID = ?1",
+            params![t],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((album.as_str(), genre.as_str(), label.as_str()), ("An Album", "Tech House", "Anjuna"));
+}
+
+#[test]
+fn an_emptied_reference_clears_to_null_and_leaves_the_lookup_row() {
+    let mut f = fixture();
+    let t = track_id(7);
+    f.writer.set_field(&t, TrackField::Artist, "Gone Soon").unwrap();
+    f.writer.set_field(&t, TrackField::Artist, "   ").unwrap();
+    let artist: Option<String> = f.one("SELECT ArtistID FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(artist, None, "NULL, as 3,942 of the reference library's artist-less tracks are");
+    // Another track may still point at it; nothing is ever hard-deleted.
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdArtist WHERE Name = 'Gone Soon'"), 1);
+}
+
+#[test]
+fn a_key_is_found_never_made() {
+    let mut f = fixture();
+    let stamp = rbl_core::time::now();
+    f.conn()
+        .execute(
+            "INSERT INTO djmdKey (ID, ScaleName, Seq, created_at, updated_at) VALUES ('12', 'Fm', 7, ?1, ?1)",
+            params![stamp],
+        )
+        .unwrap();
+    let t = track_id(8);
+    f.writer.set_field(&t, TrackField::Key, "Fm").unwrap();
+    let key: String = f.one("SELECT KeyID FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(key, "12");
+
+    assert!(matches!(
+        f.writer.set_field(&t, TrackField::Key, "H#m"),
+        Err(DbError::WriteRefused(_))
+    ));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), 1, "no key row is invented");
+    let still: String = f.one("SELECT KeyID FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(still, "12");
+
+    f.writer.set_field(&t, TrackField::Key, "").unwrap();
+    let cleared: Option<String> = f.one("SELECT KeyID FROM djmdContent WHERE ID = ?1", &[&t]);
+    assert_eq!(cleared, None);
+}
+
+#[test]
+fn every_field_edit_bumps_the_usn_and_the_stamp() {
+    let mut f = fixture();
+    let t = track_id(9);
+    let before: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&t]);
+    let changed = f.writer.set_field(&t, TrackField::Artist, "Anyone").unwrap();
+    assert_eq!(changed.rows, 1);
+    let (usn, updated, created): (i64, String, String) = f
+        .conn()
+        .query_row(
+            "SELECT rb_local_usn, updated_at, created_at FROM djmdContent WHERE ID = ?1",
+            params![t],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert!(usn > before);
+    assert_eq!(usn, changed.usn);
+    assert_ne!(updated, created, "updated_at moves, created_at does not");
+    let counter: i64 =
+        f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert_eq!(counter, usn);
+}
+
+#[test]
+fn the_wire_names_round_trip() {
+    for (name, field) in [
+        ("title", TrackField::Title),
+        ("artist", TrackField::Artist),
+        ("album", TrackField::Album),
+        ("year", TrackField::Year),
+        ("trackNumber", TrackField::TrackNumber),
+        ("discNumber", TrackField::DiscNumber),
+        ("originalArtist", TrackField::OriginalArtist),
+        ("composer", TrackField::Composer),
+        ("remixer", TrackField::Remixer),
+        ("lyricist", TrackField::Lyricist),
+        ("playCount", TrackField::PlayCount),
+        ("genre", TrackField::Genre),
+        ("label", TrackField::Label),
+        ("key", TrackField::Key),
+    ] {
+        assert_eq!(TrackField::parse(name), Some(field));
+    }
+    // What the panel shows read-only must not be reachable by name either.
+    for refused in ["albumArtist", "bpm", "mixName", "message", "hotCueAutoLoad", "publish", ""] {
+        assert_eq!(TrackField::parse(refused), None, "{refused}");
+    }
 }
 
 // ----------------------------------------------------------------- the USN

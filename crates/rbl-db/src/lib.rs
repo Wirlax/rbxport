@@ -11,6 +11,7 @@
 //!   database path is refused outright, so a test can never write to the
 //!   user's library even by mistake.
 
+pub mod details;
 pub mod fixture;
 pub mod import;
 pub mod key;

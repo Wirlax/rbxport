@@ -20,6 +20,12 @@ const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
     inner: RwLock<Inner>,
+    /// A read-only handle to the database for point reads, opened on first
+    /// use. Opening costs 50 ms on the reference library — the `SQLCipher`
+    /// key derivation — and a point read under 1 ms, so the handle is kept
+    /// rather than reopened per selection. A `Mutex`, not `RwLock`, because a
+    /// `rusqlite::Connection` is `Send` and not `Sync`.
+    reader: parking_lot::Mutex<Option<rbl_db::Library>>,
 }
 
 #[derive(Default)]
@@ -50,7 +56,35 @@ impl Default for AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        Self { inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }) }
+        Self {
+            inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
+            reader: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Runs one read against the database, opening the handle if needed.
+    ///
+    /// A read that fails drops the handle, so the next call opens a fresh one:
+    /// the file can be replaced underneath us by a library restore, and a
+    /// handle to the old inode would answer with stale rows forever.
+    ///
+    /// Blocking — call from `spawn_blocking`, never from a command body.
+    pub fn read_db<T>(
+        &self,
+        f: impl FnOnce(&rbl_db::Library) -> Result<T, rbl_db::DbError>,
+    ) -> Result<T, rbl_db::DbError> {
+        let mut slot = self.reader.lock();
+        if slot.is_none() {
+            *slot = Some(rbl_db::Library::open_installed_read_only()?);
+        }
+        let Some(db) = slot.as_ref() else {
+            return Err(rbl_db::DbError::Open("no reader".to_owned()));
+        };
+        let outcome = f(db);
+        if outcome.is_err() {
+            *slot = None;
+        }
+        outcome
     }
 
     pub fn set_library(

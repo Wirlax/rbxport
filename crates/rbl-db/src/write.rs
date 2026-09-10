@@ -78,7 +78,66 @@ const ID_ATTEMPTS: usize = 64;
 
 /// Columns [`Writer::touch`] will set. A column name is interpolated into SQL,
 /// so the set of legal names is spelled out rather than trusted.
-const WRITABLE_COLUMNS: &[&str] = &["Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL"];
+const WRITABLE_COLUMNS: &[&str] = &[
+    "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL",
+    // The information panel's Info tab.
+    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID",
+    "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
+];
+
+/// Lookup tables [`intern`] may add a row to. Same reason as above.
+const LOOKUP_TABLES: &[&str] = &["djmdArtist", "djmdAlbum", "djmdGenre", "djmdLabel"];
+
+/// A field of a track the information panel can edit.
+///
+/// Only what is settled: plain columns whose meaning is certain, and the
+/// references whose lookup row [`Writer::import_file`] already makes for a
+/// new track. What is *not* here, and why, is recorded in `details.rs`:
+/// the album artist lives on the shared album row, BPM also lives in the
+/// analysis grid, and the mix name, message and the two flags are read from
+/// columns whose spelling on write has not been seen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TrackField {
+    Title,
+    Artist,
+    Album,
+    Year,
+    TrackNumber,
+    DiscNumber,
+    OriginalArtist,
+    Composer,
+    Remixer,
+    Lyricist,
+    PlayCount,
+    Genre,
+    Label,
+    Key,
+}
+
+impl TrackField {
+    /// The wire name, as the frontend spells it.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "title" => Self::Title,
+            "artist" => Self::Artist,
+            "album" => Self::Album,
+            "year" => Self::Year,
+            "trackNumber" => Self::TrackNumber,
+            "discNumber" => Self::DiscNumber,
+            "originalArtist" => Self::OriginalArtist,
+            "composer" => Self::Composer,
+            "remixer" => Self::Remixer,
+            "lyricist" => Self::Lyricist,
+            "playCount" => Self::PlayCount,
+            "genre" => Self::Genre,
+            "label" => Self::Label,
+            "key" => Self::Key,
+            _ => return None,
+        })
+    }
+}
 
 /// Things the writer refuses to do, and why.
 ///
@@ -713,6 +772,104 @@ impl Writer {
             "ColorID",
             &color.map_or(Value::Null, |c| Value::Text(c.to_owned())),
         )
+    }
+
+    /// Sets one of the information panel's editable fields.
+    ///
+    /// Plain columns are written as they are; a reference field finds or
+    /// makes its lookup row with [`intern`] — the same shape [`Self::import_file`]
+    /// gives a new track's artist, album, genre and label — and points the
+    /// track at it, in one transaction. An empty value clears the reference to
+    /// NULL, which is how the reference library spells an absent artist on
+    /// 3,942 of its 38,681 tracks (75 carry `""`).
+    ///
+    /// The key is found, never made: `djmdKey` rows carry a `Seq` whose rule
+    /// is not known, so a name that is not already there is refused.
+    ///
+    /// A number that does not parse is refused rather than written as zero:
+    /// a typo in the year box must not erase the year.
+    pub fn set_field(&mut self, content: &str, field: TrackField, value: &str) -> Result<Changed> {
+        match field {
+            TrackField::Title => self.touch_content(content, "Title", &Value::Text(value.to_owned())),
+            TrackField::Lyricist => {
+                self.touch_content(content, "Lyricist", &Value::Text(value.to_owned()))
+            }
+            TrackField::Year => self.touch_number(content, "ReleaseYear", value, 9999),
+            TrackField::TrackNumber => self.touch_number(content, "TrackNo", value, 9999),
+            TrackField::DiscNumber => self.touch_number(content, "DiscNo", value, 999),
+            TrackField::PlayCount => self.touch_number(content, "DJPlayCount", value, 999_999),
+            TrackField::Artist => self.touch_reference(content, "ArtistID", "djmdArtist", value),
+            TrackField::OriginalArtist => {
+                self.touch_reference(content, "OrgArtistID", "djmdArtist", value)
+            }
+            TrackField::Composer => self.touch_reference(content, "ComposerID", "djmdArtist", value),
+            TrackField::Remixer => self.touch_reference(content, "RemixerID", "djmdArtist", value),
+            TrackField::Album => self.touch_reference(content, "AlbumID", "djmdAlbum", value),
+            TrackField::Genre => self.touch_reference(content, "GenreID", "djmdGenre", value),
+            TrackField::Label => self.touch_reference(content, "LabelID", "djmdLabel", value),
+            TrackField::Key => self.touch_key(content, value),
+        }
+    }
+
+    /// A non-negative integer column, refused when the text is not one.
+    fn touch_number(&mut self, content: &str, column: &str, value: &str, max: i64) -> Result<Changed> {
+        let n: i64 = value.trim().parse().map_err(|_| {
+            DbError::WriteRefused(format!("{value:?} is not a whole number"))
+        })?;
+        if !(0..=max).contains(&n) {
+            return Err(DbError::WriteRefused(format!("{n} is outside 0 to {max}")));
+        }
+        self.touch_content(content, column, &Value::Integer(n))
+    }
+
+    /// A reference column: intern the name, then point the track at it.
+    fn touch_reference(
+        &mut self,
+        content: &str,
+        column: &str,
+        table: &str,
+        name: &str,
+    ) -> Result<Changed> {
+        if !WRITABLE_COLUMNS.contains(&column) || !LOOKUP_TABLES.contains(&table) {
+            return Err(DbError::WriteRefused(format!("{table}.{column} is not a writable reference")));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id = intern(&tx, table, "Name", name.trim(), &mut self.rng, &stamp)?;
+        let usn = next_usn(&tx);
+        let sql = format!(
+            "UPDATE djmdContent SET {column} = ?1, rb_local_usn = ?2, updated_at = ?3
+             WHERE ID = ?4 AND rb_local_deleted = 0"
+        );
+        let rows = tx.execute(&sql, params![id, usn, stamp, content])?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// The key, looked up by its `ScaleName`; empty clears it.
+    fn touch_key(&mut self, content: &str, name: &str) -> Result<Changed> {
+        let name = name.trim();
+        if name.is_empty() {
+            return self.touch_content(content, "KeyID", &Value::Null);
+        }
+        let id: Option<String> = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT ID FROM djmdKey WHERE ScaleName = ?1 AND rb_local_deleted = 0",
+                params![name],
+                |r| r.get(0),
+            )
+            .ok();
+        let Some(id) = id else {
+            return Err(DbError::WriteRefused(format!(
+                "{name:?} is not a key the library knows; a new djmdKey row needs its Seq explained by a diff recording"
+            )));
+        };
+        self.touch_content(content, "KeyID", &Value::Text(id))
     }
 
     /// Points a track at a different file.

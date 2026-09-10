@@ -1,0 +1,326 @@
+//! One track's full record, for the information panel and the deck's INFO tab.
+//!
+//! A point read by id, on demand. The columnar index in `rbl-index` carries
+//! what every row of the track list needs and nothing else; the twenty-odd
+//! columns behind the Summary and Info tabs are wanted for one track at a
+//! time, and widening the index for them would cost every row in a 38,681
+//! track library for the sake of the one being looked at.
+//!
+//! # What the columns hold
+//!
+//! Read off the user's own library with
+//! `cargo run -p rbl-db --example track_details`, read-only, over all 38,681
+//! live rows rather than one:
+//!
+//! - **`FileType`** follows the extension: 1 is `.mp3` (33,849), 4 `.m4a`
+//!   (2,727), 5 `.flac` (56), 11 `.wav` (1,165), 12 `.aiff`/`.aif` (867).
+//!   One `.m4a` carries 6 — ALAC or AAC, undetermined.
+//! - **`OrgArtistID`, `ComposerID`, `RemixerID`** point into `djmdArtist`,
+//!   the same table as `ArtistID`: every one of the 47, 3,118 and 634 set
+//!   values resolves there.
+//! - **The album artist lives on the album**, `djmdAlbum.AlbumArtistID`, and
+//!   that too points into `djmdArtist` (1,591 of 9,785 albums, all resolve).
+//! - **`Lyricist`** is a plain text column on the track, not a reference.
+//! - **`Subtitle`** holds what the ID3 subtitle frame holds — "extended mix",
+//!   "Original Mix", "remastered" on the 479 rows that have one — which is
+//!   the field rekordbox labels Mix Name. Read as that; not written, because
+//!   no capture shows a non-empty Mix Name to confirm it.
+//! - **`HotCueAutoLoad`** is the text `"on"` on all 38,681 rows. What the
+//!   unticked box is spelled as has never been seen, so it is not written.
+//! - **`DeliveryControl`** is `"on"` on 220 rows, `""` on 805 and NULL on the
+//!   rest; **`DeliveryComment`** is never non-empty. These read as the
+//!   "Publish track information" box and the "Message" field — the KUVO
+//!   delivery pair — and are shown but not written.
+//! - **`DateCreated`** is `YYYY-MM-DD` on every row (length 10, all 38,681).
+//! - **`SearchStr`** is NULL on every track and every artist, so an edit that
+//!   leaves it alone stales nothing.
+
+use rusqlite::types::Value;
+use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::Result;
+
+/// Everything the panel shows for one track.
+///
+/// Numbers that the library leaves NULL come back as 0, and text as empty, so
+/// a consumer never has to distinguish "absent" from "zero" — rekordbox's own
+/// Info tab prints 0 in an empty Year or Track number box.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TrackDetails {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub original_artist: String,
+    pub composer: String,
+    pub remixer: String,
+    pub lyricist: String,
+    pub genre: String,
+    pub label: String,
+    pub key: String,
+    pub comment: String,
+    /// `Subtitle` — see the module docs.
+    pub mix_name: String,
+    /// `DeliveryComment` — see the module docs.
+    pub message: String,
+    /// `ColorID` as stored: `"0"` or NULL for none, `"1"` to `"8"` otherwise.
+    pub color: String,
+    pub rating: u8,
+    pub bpm_x100: u32,
+    pub duration_sec: u32,
+    pub year: u32,
+    pub track_number: u32,
+    pub disc_number: u32,
+    pub play_count: u32,
+    /// rekordbox's own code — see the module docs for what each is.
+    pub file_type: u32,
+    pub file_size: u64,
+    pub bitrate: u32,
+    pub sample_rate: u32,
+    pub bit_depth: u32,
+    pub date_created: String,
+    pub release_date: String,
+    /// `FolderPath`: the absolute path of the audio file.
+    pub path: String,
+    /// `HotCueAutoLoad == "on"`.
+    pub hot_cue_auto_load: bool,
+    /// `DeliveryControl == "on"`.
+    pub publish: bool,
+}
+
+/// Reads one live track, or `None` when there is no such track.
+pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
+    // One statement with the lookups joined, rather than a query per
+    // reference: seven round trips for one row is seven times the work for
+    // no reason, and the joins are on primary keys.
+    conn.query_row(
+        "SELECT c.ID, c.Title, artist.Name, album.Name, album_artist.Name,
+                org.Name, composer.Name, remixer.Name, c.Lyricist,
+                genre.Name, label.Name, key.ScaleName, c.Commnt, c.Subtitle,
+                c.DeliveryComment, c.ColorID, c.Rating, c.BPM, c.Length,
+                c.ReleaseYear, c.TrackNo, c.DiscNo, c.DJPlayCount, c.FileType,
+                c.FileSize, c.BitRate, c.SampleRate, c.BitDepth, c.DateCreated,
+                c.ReleaseDate, c.FolderPath, c.HotCueAutoLoad, c.DeliveryControl
+         FROM djmdContent c
+         LEFT JOIN djmdArtist artist ON artist.ID = c.ArtistID
+         LEFT JOIN djmdAlbum album ON album.ID = c.AlbumID
+         LEFT JOIN djmdArtist album_artist ON album_artist.ID = album.AlbumArtistID
+         LEFT JOIN djmdArtist org ON org.ID = c.OrgArtistID
+         LEFT JOIN djmdArtist composer ON composer.ID = c.ComposerID
+         LEFT JOIN djmdArtist remixer ON remixer.ID = c.RemixerID
+         LEFT JOIN djmdGenre genre ON genre.ID = c.GenreID
+         LEFT JOIN djmdLabel label ON label.ID = c.LabelID
+         LEFT JOIN djmdKey key ON key.ID = c.KeyID
+         WHERE c.ID = ?1 AND c.rb_local_deleted = 0",
+        params![id],
+        |r| {
+            Ok(TrackDetails {
+                id: text(r, 0),
+                title: text(r, 1),
+                artist: text(r, 2),
+                album: text(r, 3),
+                album_artist: text(r, 4),
+                original_artist: text(r, 5),
+                composer: text(r, 6),
+                remixer: text(r, 7),
+                lyricist: text(r, 8),
+                genre: text(r, 9),
+                label: text(r, 10),
+                key: text(r, 11),
+                comment: text(r, 12),
+                mix_name: text(r, 13),
+                message: text(r, 14),
+                color: text(r, 15),
+                // Stored as multiples of 51, so five stars is 255.
+                rating: u8::try_from(number(r, 16) / 51).unwrap_or(5).min(5),
+                bpm_x100: small(number(r, 17)),
+                duration_sec: small(number(r, 18)),
+                year: small(number(r, 19)),
+                track_number: small(number(r, 20)),
+                disc_number: small(number(r, 21)),
+                play_count: small(number(r, 22)),
+                file_type: small(number(r, 23)),
+                file_size: u64::try_from(number(r, 24)).unwrap_or(0),
+                bitrate: small(number(r, 25)),
+                sample_rate: small(number(r, 26)),
+                bit_depth: small(number(r, 27)),
+                date_created: text(r, 28),
+                release_date: text(r, 29),
+                path: text(r, 30),
+                hot_cue_auto_load: text(r, 31) == "on",
+                publish: text(r, 32) == "on",
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+/// A text column, with NULL as empty.
+fn text(r: &rusqlite::Row<'_>, index: usize) -> String {
+    r.get::<_, Option<String>>(index).ok().flatten().unwrap_or_default()
+}
+
+/// An integer column, with NULL as zero.
+///
+/// Several nominally-numeric columns are TEXT in the real schema (`ColorID`,
+/// `DBVersion`), so reading them as `i64` fails on some rows and not others;
+/// whatever type the cell has is read and parsed, the way `rbl-index` does.
+fn number(r: &rusqlite::Row<'_>, index: usize) -> i64 {
+    match r.get::<_, Value>(index).unwrap_or(Value::Null) {
+        Value::Integer(n) => n,
+        Value::Real(f) => real_to_i64(f),
+        Value::Text(s) => s.trim().parse::<f64>().map_or(0, real_to_i64),
+        Value::Null | Value::Blob(_) => 0,
+    }
+}
+
+/// Saturating rather than a lossy `as`: a NaN must not become an arbitrary
+/// integer, and no rekordbox field is anywhere near the bound.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn real_to_i64(f: f64) -> i64 {
+    if f.is_nan() {
+        0
+    } else if f >= i64::MAX as f64 {
+        i64::MAX
+    } else if f <= i64::MIN as f64 {
+        i64::MIN
+    } else {
+        f as i64
+    }
+}
+
+/// A count or size that is never negative.
+fn small(n: i64) -> u32 {
+    u32::try_from(n.max(0)).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::fixture::{self, track_id, Shape};
+    use crate::{Library, OpenMode};
+
+    fn open() -> (tempfile::TempDir, Library) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let location = fixture::build(dir.path(), Shape::default()).expect("fixture");
+        let library = Library::open(location, OpenMode::ReadWrite).expect("open");
+        (dir, library)
+    }
+
+    #[test]
+    fn a_bare_fixture_row_reads_with_zeros_and_blanks() {
+        let (_dir, library) = open();
+        let details = track_details(library.connection(), &track_id(1)).expect("read").expect("row");
+        assert_eq!(details.title, "Track 001");
+        assert_eq!(details.path, "/fixture/audio/track001.mp3");
+        assert_eq!(details.bpm_x100, 12_801);
+        assert_eq!(details.duration_sec, 300);
+        assert_eq!(details.artist, "");
+        assert_eq!(details.album_artist, "");
+        assert_eq!(details.year, 0);
+        assert_eq!(details.file_size, 0);
+        assert!(!details.hot_cue_auto_load);
+        assert!(!details.publish);
+    }
+
+    #[test]
+    fn every_reference_resolves_through_its_table() {
+        let (_dir, library) = open();
+        let conn = library.connection();
+        let stamp = rbl_core::time::now();
+        for (table, id, name) in [
+            ("djmdArtist", "a1", "Artist One"),
+            ("djmdArtist", "a2", "Album Artist"),
+            ("djmdArtist", "a3", "Original"),
+            ("djmdArtist", "a4", "Composer"),
+            ("djmdArtist", "a5", "Remixer"),
+            ("djmdGenre", "g1", "House"),
+            ("djmdLabel", "l1", "Anjuna"),
+        ] {
+            conn.execute(
+                &format!("INSERT INTO {table} (ID, Name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)"),
+                params![id, name, stamp],
+            )
+            .expect("insert");
+        }
+        conn.execute(
+            "INSERT INTO djmdAlbum (ID, Name, AlbumArtistID, created_at, updated_at)
+             VALUES ('al1', 'The Album', 'a2', ?1, ?1)",
+            params![stamp],
+        )
+        .expect("album");
+        conn.execute(
+            "INSERT INTO djmdKey (ID, ScaleName, created_at, updated_at) VALUES ('k1', 'Fm', ?1, ?1)",
+            params![stamp],
+        )
+        .expect("key");
+        conn.execute(
+            "UPDATE djmdContent SET ArtistID = 'a1', AlbumID = 'al1', OrgArtistID = 'a3',
+                ComposerID = 'a4', RemixerID = 'a5', GenreID = 'g1', LabelID = 'l1', KeyID = 'k1',
+                Lyricist = 'Words', Subtitle = 'extended mix', DeliveryComment = 'hello',
+                ColorID = '2', Rating = 204, ReleaseYear = 2023, TrackNo = 4, DiscNo = 2,
+                DJPlayCount = 7, FileType = 11, FileSize = 47322584, BitRate = 1411,
+                SampleRate = 44100, BitDepth = 16, DateCreated = '2023-08-06',
+                ReleaseDate = '2023-08-01', HotCueAutoLoad = 'on', DeliveryControl = 'on'
+             WHERE ID = ?1",
+            params![track_id(5)],
+        )
+        .expect("update");
+
+        let d = track_details(conn, &track_id(5)).expect("read").expect("row");
+        assert_eq!(d.artist, "Artist One");
+        assert_eq!(d.album, "The Album");
+        assert_eq!(d.album_artist, "Album Artist");
+        assert_eq!(d.original_artist, "Original");
+        assert_eq!(d.composer, "Composer");
+        assert_eq!(d.remixer, "Remixer");
+        assert_eq!(d.lyricist, "Words");
+        assert_eq!(d.genre, "House");
+        assert_eq!(d.label, "Anjuna");
+        assert_eq!(d.key, "Fm");
+        assert_eq!(d.mix_name, "extended mix");
+        assert_eq!(d.message, "hello");
+        assert_eq!(d.color, "2");
+        assert_eq!(d.rating, 4);
+        assert_eq!(d.year, 2023);
+        assert_eq!(d.track_number, 4);
+        assert_eq!(d.disc_number, 2);
+        assert_eq!(d.play_count, 7);
+        assert_eq!(d.file_type, 11);
+        assert_eq!(d.file_size, 47_322_584);
+        assert_eq!(d.bitrate, 1411);
+        assert_eq!(d.sample_rate, 44_100);
+        assert_eq!(d.bit_depth, 16);
+        assert_eq!(d.date_created, "2023-08-06");
+        assert_eq!(d.release_date, "2023-08-01");
+        assert!(d.hot_cue_auto_load);
+        assert!(d.publish);
+    }
+
+    #[test]
+    fn a_deleted_or_unknown_track_is_none_not_an_error() {
+        let (_dir, library) = open();
+        let conn = library.connection();
+        conn.execute("UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1", params![track_id(3)])
+            .expect("soft delete");
+        assert_eq!(track_details(conn, &track_id(3)).expect("read"), None);
+        assert_eq!(track_details(conn, "no-such-id").expect("read"), None);
+    }
+
+    #[test]
+    fn a_number_stored_as_text_still_reads() {
+        let (_dir, library) = open();
+        let conn = library.connection();
+        conn.execute(
+            "UPDATE djmdContent SET BPM = '12850.0', DJPlayCount = 'three' WHERE ID = ?1",
+            params![track_id(2)],
+        )
+        .expect("update");
+        let d = track_details(conn, &track_id(2)).expect("read").expect("row");
+        assert_eq!(d.bpm_x100, 12_850);
+        assert_eq!(d.play_count, 0, "unparseable text reads as zero rather than failing the row");
+    }
+}

@@ -4,6 +4,7 @@
 mod windowfit;
 mod commands;
 mod cues;
+mod details;
 mod diagnostics;
 mod explorer;
 mod link;
@@ -356,6 +357,11 @@ pub fn run() {
             device_settings::save_device_settings,
             explorer::explorer_roots,
             explorer::explorer_children,
+            // The information panel: one track's full record, the lookup
+            // lists its dropdowns offer, and the fields it may write.
+            details::track_details,
+            details::track_lookups,
+            details::set_track_field,
         ])
         .build(tauri::generate_context!());
 
