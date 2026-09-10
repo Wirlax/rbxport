@@ -115,6 +115,9 @@
   --c-info-check-off: #282828; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the unticked Publish box, (40,40,40); the ticked one is the active-tab blue with a white tick */
   --c-info-button: #7D7D7D; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's import and delete buttons, (125,125,125) with a black glyph */
   --c-info-disc: #1E1E1E; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the record drawn in the Summary sleeve where there is no artwork, (30,30,30) on the (15,15,15) sleeve; its diameter is 89% of the sleeve's side */
+  --c-cue-row: #0F0F0F; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: each row's box reads (15,15,15) on the (30,30,30) panel; ten boxes whether or not a cue fills them */
+  --c-cue-delete: #969696; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: the ✕ on a row that holds a cue, (150,150,150) at its brightest */
+  --c-cue-delete-empty: #454545; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: the ✕ on an empty row, (69,69,69) at its brightest */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 23px;
@@ -334,6 +337,10 @@
   --s-deck-info-dot-gap: 8px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): from the dot's right edge to the colour's name */
   --s-deck-info-comment-icon-w: 12px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the speech bubble is 28px wide and 23px tall, the 12x10 of Pioneer's own comment.svg; ours is redrawn at that size */
   --s-deck-info-comment-icon-top: 9px; /* the rekordbox 6.0.0 manual, p.57, the [INFO] panel graphic (2.32px/pt): the bubble's top 21px under the second hairline */
+  --s-cue-row-h: 23px; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: each box spans 46px at 2x (y 200..245 for the first) */
+  --s-cue-row-gap: 1px; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: 2px of panel between boxes at 2x (y 246..247) */
+  --s-cue-list-inset: 5px; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: 10px of panel above the first box at 2x (y 190..199) */
+  --s-cue-list-inset-x: 8px; /* capture docs/screenshots 2026-09-09 at 9.08.22 PM (rekordbox 7.2.11, 2x), the MEMORY list beside the deck: 16px of panel left of the boxes (x 3294..3309) and 17px right of them at 2x */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
