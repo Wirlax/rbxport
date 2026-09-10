@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { capacityText, contentsText, deviceId, deviceNodes, devicePath, fullness, hasRoomFor } from "./devices";
+import {
+  capacityText, contentsText, deviceId, deviceNodes, devicePath, formatSpace, fullness, hasRoomFor,
+} from "./devices";
 import type { Device } from "@/ipc/types";
 
 const stick: Device = {
@@ -28,6 +30,14 @@ describe("devices", () => {
   it("reports capacity in the units a stick is sold in", () => {
     expect(capacityText(stick)).toBe("8.0 GB free of 32.0 GB");
     expect(fullness(stick)).toBeCloseTo(0.75);
+  });
+
+  it("prints the space table's figures the way rekordbox does", () => {
+    // The TEST stick's capture: a 1.5 TB card reads 1,430.3 GB.
+    expect(formatSpace(1_535_800_000_000)).toBe("1,430.3 GB");
+    expect(formatSpace(216_800_000_000)).toBe("201.9 GB");
+    expect(formatSpace(32 * 1024 ** 3)).toBe("32.0 GB");
+    expect(formatSpace(0)).toBe("");
   });
 
   it("says nothing about a size it does not know", () => {

@@ -912,6 +912,7 @@ export function App() {
             playlists={tree}
             onSync={syncToDevice}
             onRefresh={refreshDevices}
+            onError={refuse}
             busy={syncing}
           />
         ) : (

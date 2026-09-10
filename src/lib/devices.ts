@@ -37,6 +37,18 @@ export function capacityText(device: Device): string {
   return `${formatBytes(device.freeBytes)} free of ${formatBytes(device.totalBytes)}`;
 }
 
+/**
+ * `1,430.3 GB` — the space table's figure: gibibytes to one decimal with a
+ * thousands separator, which is what rekordbox prints for a 1.5 TB card
+ * [OBS: capture 9.08.22 PM]. Empty when the size is not known.
+ */
+export function formatSpace(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const gb = (bytes / 1024 ** 3).toFixed(1);
+  const [whole = "", fraction = "0"] = gb.split(".");
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${fraction} GB`;
+}
+
 /** How full the volume is, 0 to 1, or null when the size is not known. */
 export function fullness(device: Device): number | null {
   if (device.totalBytes <= 0) return null;

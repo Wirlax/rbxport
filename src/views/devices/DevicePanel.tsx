@@ -1,17 +1,38 @@
 /**
- * What is on a connected stick, and how to put a playlist on it.
+ * The panel a selected device opens: six tabs across the top — General,
+ * Category, Sort, Column, Color, My Settings — and the tab's body beneath.
  *
- * Rekordbox calls this the Sync Manager. There is no reference capture of that
- * window — it is one of the panels the sketch never got to — so the layout
- * here is ours, built from the same tokens as the rest of the chrome rather
- * than guessed at from memory. Recorded in TODO.md under the panels that still
- * want a capture.
+ * Drawn from the captures docs/screenshots 9.08.22 to 9.08.41 PM (rekordbox
+ * 7.2.11, the TEST stick). The strip and every measurement in the tabs come
+ * from them; My Settings has no capture and says so.
+ *
+ * The settings are the stick's own files, read when the panel opens and
+ * written on every change — there is no Apply button in the captures. Each
+ * write resolves to what the stick now holds, which is what is shown, so a
+ * write that did not take cannot leave the panel claiming it did.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import type { Device, TreeNode } from "@/ipc/types";
-import { capacityText, contentsText, fullness } from "@/lib/devices";
+import { getBackend } from "@/ipc/client";
+import type { Device, DeviceSettings, TreeNode } from "@/ipc/types";
+import { ColorTab } from "./ColorTab";
+import { ColumnTab } from "./ColumnTab";
 import styles from "./DevicePanel.module.css";
+import { GeneralTab } from "./GeneralTab";
+import { ListPairTab } from "./ListPairTab";
+import { MySettingsTab } from "./MySettingsTab";
+
+/** The six, in the order and with the wording of the capture [OBS]. */
+const TABS = [
+  { id: "general", label: "General" },
+  { id: "category", label: "Category" },
+  { id: "sort", label: "Sort" },
+  { id: "column", label: "Column" },
+  { id: "color", label: "Color" },
+  { id: "mySettings", label: "My Settings" },
+] as const;
+
+export type DeviceTab = (typeof TABS)[number]["id"];
 
 export interface DevicePanelProps {
   device: Device;
@@ -21,79 +42,113 @@ export interface DevicePanelProps {
   onSync: (playlistId: string) => Promise<void>;
   /** Re-reads the connected volumes. */
   onRefresh: () => void;
+  /** Something the stick refused; shown in the status bar. */
+  onError?: (message: string) => void;
   busy?: boolean;
 }
 
-export function DevicePanel({ device, playlists, onSync, onRefresh, busy = false }: DevicePanelProps) {
-  const choices = useMemo(() => playlists.filter((node) => node.kind === "playlist"), [playlists]);
-  const [chosen, setChosen] = useState("");
-  const playlistId = chosen || choices[0]?.id || "";
+export function DevicePanel({
+  device,
+  playlists,
+  onSync,
+  onRefresh,
+  onError,
+  busy = false,
+}: DevicePanelProps) {
+  const [tab, setTab] = useState<DeviceTab>("general");
+  const [settings, setSettings] = useState<DeviceSettings | null>(null);
 
-  const sync = useCallback(() => {
-    if (playlistId) void onSync(playlistId);
-  }, [onSync, playlistId]);
+  // Read when the device changes, and again after a sync: an export writes a
+  // library, and with it the rows the Category, Sort and Color tabs edit.
+  const exportStamp = device.export?.written ?? "";
+  useEffect(() => {
+    let cancelled = false;
+    setSettings(null);
+    void getBackend()
+      .then((backend) => backend.deviceSettings(device.path))
+      .then((read) => {
+        if (!cancelled) setSettings(read);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) onError?.(e instanceof Error ? e.message : "That device could not be read.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [device.path, exportStamp, onError]);
 
-  const used = fullness(device);
-  const capacity = capacityText(device);
+  // Every change is written at once and the panel shows what came back.
+  const save = useCallback(
+    (next: DeviceSettings) => {
+      setSettings(next);
+      void getBackend()
+        .then((backend) => backend.saveDeviceSettings(device.path, next))
+        .then(setSettings)
+        .catch((e: unknown) => {
+          onError?.(e instanceof Error ? e.message : "That setting could not be written.");
+        });
+    },
+    [device.path, onError],
+  );
 
   return (
     <section className={styles.panel} aria-label={`Device ${device.name}`}>
-      <header className={styles.head}>
-        <h2 className={styles.name}>{device.name}</h2>
-        <span className={styles.path}>{device.path}</span>
-        <button type="button" className={styles.refresh} onClick={onRefresh}>
-          Refresh
-        </button>
-      </header>
-
-      {used === null ? null : (
-        <div className={styles.capacity}>
-          <div
-            className={styles.bar}
-            role="progressbar"
-            aria-label="Space used"
-            aria-valuenow={Math.round(used * 100)}
-            aria-valuemin={0}
-            aria-valuemax={100}
+      <div className={styles.strip} role="tablist" aria-label="Device settings">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`device-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`device-tabpanel-${t.id}`}
+            className={styles.tab}
+            data-on={tab === t.id || undefined}
+            onClick={() => setTab(t.id)}
           >
-            <span className={styles.fill} style={{ width: `${used * 100}%` }} />
-          </div>
-          <span className={styles.capacityText}>{capacity}</span>
-        </div>
-      )}
-
-      <p className={styles.contents}>{contentsText(device)}</p>
-
-      <div className={styles.actions}>
-        <label className={styles.label} htmlFor="device-playlist">
-          Playlist
-        </label>
-        <select
-          id="device-playlist"
-          className={styles.select}
-          value={playlistId}
-          onChange={(e) => setChosen(e.target.value)}
-          disabled={choices.length === 0 || busy}
-        >
-          {choices.map((node) => (
-            <option key={node.id} value={node.id}>
-              {node.name}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={styles.sync}
-          onClick={sync}
-          disabled={playlistId === "" || busy}
-        >
-          {busy ? "Writing…" : device.export?.ours === true ? "Sync" : "Export"}
-        </button>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {choices.length === 0 ? (
-        <p className={styles.note}>There are no playlists to write yet.</p>
-      ) : null}
+      <div
+        className={styles.body}
+        role="tabpanel"
+        id={`device-tabpanel-${tab}`}
+        aria-labelledby={`device-tab-${tab}`}
+      >
+        {settings === null ? null : tab === "general" ? (
+          <GeneralTab
+            device={device}
+            settings={settings}
+            onChange={save}
+            playlists={playlists}
+            onSync={onSync}
+            onRefresh={onRefresh}
+            busy={busy}
+          />
+        ) : tab === "category" ? (
+          <ListPairTab
+            kind="category"
+            slots={settings.categories}
+            disabled={!settings.hasLibrarySettings}
+            onChange={(categories) => save({ ...settings, categories })}
+          />
+        ) : tab === "sort" ? (
+          <ListPairTab
+            kind="sort"
+            slots={settings.sorts}
+            disabled={!settings.hasLibrarySettings}
+            onChange={(sorts) => save({ ...settings, sorts })}
+          />
+        ) : tab === "column" ? (
+          <ColumnTab settings={settings} onChange={save} />
+        ) : tab === "color" ? (
+          <ColorTab settings={settings} onChange={save} />
+        ) : (
+          <MySettingsTab />
+        )}
+      </div>
     </section>
   );
 }

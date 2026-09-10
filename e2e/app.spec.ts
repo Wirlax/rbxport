@@ -538,10 +538,9 @@ test("a device shows what is on it, and a second write only syncs the difference
   const panel = page.getByRole("region", { name: "Device DJ STICK" });
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("No export on this device yet.");
-  await expect(panel.getByRole("progressbar", { name: "Space used" })).toHaveAttribute(
-    "aria-valuenow",
-    "25",
-  );
+  // The General tab's space table, in the units rekordbox prints.
+  await expect(panel.getByRole("table")).toContainText("Total Space32.0 GB");
+  await expect(panel.getByRole("table")).toContainText("Available Space24.0 GB");
 
   // First write: everything goes.
   await expect(panel.getByRole("button", { name: "Export" })).toBeVisible();
