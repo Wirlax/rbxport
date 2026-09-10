@@ -435,6 +435,13 @@ jobs:
           merge-multiple: true
           path: out
 
+      # The steps below build and read latest.json with node. There is no
+      # checkout in this job, so nothing else would put node on PATH, and the
+      # arc Linux host's own node is not something a job should depend on.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Ensure the AWS CLI
         # A hosted Ubuntu image ships it; the arc Linux host does not. Into
         # ~/.local so no step here needs sudo.
