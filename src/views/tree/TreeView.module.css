@@ -78,5 +78,8 @@
   font-size: var(--f-size-sm);
 }
 
-/* While tracks are being dragged, the playlists that would take them say so. */
-.node[data-droppable] { outline: 1px dashed var(--c-accent); outline-offset: -1px; }
+/* While tracks are being dragged, only the playlist under the pointer says
+   it would take them — the way the selection does. [ASSUME] the colour: no
+   capture holds a drag in progress, and the selection blue is what rekordbox
+   uses for "this row". The other playlists stay as they are. */
+.node[data-over] { background: var(--c-select); }

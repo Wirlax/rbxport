@@ -44,6 +44,13 @@ const Row = memo(function Row({
           : node.kind === "device"
             ? DeviceIcon
             : ListIcon;
+  // Whether the drag is over this row right now. Only the row under the
+  // pointer is marked — every playlist lighting up for the whole drag read
+  // as a grid of errors — and a drag that ends elsewhere clears it.
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (!droppable) setOver(false);
+  }, [droppable]);
   return (
     <div
       className={styles.node}
@@ -58,8 +65,15 @@ const Row = memo(function Row({
         if (!droppable) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
+        setOver(true);
+      }}
+      onDragLeave={(e) => {
+        // Leaving for one of the row's own children is not leaving the row.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setOver(false);
       }}
       onDrop={(e) => {
+        setOver(false);
         if (!droppable) return;
         e.preventDefault();
         onDropTracks?.(node.id);
@@ -72,6 +86,7 @@ const Row = memo(function Row({
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
       data-droppable={droppable || undefined}
+      data-over={(droppable && over) || undefined}
       role="treeitem"
       aria-selected={selected}
       aria-expanded={branch ? open : undefined}
