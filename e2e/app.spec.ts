@@ -1250,8 +1250,10 @@ test("the memory, hot cue and info tabs change the panel beside the deck", async
   await panel.getByRole("tab", { name: "HOT CUE" }).click();
   // Eight slots, always — an empty one is a slot you can fill, and hiding it
   // makes the list read as a shorter track. The tabs are role=tab, not button.
-  await expect(panel.getByRole("button")).toHaveCount(8);
-  await expect(panel.getByRole("button", { disabled: true })).toHaveCount(4);
+  await expect(panel.getByRole("button", { name: /^Hot cue [A-H]$/ })).toHaveCount(8);
+  await expect(panel.getByRole("button", { name: /^Hot cue [A-H]$/, disabled: true })).toHaveCount(4);
+  // A set row has its ✕; an empty one has nothing to clear.
+  await expect(panel.getByRole("button", { name: /^Clear hot cue/ })).toHaveCount(4);
   await expect(panel.getByText(/^\d\d:\d\d:\d\d\d$/)).toHaveCount(0);
 
   await panel.getByRole("tab", { name: "INFO" }).click();
