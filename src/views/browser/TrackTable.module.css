@@ -162,6 +162,12 @@
   position: relative;
   background: var(--c-black);
   min-height: 0;
+  /* Pinned to the `1fr` row. With the Track Filter closed there is nothing
+     in the `auto` row, and auto-placement put the scroller there instead:
+     content-high, its horizontal bar directly under the last row of a short
+     list and empty panel under that. rekordbox runs the bar along the
+     panel's foot whatever the list's length (9.03.41 PM, 18 tracks). */
+  grid-row: 3;
 }
 
 /* Drawn rather than left to the platform. macOS hides its scrollbars until
