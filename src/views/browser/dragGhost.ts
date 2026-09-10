@@ -29,10 +29,16 @@ export function setRowDragImage(
   const ghost = row.cloneNode(true) as HTMLElement;
   ghost.removeAttribute("draggable");
   ghost.setAttribute("aria-hidden", "true");
+  // Laid over the row's own place rather than off screen: WebKit takes the
+  // drag image from what it is painting, and an element it is not painting
+  // — one parked at -9999px — comes out as nothing. Behind the row, so the
+  // frame it exists for shows nothing new.
+  const hostBox = host.getBoundingClientRect();
   ghost.style.transform = "none";
-  ghost.style.top = "-9999px";
-  ghost.style.left = "0";
+  ghost.style.top = `${box.top - hostBox.top}px`;
+  ghost.style.left = `${box.left - hostBox.left}px`;
   ghost.style.width = `${box.width}px`;
+  ghost.style.zIndex = "-1";
   ghost.style.opacity = GHOST_OPACITY;
   ghost.style.pointerEvents = "none";
   // A cloned canvas is blank; the row's waveform is painted across.

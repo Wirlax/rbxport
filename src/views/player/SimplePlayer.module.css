@@ -108,12 +108,8 @@
 }
 .artwork:disabled { cursor: default; }
 
-/* A track is being dragged and this strip would take it. The sleeve is what
-   is marked, as on the full deck: it is where the track lands. */
-.strip[data-droppable] .artwork {
-  outline: 1px dashed var(--c-accent);
-  outline-offset: -1px;
-}
+/* A track being dragged over the strip is not marked on the sleeve, as on the
+   full deck: the row travelling with the hand is the feedback. */
 
 /* The record on the empty sleeve: `design/icons/ui/record.svg` filling the
    48pt square, which puts its disc at 41pt and its hole at 11.5 against the

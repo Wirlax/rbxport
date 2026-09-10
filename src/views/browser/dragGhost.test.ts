@@ -28,6 +28,8 @@ describe("setRowDragImage", () => {
     const element = row();
     element.getBoundingClientRect = () =>
       ({ left: 10, top: 300, width: 900, height: 25 }) as DOMRect;
+    element.parentElement!.getBoundingClientRect = () =>
+      ({ left: 10, top: 100, width: 900, height: 5000 }) as DOMRect;
     const setDragImage = vi.fn();
     const transfer = { setDragImage } as unknown as DataTransfer;
 
@@ -41,6 +43,10 @@ describe("setRowDragImage", () => {
     // itself draggable or read out.
     expect(ghost.parentElement).toBe(element.parentElement);
     expect(ghost.style.transform).toBe("none");
+    // Over the row's own place, behind it: WebKit only pictures what it paints.
+    expect(ghost.style.top).toBe("200px");
+    expect(ghost.style.left).toBe("0px");
+    expect(ghost.style.zIndex).toBe("-1");
     expect(ghost.style.opacity).toBe("0.45");
     expect(ghost.style.width).toBe("900px");
     expect(ghost.getAttribute("draggable")).toBeNull();
