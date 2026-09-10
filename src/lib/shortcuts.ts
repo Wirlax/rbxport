@@ -81,6 +81,46 @@ function primary(chord: KeyChord, platform: Platform): boolean {
 }
 
 /**
+ * The native menu item a chord is the accelerator of, on a platform where
+ * the webview eats it — or `null`.
+ *
+ * On macOS the menu's key equivalents are handled by the application before
+ * the webview sees a keystroke, so nothing is needed and nothing is
+ * returned: a fallback there would fire the item twice. On Windows the
+ * accelerators are bound too, but a keystroke that lands in the focused
+ * webview never reaches them (Ctrl+, and Ctrl+8 did nothing on 0.5.1 while
+ * typing into the search field proved the keys arrived), so the shell's ids
+ * are produced here and handled exactly as a menu click is. Full screen is
+ * left out: the shell does that one itself, on the native event.
+ */
+export function menuAccelerator(chord: KeyChord, platform: Platform): string | null {
+  if (platform.mac || chord.ctrlKey !== true || chord.metaKey === true || chord.altKey === true) {
+    return null;
+  }
+  if (chord.shiftKey === true) return null;
+  switch (chord.key.toLowerCase()) {
+    case ",":
+      return "settings";
+    case "o":
+      return "import";
+    case "i":
+      return "info";
+    case "b":
+      return "sub";
+    case "7":
+      return "layout-one";
+    case "8":
+      return "layout-two";
+    case "9":
+      return "layout-simple";
+    case "0":
+      return "layout-browser";
+    default:
+      return null;
+  }
+}
+
+/**
  * The action a chord asks for, or `null`.
  *
  * `null` means "not ours" — the caller must let the event through rather than

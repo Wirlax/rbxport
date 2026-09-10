@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  actionFor, BINDINGS, describeChord, dispatch, hotCuePad, isTyping, type Platform,
+  actionFor, BINDINGS, describeChord, dispatch, hotCuePad, isTyping, menuAccelerator, type Platform,
 } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
@@ -83,6 +83,31 @@ describe("dispatch", () => {
   it("applies every action outside a field", () => {
     expect(dispatch({ key: "ArrowDown" }, MAC, list)).toBe("moveDown");
     expect(dispatch({ key: "a", metaKey: true }, MAC, null)).toBe("selectAll");
+  });
+});
+
+describe("menuAccelerator", () => {
+  it("names the menu item a Windows accelerator stands for", () => {
+    expect(menuAccelerator({ key: ",", ctrlKey: true }, WIN)).toBe("settings");
+    expect(menuAccelerator({ key: "o", ctrlKey: true }, WIN)).toBe("import");
+    expect(menuAccelerator({ key: "i", ctrlKey: true }, WIN)).toBe("info");
+    expect(menuAccelerator({ key: "b", ctrlKey: true }, WIN)).toBe("sub");
+    expect(menuAccelerator({ key: "7", ctrlKey: true }, WIN)).toBe("layout-one");
+    expect(menuAccelerator({ key: "8", ctrlKey: true }, WIN)).toBe("layout-two");
+    expect(menuAccelerator({ key: "9", ctrlKey: true }, WIN)).toBe("layout-simple");
+    expect(menuAccelerator({ key: "0", ctrlKey: true }, WIN)).toBe("layout-browser");
+  });
+
+  it("does nothing on macOS, where the menu handles its own key equivalents", () => {
+    expect(menuAccelerator({ key: ",", metaKey: true }, MAC)).toBeNull();
+    expect(menuAccelerator({ key: ",", ctrlKey: true }, MAC)).toBeNull();
+  });
+
+  it("leaves other chords alone, full screen included", () => {
+    expect(menuAccelerator({ key: "f", ctrlKey: true, shiftKey: true }, WIN)).toBeNull();
+    expect(menuAccelerator({ key: ",", ctrlKey: true, altKey: true }, WIN)).toBeNull();
+    expect(menuAccelerator({ key: "," }, WIN)).toBeNull();
+    expect(menuAccelerator({ key: "x", ctrlKey: true }, WIN)).toBeNull();
   });
 });
 
