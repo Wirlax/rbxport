@@ -174,6 +174,22 @@ impl Cues {
         self.cues.get(start..end).unwrap_or(&[])
     }
 
+    /// The letters of a track's hot cues, in letter order — `"ABCD"` for the
+    /// four the reference track carries. What the browser row and the
+    /// information panel print, so it is built here once per row rather than
+    /// in each caller.
+    ///
+    /// In letter order rather than position order: two slots read the same
+    /// way whichever was set first, and a slot is what the letter names.
+    /// Sixteen at most, so the sort is nothing.
+    #[must_use]
+    pub fn hot_letters_of(&self, row: Row) -> String {
+        let mut letters: Vec<char> = self.of(row).iter().filter_map(Cue::hot_letter).collect();
+        letters.sort_unstable();
+        letters.dedup();
+        letters.into_iter().collect()
+    }
+
     /// Replaces one track's cues, leaving every other track's where they are.
     ///
     /// A splice rather than a rebuild: the tail moves by the difference in

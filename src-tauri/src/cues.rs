@@ -336,6 +336,40 @@ mod tests {
     }
 
     #[test]
+    fn the_browser_row_s_letters_follow_a_hot_cue_edit_without_a_reload() {
+        // What `fetch_rows` hands the browser after an edit: the same
+        // `rows_to_dto` over the same index, with only the track re-read.
+        use crate::state::rows_to_dto;
+        let mut f = open();
+        let track = track_id(1);
+        let row = f.library.row_of(&track).unwrap();
+        let letters = |f: &Fixture| rows_to_dto(&f.library, &[row], 0).remove(0).cues;
+        assert_eq!(letters(&f), "");
+
+        let d = apply(
+            &mut f.writer,
+            CueEdit::Add { track: track.clone(), kind: CueKind::Hot('D'), position_ms: 9_000 },
+        )
+        .unwrap();
+        apply(
+            &mut f.writer,
+            CueEdit::Add { track: track.clone(), kind: CueKind::Hot('A'), position_ms: 20_000 },
+        )
+        .unwrap();
+        apply(
+            &mut f.writer,
+            CueEdit::Add { track: track.clone(), kind: CueKind::Memory, position_ms: 1_000 },
+        )
+        .unwrap();
+        f.reload(&track);
+        assert_eq!(letters(&f), "AD", "letter order, and the memory cue is not a letter");
+
+        apply(&mut f.writer, CueEdit::Delete { cue: d.cue }).unwrap();
+        f.reload(&track);
+        assert_eq!(letters(&f), "A");
+    }
+
+    #[test]
     fn a_loop_that_ends_before_it_starts_is_refused_as_read_only() {
         // The writer's refusals all map onto `ReadOnly`, which is what the
         // interface shows in the status bar; nothing is written.

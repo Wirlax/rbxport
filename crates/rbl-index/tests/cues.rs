@@ -194,3 +194,35 @@ fn adding_a_cue_moves_the_content_version() {
     f.writer.add_cue(&track_id(0), 1, 1_000).unwrap();
     assert_ne!(before, version(&f));
 }
+
+#[test]
+fn a_track_s_hot_letters_read_in_letter_order_whatever_order_they_sit_in() {
+    use rbl_index::testing::{library_from, TestTrack};
+    let lib = library_from(&[
+        TestTrack { id: 1, title: "one", ..TestTrack::default() },
+        TestTrack { id: 2, title: "two", ..TestTrack::default() },
+    ]);
+    // Positioned so D comes before A, with a memory cue and a loop between.
+    lib.set_cues_of(
+        0,
+        vec![
+            Cue { id: 1, position_ms: 100, out_ms: 0, kind: Cue::kind_of_letter('D').unwrap() },
+            Cue { id: 2, position_ms: 200, out_ms: 0, kind: Cue::MEMORY },
+            Cue { id: 3, position_ms: 300, out_ms: 900, kind: Cue::kind_of_letter('A').unwrap() },
+            Cue { id: 4, position_ms: 400, out_ms: 0, kind: Cue::kind_of_letter('P').unwrap() },
+        ],
+    );
+    assert_eq!(lib.cues().hot_letters_of(0), "ADP");
+    assert_eq!(lib.cues().hot_letters_of(1), "", "no cues, no letters");
+    assert_eq!(lib.cues().hot_letters_of(9), "", "out of range is empty, not a panic");
+    // Nothing here fills a slot twice — the pads only set an empty one — but
+    // the library is not ours alone, so a doubled slot is one letter, not two.
+    lib.set_cues_of(
+        1,
+        vec![
+            Cue { id: 5, position_ms: 100, out_ms: 0, kind: 1 },
+            Cue { id: 6, position_ms: 200, out_ms: 0, kind: 1 },
+        ],
+    );
+    assert_eq!(lib.cues().hot_letters_of(1), "A");
+}
