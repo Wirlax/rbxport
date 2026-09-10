@@ -12,6 +12,7 @@ import process from "node:process";
  */
 const port = Number(process.env.E2E_PORT) || 1420;
 const previewPort = port + 1;
+const viewport = { width: 1800, height: 1130 };
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,13 +28,14 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${port}`,
     trace: "on-first-retry",
-    // Matches the reference captures so screenshots compare like for like.
-    viewport: { width: 1800, height: 1130 },
     deviceScaleFactor: 2,
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    // The window matches the reference captures so screenshots compare like
+    // for like. It is set per project, after the device preset: each preset
+    // carries its own 1280x720 viewport, and spread later it would win.
+    { name: "chromium", use: { ...devices["Desktop Chrome"], viewport } },
+    { name: "webkit", use: { ...devices["Desktop Safari"], viewport } },
   ],
   webServer: [
     {
