@@ -5,6 +5,12 @@ name: Release
 # that version — plus a `latest/` copy, so a download link does not have to
 # name a version.
 #
+# R2 is the only place a release is published. No GitHub Release is created:
+# this repository is private and release assets inherit that, so a download
+# link would 404 for everyone it was given to, and the workflow token is
+# read-only, so creating one would need a permission this file does not ask
+# for. The bucket is the download; the tag is the record.
+#
 # `workflow_dispatch` builds the same way without publishing, which is how a
 # change to this file is tried before a tag depends on it.
 #
@@ -440,9 +446,3 @@ jobs:
           # A stable path as well as the versioned one, so a download link on a
           # page does not have to be edited for every release.
           aws s3 sync out "s3://$BUCKET/latest/" --endpoint-url "$ENDPOINT" --no-progress --delete
-
-      - name: Attach them to the GitHub release too
-        uses: softprops/action-gh-release@v2
-        with:
-          files: out/*
-          generate_release_notes: true
