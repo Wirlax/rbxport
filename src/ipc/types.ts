@@ -308,6 +308,10 @@ export interface Backend {
   audioDevices(): Promise<AudioDevices>;
   /** Choose one, or `null` for the system's own. Takes effect on the next play. */
   setAudioDevice(device: string | null): Promise<void>;
+  /** The master limiter as it stands. */
+  masterLimiter(): Promise<Limiter>;
+  /** Sets the master limiter; what comes back is what the engine could set. */
+  setMasterLimiter(limiter: Limiter): Promise<Limiter>;
   /**
    * How fast a deck plays, as a multiple of the file's own speed.
    *
@@ -427,6 +431,20 @@ export interface AudioDevices {
   chosen: string | null;
 }
 
+/**
+ * The master limiter, which keeps two decks summed from clipping.
+ *
+ * Both directions: what is sent, and what the engine says it set — it clamps
+ * the numbers to what it can do, and the interface shows that.
+ */
+export interface Limiter {
+  enabled: boolean;
+  /** dBFS, −12 to 0. */
+  ceilingDb: number;
+  /** Milliseconds, 10 to 1000. */
+  releaseMs: number;
+}
+
 /** The three bands of a channel strip, high to low as the strip is drawn. */
 export type EqBand = "high" | "mid" | "low";
 
@@ -456,6 +474,8 @@ export interface Tick {
   peakRight: number;
   /** The master level, 0 to 1. */
   master: number;
+  /** How far the limiter turned the sum down since the last tick, in dB. */
+  reduction: number;
 }
 
 /** The master's meters and level, on their own faster beat. */
@@ -463,6 +483,8 @@ export interface Meters {
   peakLeft: number;
   peakRight: number;
   master: number;
+  /** How far the limiter turned the sum down since the last tick, in dB. */
+  reduction: number;
 }
 
 /** A deck finishing a load, or failing one. */

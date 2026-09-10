@@ -242,7 +242,9 @@ fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
     }
 }
 
-pub fn run() {
+/// Logging, and a panic hook that puts the panic in the log rather than on a
+/// stderr nobody is watching.
+fn install_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -253,6 +255,10 @@ pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         tracing::error!(%info, "panic");
     }));
+}
+
+pub fn run() {
+    install_tracing();
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -323,6 +329,8 @@ pub fn run() {
             commands::set_master_level,
             commands::audio_devices,
             commands::set_audio_device,
+            commands::master_limiter,
+            commands::set_master_limiter,
             commands::deck_tempo,
             commands::deck_master_tempo,
             commands::set_channel_band,

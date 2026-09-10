@@ -11,7 +11,7 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, RowDto, SortColumn, Tick, TrackDetails, TrackField,
+  FilterValues, LibrarySummary, Limiter, RowDto, SortColumn, Tick, TrackDetails, TrackField,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -707,6 +707,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   /** The master level, which a browser can hold even with nothing to apply it to. */
   let master = 1;
 
+  /** The master limiter, likewise. */
+  let limiter: Limiter = { enabled: true, ceilingDb: -0.3, releaseMs: 100 };
+
   const tick = (): Tick => ({
     a: { ...deckA },
     b: { ...deckB },
@@ -716,6 +719,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     peakLeft: 0,
     peakRight: 0,
     master,
+    reduction: 0,
   });
 
   const sendTick = () => {
@@ -1046,6 +1050,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // and the picker says so rather than inventing devices.
     audioDevices: () => wait({ devices: [], default: null, chosen: null }),
     setAudioDevice: () => wait(undefined),
+    // Held and given back clamped as the engine would, so the controls in
+    // Settings behave in a browser.
+    masterLimiter: () => wait({ ...limiter }),
+    setMasterLimiter: (wanted) => {
+      limiter = {
+        enabled: wanted.enabled,
+        ceilingDb: Number.isFinite(wanted.ceilingDb)
+          ? Math.min(Math.max(wanted.ceilingDb, -12), 0)
+          : -0.3,
+        releaseMs: Number.isFinite(wanted.releaseMs)
+          ? Math.min(Math.max(wanted.releaseMs, 10), 1000)
+          : 100,
+      };
+      return wait({ ...limiter });
+    },
     // The mixer is the engine's; a browser has no audio to apply it to, so
     // these are accepted and dropped rather than pretended at.
     // The tempo is the engine's, but the mock keeps it so the readout and the

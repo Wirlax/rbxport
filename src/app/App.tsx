@@ -26,6 +26,7 @@ import {
 } from "@/lib/session";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { formatCount, formatMemory, useDiagnostics } from "@/store/useDiagnostics";
+import { useLimiter } from "@/store/useLimiter";
 import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { InfoPanel } from "@/views/info/InfoPanel";
@@ -217,6 +218,9 @@ export function App() {
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
   const cost = useDiagnostics(true);
   const master = useMaster();
+  // Read at start so the remembered setting reaches the engine before the
+  // first thing plays, not when Settings is next opened.
+  const limiter = useLimiter();
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {
@@ -1077,6 +1081,9 @@ export function App() {
       {settingsOpen ? (
         <Settings
           summary={summary}
+          limiter={limiter.limiter}
+          onLimiterChange={limiter.set}
+          reduction={master.reduction}
           onResetColumns={cols.reset}
           onResetLayout={() => {
             setTreeWidth(clampWidth(305, bounds()));

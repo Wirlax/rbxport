@@ -105,6 +105,10 @@ fn worst_step(out: &[f32]) -> f32 {
 /// two-millisecond fade to the last sample above −80 dB.
 const STRIP_TAIL: usize = 320;
 
+/// The master limiter's lookahead, which delays everything by this much
+/// whether it is on or not: 1.5 ms at the harness's rate.
+const LIMITER_TAIL: usize = 66;
+
 /// Below this nothing is audible: −80 dB of full scale.
 ///
 /// "Silent" is this rather than a hard zero because the channel strip's
@@ -156,6 +160,11 @@ fn harness() -> Harness {
     .expect("engine");
 
     let sink = sink_slot.lock().unwrap().clone().expect("sink");
+    // These tests measure the deck path, and the ramp fixtures run to full
+    // scale — over the limiter's ceiling. Off, the limiter is a fixed delay
+    // of `LIMITER_TAIL` frames and nothing else; `the_limiter_*` tests turn
+    // it back on.
+    engine.limiter().set_enabled(false);
     Harness { engine, sink, events, loaded }
 }
 
@@ -270,7 +279,7 @@ fn pausing_stops_the_clock_and_the_device() {
     let fade = usize::from(FADE_FRAMES);
     assert!(
         tail
-            .get((fade + STRIP_TAIL) * 2..)
+            .get((fade + STRIP_TAIL + LIMITER_TAIL) * 2..)
             .is_some_and(|rest| rest.iter().all(|s| s.abs() < INAUDIBLE)),
         "the deck was still sounding after the fade",
     );
@@ -1042,4 +1051,61 @@ fn a_drag_sounds_on_a_deck_that_has_only_been_loaded_never_played() {
     // Letting go leaves the transport as it was found: stopped, and the
     // device released.
     assert!(!h.engine.snapshot().a.playing);
+}
+
+/// The tone at full scale, so two of them sum to twice what the device takes.
+fn loud_tone(path: &Path, frames: usize) {
+    let mut samples = Vec::with_capacity(frames * 2);
+    for frame in 0..frames {
+        let t = frame as f32 / RATE as f32;
+        let value = 0.99 * (t * 220.0 * std::f32::consts::TAU).sin();
+        samples.push(value);
+        samples.push(value);
+    }
+    write_wav(path, RATE, 2, &samples);
+}
+
+/// Both decks playing the same full-scale tone, pulled for a moment.
+fn two_decks_summed(h: &Harness) -> Vec<f32> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("loud.wav");
+    loud_tone(&path, RATE as usize * 4);
+    h.engine.load(Deck::A, &path);
+    h.engine.load(Deck::B, &path);
+    h.wait_for_load(2);
+    h.engine.play(Deck::A);
+    h.engine.play(Deck::B);
+    // Past the fade in and the limiter's own settling.
+    h.play_until(Deck::A, 8_192);
+    let mut out = Vec::new();
+    for _ in 0..40 {
+        out.extend(h.sink.pull(512));
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    out
+}
+
+#[test]
+fn the_limiter_keeps_two_full_decks_under_its_ceiling() {
+    let h = harness();
+    h.engine.limiter().set_enabled(true);
+    let out = two_decks_summed(&h);
+    let ceiling = 10.0_f32.powf(rbl_deck::DEFAULT_CEILING_DB / 20.0);
+    let loudest = out.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
+    assert!(loudest <= ceiling + 1e-5, "{loudest} reached the device, over {ceiling}");
+    assert!(loudest > ceiling * 0.9, "{loudest}: the sum was turned down, not limited");
+    // Two decks at 0.99 is about six decibels over: that is what came off.
+    let reduction = h.engine.master().reduction_db();
+    assert!((4.0..8.0).contains(&reduction), "the meter read {reduction} dB of reduction");
+    // And no flat tops: the sum is a sine, and a sine's steps are smooth.
+    assert_eq!(clicks(&out), 0);
+}
+
+#[test]
+fn the_limiter_off_leaves_the_clamp_to_flat_top_the_sum() {
+    let h = harness();
+    let out = two_decks_summed(&h);
+    let flat = out.iter().filter(|s| s.abs() >= 1.0).count();
+    assert!(flat > 100, "only {flat} samples hit the rail: the sum was not clipped");
+    assert!(h.engine.master().reduction_db() < 1e-6, "off, the limiter reported work");
 }

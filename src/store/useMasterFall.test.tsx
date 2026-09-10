@@ -42,7 +42,7 @@ const idle: Tick["a"] = {
 function stubBackend(): Backend {
   return {
     deckState: () => Promise.resolve({
-      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: 1,
+      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: 1, reduction: 0,
     } satisfies Tick),
     onDeckTick: () => () => {},
     onDeckEvent: () => () => {},
@@ -102,7 +102,7 @@ function elapse(ms: number) {
 /** One reading, as the engine sends them thirty times a second. */
 function reading(peak: number) {
   act(() => {
-    metered({ peakLeft: peak, peakRight: peak, master: 1 });
+    metered({ peakLeft: peak, peakRight: peak, master: 1, reduction: 0 });
   });
 }
 
@@ -177,7 +177,7 @@ describe("the master meters when the readings stop", () => {
   it("leaves the level alone while the bars fall", () => {
     elapse(33);
     act(() => {
-      metered({ peakLeft: 1, peakRight: 1, master: 0.62 });
+      metered({ peakLeft: 1, peakRight: 1, master: 0.62, reduction: 0 });
     });
     elapse(SILENCE_WAIT_MS);
     runFrames(600);

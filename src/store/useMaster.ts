@@ -52,6 +52,20 @@ export function nextPeak(shown: number, reading: number, seconds: number): numbe
 }
 
 /**
+ * The reduction readout's next value: the reading, or the last one fallen.
+ *
+ * In decibels rather than a fraction, so the fall is a straight line at the
+ * meters' own rate and a reading of nothing is reached rather than approached.
+ */
+export function nextReduction(shown: number, reading: number, seconds: number): number {
+  const safe = Number.isFinite(reading) ? Math.max(reading, 0) : 0;
+  const previous = Number.isFinite(shown) ? Math.max(shown, 0) : 0;
+  const step = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), MAX_STEP_SECONDS) : 0;
+  const held = previous - FALL_DB_PER_SECOND * step;
+  return Math.max(safe, held, 0);
+}
+
+/**
  * How long a meter waits for the next reading before it falls on its own.
  *
  * The engine's ticker stops the moment neither deck is playing, which is what
@@ -70,11 +84,13 @@ export interface Master {
   level: number;
   peakLeft: number;
   peakRight: number;
+  /** How far the limiter turned the sum down over the last tick, in dB. */
+  reduction: number;
   setLevel: (level: number) => void;
 }
 
 export function useMaster(): Master {
-  const [state, setState] = useState({ level: 1, peakLeft: 0, peakRight: 0 });
+  const [state, setState] = useState({ level: 1, peakLeft: 0, peakRight: 0, reduction: 0 });
 
   useEffect(() => {
     let live = true;
@@ -84,6 +100,9 @@ export function useMaster(): Master {
     // it has finished without reaching into a render.
     let left = 0;
     let right = 0;
+    // The limiter's reduction falls the same way, so a single kick's dip is
+    // seen rather than gone before the next reading.
+    let reduction = 0;
     let last = performance.now();
     let falling: number | undefined;
     let quiet: ReturnType<typeof setTimeout> | undefined;
@@ -93,9 +112,10 @@ export function useMaster(): Master {
         const next = level ?? current.level;
         return current.level === next &&
           current.peakLeft === left &&
-          current.peakRight === right
+          current.peakRight === right &&
+          current.reduction === reduction
           ? current
-          : { level: next, peakLeft: left, peakRight: right };
+          : { level: next, peakLeft: left, peakRight: right, reduction };
       });
     };
 
@@ -107,10 +127,11 @@ export function useMaster(): Master {
       last = now;
       left = nextPeak(left, 0, elapsed);
       right = nextPeak(right, 0, elapsed);
+      reduction = nextReduction(reduction, 0, elapsed);
       show();
       // Nothing left to fall, so nothing left to draw: the frames stop here
       // rather than running on against an idle window.
-      if (left > 0 || right > 0) falling = requestAnimationFrame(fall);
+      if (left > 0 || right > 0 || reduction > 0) falling = requestAnimationFrame(fall);
     };
 
     /** Hands the meters over to the fall if the next reading does not come. */
@@ -118,7 +139,9 @@ export function useMaster(): Master {
       if (quiet !== undefined) clearTimeout(quiet);
       quiet = setTimeout(() => {
         quiet = undefined;
-        if (!live || falling !== undefined || (left === 0 && right === 0)) return;
+        if (!live || falling !== undefined || (left === 0 && right === 0 && reduction === 0)) {
+          return;
+        }
         last = performance.now();
         falling = requestAnimationFrame(fall);
       }, SILENT_AFTER_MS);
@@ -142,6 +165,7 @@ export function useMaster(): Master {
         // next reading flickers, and the loud moment is the one to see.
         left = nextPeak(left, meters.peakLeft, elapsed);
         right = nextPeak(right, meters.peakRight, elapsed);
+        reduction = nextReduction(reduction, meters.reduction, elapsed);
         show(meters.master);
         watch();
       });
@@ -155,6 +179,7 @@ export function useMaster(): Master {
       if (!live) return;
       left = Math.min(Math.max(now.peakLeft, 0), 1);
       right = Math.min(Math.max(now.peakRight, 0), 1);
+      reduction = nextReduction(0, now.reduction, 0);
       last = performance.now();
       show(now.master);
       // Opening onto a stopped engine is the same case as the music ending:

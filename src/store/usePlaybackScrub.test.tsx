@@ -45,6 +45,7 @@ function tickAt(seconds: number, generation: number, playing = true): Tick {
     peakLeft: 0,
     peakRight: 0,
     master: 1,
+    reduction: 0,
   };
 }
 

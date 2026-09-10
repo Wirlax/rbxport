@@ -32,6 +32,7 @@ mod clock;
 mod deck;
 mod decode;
 mod fade;
+mod limiter;
 mod mixer;
 #[cfg(feature = "rubberband")]
 mod rubberband;
@@ -56,6 +57,10 @@ use block::{Block, RING_BLOCKS};
 use fade::Ramp;
 use smooth::Smoothed;
 
+pub use limiter::{
+    Limiter, LimiterSettings, DEFAULT_CEILING_DB, DEFAULT_RELEASE_MS, MAX_CEILING_DB,
+    MAX_RELEASE_MS, MIN_CEILING_DB, MIN_RELEASE_MS,
+};
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
 #[cfg(feature = "rubberband")]
 pub use rubberband::RubberBand;
@@ -141,6 +146,9 @@ pub struct Master {
     gain: AtomicU32,
     peak_left: AtomicU32,
     peak_right: AtomicU32,
+    /// The lowest gain the limiter applied since the meter was last read, as
+    /// a linear factor: 1.0 is a limiter that did nothing.
+    reduction: AtomicU32,
     /// The device's rate, so the callback can smooth a fader in real time.
     ///
     /// Written once, by the engine, as soon as the sink is open — which is
@@ -154,6 +162,7 @@ impl Default for Master {
             gain: AtomicU32::new(1.0_f32.to_bits()),
             peak_left: AtomicU32::new(0),
             peak_right: AtomicU32::new(0),
+            reduction: AtomicU32::new(1.0_f32.to_bits()),
             rate: AtomicU32::new(0),
         }
     }
@@ -179,6 +188,23 @@ impl Master {
     fn report(&self, left: f32, right: f32) {
         Self::hold(&self.peak_left, left);
         Self::hold(&self.peak_right, right);
+    }
+
+    /// The limiter's floor for the last callback, held the same way, lowest
+    /// wins: the moment it worked hardest is the one the meter should show.
+    fn report_reduction(&self, floor: f32) {
+        let mut current = self.reduction.load(Ordering::Relaxed);
+        while floor < f32::from_bits(current) {
+            match self.reduction.compare_exchange_weak(
+                current,
+                floor.to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(seen) => current = seen,
+            }
+        }
     }
 
     fn hold(slot: &AtomicU32, value: f32) {
@@ -214,6 +240,14 @@ impl Master {
             f32::from_bits(self.peak_right.swap(0, Ordering::Relaxed)),
         )
     }
+
+    /// How far the limiter turned the sum down since the last read, in
+    /// decibels, as a positive number: 0 is a limiter that did nothing. Clears
+    /// on read, like the peaks.
+    pub fn reduction_db(&self) -> f32 {
+        let floor = f32::from_bits(self.reduction.swap(1.0_f32.to_bits(), Ordering::Relaxed));
+        if floor >= 1.0 || floor <= 0.0 { 0.0 } else { -20.0 * floor.log10() }
+    }
 }
 
 pub struct Engine {
@@ -222,6 +256,7 @@ pub struct Engine {
     sample_rate: u32,
     master: Arc<Master>,
     mixer: Arc<MixerSettings>,
+    limiter: Arc<LimiterSettings>,
 }
 
 impl Engine {
@@ -276,6 +311,11 @@ impl Engine {
         let mixing = Arc::clone(&master);
         let mixer = Arc::new(MixerSettings::default());
         let strip = Arc::clone(&mixer);
+        let limiter = Arc::new(LimiterSettings::default());
+        let limiting = Arc::clone(&limiter);
+        // Built at the first callback with the channels, for the same reason:
+        // its lookahead is a number of frames, and that needs the rate.
+        let mut limit: Option<Limiter> = None;
         // One buffer per deck, allocated here rather than in the callback.
         let mut scratch = vec![0.0_f32; MIX_FRAMES * 2];
         let mut channels: Option<[Channel; 2]> = None;
@@ -310,18 +350,30 @@ impl Engine {
             }
             let target = mixing.gain();
             let level = level.get_or_insert_with(|| Smoothed::new(target, mixing.rate()));
-            // Two decks at full level sum past 1.0. A clamp is not a limiter —
-            // that is the mixer's job, in P3 — but it keeps a hot sum from
-            // reaching the device as a wrap.
-            let (mut left, mut right) = (0.0_f32, 0.0_f32);
             for frame in out.chunks_exact_mut(2) {
                 let gain = level.step(target);
+                for sample in frame.iter_mut() {
+                    *sample *= gain;
+                }
+            }
+            // Two decks at full level sum past 1.0. The limiter sits after
+            // the master level, as a DJM's does: turning the master down is
+            // then a way to limit less, and what it protects is the output.
+            let limit = limit.get_or_insert_with(|| Limiter::new(mixing.rate()));
+            limit.process(out, &limiting);
+            mixing.report_reduction(limit.take_floor());
+            // The limiter lets nothing over its ceiling through, so this
+            // never engages — but a hot sum with the limiter off must not
+            // reach the device as a wrap.
+            let (mut left, mut right) = (0.0_f32, 0.0_f32);
+            for frame in out.chunks_exact_mut(2) {
                 for (channel, sample) in frame.iter_mut().enumerate() {
-                    let value = (*sample * gain).clamp(-1.0, 1.0);
+                    let value = sample.clamp(-1.0, 1.0);
                     *sample = value;
                     // The meter reads what the device is given, after the
-                    // level: a meter before the fader tells you about the file
-                    // rather than about what anyone can hear.
+                    // level and the limiter: a meter before the fader tells
+                    // you about the file rather than about what anyone can
+                    // hear.
                     if channel == 0 {
                         left = left.max(value.abs());
                     } else {
@@ -352,7 +404,7 @@ impl Engine {
         let decks: [deck::DeckHandle; 2] = handles
             .try_into()
             .map_err(|_| DeckError::Device("could not start both decks".to_owned()))?;
-        Ok(Self { decks, sink, sample_rate, master, mixer })
+        Ok(Self { decks, sink, sample_rate, master, mixer, limiter })
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -390,6 +442,11 @@ impl Engine {
     /// The master level and its meters.
     pub fn master(&self) -> &Arc<Master> {
         &self.master
+    }
+
+    /// The master limiter: on or off, its ceiling and its release.
+    pub fn limiter(&self) -> &Arc<LimiterSettings> {
+        &self.limiter
     }
 
     fn deck(&self, deck: Deck) -> Option<&deck::DeckHandle> {

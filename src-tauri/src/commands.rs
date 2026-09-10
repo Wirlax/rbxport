@@ -15,7 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    ImportReportDto, LibrarySummaryDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
+    ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     CountedDto, FilterValuesDto, TagCategoryDto,
 };
@@ -969,6 +969,27 @@ pub async fn set_audio_device(
 ) -> AppResult<()> {
     player.set_device(device);
     Ok(())
+}
+
+/// The master limiter as it stands.
+#[tauri::command]
+pub async fn master_limiter(
+    player: State<'_, Arc<crate::player::Player>>,
+) -> AppResult<LimiterDto> {
+    Ok(player.limiter())
+}
+
+/// Sets the master limiter and returns what was actually set.
+///
+/// Takes effect at once if the engine is up, and is remembered for its build
+/// if not — or its rebuild, after a device change. What comes back is the
+/// engine's clamping of what was sent, so the interface shows the truth.
+#[tauri::command]
+pub async fn set_master_limiter(
+    player: State<'_, Arc<crate::player::Player>>,
+    limiter: LimiterDto,
+) -> AppResult<LimiterDto> {
+    Ok(player.set_limiter(limiter))
 }
 
 /// Shows a track's file in the Finder.

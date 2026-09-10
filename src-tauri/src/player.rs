@@ -20,6 +20,7 @@ use rbl_deck::{Deck, DeckEvent, Engine};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::dto::LimiterDto;
 use crate::error::{AppError, AppResult, ErrorKind};
 
 /// How often the meters go out. A tenth of a second is a meter that steps
@@ -60,6 +61,8 @@ pub struct TickDto {
     pub peak_right: f32,
     /// The master level, 0 to 1.
     pub master: f32,
+    /// How far the limiter turned the sum down since the last tick, in dB.
+    pub reduction: f32,
 }
 
 impl TickDto {
@@ -75,7 +78,15 @@ impl TickDto {
             tempo: 1.0,
             master_tempo: false,
         };
-        Self { a: empty, b: empty, sample_rate: 0, peak_left: 0.0, peak_right: 0.0, master: 1.0 }
+        Self {
+            a: empty,
+            b: empty,
+            sample_rate: 0,
+            peak_left: 0.0,
+            peak_right: 0.0,
+            master: 1.0,
+            reduction: 0.0,
+        }
     }
 }
 
@@ -90,6 +101,9 @@ pub struct MeterDto {
     pub peak_left: f32,
     pub peak_right: f32,
     pub master: f32,
+    /// How far the limiter turned the sum down since the last tick, in dB;
+    /// 0 when it did nothing.
+    pub reduction: f32,
 }
 
 /// What a deck reports outside the tick.
@@ -103,7 +117,6 @@ pub struct DeckEventDto {
 }
 
 /// Holds the engine, which is not built until something is played.
-#[derive(Default)]
 pub struct Player {
     engine: Mutex<Option<Arc<Engine>>>,
     /// Whether a ticker is already running, so play does not start a second.
@@ -115,6 +128,37 @@ pub struct Player {
     /// devices, and rebuilding costs nothing anyone hears — the decks are
     /// reloaded from where they were.
     device: Mutex<Option<String>>,
+    /// The master limiter as the interface last set it.
+    ///
+    /// Held here as well as in the engine because the engine is built late
+    /// and rebuilt on a device change, and a setting that only lived in it
+    /// would go back to the default every time.
+    limiter: Mutex<LimiterDto>,
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self {
+            engine: Mutex::new(None),
+            ticking: std::sync::atomic::AtomicBool::new(false),
+            device: Mutex::new(None),
+            limiter: Mutex::new(LimiterDto {
+                enabled: true,
+                ceiling_db: rbl_deck::DEFAULT_CEILING_DB,
+                release_ms: rbl_deck::DEFAULT_RELEASE_MS,
+            }),
+        }
+    }
+}
+
+/// The engine's limiter as the interface sees it, read back after the engine
+/// clamped it.
+fn limiter_of(settings: &rbl_deck::LimiterSettings) -> LimiterDto {
+    LimiterDto {
+        enabled: settings.enabled(),
+        ceiling_db: settings.ceiling_db(),
+        release_ms: settings.release_ms(),
+    }
 }
 
 impl Player {
@@ -137,9 +181,36 @@ impl Player {
             AppError::new(ErrorKind::Internal, "The audio device could not be opened.")
                 .with_detail(e.to_string())
         })?;
+        // What the interface asked for, before the first callback runs.
+        Self::apply_limiter(engine.limiter(), *self.limiter.lock());
         let engine = Arc::new(engine);
         *held = Some(Arc::clone(&engine));
         Ok(engine)
+    }
+
+    fn apply_limiter(settings: &rbl_deck::LimiterSettings, wanted: LimiterDto) {
+        settings.set_enabled(wanted.enabled);
+        settings.set_ceiling_db(wanted.ceiling_db);
+        settings.set_release_ms(wanted.release_ms);
+    }
+
+    /// Sets the master limiter, now if the engine is up and at its build if
+    /// not, and returns what was actually set — the engine clamps.
+    pub fn set_limiter(&self, wanted: LimiterDto) -> LimiterDto {
+        // Through a throwaway settings so the clamping is the engine's own,
+        // whether or not there is an engine yet.
+        let clamped = rbl_deck::LimiterSettings::default();
+        Self::apply_limiter(&clamped, wanted);
+        let safe = limiter_of(&clamped);
+        *self.limiter.lock() = safe;
+        if let Some(engine) = self.opened() {
+            Self::apply_limiter(engine.limiter(), safe);
+        }
+        safe
+    }
+
+    pub fn limiter(&self) -> LimiterDto {
+        *self.limiter.lock()
     }
 
     /// Which output to open. `None` is the system default.
@@ -215,9 +286,10 @@ pub fn start_ticker(app: &AppHandle) {
             let Some(engine) = player.opened() else { break };
             let master = engine.master();
             let (peak_left, peak_right) = master.peaks();
+            let reduction = master.reduction_db();
             if let Err(e) = handle.emit(
                 "deck:meters",
-                MeterDto { peak_left, peak_right, master: master.gain() },
+                MeterDto { peak_left, peak_right, master: master.gain(), reduction },
             ) {
                 tracing::warn!(error = %e, "a meter tick did not reach the interface");
             }
@@ -233,6 +305,7 @@ pub fn start_ticker(app: &AppHandle) {
             let mut tick = tick_of(&snapshot, master);
             tick.peak_left = peak_left;
             tick.peak_right = peak_right;
+            tick.reduction = reduction;
             if let Err(e) = handle.emit("deck:tick", tick) {
                 tracing::warn!(error = %e, "a deck tick did not reach the interface");
             }
@@ -267,6 +340,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         peak_left,
         peak_right,
         master: master.gain(),
+        reduction: master.reduction_db(),
     }
 }
 

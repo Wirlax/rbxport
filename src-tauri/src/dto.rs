@@ -74,6 +74,20 @@ pub struct AudioDevicesDto {
     pub chosen: Option<String>,
 }
 
+/// The master limiter, as the interface sets it and reads it back.
+///
+/// Both directions: what a command is given and what `master_limiter`
+/// returns, so a value the engine clamped comes home clamped.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimiterDto {
+    pub enabled: bool,
+    /// dBFS, −12 to 0.
+    pub ceiling_db: f32,
+    /// Milliseconds, 10 to 1000.
+    pub release_ms: f32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySummaryDto {
