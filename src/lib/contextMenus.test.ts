@@ -31,6 +31,7 @@ describe("TRACK_MENU", () => {
       "Auto Load Hot Cue",
       "Reset DJ Play Count",
       "Add New Analysis Data",
+      "Convert Memory Cues to Hot Cues",
       "Remove from Playlist",
       "Remove from Collection",
       "Remove from History",
@@ -91,6 +92,37 @@ describe("trackMenuFor", () => {
 });
 
 describe("treeMenu", () => {
+  it("is rekordbox's own list over a playlist, in its own order", () => {
+    // docs/screenshots context-menu-tree@2x: thirteen entries in eight groups.
+    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
+      "Cloud Library Sync",
+      "Auto Upload",
+      "Export Playlist",
+      "Batch Auto Upload setting",
+      "Create New Playlist",
+      "Create New Intelligent Playlist",
+      "Create New Folder",
+      "Playlist display setting",
+      "Add Artwork",
+      "Delete Playlist",
+      "Export a playlist to a file",
+      "Collaborative playlist",
+      "Add To Shortcut",
+    ]);
+    expect(treeMenu("playlist").filter((row) => row === SEPARATOR)).toHaveLength(7);
+  });
+
+  it("marks the entries that open a submenu", () => {
+    const arrows = entriesOf(treeMenu("playlist")).filter((e) => e.submenu).map((e) => e.label);
+    expect(arrows).toEqual([
+      "Cloud Library Sync",
+      "Auto Upload",
+      "Export Playlist",
+      "Export a playlist to a file",
+      "Collaborative playlist",
+    ]);
+  });
+
   it("takes the node's own word for what is being deleted", () => {
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toContain("Delete Folder");
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toContain("Delete Playlist");

@@ -77,6 +77,7 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Auto Load Hot Cue", action: null, submenu: true },
   { label: "Reset DJ Play Count", action: null },
   { label: "Add New Analysis Data", action: null },
+  { label: "Convert Memory Cues to Hot Cues", action: null },
   SEPARATOR,
   { label: "Remove from Playlist", action: "removeFromPlaylist", needs: "playlist" },
   { label: "Remove from Collection", action: null },
@@ -89,16 +90,26 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
 ];
 
 /**
- * Right-clicking the tree.
+ * Right-clicking the tree, top to bottom as the capture has it
+ * (docs/screenshots context-menu-tree@2x, over a playlist).
  *
- * `Delete` takes the node's own word — rekordbox writes "Delete Folder" over a
- * folder and "Delete Playlist" over a playlist, so this does too.
+ * `Delete` and `Export` take the node's own word — rekordbox writes "Delete
+ * Folder" over a folder and "Delete Playlist" over a playlist, so this does
+ * too. Only the playlist menu is captured; the folder's is assumed to be the
+ * same list with those two words changed [ASSUME].
+ *
+ * The greyed entries are the cloud, artwork, the intelligent playlist, the
+ * file export, sharing and the shortcut list: rekordbox has them, this does
+ * not. "Cloud Library Sync" and "Auto Upload" are product names that
+ * `german.lang` never translates, so they have no key of their own there.
  */
 export function treeMenu(kind: "playlist" | "folder"): readonly MenuRow<TreeAction>[] {
   const folder = kind === "folder";
   return [
-    { label: "Batch Auto Upload setting", action: null },
+    { label: "Cloud Library Sync", action: null, submenu: true },
+    { label: "Auto Upload", action: null, submenu: true },
     { label: folder ? "Export Folder" : "Export Playlist", action: "export", submenu: true },
+    { label: "Batch Auto Upload setting", action: null },
     SEPARATOR,
     { label: "Create New Playlist", action: "createPlaylist" },
     { label: "Create New Intelligent Playlist", action: null },
@@ -106,13 +117,15 @@ export function treeMenu(kind: "playlist" | "folder"): readonly MenuRow<TreeActi
     SEPARATOR,
     { label: "Playlist display setting", action: null },
     SEPARATOR,
+    { label: "Add Artwork", action: null },
+    SEPARATOR,
     { label: folder ? "Delete Folder" : "Delete Playlist", action: "delete" },
     SEPARATOR,
-    { label: "Sort Items", action: null },
+    { label: "Export a playlist to a file", action: null, submenu: true },
+    SEPARATOR,
+    { label: "Collaborative playlist", action: null, submenu: true },
     SEPARATOR,
     { label: "Add To Shortcut", action: null },
-    SEPARATOR,
-    { label: "Cancel sharing of all collaborative playlists", action: null },
   ];
 }
 

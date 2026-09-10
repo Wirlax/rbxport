@@ -2121,7 +2121,7 @@ test("right-clicking the tree opens the folder menu", async ({ page }) => {
   await expect(menu.getByRole("menuitem", { name: "Delete Playlist" })).toBeDisabled();
 
   // And the entries rekordbox has that this does not are greyed either way.
-  await expect(menu.getByRole("menuitem", { name: "Sort Items" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Add Artwork" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeDisabled();
 });
 
