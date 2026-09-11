@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { bandStops, drawBands, drawPreviewCues, ramp } from "./waveform";
+import { bandStops, drawBands, drawColumns, drawPreviewCues, ramp, strideOf, waveformKindOf } from "./waveform";
 
 describe("the three-band colour ramp", () => {
   it("runs blue, amber, cream rather than blue to cream", () => {
@@ -292,5 +292,66 @@ describe("the hot cue badges on a row preview", () => {
     expect(ops[0]).toMatchObject({ style: token("--c-cue-hot")?.toUpperCase() });
     expect(ops[1]).toMatchObject({ style: token("--c-cue-hot-text")?.toUpperCase() });
     expect(ctx.font).toBe(`700 ${token("--f-size-preview-cue")} ${token("--f-ui")}`);
+  });
+});
+
+describe("the BLUE and RGB palettes", () => {
+  function recorder() {
+    const fills: { style: string; x: number; y: number; w: number; h: number }[] = [];
+    const ctx = {
+      fillStyle: "",
+      clearRect: () => undefined,
+      fillRect(x: number, y: number, w: number, h: number) {
+        fills.push({ style: String(this.fillStyle), x, y, w, h });
+      },
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, fills };
+  }
+
+  it("each palette reads its own tag, at its own bytes per column", () => {
+    expect([waveformKindOf("3band", false), waveformKindOf("3band", true)]).toEqual(["bands", "bandsDetail"]);
+    expect([waveformKindOf("blue", false), waveformKindOf("blue", true)]).toEqual(["mono", "monoDetail"]);
+    expect([waveformKindOf("rgb", false), waveformKindOf("rgb", true)]).toEqual(["colour", "colourDetail"]);
+    expect([strideOf("3band", true), strideOf("blue", true), strideOf("rgb", false), strideOf("rgb", true)])
+      .toEqual([3, 1, 6, 2]);
+  });
+
+  it("BLUE reads five bits of height and three of whiteness from one byte", () => {
+    // Full height, no whiteness: the bass blue. Then half height, all white.
+    const { ctx, fills } = recorder();
+    drawColumns(ctx, new Uint8Array([0x1f, 0x0f | (7 << 5)]), 2, 100, "blue", false);
+    expect(fills).toHaveLength(2);
+    expect(fills[0]!.style).toBe("rgb(0,85,225)");
+    expect(fills[0]!.h).toBeCloseTo(100, 5);
+    expect(fills[1]!.style).toBe("rgb(245,234,214)");
+    expect(fills[1]!.h).toBeCloseTo((15 / 31) * 100, 5);
+  });
+
+  it("RGB reads PWV4's height and its three channels, the strongest at full", () => {
+    // Height 127 of 127; channels mid 40, high 10, low 80 → blue strongest.
+    const { ctx, fills } = recorder();
+    drawColumns(ctx, new Uint8Array([127, 200, 30, 40, 10, 80]), 1, 100, "rgb", false);
+    expect(fills).toHaveLength(1);
+    expect(fills[0]!.style).toBe("rgb(128,32,255)");
+    expect(fills[0]!.h).toBeCloseTo(100, 5);
+  });
+
+  it("RGB detail reads PWV5's rrrgggbbhhhhh00 word", () => {
+    // r 7, g 0, b 3, height 16: 111 000 011 10000 00.
+    const word = (7 << 13) | (0 << 10) | (3 << 7) | (16 << 2);
+    const { ctx, fills } = recorder();
+    drawColumns(ctx, new Uint8Array([word >> 8, word & 0xff]), 1, 62, "rgb", true);
+    expect(fills).toHaveLength(1);
+    expect(fills[0]!.style).toBe("rgb(255,0,109)");
+    expect(fills[0]!.h).toBeCloseTo((16 / 31) * 62, 5);
+  });
+
+  it("a half waveform grows from the floor, a centred one from the middle", () => {
+    const { ctx: a, fills: half } = recorder();
+    drawColumns(a, new Uint8Array([0x1f]), 1, 100, "blue", false, true);
+    expect(half[0]!.y + half[0]!.h).toBeCloseTo(100, 5);
+    const { ctx: b, fills: centred } = recorder();
+    drawColumns(b, new Uint8Array([0x10]), 1, 100, "blue", false);
+    expect(centred[0]!.y + centred[0]!.h / 2).toBeCloseTo(50, 5);
   });
 });

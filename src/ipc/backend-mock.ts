@@ -913,23 +913,52 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const row = all[index];
       if (!row || row.analysed === 0) return wait(new Uint8Array());
       const rnd = mulberry32(index + 1);
-      // `PWV6` is 1,200 columns for any track; `PWV7` is far denser.
-      const columns = kind === "bandsDetail" ? 12_000 : 1200;
-      const out = new Uint8Array(columns * 3);
+      // The overview tags are 1,200 columns for any track; the detail ones
+      // are far denser.
+      const detail = kind === "bandsDetail" || kind === "monoDetail" || kind === "colourDetail";
+      const columns = detail ? 12_000 : 1200;
+      // Each palette's tag in its own layout, from the same three bands, so
+      // a palette switch shows the same track drawn another way.
+      const stride = kind === "mono" || kind === "monoDetail" ? 1
+        : kind === "colour" ? 6
+          : kind === "colourDetail" ? 2
+            : 3;
+      const out = new Uint8Array(columns * stride);
       for (let i = 0; i < columns; i++) {
         const at = i / columns;
         // A shape with quiet intros and outros, so the overview reads as a
         // track rather than a block.
         const envelope = Math.min(1, Math.min(at, 1 - at) * 6) * (0.55 + 0.45 * Math.abs(Math.sin(at * Math.PI * 5)));
         const jitter = 0.75 + rnd() * 0.25;
-        out[i * 3] = Math.round(envelope * jitter * 110);
-        out[i * 3 + 1] = Math.round(envelope * jitter * 70);
+        const low = Math.round(envelope * jitter * 110);
+        const mid = Math.round(envelope * jitter * 70);
         // Highs are sparse, which is what puts the bright core in the middle.
-        out[i * 3 + 2] = Math.round(envelope * (rnd() > 0.7 ? rnd() * 45 : rnd() * 8));
+        const high = Math.round(envelope * (rnd() > 0.7 ? rnd() * 45 : rnd() * 8));
+        const height = Math.max(low, mid, high);
+        const base = i * stride;
+        if (stride === 3) {
+          out[base] = low;
+          out[base + 1] = mid;
+          out[base + 2] = high;
+        } else if (stride === 1) {
+          // Five bits of height, three of whiteness from how much is highs.
+          out[base] = (Math.round((height / 127) * 31) & 0x1f) | (Math.min(7, Math.round((high / 45) * 7)) << 5);
+        } else if (stride === 6) {
+          // Height, then red green blue as mid high low.
+          out[base] = height;
+          out[base + 3] = mid;
+          out[base + 4] = high;
+          out[base + 5] = low;
+        } else {
+          const word = (Math.min(7, mid >> 4) << 13) | (Math.min(7, high >> 3) << 10) | (Math.min(7, low >> 4) << 7)
+            | ((Math.round((height / 127) * 31) & 0x1f) << 2);
+          out[base] = word >> 8;
+          out[base + 1] = word & 0xff;
+        }
       }
       if (!window) return wait(out);
-      const first = Math.min(window.from, columns) * 3;
-      const len = Math.min(window.len, columns - window.from) * 3;
+      const first = Math.min(window.from, columns) * stride;
+      const len = Math.min(window.len, columns - window.from) * stride;
       return wait(out.subarray(first, first + Math.max(0, len)));
     },
 

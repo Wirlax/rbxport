@@ -21,6 +21,27 @@ export type WaveformRate = "high" | "medium" | "low";
 /** BEAT SYNC matches the tempo and the bar; BPM SYNC the tempo alone. */
 export type SyncType = "beat" | "bpm";
 
+/** View › Color › HOT CUE color: each cue its own, or every one the CDJ green. */
+export type HotCueColor = "colorful" | "cdj";
+
+/**
+ * View › Display Type › Beat Count Display: what the number beside the
+ * playhead counts — bars into the track, or bars or beats to the next memory
+ * cue, the way a CDJ's count-down does.
+ */
+export type BeatCount = "position" | "toMemoryBars" | "toMemoryBeats";
+
+/** Audio › Sample Rate, in hertz; what the device is asked to run at. */
+export type SampleRate = 44_100 | 48_000 | 88_200 | 96_000;
+export const SAMPLE_RATES: readonly SampleRate[] = [44_100, 48_000, 88_200, 96_000];
+
+/** Audio › Buffer size, in frames; the slider's stops. */
+export const BUFFER_SIZES: readonly number[] = [64, 128, 256, 512, 1024, 2048];
+
+/** Audio › Metronome: which click, and how loud. */
+export type MetronomeSound = 1 | 2 | 3;
+export type MetronomeVolume = "small" | "middle" | "large";
+
 /** The fraction of a beat the quantized cue snaps to. */
 export type QuantizeBeat = "1/1" | "1/2" | "1/4" | "1/8";
 
@@ -81,6 +102,27 @@ export interface ViewPreferences {
   vocalFull: boolean;
   /** Traffic Light: how far around the loaded track's key the browser lights. */
   trafficLight: TrafficLightReach;
+  /** Color › Waveform color: the deck's palette — BLUE, RGB or 3Band. */
+  waveformColor: WaveformColor;
+  /** Color › HOT CUE color. */
+  hotCueColor: HotCueColor;
+  /** Display Type › Beat Count Display. */
+  beatCount: BeatCount;
+  /**
+   * Display Type › Click on the waveform for PLAY and CUE. On, a click on
+   * the enlarged waveform moves the playhead there, sets the cue there when
+   * the deck is stopped, and plays; the window's switch is "Disable", so
+   * this is stored the way round the deck reads it.
+   */
+  waveformClick: boolean;
+}
+
+export interface AudioPreferences {
+  sampleRate: SampleRate;
+  /** Frames per device buffer; one of `BUFFER_SIZES`. */
+  bufferSize: number;
+  metronomeSound: MetronomeSound;
+  metronomeVolume: MetronomeVolume;
 }
 
 export interface AnalysisPreferences {
@@ -122,6 +164,7 @@ export interface AdvancedPreferences {
 
 export interface Preferences {
   view: ViewPreferences;
+  audio: AudioPreferences;
   analysis: AnalysisPreferences;
   djSystem: DjSystemPreferences;
   advanced: AdvancedPreferences;
@@ -151,6 +194,18 @@ export const DEFAULT_PREFERENCES: Preferences = {
     phraseLabels: true,
     vocalFull: true,
     trafficLight: "related3",
+    waveformColor: "3band",
+    hotCueColor: "colorful",
+    beatCount: "position",
+    waveformClick: true,
+  },
+  audio: {
+    // The capture shows 96000 Hz and 512 samples [OBS]; the rate is what
+    // that machine's device ran at, and 48000 is what most do.
+    sampleRate: 48_000,
+    bufferSize: 512,
+    metronomeSound: 2,
+    metronomeVolume: "large",
   },
   analysis: {
     auto: true,
@@ -221,6 +276,14 @@ const RATES: readonly WaveformRate[] = ["high", "medium", "low"];
 const WAVEFORM_COLORS: readonly WaveformColor[] = ["blue", "rgb", "3band"];
 const POSITIONS: readonly WaveformPosition[] = ["center", "left"];
 const SYNC_TYPES: readonly SyncType[] = ["beat", "bpm"];
+const HOT_CUE_COLORS: readonly HotCueColor[] = ["colorful", "cdj"];
+const BEAT_COUNTS: readonly BeatCount[] = ["position", "toMemoryBars", "toMemoryBeats"];
+const METRONOME_SOUNDS: readonly MetronomeSound[] = [1, 2, 3];
+const METRONOME_VOLUMES: readonly MetronomeVolume[] = ["small", "middle", "large"];
+
+function oneOfNumber<T extends number>(value: unknown, choices: readonly T[], fallback: T): T {
+  return choices.includes(value as T) ? (value as T) : fallback;
+}
 const REACHES: readonly TrafficLightReach[] = ["same", "related1", "related2", "related3"];
 
 type Raw<T> = Partial<Record<keyof T, unknown>>;
@@ -233,6 +296,7 @@ function part<T>(value: unknown): Raw<T> {
 export function sanitisePreferences(value: unknown): Preferences {
   const raw = part<Preferences>(value);
   const view = part<ViewPreferences>(raw.view);
+  const audio = part<AudioPreferences>(raw.audio);
   const analysis = part<AnalysisPreferences>(raw.analysis);
   const dj = part<DjSystemPreferences>(raw.djSystem);
   const advanced = part<AdvancedPreferences>(raw.advanced);
@@ -254,6 +318,16 @@ export function sanitisePreferences(value: unknown): Preferences {
       phraseLabels: bool(view.phraseLabels, d.view.phraseLabels),
       vocalFull: bool(view.vocalFull, d.view.vocalFull),
       trafficLight: oneOf(view.trafficLight, REACHES, d.view.trafficLight),
+      waveformColor: oneOf(view.waveformColor, WAVEFORM_COLORS, d.view.waveformColor),
+      hotCueColor: oneOf(view.hotCueColor, HOT_CUE_COLORS, d.view.hotCueColor),
+      beatCount: oneOf(view.beatCount, BEAT_COUNTS, d.view.beatCount),
+      waveformClick: bool(view.waveformClick, d.view.waveformClick),
+    },
+    audio: {
+      sampleRate: oneOfNumber(audio.sampleRate, SAMPLE_RATES, d.audio.sampleRate),
+      bufferSize: oneOfNumber(audio.bufferSize, BUFFER_SIZES, d.audio.bufferSize),
+      metronomeSound: oneOfNumber(audio.metronomeSound, METRONOME_SOUNDS, d.audio.metronomeSound),
+      metronomeVolume: oneOf(audio.metronomeVolume, METRONOME_VOLUMES, d.audio.metronomeVolume),
     },
     analysis: {
       auto: bool(analysis.auto, d.analysis.auto),

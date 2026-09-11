@@ -8,7 +8,10 @@
 import { memo, useEffect, useRef } from "react";
 import { getBackend } from "@/ipc/client";
 import type { RowCue } from "@/ipc/types";
-import { drawPreviewCues, renderPreview, WaveformCache, type RenderedWaveform } from "@/canvas";
+import {
+  drawPreviewCues, renderPreview, waveformKindOf, WaveformCache, type RenderedWaveform, type WavePalette,
+} from "@/canvas";
+import { usePreferences } from "@/store/usePreferences";
 
 /** Shared across every row: bounded, and released when entries fall out. */
 const cache = new WaveformCache(500);
@@ -70,6 +73,7 @@ async function load(
   width: number,
   height: number,
   dpr: number,
+  palette: WavePalette,
 ): Promise<RenderedWaveform | null> {
   const existing = inFlight.get(key);
   if (existing) return existing;
@@ -78,9 +82,9 @@ async function load(
     await acquire();
     try {
       const backend = await getBackend();
-      const data = await backend.trackWaveform(trackId, "bands");
+      const data = await backend.trackWaveform(trackId, waveformKindOf(palette, false));
       if (data.length === 0) return null;
-      const rendered = await renderPreview(data, width, height, dpr);
+      const rendered = await renderPreview(data, width, height, dpr, palette);
       if (rendered) cache.set(key, rendered);
       return rendered;
     } catch {
@@ -119,11 +123,14 @@ export const WaveformPreview = memo(function WaveformPreview({
   durationSec,
 }: WaveformPreviewProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // View › Color › Waveform color: the row follows the deck's palette, and a
+  // bitmap rendered in one palette is not the row in another.
+  const { waveformColor: palette, hotCueColor } = usePreferences().view;
 
   useEffect(() => {
     let cancelled = false;
     const dpr = window.devicePixelRatio || 1;
-    const key = WaveformCache.key(trackId, width, dpr);
+    const key = `${palette}:${WaveformCache.key(trackId, width, dpr)}`;
 
     const paint = (entry: { bitmap: CanvasImageSource }) => {
       const canvas = ref.current;
@@ -132,7 +139,9 @@ export const WaveformPreview = memo(function WaveformPreview({
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
-      drawPreviewCues(ctx, hotCues, durationSec * 1000, canvas.width, dpr);
+      // CDJ: every badge the fallback green, whatever the cue was given.
+      const badges = hotCueColor === "cdj" ? hotCues.map(([letter, at]) => [letter, at, null] as const) : hotCues;
+      drawPreviewCues(ctx, badges, durationSec * 1000, canvas.width, dpr);
     };
 
     const cached = cache.get(key);
@@ -144,7 +153,7 @@ export const WaveformPreview = memo(function WaveformPreview({
     // Nothing is asked for until the row has settled. A row a flick goes past
     // is unmounted before this fires, and the request is never made.
     const timer = window.setTimeout(() => {
-      void load(trackId, key, width, height, dpr).then((rendered) => {
+      void load(trackId, key, width, height, dpr, palette).then((rendered) => {
         if (rendered) paint(rendered);
       });
     }, SETTLE_MS);
@@ -153,7 +162,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [trackId, width, height, hotCues, durationSec]);
+  }, [trackId, width, height, hotCues, durationSec, palette, hotCueColor]);
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return (

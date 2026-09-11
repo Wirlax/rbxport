@@ -28,6 +28,32 @@ export type WaveBand = "overview" | "detail";
 export type HalfWaveform = boolean | "overlaid";
 
 /**
+ * Which of rekordbox's palettes: View › Color › Waveform color. Each reads
+ * its own tags, so the bytes a palette is handed are in that palette's
+ * layout — see `strideOf`.
+ */
+export type WavePalette = "blue" | "rgb" | "3band";
+
+/** Bytes per column of the tag a palette reads, at either resolution. */
+export function strideOf(palette: WavePalette, detail: boolean): number {
+  switch (palette) {
+    case "3band": return 3;
+    case "blue": return 1;
+    case "rgb": return detail ? 2 : 6;
+  }
+}
+
+/** The tag to ask the backend for, per palette and resolution. */
+export function waveformKindOf(palette: WavePalette, detail: boolean):
+  "bands" | "bandsDetail" | "mono" | "monoDetail" | "colour" | "colourDetail" {
+  switch (palette) {
+    case "3band": return detail ? "bandsDetail" : "bands";
+    case "blue": return detail ? "monoDetail" : "mono";
+    case "rgb": return detail ? "colourDetail" : "colour";
+  }
+}
+
+/**
  * The three bands, from `src/styles/tokens.css`.
  *
  * rekordbox colours a column by its frequency content: bass blue, mids amber,
@@ -199,6 +225,140 @@ export function drawBands(
 }
 
 /**
+ * One column of a waveform, whatever tag it came from: how tall, and what
+ * colour. `height` is 0 to 1 of full scale.
+ */
+interface Column {
+  height: number;
+  colour: string;
+}
+
+/**
+ * Reads a `PWAV` / `PWV3` column: five bits of height, three of whiteness,
+ * drawn as blue shading to near-white — the BLUE palette [DOC].
+ */
+function monoColumn(data: Uint8Array, at: number): Column {
+  const byte = data[at] ?? 0;
+  return {
+    height: (byte & HEIGHT_MASK) / HEIGHT_MASK,
+    colour: ramp([LOW, HIGH], (byte >> WHITENESS_SHIFT) / 7),
+  };
+}
+
+/**
+ * Reads a `PWV4` column: six bytes, of which the first is the height (0 to
+ * 127) and the last three the red, green and blue of the column; the RGB
+ * palette. The channels track the mid, high and low bands of `PWV6` in
+ * that order (r = +0.79, +0.75, +0.77 against them on the reference
+ * library [OBS], `cargo run -p rbl-anlz --example pwv4`), so bass is blue
+ * and the mids red, as rekordbox's RGB waveform shows them. Bytes 1 and 2
+ * are not read: the second runs against every band and the third with the
+ * mids, and neither is needed to draw what the CDJ draws [UNKNOWN].
+ */
+function colourColumn(data: Uint8Array, at: number): Column {
+  return {
+    height: (data[at] ?? 0) / 127,
+    colour: rgbOf(data[at + 3] ?? 0, data[at + 4] ?? 0, data[at + 5] ?? 0),
+  };
+}
+
+/**
+ * Reads a `PWV5` column: sixteen bits big-endian, `rrrgggbbhhhhh00` — three
+ * bits each of red, green and blue, then five of height [DOC], and the
+ * channels track the same bands as `PWV4`'s [OBS].
+ */
+function colourDetailColumn(data: Uint8Array, at: number): Column {
+  const word = ((data[at] ?? 0) << 8) | (data[at + 1] ?? 0);
+  return {
+    height: ((word >> 2) & 0x1f) / 0x1f,
+    colour: rgbOf((word >> 13) & 7, (word >> 10) & 7, (word >> 7) & 7),
+  };
+}
+
+/**
+ * A column's colour from its three channels, whatever their scale: the
+ * strongest channel is drawn at full, the others in proportion, so a
+ * quiet column is as saturated as a loud one and only its height differs —
+ * which is how the CDJ's own drawing of these bytes reads.
+ */
+function rgbOf(r: number, g: number, b: number): string {
+  const peak = Math.max(r, g, b);
+  if (peak === 0) return "rgb(0,0,0)";
+  const scale = 255 / peak;
+  return `rgb(${Math.round(r * scale)},${Math.round(g * scale)},${Math.round(b * scale)})`;
+}
+
+/**
+ * Draws a one-colour-per-column waveform — the BLUE and RGB palettes — the
+ * way `drawBands` draws the three-band one: centred by default, or a half
+ * from the bottom, with the same insets. The loudest column in each pixel's
+ * span is the one drawn, so a transient survives many columns to a pixel.
+ */
+export function drawColumns(
+  ctx: CanvasRenderingContext2D,
+  data: Uint8Array,
+  width: number,
+  height: number,
+  palette: "blue" | "rgb",
+  detail: boolean,
+  half: HalfWaveform = false,
+  inset: { top: number; bottom: number } = { top: 0, bottom: 0 },
+): void {
+  ctx.clearRect(0, 0, width, height);
+  const stride = strideOf(palette, detail);
+  const columns = Math.floor(data.length / stride);
+  if (columns === 0 || width <= 0 || height <= 0) return;
+  const read = palette === "blue" ? monoColumn : detail ? colourDetailColumn : colourColumn;
+
+  const top = Math.max(0, Math.min(inset.top, height / 2 - 1));
+  const bottom = Math.max(0, Math.min(inset.bottom, height / 2 - 1));
+  const usable = Math.max(1, height - top - bottom);
+  const floor = height - bottom;
+  const centre = top + usable / 2;
+  const step = columns / width;
+
+  for (let x = 0; x < width; x++) {
+    let peak: Column | null = null;
+    const first = Math.floor(x * step);
+    const last = Math.max(first + 1, Math.floor((x + 1) * step));
+    for (let i = first; i < last && i < columns; i++) {
+      const column = read(data, i * stride);
+      if (!peak || column.height > peak.height) peak = column;
+    }
+    if (!peak || peak.height <= 0) continue;
+    ctx.fillStyle = peak.colour;
+    if (half) {
+      const tall = Math.max(1, Math.min(peak.height, 1) * usable);
+      ctx.fillRect(x, floor - tall, 1, tall);
+    } else {
+      const reach = Math.max(0.5, Math.min(peak.height, 1) * (usable / 2));
+      ctx.fillRect(x, centre - reach, 1, reach * 2);
+    }
+  }
+}
+
+/**
+ * Draws a waveform in the palette asked for. The bytes must be the tag that
+ * palette reads (`waveformKindOf`).
+ */
+export function drawWave(
+  ctx: CanvasRenderingContext2D,
+  data: Uint8Array,
+  width: number,
+  height: number,
+  palette: WavePalette,
+  detail: boolean,
+  half: HalfWaveform = false,
+  inset: { top: number; bottom: number } = { top: 0, bottom: 0 },
+): void {
+  if (palette === "3band") {
+    drawBands(ctx, data, width, height, detail ? "detail" : "overview", half, inset);
+  } else {
+    drawColumns(ctx, data, width, height, palette, detail, half, inset);
+  }
+}
+
+/**
  * Draws a `PWAV` preview into a context.
  *
  * `data` is one byte per column. The canvas is scaled to fit however many
@@ -317,6 +477,7 @@ export async function renderPreview(
   width: number,
   height: number,
   dpr: number,
+  palette: WavePalette = "3band",
 ): Promise<RenderedWaveform | null> {
   const w = Math.max(1, Math.round(width * dpr));
   const h = Math.max(1, Math.round(height * dpr));
@@ -326,7 +487,7 @@ export async function renderPreview(
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   // The row preview: half height from the baseline, bands stacked.
-  drawBands(ctx, data, w, h, "overview", true);
+  drawWave(ctx, data, w, h, palette, false, true);
 
   // An ImageBitmap blits faster than a canvas element; fall back where the
   // browser lacks it rather than failing to draw at all.

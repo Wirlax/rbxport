@@ -53,6 +53,7 @@ import {
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
+import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { beatNudgeFor, beatWait, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
 import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
@@ -201,10 +202,15 @@ export interface PlayerProps {
  * var(--c-cue-hot))` falls back to the token green otherwise, so the default
  * lives in one place.
  */
-export function cueStyle(left: string | undefined, colour: string | null | undefined): React.CSSProperties {
+export function cueStyle(
+  left: string | undefined,
+  colour: string | null | undefined,
+  /** View › Color › HOT CUE color: CDJ draws every cue in the fallback green. */
+  hotCueColor: HotCueColor = "colorful",
+): React.CSSProperties {
   const style: Record<string, string> = {};
   if (left !== undefined) style.left = left;
-  if (colour) style["--cue-colour"] = colour;
+  if (colour && hotCueColor === "colorful") style["--cue-colour"] = colour;
   return style;
 }
 
@@ -253,6 +259,7 @@ export const CueMarkers = memo(function CueMarkers({
   window?: { from: number; to: number };
 }) {
   const tip = useTooltip();
+  const hotCueColor = usePreferences().view.hotCueColor;
   if (totalMs <= 0) return null;
   const from = window?.from ?? 0;
   const to = window?.to ?? 1;
@@ -281,7 +288,7 @@ export const CueMarkers = memo(function CueMarkers({
             className={cue.memory ? styles.memoryCue : styles.hotCue}
             data-band={band}
             data-cue={cue.memory ? "" : cue.letter}
-            style={cueStyle(left, cue.colour)}
+            style={cueStyle(left, cue.colour, hotCueColor)}
             title={tip(cue.memory ? "Memory cue" : `Hot cue ${cue.letter}`)}
             aria-hidden
           >
@@ -1577,7 +1584,7 @@ export const Player = memo(function Player({
                     type="button"
                     className={styles.pad}
                     data-set={cue ? "" : undefined}
-                    style={cueStyle(undefined, cue?.colour)}
+                    style={cueStyle(undefined, cue?.colour, viewPrefs.hotCueColor)}
                     aria-label={`Hot cue ${letter}`}
                     aria-pressed={cue !== null}
                     title={cue
@@ -1758,7 +1765,7 @@ export const Player = memo(function Player({
                   <span
                     className={styles.cueChip}
                     data-set={cue ? "" : undefined}
-                    style={cueStyle(undefined, cue?.colour)}
+                    style={cueStyle(undefined, cue?.colour, viewPrefs.hotCueColor)}
                   >
                     {letter}
                   </span>

@@ -137,13 +137,17 @@ export interface AppErrorDto {
 
 /** Which waveform to fetch for a track. */
 /**
- * Which waveform tag to read.
+ * Which waveform tag to read, one pair per palette of View › Color:
  *
- * `bands` and `bandsDetail` are the three-band ones rekordbox 7 draws — every
- * track checked in the reference library has them. The others are what a
- * library analysed before those existed would carry.
+ * - `bands` / `bandsDetail`: the three-band `PWV6` / `PWV7`, three bytes a
+ *   column, which 3Band draws — every track checked in the reference
+ *   library has them.
+ * - `mono` / `monoDetail`: `PWAV` / `PWV3`, one byte a column (five bits of
+ *   height, three of whiteness), which BLUE draws.
+ * - `colour` / `colourDetail`: `PWV4` / `PWV5`, six and two bytes a column,
+ *   which RGB draws.
  */
-export type WaveformKind = "bands" | "bandsDetail" | "preview" | "detail" | "colour";
+export type WaveformKind = "bands" | "bandsDetail" | "mono" | "monoDetail" | "colour" | "colourDetail";
 
 export interface Backend {
   librarySummary(): Promise<LibrarySummary>;

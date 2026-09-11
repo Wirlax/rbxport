@@ -309,9 +309,11 @@ pub async fn track_waveform(
         let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind.as_str() {
             "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
             "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
-            // Kept for a library analysed before the three-band tags existed.
-            "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
+            // The RGB palette's pair, six and two bytes a column.
+            "colourDetail" | "detail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV5", 2),
             "colour" | "color" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV4", 6),
+            // The BLUE palette's pair, one byte a column.
+            "monoDetail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV3", 1),
             _ => (dat, *b"PWAV", 1),
         };
 

@@ -1,11 +1,9 @@
 /**
- * View: Display Type and Layout. Captures docs/screenshots 9.46.53 to
- * 9.47.14 PM.
+ * View: Display Type, Layout and Color. Captures docs/screenshots 9.46.53
+ * to 9.47.18 PM.
  *
- * The Color tab is not here: it holds the light theme, the BLUE / RGB
- * waveform palettes and the hot cue palette, none of which this build draws
- * — the deck has one waveform renderer, the three-band one rekordbox 7
- * defaults to — and a tab of three dead choices is not a tab.
+ * Color's Appearance is drawn greyed on Dark: the light theme is not built,
+ * and a radio that cannot be chosen still says the choice exists.
  */
 import { BROWSE_SCALE_STEPS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
@@ -14,11 +12,12 @@ import {
   Button, Checkbox, Note, Radios, Section, Select, Separator, Slider, Sub, Toggle,
 } from "./controls";
 
-export type ViewTab = "display" | "layout";
+export type ViewTab = "display" | "layout" | "color";
 
 export const VIEW_TABS: readonly { id: ViewTab; label: string }[] = [
   { id: "display", label: "Display Type" },
   { id: "layout", label: "Layout" },
+  { id: "color", label: "Color" },
 ];
 
 export interface ViewPaneProps {
@@ -31,6 +30,56 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
   const { preferences, update } = usePreferencesContext();
   const view = preferences.view;
   const set = (patch: Partial<typeof view>) => update("view", patch);
+
+  if (tab === "color") {
+    return (
+      <>
+        <Section title="Appearance">
+          <Radios
+            label="Appearance"
+            dim
+            value="dark"
+            choices={[
+              { value: "dark", label: "Dark" },
+              { value: "light", label: "Light" },
+            ]}
+            onChange={() => {}}
+          />
+          <Note>The light theme is not built; the window is dark.</Note>
+        </Section>
+        <Section title="Waveform color">
+          {/* The three palettes rekordbox 7 draws, from the analysis files
+              it wrote: BLUE from the mono waveforms, RGB from the colour
+              ones, 3Band from the three-band ones. */}
+          <Radios
+            label="Waveform color"
+            value={view.waveformColor}
+            choices={[
+              { value: "blue", label: "BLUE" },
+              { value: "rgb", label: "RGB" },
+              { value: "3band", label: "3Band" },
+            ]}
+            onChange={(waveformColor) => set({ waveformColor })}
+          />
+        </Section>
+        <Section title="HOT CUE color">
+          <Select
+            label="HOT CUE color"
+            value={view.hotCueColor}
+            choices={[
+              { value: "colorful", label: "COLORFUL" },
+              { value: "cdj", label: "CDJ" },
+            ]}
+            onChange={(hotCueColor) => set({ hotCueColor })}
+          />
+          <Note>
+            COLORFUL draws each hot cue in the colour it was given; CDJ draws
+            every one in the green a CDJ shows them in.
+          </Note>
+        </Section>
+      </>
+    );
+  }
 
   if (tab === "layout") {
     return (

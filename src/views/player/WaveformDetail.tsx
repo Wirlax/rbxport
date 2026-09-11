@@ -12,17 +12,19 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { drawBands, type HalfWaveform } from "@/canvas";
+import { drawWave, strideOf, waveformKindOf, type HalfWaveform } from "@/canvas";
 import { getBackend } from "@/ipc/client";
+import type { WaveformKind } from "@/ipc/types";
 import { backingSize } from "@/lib/canvasSize";
 import { waveSlice } from "@/lib/player";
+import { usePreferences } from "@/store/usePreferences";
 
 /** Raw waveform bytes per track. Small — a few hundred bytes each. */
 const bytesByTrack = new Map<string, Uint8Array>();
 /** In-flight fetches, shared so StrictMode's double effect does not double-fetch. */
 const inFlight = new Map<string, Promise<Uint8Array>>();
 
-async function load(trackId: string, kind: "bands" | "bandsDetail"): Promise<Uint8Array> {
+async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
   const key = `${trackId}:${kind}`;
   const cached = bytesByTrack.get(key);
   if (cached) return cached;
@@ -69,17 +71,19 @@ export const WaveformDetail = memo(function WaveformDetail({
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<Uint8Array | null>(null);
+  // View › Color › Waveform color: each palette reads its own tags.
+  const palette = usePreferences().view.waveformColor;
 
   useEffect(() => {
     let live = true;
     setData(null);
-    void load(trackId, detail ? "bandsDetail" : "bands").then((bytes) => {
+    void load(trackId, waveformKindOf(palette, detail)).then((bytes) => {
       if (live) setData(bytes);
     });
     return () => {
       live = false;
     };
-  }, [trackId, detail]);
+  }, [trackId, detail, palette]);
 
   // A layout effect, so the redraw lands before the frame that shows it. The
   // strip that holds this is slid by a transform written in the parent's own
@@ -100,19 +104,19 @@ export const WaveformDetail = memo(function WaveformDetail({
     // edge. The overhang is drawn as nothing rather than as a stretched copy
     // of the first bar. Both tags cover the whole track, so a window into one
     // is a slice of its columns rather than a second fetch.
-    const { first, last, x0, width: span_ } = waveSlice(progress, span, data.length, w);
+    const { first, last, x0, width: span_ } = waveSlice(progress, span, data.length, w, strideOf(palette, detail));
     // The inset is given in CSS pixels; the canvas is in device pixels.
     const scale = h / Math.max(height, 1);
     ctx.clearRect(0, 0, w, h);
     if (last <= first || span_ < 1) return;
     ctx.save();
     ctx.translate(x0, 0);
-    drawBands(ctx, data.subarray(first, last), span_, h, detail ? "detail" : "overview", half, {
+    drawWave(ctx, data.subarray(first, last), span_, h, palette, detail, half, {
       top: inset.top * scale,
       bottom: inset.bottom * scale,
     });
     ctx.restore();
-  }, [data, progress, span, width, height, half, detail, inset.top, inset.bottom]);
+  }, [data, progress, span, width, height, half, detail, palette, inset.top, inset.bottom]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });
