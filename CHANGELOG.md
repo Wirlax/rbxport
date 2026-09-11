@@ -5,7 +5,7 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
-## [0.5.4] — 2026-09-11
+## [0.6.0] — 2026-09-11
 
 ### Fixed
 - A rating set in the app is stored as the number of stars, which is how
