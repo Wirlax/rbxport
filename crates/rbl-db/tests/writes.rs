@@ -688,6 +688,26 @@ fn the_library_is_backed_up_before_the_first_write_and_only_once() {
         writer.create_playlist(&format!("More {i}"), ROOT).unwrap();
     }
     assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "once per session");
+    assert!(writer.backed_up());
+}
+
+#[test]
+fn a_writer_told_the_session_is_backed_up_takes_no_backup_of_its_own() {
+    // The app opens a writer per edit; the second edit of a session must not
+    // copy the library again.
+    let dir = tempfile::tempdir().unwrap();
+    let location = fixture::build(dir.path(), Shape::default()).unwrap();
+    let backups = dir.path().join("backups");
+    let mut first = Writer::open(location.clone(), &backups).unwrap();
+    first.create_playlist("First", ROOT).unwrap();
+    drop(first);
+    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
+
+    let mut second = Writer::open(location, &backups).unwrap();
+    assert!(!second.backed_up());
+    second.mark_backed_up();
+    second.create_playlist("Second", ROOT).unwrap();
+    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "the session's backup stands");
 }
 
 #[test]

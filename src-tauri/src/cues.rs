@@ -140,11 +140,14 @@ async fn edit_cues<R: tauri::Runtime>(
     let library = state.library()?;
     let state = Arc::clone(&state);
     let change = blocking(name, move || {
-        let mut writer = state.open_writer().map_err(write_error)?;
-        let change = apply(&mut writer, edit)?;
-        // The writer holds the file read-write; it is dropped before the
-        // read-only handle below opens, as an edit in `commands.rs` is.
-        drop(writer);
+        // `apply` answers with the interface's error; the writer's own
+        // refusals are carried out of the closure and mapped the same way.
+        let change = match state.write(|writer| Ok(apply(writer, edit))) {
+            Ok(applied) => applied?,
+            Err(refused) => return Err(write_error(refused)),
+        };
+        // The writer held the file read-write; `write` has closed it before
+        // the read-only handle below opens, as an edit in `commands.rs` is.
         let db = state.open_read_only().map_err(write_error)?;
         rbl_index::reload_cues_of(&db, &library, &change.track)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;

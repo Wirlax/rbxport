@@ -215,6 +215,20 @@ impl Writer {
         })
     }
 
+    /// Tells the writer the session already holds a backup, so this one
+    /// takes none. A writer is opened per edit and dropped after it (rekordbox
+    /// must be able to take the file back between edits), so "once per
+    /// session" is the caller's to keep: without this every rating click
+    /// copied the whole library again.
+    pub fn mark_backed_up(&mut self) {
+        self.backup_taken = true;
+    }
+
+    /// Whether a backup has been taken, by this writer or as told to it.
+    pub fn backed_up(&self) -> bool {
+        self.backup_taken
+    }
+
     pub fn library(&self) -> &Library {
         &self.library
     }

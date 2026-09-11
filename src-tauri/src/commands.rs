@@ -422,7 +422,7 @@ pub(crate) enum Touched {
 /// Opens the library for writing, runs one action, and reloads the index.
 ///
 /// The writer is opened per action rather than held (see
-/// [`AppState::open_writer`]); opening is cheap next to the user's own
+/// [`AppState::write`]); opening is cheap next to the user's own
 /// thinking time between edits.
 pub(crate) async fn edit<R: tauri::Runtime, F>(
     app: tauri::AppHandle<R>,
@@ -436,12 +436,7 @@ where
 {
     let state = Arc::clone(&state);
     let writing = Arc::clone(&state);
-    let changed = blocking(name, move || {
-        let mut writer = writing.open_writer().map_err(write_error)?;
-        action(&mut writer).map_err(write_error)?;
-        Ok(())
-    })
-    .await;
+    let changed = blocking(name, move || writing.write(action).map_err(write_error)).await;
     changed?;
     match touched {
         Touched::Playlists => reload_playlists(app, state).await,
@@ -1274,30 +1269,33 @@ pub async fn import_files<R: tauri::Runtime>(
     let state_for_edit = Arc::clone(&state);
     let writing = Arc::clone(&state);
     let report = blocking("import_files", move || {
-        let mut writer = writing.open_writer().map_err(write_error)?;
-        let mut imported = 0_u32;
-        let mut skipped = Vec::new();
-        let mut tracks = Vec::new();
-        for path in &paths {
-            let file = std::path::Path::new(path);
-            match writer.import_file(file) {
-                Ok(id) => {
-                    imported += 1;
-                    tracks.push(crate::dto::ImportedTrackDto {
-                        id,
-                        title: file
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                    });
+        writing
+            .write(|writer| {
+                let mut imported = 0_u32;
+                let mut skipped = Vec::new();
+                let mut tracks = Vec::new();
+                for path in &paths {
+                    let file = std::path::Path::new(path);
+                    match writer.import_file(file) {
+                        Ok(id) => {
+                            imported += 1;
+                            tracks.push(crate::dto::ImportedTrackDto {
+                                id,
+                                title: file
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
+                            });
+                        }
+                        Err(rbl_db::DbError::WriteRefused(reason)) => {
+                            skipped.push(format!("{path}: {reason}"));
+                        }
+                        Err(other) => return Err(other),
+                    }
                 }
-                Err(rbl_db::DbError::WriteRefused(reason)) => {
-                    skipped.push(format!("{path}: {reason}"));
-                }
-                Err(other) => return Err(write_error(other)),
-            }
-        }
-        Ok(ImportReportDto { imported, skipped, tracks })
+                Ok(ImportReportDto { imported, skipped, tracks })
+            })
+            .map_err(write_error)
     })
     .await?;
 

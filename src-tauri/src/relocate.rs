@@ -116,19 +116,22 @@ pub async fn auto_relocate<R: tauri::Runtime>(
         let roots: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
         let found = index_folders(&roots);
 
-        let mut writer = writing.open_writer().map_err(write_error)?;
-        let mut relocated = 0_u32;
-        let mut unresolved = 0_u32;
-        for (id, name) in &missing {
-            match found.get(name) {
-                Some(path) => {
-                    writer.relocate(id, path).map_err(write_error)?;
-                    relocated += 1;
+        writing
+            .write(|writer| {
+                let mut relocated = 0_u32;
+                let mut unresolved = 0_u32;
+                for (id, name) in &missing {
+                    match found.get(name) {
+                        Some(path) => {
+                            writer.relocate(id, path)?;
+                            relocated += 1;
+                        }
+                        None => unresolved += 1,
+                    }
                 }
-                None => unresolved += 1,
-            }
-        }
-        Ok(RelocateReportDto { relocated, unresolved })
+                Ok(RelocateReportDto { relocated, unresolved })
+            })
+            .map_err(write_error)
     })
     .await?;
 

@@ -356,6 +356,23 @@ fn every_edit_bumps_the_generation_and_tells_the_interface() {
 }
 
 #[test]
+fn the_library_is_backed_up_once_a_session_not_once_an_edit() {
+    let s = shell();
+    let backups = s._dir.path().join("backups");
+    assert!(!backups.exists());
+
+    run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 3)).unwrap();
+    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "the first write is preceded by a copy");
+
+    // Every kind of edit opens its own writer; none of them copies again.
+    run(commands::set_track_comment(s.handle(), s.state(), track_id(0), "x".into())).unwrap();
+    run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into())).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track_id(0), CueKind::Memory, 1_000)).unwrap();
+    run(details::set_track_field(s.handle(), s.state(), track_id(0), "title".into(), "T".into())).unwrap();
+    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "once a session");
+}
+
+#[test]
 fn an_edit_closes_the_views_that_were_open_over_the_old_library() {
     let s = shell();
     let (view, _) = s.open(playlist_spec(&playlist_id(0)));

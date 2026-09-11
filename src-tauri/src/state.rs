@@ -22,6 +22,10 @@ pub struct AppState {
     inner: RwLock<Inner>,
     /// Where backups go before the first write of a session.
     backup_dir: std::path::PathBuf,
+    /// Whether this session has backed the library up. Kept here because a
+    /// writer lives for one edit; the writer is told, so the second edit does
+    /// not copy the library again.
+    backed_up: std::sync::atomic::AtomicBool,
     /// A read-only handle to the database for point reads, opened on first
     /// use. Opening costs 50 ms on the reference library — the `SQLCipher`
     /// key derivation — and a point read under 1 ms, so the handle is kept
@@ -72,6 +76,7 @@ impl AppState {
         Self {
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
             backup_dir: backup_dir.into(),
+            backed_up: std::sync::atomic::AtomicBool::new(false),
             reader: parking_lot::Mutex::new(None),
         }
     }
@@ -95,19 +100,34 @@ impl AppState {
         rbl_db::Library::open(location, rbl_db::OpenMode::ReadOnly)
     }
 
-    /// The library open for writing, backed up first if this is the session's
-    /// first write. Refused while rekordbox is running.
+    /// Opens the library for writing, runs one edit against it, and closes
+    /// it. Refused while rekordbox is running.
     ///
     /// Opened per edit rather than held: holding it would keep the database
     /// open read-write for the life of the app, and rekordbox launching
-    /// behind us must be able to take the file back.
+    /// behind us must be able to take the file back. The session's backup is
+    /// taken before the first write and not again: the writer is told when
+    /// one exists, and remembered here when it takes one.
     ///
     /// Blocking — call from `spawn_blocking`, never from a command body.
-    pub fn open_writer(&self) -> Result<rbl_db::write::Writer, rbl_db::DbError> {
+    pub fn write<T>(
+        &self,
+        edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
+    ) -> Result<T, rbl_db::DbError> {
+        use std::sync::atomic::Ordering;
         let location = self
             .location()
             .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
-        rbl_db::write::Writer::open(location, self.backup_dir.clone())
+        let mut writer = rbl_db::write::Writer::open(location, self.backup_dir.clone())?;
+        if self.backed_up.load(Ordering::SeqCst) {
+            writer.mark_backed_up();
+        }
+        let outcome = edit(&mut writer);
+        // Whatever the edit did, a backup taken is a backup that stands.
+        if writer.backed_up() {
+            self.backed_up.store(true, Ordering::SeqCst);
+        }
+        outcome
     }
 
     /// Runs one read against the database, opening the handle if needed.
@@ -149,6 +169,10 @@ impl AppState {
         // would be a deadlock waiting for a reload during a point read.
         *self.reader.lock() = None;
         let mut inner = self.inner.write();
+        // A different file is a different session's worth of backing up.
+        if inner.location.as_ref().map(|l| &l.master_db) != Some(&location.master_db) {
+            self.backed_up.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         inner.library = Some(Arc::new(library));
         inner.location = Some(location);
         inner.read_only = read_only;
