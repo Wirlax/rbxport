@@ -315,14 +315,46 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
 
   /** The rows a source and query leave, before sorting and before the filter. */
+  // The mock owns the tree and the playlists' contents the same way Rust
+  // does, so the edit flows can be driven end to end in `pnpm dev:mock` and
+  // in Playwright without a database.
+  let generation = 1;
+  /**
+   * What a playlist holds once anything has been done to it, as track ids in
+   * playing order. A playlist nobody has touched is not here and shows its
+   * seeded slice; one made here starts empty, as a new one does.
+   */
+  const membership = new Map<string, string[]>();
+  let nextId = 1;
+  const indexOfId = new Map(all.map((row, i) => [row.id, i] as const));
+
+  /** The deterministic slice a list shows before it is edited. */
+  const seededMembers = (id: string): number[] => {
+    const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+    const size = 14 + (seed % 30);
+    return Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
+  };
+  /** A playlist's tracks as ids, seeding the membership on first edit. */
+  const membersOf = (playlist: string): string[] => {
+    const held = membership.get(playlist);
+    if (held) return held;
+    const seeded = seededMembers(playlist).map((i) => all[i]?.id ?? "");
+    membership.set(playlist, seeded);
+    return seeded;
+  };
+  /** The count the tree and the export report carry. */
+  const playlistSize = (id: string): number =>
+    membership.get(id)?.length ?? mockPlaylistSize(id);
+
   const candidatesFor = (spec: ViewSpec): number[] => {
-    // A playlist or a history session shows a deterministic slice, so the
-    // mock stays stable across runs.
     let candidates: number[];
-    if (spec.source.kind === "playlist" || spec.source.kind === "history") {
-      const seed = [...spec.source.id].reduce((a, c) => a + c.charCodeAt(0), 0);
-      const size = 14 + (seed % 30);
-      candidates = Array.from({ length: size }, (_, i) => (seed * 37 + i * 101) % trackCount);
+    if (spec.source.kind === "playlist") {
+      const held = membership.get(spec.source.id);
+      candidates = held
+        ? held.map((id) => indexOfId.get(id)).filter((i): i is number => i !== undefined)
+        : seededMembers(spec.source.id);
+    } else if (spec.source.kind === "history") {
+      candidates = seededMembers(spec.source.id);
     } else {
       candidates = Array.from({ length: trackCount }, (_, i) => i);
     }
@@ -339,12 +371,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const folderViews = new Map<number, RowDto[]>();
   let nextViewId = 1;
 
-  // The mock owns the tree the same way Rust does, so the edit flows can be
-  // driven end to end in `pnpm dev:mock` and in Playwright without a database.
-  let generation = 1;
-  const membership = new Map<string, string[]>();
-  let nextId = 1;
-
   const listeners = new Set<(generation: number) => void>();
 
   /**
@@ -353,11 +379,33 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    */
   const bump = (): Promise<number> => {
     generation += 1;
+    // The counts the tree shows follow the edit, as the re-read tree does.
+    for (const node of tree) {
+      if (node.kind === "playlist") node.childCount = playlistSize(node.id);
+    }
     for (const listener of listeners) listener(generation);
     return wait(generation);
   };
 
   const findNode = (id: string) => tree.find((n) => n.id === id);
+
+  /**
+   * Puts a new node where the re-read tree would show it: last under its
+   * parent, or last among the top-level playlists — before the Histories,
+   * whose collapsed heading would otherwise hide anything appended after it.
+   */
+  const insertUnder = (parent: string, node: TreeNode) => {
+    let at: number;
+    if (parent === TREE_ROOT) {
+      at = tree.findIndex((n) => n.depth === 0 && n.id !== "all" && n.id !== "playlists");
+    } else {
+      const start = tree.findIndex((n) => n.id === parent);
+      const depth = tree[start]?.depth ?? 0;
+      at = start + 1;
+      while (at < tree.length && (tree[at]?.depth ?? 0) > depth) at += 1;
+    }
+    tree.splice(at < 0 ? tree.length : at, 0, node);
+  };
 
   /**
    * Whether the library has "finished loading".
@@ -430,18 +478,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return fresh;
   };
 
-  /** How many tracks a playlist holds — the same count `openView` shows. */
-  const playlistSize = mockPlaylistSize;
-
   const edits: Edits = {
     createPlaylist: (name, parent) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
-      tree.push({ id: `made-${nextId++}`, name, kind: "playlist", depth });
+      const id = `made-${nextId++}`;
+      membership.set(id, []);
+      insertUnder(parent, { id, name, kind: "playlist", depth, childCount: 0 });
       return bump();
     },
     createFolder: (name, parent) => {
       const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
-      tree.push({ id: `made-${nextId++}`, name, kind: "folder", depth, expanded: true });
+      insertUnder(parent, { id: `made-${nextId++}`, name, kind: "folder", depth, expanded: true });
       return bump();
     },
     renamePlaylist: (id, name) => {
@@ -463,18 +510,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     addTracksToPlaylist: (playlist, tracks) => {
       // The real backend refuses while Rekordbox holds the database; the mock
       // never does, so the happy path is what `pnpm dev:mock` exercises.
-      const current = membership.get(playlist) ?? [];
+      const current = membersOf(playlist);
       for (const track of tracks) if (!current.includes(track)) current.push(track);
       membership.set(playlist, current);
       return bump();
     },
     removeTracksFromPlaylist: (playlist, tracks) => {
-      const current = (membership.get(playlist) ?? []).filter((t) => !tracks.includes(t));
+      const current = membersOf(playlist).filter((t) => !tracks.includes(t));
       membership.set(playlist, current);
       return bump();
     },
     reorderPlaylist: (playlist, tracks) => {
-      const current = membership.get(playlist) ?? [];
+      const current = membersOf(playlist);
       // Mirrors the backend: tracks not named keep their place after the rest,
       // so a partial order cannot silently drop any.
       const named = tracks.filter((t) => current.includes(t));

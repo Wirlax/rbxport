@@ -1,0 +1,187 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Managing playlists from the interface: made from the tree's menu, filled
+ * by a drop, emptied from the track's menu, and deleted again. The mock
+ * backend owns the tree and the memberships the way Rust does, so what the
+ * list shows after each step is the backend's answer, not the view's guess.
+ */
+
+/** The mock stands in for a library rekordbox holds unless told otherwise. */
+async function open(page: Page) {
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+}
+
+function item(page: Page, name: string): Locator {
+  return page.getByRole("treeitem").filter({ hasText: name }).first();
+}
+
+/** The indent the tree draws for a node, which is how deep it is. */
+async function depthOf(node: Locator): Promise<number> {
+  const padding = await node.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+  return (padding - 14) / 20;
+}
+
+async function chooseFromTreeMenu(page: Page, node: Locator, entry: string) {
+  await node.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: /^(Playlist|Folder)$/ });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: entry, exact: true }).click();
+  await expect(menu).toBeHidden();
+}
+
+const rows = (page: Page) => page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+
+test("a playlist made from another's menu lands in the same folder, empty", async ({ page }) => {
+  await open(page);
+  const sibling = item(page, "Melodic Vox");
+  const siblingDepth = await depthOf(sibling);
+
+  await chooseFromTreeMenu(page, sibling, "Create New Playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New playlist.");
+
+  // rekordbox's default name, beside the playlist the menu was opened on
+  // rather than at the top of the tree.
+  const made = item(page, "New playlist");
+  await expect(made).toBeVisible();
+  expect(await depthOf(made)).toBe(siblingDepth);
+
+  await made.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
+  await expect(rows(page)).toHaveCount(0);
+});
+
+test("a folder made from a folder's menu goes inside it", async ({ page }) => {
+  await open(page);
+  const folder = item(page, "CURRENT");
+  const folderDepth = await depthOf(folder);
+
+  await chooseFromTreeMenu(page, folder, "Create New Folder");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New folder.");
+  const made = item(page, "New folder");
+  await expect(made).toBeVisible();
+  expect(await depthOf(made)).toBe(folderDepth + 1);
+});
+
+test("a track dropped on a new playlist is in it, and its menu takes it out again", async ({
+  page,
+}) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Hardstyle"), "Create New Playlist");
+  const made = item(page, "New playlist");
+  await expect(made).toBeVisible();
+
+  // From All Tracks, the second row, so the title is known before the drop.
+  const source = rows(page).nth(1);
+  const title = (await source.locator('[data-col="title"]').innerText()).trim();
+  await source.dragTo(made);
+  await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to New playlist.");
+  // Dropping it again changes nothing: a playlist holds a track once.
+  await source.dragTo(made);
+  await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to New playlist.");
+
+  await made.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (1 Tracks)");
+  const only = rows(page).first();
+  await expect(only.locator('[data-col="title"]')).toHaveText(title);
+  // Numbered by its place in the playlist, not the collection.
+  await expect(only.locator('[data-col="trackNo"]')).toHaveText("1");
+
+  // Out again from the track's own menu, which is live only inside a playlist.
+  await rows(page).first().locator('[data-col="title"]').click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Track" });
+  const remove = menu.getByRole("menuitem", { name: "Remove from Playlist" });
+  await expect(remove).toBeEnabled();
+  await remove.click();
+  await expect(page.getByRole("contentinfo")).toContainText("Removed 1 track.");
+  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
+});
+
+test("removing from an existing playlist shortens it by exactly the selection", async ({ page }) => {
+  await open(page);
+  const playlist = item(page, "Eurodance");
+  await playlist.click();
+  const title = page.getByTestId("browser-title");
+  await expect(title).toContainText("Eurodance (");
+  const before = Number(/\((\d+) Tracks\)/.exec(await title.innerText())?.[1]);
+  expect(before).toBeGreaterThan(2);
+
+  const first = rows(page).first();
+  const second = rows(page).nth(1);
+  const third = (await rows(page).nth(2).locator('[data-col="title"]').innerText()).trim();
+
+  // Two rows, shift-click, and a right-click on the selection keeps it so
+  // the menu acts on both — not on the one under the pointer.
+  await first.locator('[data-col="title"]').click();
+  await second.locator('[data-col="title"]').click({ modifiers: ["Shift"] });
+  await expect(page.getByText("Selected: 2 Tracks")).toBeVisible();
+  await second.locator('[data-col="title"]').click({ button: "right" });
+  await expect(page.getByText("Selected: 2 Tracks")).toBeVisible();
+  await page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Remove from Playlist" }).click();
+
+  await expect(page.getByRole("contentinfo")).toContainText("Removed 2 tracks.");
+  await expect(title).toHaveText(`Eurodance (${before - 2} Tracks)`);
+  // What was third is first: the two above it went, and nothing else moved.
+  await expect(rows(page).first().locator('[data-col="title"]')).toHaveText(third);
+  await expect(rows(page).first().locator('[data-col="trackNo"]')).toHaveText("1");
+});
+
+test("deleting a playlist takes it out of the tree and the view moves off it", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Create New Playlist");
+  const made = item(page, "New playlist");
+  await made.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
+
+  await chooseFromTreeMenu(page, made, "Delete Playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("Deleted New playlist.");
+  await expect(page.getByRole("treeitem").filter({ hasText: "New playlist" })).toHaveCount(0);
+  // The selection does not stay on a list that no longer exists.
+  await expect(page.getByTestId("browser-title")).not.toContainText("New playlist");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // A playlist that was there from the start goes the same way.
+  await chooseFromTreeMenu(page, item(page, "Drum and Bass"), "Delete Playlist");
+  await expect(page.getByRole("treeitem").filter({ hasText: "Drum and Bass" })).toHaveCount(0);
+  await expect(item(page, "Eurodance")).toBeVisible();
+});
+
+test("a folder's menu deletes the folder", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "CURRENT"), "Create New Folder");
+  const made = item(page, "New folder");
+  await expect(made).toBeVisible();
+  await made.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Folder" });
+  await expect(menu.getByRole("menuitem", { name: "Delete Folder" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Delete Folder" }).click();
+  await expect(page.getByRole("treeitem").filter({ hasText: "New folder" })).toHaveCount(0);
+});
+
+test("with the library protected, the tree menu will not create or delete", async ({ page }) => {
+  await open(page);
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "Advanced" }).click();
+  await dialog.getByRole("tab", { name: "Browse", exact: true }).click();
+  await dialog.getByRole("switch", { name: "Protect library edit." }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("contentinfo")).toContainText(/read-only/i);
+
+  await item(page, "Melodic Vox").click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Playlist" });
+  for (const label of ["Create New Playlist", "Create New Folder", "Delete Playlist"]) {
+    await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeDisabled();
+  }
+  // Reading is still fine.
+  await expect(menu.getByRole("menuitem", { name: "Export Playlist" })).toBeEnabled();
+  await page.keyboard.press("Escape");
+
+  await item(page, "Melodic Vox").click();
+  await rows(page).first().locator('[data-col="title"]').click({ button: "right" });
+  await expect(
+    page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Remove from Playlist" }),
+  ).toBeDisabled();
+});
