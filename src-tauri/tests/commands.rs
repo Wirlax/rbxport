@@ -282,6 +282,7 @@ fn a_playlist_is_made_filled_reordered_renamed_moved_and_deleted() {
     run(commands::create_folder(s.handle(), s.state(), "Gigs".into(), ROOT.into())).unwrap();
     let gigs = s.node("Gigs");
     assert_eq!(gigs.depth, 1);
+    assert_eq!((gigs.kind, gigs.child_count), ("folder", Some(0)), "a folder before anything is in it");
     run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), gigs.id.clone())).unwrap();
     let friday = s.node("Friday");
     assert_eq!(friday.depth, 2, "inside the folder");

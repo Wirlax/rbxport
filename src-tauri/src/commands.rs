@@ -168,14 +168,18 @@ fn push_lists(
         }
         let under = children.get(index).map_or(0, Vec::len);
         let members = lists.members.get(index).map_or(0, Vec::len);
+        // A folder by its attribute, or by what is under it: a history year
+        // is a folder only in the second sense, an empty playlist folder only
+        // in the first.
+        let folder = lists.is_folder(index) || under > 0;
         nodes.push(TreeNodeDto {
             id: lists.ids.get(index).copied().unwrap_or(0).to_string(),
             name: lists.name(index).to_owned(),
-            kind: if under > 0 { kinds.folder } else { kinds.leaf },
+            kind: if folder { kinds.folder } else { kinds.leaf },
             depth,
-            expanded: if under > 0 { Some(depth < open_to) } else { None },
+            expanded: if folder { Some(depth < open_to) } else { None },
             child_count: Some(
-                u32::try_from(if under > 0 { under } else { members }).unwrap_or(u32::MAX),
+                u32::try_from(if folder { under } else { members }).unwrap_or(u32::MAX),
             ),
         });
         if let Some(below) = children.get(index) {

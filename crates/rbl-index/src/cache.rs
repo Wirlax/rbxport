@@ -39,8 +39,10 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 ///
 /// 2 added the My Tag categories. 3 added the cues: formats 1 and 2 left them
 /// out, so every start that hit the snapshot — which is most of them — drew a
-/// player with no cue markers and an empty HOT CUE list.
-pub const FORMAT: u32 = 3;
+/// player with no cue markers and an empty HOT CUE list. 4 added whether each
+/// playlist is a folder, and the histories: formats 1 to 3 left them out, so
+/// every start that hit the snapshot had no Histories section at all.
+pub const FORMAT: u32 = 4;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -210,16 +212,9 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
         w.interner(interner);
     }
 
-    let playlists = library.playlists();
-    w.u64s(&playlists.ids);
-    w.strings(&playlists.names);
-    w.u32s(&playlists.parent);
-    w.u32s(&playlists.seq);
-    w.u64(playlists.members.len() as u64);
-    for members in &playlists.members {
-        w.u32s(members);
-    }
-    drop(playlists);
+    write_lists(&mut w, &library.playlists());
+    // Format 4: the histories, the same shape as the playlists.
+    write_lists(&mut w, &library.histories());
 
     // Format 2: the My Tag categories, a string column per category whose
     // first row is the category's own name.
@@ -390,18 +385,8 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.labels = r.interner()?;
     lib.keys = r.interner()?;
 
-    let mut playlists = Playlists {
-        ids: r.u64s()?,
-        names: r.strings()?,
-        parent: r.u32s()?,
-        seq: r.u32s()?,
-        members: Vec::new(),
-    };
-    let lists = r.count(8)?;
-    playlists.members = Vec::with_capacity(lists);
-    for _ in 0..lists {
-        playlists.members.push(r.u32s()? as Vec<Row>);
-    }
+    let playlists = read_lists(&mut r)?;
+    let histories = read_lists(&mut r)?;
 
     let categories = r.count(8)?;
     let mut my_tags = Vec::with_capacity(categories);
@@ -460,6 +445,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.set_count(count);
     lib.set_cues(Cues::from_parts(cues, cue_index));
     lib.set_playlists(playlists);
+    lib.set_histories(histories);
     lib.set_my_tags(my_tags);
     // Derived, and cheap: rebuilding removes any chance of a stored rank array
     // disagreeing with the columns it claims to order.
@@ -486,4 +472,34 @@ pub fn save(path: &Path, library: &Library, fingerprint: Fingerprint) -> std::io
 #[must_use]
 pub fn load(path: &Path, fingerprint: Fingerprint) -> Option<Library> {
     decode(&std::fs::read(path).ok()?, fingerprint)
+}
+
+/// One list tree — the playlists or the histories — in the snapshot.
+fn write_lists(w: &mut Writer, lists: &Playlists) {
+    w.u64s(&lists.ids);
+    w.strings(&lists.names);
+    w.u32s(&lists.parent);
+    w.u32s(&lists.seq);
+    w.bytes(&lists.folder.iter().map(|&f| u8::from(f)).collect::<Vec<u8>>());
+    w.u64(lists.members.len() as u64);
+    for members in &lists.members {
+        w.u32s(members);
+    }
+}
+
+fn read_lists(r: &mut Reader<'_>) -> Option<Playlists> {
+    let mut lists = Playlists {
+        ids: r.u64s()?,
+        names: r.strings()?,
+        parent: r.u32s()?,
+        seq: r.u32s()?,
+        folder: r.bytes()?.into_iter().map(|b| b == 1).collect(),
+        members: Vec::new(),
+    };
+    let count = r.count(8)?;
+    lists.members = Vec::with_capacity(count);
+    for _ in 0..count {
+        lists.members.push(r.u32s()? as Vec<Row>);
+    }
+    Some(lists)
 }

@@ -473,7 +473,7 @@ fn read_lists(
     }
 
     let mut stmt = conn.prepare(&format!(
-        "SELECT ID, Name, ParentID, Seq FROM `{}`
+        "SELECT ID, Name, ParentID, Seq, Attribute FROM `{}`
          WHERE rb_local_deleted = 0 ORDER BY Seq",
         tables.lists,
     ))?;
@@ -487,6 +487,9 @@ fn read_lists(
         // Parent is resolved after every playlist is known.
         playlists.parent.push(NO_ID);
         playlists.seq.push(clamp_u32(num(r, 3)?));
+        // 0 a playlist (or a session), 1 a folder; anything else is not a
+        // folder, which is the safer reading of a value nobody has seen.
+        playlists.folder.push(num(r, 4)? == 1);
         playlists.members.push(Vec::new());
     }
 

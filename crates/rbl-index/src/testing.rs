@@ -60,12 +60,36 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
 
 /// Adds a playlist over the given row indices, returning its index.
 pub fn add_playlist(lib: &mut Library, name: &str, rows: &[Row]) -> usize {
+    add_list(lib, name, rows, false)
+}
+
+/// Adds an empty folder at the top of the tree, returning its index.
+pub fn add_folder(lib: &mut Library, name: &str) -> usize {
+    add_list(lib, name, &[], true)
+}
+
+/// Adds a history session over the given row indices, returning its index.
+pub fn add_history(lib: &mut Library, name: &str, rows: &[Row]) -> usize {
+    let mut histories = (*lib.histories()).clone();
+    let index = histories.ids.len();
+    histories.ids.push(2000 + u64::try_from(index).unwrap_or(0));
+    histories.names.push(name);
+    histories.parent.push(crate::NO_ID);
+    histories.seq.push(u32::try_from(index).unwrap_or(0));
+    histories.folder.push(false);
+    histories.members.push(rows.to_vec());
+    lib.set_histories(histories);
+    index
+}
+
+fn add_list(lib: &mut Library, name: &str, rows: &[Row], folder: bool) -> usize {
     let mut playlists = (*lib.playlists()).clone();
     let index = playlists.ids.len();
     playlists.ids.push(1000 + u64::try_from(index).unwrap_or(0));
     playlists.names.push(name);
     playlists.parent.push(crate::NO_ID);
     playlists.seq.push(u32::try_from(index).unwrap_or(0));
+    playlists.folder.push(folder);
     playlists.members.push(rows.to_vec());
     lib.set_playlists(playlists);
     index

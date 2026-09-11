@@ -287,6 +287,10 @@ pub struct Playlists {
     pub names: StrColumn,
     pub parent: Vec<u32>,
     pub seq: Vec<u32>,
+    /// `Attribute = 1`: a folder, whether or not anything is in it yet. A
+    /// tree that told folders from playlists by their children called an
+    /// empty folder a playlist, and put what its menu made beside it.
+    pub folder: Vec<bool>,
     /// Row indices per playlist, in `TrackNo` order.
     pub members: Vec<Vec<Row>>,
 }
@@ -305,6 +309,11 @@ impl Playlists {
     }
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
+    }
+    /// Whether the list is a folder, by its own attribute rather than by
+    /// whether anything is under it.
+    pub fn is_folder(&self, index: usize) -> bool {
+        self.folder.get(index).copied().unwrap_or(false)
     }
     pub fn name(&self, index: usize) -> &str {
         self.names.get(index)

@@ -3,7 +3,7 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use rbl_index::cache::{decode, encode, Fingerprint};
-use rbl_index::testing::{add_playlist, library_from, TestTrack};
+use rbl_index::testing::{add_folder, add_history, add_playlist, library_from, TestTrack};
 use rbl_index::{Cue, SortColumn, TrackSource, ViewSpec};
 
 fn fingerprint() -> Fingerprint {
@@ -41,6 +41,8 @@ fn sample() -> Vec<TestTrack> {
 fn built() -> rbl_index::Library {
     let mut lib = library_from(&sample());
     add_playlist(&mut lib, "Set", &[2, 0]);
+    add_folder(&mut lib, "Gigs");
+    add_history(&mut lib, "HISTORY 2026-09-10", &[1, 2]);
     lib
 }
 
@@ -60,6 +62,14 @@ fn a_snapshot_reproduces_the_library_it_came_from() {
     }
     assert_eq!(restored.playlists().members, original.playlists().members);
     assert_eq!(restored.playlists().names.get(0), "Set");
+    // An empty folder is still a folder on the way back.
+    assert!(!restored.playlists().is_folder(0));
+    assert!(restored.playlists().is_folder(1));
+    // The histories come back too: formats before 4 dropped them, and every
+    // cached start opened with no Histories section.
+    assert_eq!(restored.histories().len(), 1);
+    assert_eq!(restored.histories().names.get(0), "HISTORY 2026-09-10");
+    assert_eq!(restored.histories().members, original.histories().members);
 }
 
 #[test]
