@@ -120,8 +120,10 @@ export function ContextMenu<A extends string>({
                     <button
                       key={child.label}
                       type="button"
-                      role="menuitem"
+                      role={child.checked === undefined ? "menuitem" : "menuitemradio"}
+                      aria-checked={child.checked}
                       className={styles.item}
+                      data-checked={child.checked || undefined}
                       disabled={!enabled(child, context)}
                       aria-disabled={enabled(child, context) ? undefined : true}
                       onClick={() => {
@@ -129,6 +131,7 @@ export function ContextMenu<A extends string>({
                         onClose();
                       }}
                     >
+                      {child.checked ? <span className={styles.tick} aria-hidden /> : null}
                       <span className={styles.label}>{child.label}</span>
                     </button>
                   ),

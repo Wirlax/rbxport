@@ -55,7 +55,9 @@ import {
   type PadMode,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
-import { usePreferences, useTooltip } from "@/store/usePreferences";
+import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
+import { ContextMenu } from "@/components/ContextMenu";
+import { deckMenu, type DeckAction } from "@/lib/contextMenus";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { beatNudgeFor, beatWait, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
@@ -98,6 +100,8 @@ export interface PlayerProps {
    * else the app has to say.
    */
   onError?: (message: string | null) => void;
+  /** Analyze Track from the deck's ≡ menu: the loaded track goes to the analyser. */
+  onAnalyse?: (trackId: string, title: string) => void;
   /**
    * A track dropped onto the deck.
    *
@@ -476,7 +480,7 @@ const PANELS = [
 ] as const;
 
 export const Player = memo(function Player({
-  track, onEject, onError, onDropTrack, onLoadSelected, dragging = false, deck = "a",
+  track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
@@ -541,7 +545,27 @@ export const Player = memo(function Player({
       .then((backend) => backend.deckMetronome(deck, on))
       .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The metronome could not be switched."));
   }, [metronome, deck, onError]);
-  const { view: viewPrefs, advanced: advancedPrefs } = usePreferences();
+  const { preferences, update: updatePreferences } = usePreferencesContext();
+  const { view: viewPrefs, advanced: advancedPrefs } = preferences;
+  // The ≡ menu at the foot of the deck.
+  const [deckMenuAt, setDeckMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const chooseFromDeckMenu = useCallback(
+    (action: DeckAction) => {
+      switch (action) {
+        case "waveformBlue": updatePreferences("view", { waveformColor: "blue" }); break;
+        case "waveformRgb": updatePreferences("view", { waveformColor: "rgb" }); break;
+        case "waveform3band": updatePreferences("view", { waveformColor: "3band" }); break;
+        case "beatPosition": updatePreferences("view", { beatCount: "position" }); break;
+        case "beatToMemoryBars": updatePreferences("view", { beatCount: "toMemoryBars" }); break;
+        case "beatToMemoryBeats": updatePreferences("view", { beatCount: "toMemoryBeats" }); break;
+        case "waveformClickOn": updatePreferences("view", { waveformClick: true }); break;
+        case "waveformClickOff": updatePreferences("view", { waveformClick: false }); break;
+        case "analyse": if (track) onAnalyse?.(track.id, track.title); break;
+        default: break;
+      }
+    },
+    [updatePreferences, track, onAnalyse],
+  );
   const tip = useTooltip();
   // QUANTIZE BEAT VALUE in Preferences: the grid every quantized cue snaps
   // to, split as finely as the value asks.
@@ -1777,9 +1801,38 @@ export const Player = memo(function Player({
           >
             Q
           </button>
-          <button type="button" className={styles.padMenu} aria-label="Pad settings">≡</button>
+          <button
+            type="button"
+            className={styles.padMenu}
+            aria-label="Player menu"
+            aria-haspopup="menu"
+            aria-expanded={deckMenuAt !== null}
+            onClick={(event) => {
+              // Opened from the button's corner, as rekordbox's is.
+              const box = event.currentTarget.getBoundingClientRect();
+              setDeckMenuAt({ x: box.left, y: box.bottom });
+            }}
+          >
+            ≡
+          </button>
         </div>
         )}
+        {deckMenuAt ? (
+          <ContextMenu
+            x={deckMenuAt.x}
+            y={deckMenuAt.y}
+            rows={deckMenu({
+              waveformColor: viewPrefs.waveformColor,
+              beatCount: viewPrefs.beatCount,
+              waveformClick: viewPrefs.waveformClick,
+              loaded: Boolean(track),
+            })}
+            label="Player menu"
+            context={{ inPlaylist: false, hasFile: true, readOnly: false }}
+            onChoose={chooseFromDeckMenu}
+            onClose={() => setDeckMenuAt(null)}
+          />
+        ) : null}
 
       </div>
 

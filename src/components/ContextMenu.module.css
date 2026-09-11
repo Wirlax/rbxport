@@ -101,3 +101,17 @@
     var(--s-context-menu-sep-gap) var(--s-context-menu-sep-inset-l);
   background: var(--c-context-menu-separator);
 }
+
+/* The tick beside the choice in force, in the gutter the text inset leaves;
+   a submenu of choices is rekordbox's layout menu, whose tick sits there
+   [ASSUME — no capture of an open submenu]. */
+.tick {
+  position: absolute;
+  left: calc(var(--s-context-menu-text-inset) / 2 - 4px);
+  top: calc(var(--s-menu-row-h) / 2 - 5px);
+  width: 4px;
+  height: 8px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}

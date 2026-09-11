@@ -727,6 +727,11 @@ export function App() {
     if (selectedTracks.length === 0) return;
     analysis.add(selectedTracks);
   }, [analysis, selectedTracks]);
+  /** Queues one track: the deck's own, from its menu. */
+  const analyseOne = useCallback(
+    (id: string, title: string) => analysis.add([{ id, title }]),
+    [analysis],
+  );
 
   const importFromMenu = useCallback(async () => {
     report("Choosing files to import…");
@@ -1041,6 +1046,7 @@ export function App() {
             track={playerTrack}
             onEject={() => setPlayerTrack(null)}
             onError={setPlayerError}
+            onAnalyse={analyseOne}
             simple={!isFullDeck(layout)}
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
@@ -1064,6 +1070,7 @@ export function App() {
               deck="b"
               track={playerTrackB}
               onEject={() => setPlayerTrackB(null)}
+              onAnalyse={analyseOne}
               onError={setPlayerError}
               simple={!isFullDeck(layout)}
               dragging={draggedTracks !== null}

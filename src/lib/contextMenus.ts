@@ -23,6 +23,18 @@ export type TreeAction =
   | "createFolder"
   | "delete";
 
+/** The deck's ≡ menu: the choices it changes, and the one thing it does. */
+export type DeckAction =
+  | "waveformBlue"
+  | "waveformRgb"
+  | "waveform3band"
+  | "analyse"
+  | "beatPosition"
+  | "beatToMemoryBars"
+  | "beatToMemoryBeats"
+  | "waveformClickOn"
+  | "waveformClickOff";
+
 export interface MenuEntry<A> {
   /** The label, as `german.lang` spells it. */
   label: string;
@@ -40,6 +52,8 @@ export interface MenuEntry<A> {
   items?: readonly MenuRow<A>[];
   /** A rule beyond "we have it": no playlist to remove from, and so on. */
   needs?: "playlist" | "file";
+  /** In a submenu of choices, the one in force: drawn with a tick. */
+  checked?: boolean;
 }
 
 /** A separator between groups. */
@@ -137,6 +151,76 @@ export interface MenuContext {
   hasFile: boolean;
   /** The library is open read-only, because rekordbox is running. */
   readOnly: boolean;
+}
+
+/** What the deck's menu shows, so it can tick what is in force. */
+export interface DeckMenuState {
+  waveformColor: "blue" | "rgb" | "3band";
+  beatCount: "position" | "toMemoryBars" | "toMemoryBeats";
+  waveformClick: boolean;
+  /** A track is loaded, so it can be analysed. */
+  loaded: boolean;
+}
+
+/**
+ * The ≡ at the foot of the deck, top to bottom as rekordbox draws it
+ * (capture of 7.2.11's player menu). The waveform colour, the beat count and
+ * the waveform click are Preferences › View's own choices, reachable from
+ * here as well; each submenu ticks what is in force. Export Track wants a
+ * single track added to a stick, which the export cannot yet do without
+ * rewriting the stick; Export Loop As WAV and Active Loop Playback need
+ * loops, which are not built. All three are drawn greyed, as rekordbox
+ * greys Export Loop As WAV with nothing to export.
+ */
+export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
+  const tick = (on: boolean) => ({ checked: on });
+  return [
+    {
+      label: "Change waveform color",
+      action: null,
+      items: [
+        { label: "BLUE", action: "waveformBlue", ...tick(state.waveformColor === "blue") },
+        { label: "RGB", action: "waveformRgb", ...tick(state.waveformColor === "rgb") },
+        { label: "3Band", action: "waveform3band", ...tick(state.waveformColor === "3band") },
+      ],
+    },
+    { label: "Analyze Track", action: state.loaded ? "analyse" : null },
+    SEPARATOR,
+    {
+      label: "Beat Count Display",
+      action: null,
+      items: [
+        { label: "Current Position (Bars)", action: "beatPosition", ...tick(state.beatCount === "position") },
+        {
+          label: "Count to the next MEMORY CUE (Bars)",
+          action: "beatToMemoryBars",
+          ...tick(state.beatCount === "toMemoryBars"),
+        },
+        {
+          label: "Count to the next MEMORY CUE (Beats)",
+          action: "beatToMemoryBeats",
+          ...tick(state.beatCount === "toMemoryBeats"),
+        },
+      ],
+    },
+    SEPARATOR,
+    { label: "Export Track", action: null, submenu: true },
+    SEPARATOR,
+    { label: "Export Loop As WAV", action: null },
+    SEPARATOR,
+    { label: "Active Loop Playback", action: null, submenu: true },
+    SEPARATOR,
+    {
+      label: "Click on the waveform for PLAY and CUE",
+      action: null,
+      // The submenu's wording is [ASSUME]: the capture shows the arrow and
+      // not what is behind it. Preferences calls the switch "Disable".
+      items: [
+        { label: "Enable", action: "waveformClickOn", ...tick(state.waveformClick) },
+        { label: "Disable", action: "waveformClickOff", ...tick(!state.waveformClick) },
+      ],
+    },
+  ];
 }
 
 /** Writes to the shared library, so rekordbox running is a refusal. */

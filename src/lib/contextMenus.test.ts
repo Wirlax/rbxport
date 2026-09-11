@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deckMenu,
   enabled,
   entriesOf,
   SEPARATOR,
@@ -157,5 +158,36 @@ describe("enabled", () => {
     // Reading is still fine.
     expect(enabled(entry("Show information"), locked)).toBe(true);
     expect(enabled(entry("Analyze Track"), locked)).toBe(true);
+  });
+});
+
+describe("deckMenu", () => {
+  const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true, loaded: true };
+
+  it("is rekordbox's player menu, top to bottom, with its greyed entries", () => {
+    const labels = entriesOf(deckMenu(state)).map((e) => e.label);
+    expect(labels).toEqual([
+      "Change waveform color", "Analyze Track", "Beat Count Display", "Export Track", "Export Loop As WAV",
+      "Active Loop Playback", "Click on the waveform for PLAY and CUE",
+    ]);
+    const context = { inPlaylist: false, hasFile: true, readOnly: false };
+    const live = entriesOf(deckMenu(state)).filter((e) => enabled(e, context)).map((e) => e.label);
+    expect(live).toEqual(["Change waveform color", "Analyze Track", "Beat Count Display", "Click on the waveform for PLAY and CUE"]);
+  });
+
+  it("ticks the choice in force in each submenu", () => {
+    const rows = deckMenu({ ...state, waveformColor: "rgb", beatCount: "toMemoryBeats", waveformClick: false });
+    const items = (label: string) => entriesOf(rows).find((e) => e.label === label)?.items ?? [];
+    expect(entriesOf(items("Change waveform color")).map((e) => [e.label, e.checked ?? false]))
+      .toEqual([["BLUE", false], ["RGB", true], ["3Band", false]]);
+    expect(entriesOf(items("Beat Count Display")).filter((e) => e.checked).map((e) => e.label))
+      .toEqual(["Count to the next MEMORY CUE (Beats)"]);
+    expect(entriesOf(items("Click on the waveform for PLAY and CUE")).filter((e) => e.checked).map((e) => e.label))
+      .toEqual(["Disable"]);
+  });
+
+  it("greys Analyze Track with nothing loaded", () => {
+    const entry = entriesOf(deckMenu({ ...state, loaded: false })).find((e) => e.label === "Analyze Track");
+    expect(entry?.action).toBeNull();
   });
 });

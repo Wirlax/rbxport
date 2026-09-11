@@ -602,7 +602,7 @@ test("the player draws the transport, disabled where there is no backend", async
   // drawn and inert: a player waiting for a backend, not an unfinished panel.
   await page.goto("/");
   const player = page.getByRole("region", { name: "Preview player" });
-  await expect(player.getByRole("button", { name: "Play" })).toBeDisabled();
+  await expect(player.getByRole("button", { name: "Play", exact: true })).toBeDisabled();
   await expect(player.getByRole("button", { name: "Cue", exact: true })).toBeDisabled();
   await expect(page.getByTestId("player-overview")).toBeVisible();
   await expect(page.getByTestId("player-detail")).toBeVisible();

@@ -200,3 +200,35 @@ test("About shows the version and the update check switch, which Advanced shares
   await dialog.getByRole("tab", { name: "Others" }).click();
   await expect(dialog.getByRole("switch", { name: /Check for a new version/ })).not.toBeChecked();
 });
+
+test("the player's ≡ opens rekordbox's own menu, and its choices are the View preferences", async ({ page }) => {
+  await open(page);
+  await load(page);
+  await player(page).getByRole("button", { name: "Player menu" }).click();
+  const menu = page.getByRole("menu", { name: "Player menu" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Change waveform color", "Analyze Track", "Beat Count Display", "Export Track", "Export Loop As WAV",
+    "Active Loop Playback", "Click on the waveform for PLAY and CUE",
+  ]);
+  for (const greyed of ["Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
+    await expect(menu.getByRole("menuitem", { name: greyed })).toBeDisabled();
+  }
+
+  // The submenu ticks what is in force, and choosing changes the preference.
+  await menu.getByRole("menuitem", { name: "Change waveform color" }).hover();
+  const colours = page.getByRole("menu", { name: "Change waveform color" });
+  await expect(colours.getByRole("menuitemradio", { name: "3Band" })).toHaveAttribute("aria-checked", "true");
+  await colours.getByRole("menuitemradio", { name: "BLUE" }).click();
+  await expect(menu).toBeHidden();
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Color" }).click();
+  await expect(dialog.getByRole("radiogroup", { name: "Waveform color" }).getByRole("radio", { name: "BLUE" })).toBeChecked();
+  await page.keyboard.press("Escape");
+
+  // Analyze Track queues the loaded track: the status bar reports the run,
+  // or its outcome when the mock's analysis has already finished.
+  await player(page).getByRole("button", { name: "Player menu" }).click();
+  await menu.getByRole("menuitem", { name: "Analyze Track" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText(/Analyzing: \d+ of \d+|\d+ failed|analy[sz]ed/i);
+});
