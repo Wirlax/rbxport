@@ -16,6 +16,9 @@ import {
   nextJumpSize,
   showsEveryBeat,
   waveSlice,
+  beatCountText,
+  clickSeconds,
+  isClick,
   ZOOM_STEPS,
   zoomBy,
   phraseKind,
@@ -609,5 +612,51 @@ describe("subdivideGrid", () => {
     expect(subdivideGrid(NO_BEATS, 4)).toBe(NO_BEATS);
     const one = { times: Uint32Array.from([100]), numbers: Uint8Array.from([1]) };
     expect(subdivideGrid(one, 4)).toBe(one);
+  });
+});
+
+describe("beatCountText", () => {
+  // 120 BPM: two beats a second, a bar every two seconds.
+  it("counts bars from the start by default", () => {
+    expect(beatCountText(10, 120, "position", [30])).toBe("5.0Bars");
+    expect(beatCountText(0, 120, "position", [])).toBe("0.0Bars");
+  });
+
+  it("counts down to the next memory cue in bars or beats", () => {
+    expect(beatCountText(10, 120, "toMemoryBars", [30, 14, 5])).toBe("-2.0Bars");
+    expect(beatCountText(10, 120, "toMemoryBeats", [30, 14, 5])).toBe("-8Beats");
+    // Part way through a beat rounds up: seven and a bit beats left is eight.
+    expect(beatCountText(10.1, 120, "toMemoryBeats", [14])).toBe("-8Beats");
+    // At the cue itself the count is zero, not the cue before it.
+    expect(beatCountText(14, 120, "toMemoryBars", [14, 5])).toBe("-0.0Bars");
+  });
+
+  it("shows nothing with no cue ahead, or no grid", () => {
+    expect(beatCountText(20, 120, "toMemoryBars", [5, 14])).toBe("");
+    expect(beatCountText(20, 120, "toMemoryBeats", [])).toBe("");
+    expect(beatCountText(20, 0, "position", [])).toBe("");
+  });
+});
+
+describe("clickSeconds", () => {
+  // A 1000px detail showing a tenth of a 200 s track: 20 s across, 0.02 s a pixel.
+  it("puts the head under the pointer, at the window's own rate", () => {
+    expect(clickSeconds(500, 1000, 100, 0.1, 200)).toBeCloseTo(100, 6);
+    expect(clickSeconds(750, 1000, 100, 0.1, 200)).toBeCloseTo(105, 6);
+    expect(clickSeconds(0, 1000, 100, 0.1, 200)).toBeCloseTo(90, 6);
+  });
+
+  it("stays inside the track", () => {
+    expect(clickSeconds(0, 1000, 2, 0.1, 200)).toBe(0);
+    expect(clickSeconds(1000, 1000, 199, 0.1, 200)).toBe(200);
+  });
+});
+
+describe("isClick", () => {
+  it("is a release within a few pixels of the press", () => {
+    expect(isClick(0, 0)).toBe(true);
+    expect(isClick(3, -3)).toBe(true);
+    expect(isClick(4, 0)).toBe(false);
+    expect(isClick(0, 12)).toBe(false);
   });
 });

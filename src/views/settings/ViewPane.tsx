@@ -218,6 +218,33 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           onChange={(overviewWaveform) => set({ overviewWaveform })}
         />
       </Section>
+      <Section title="Beat Count Display">
+        {/* The number beside the playhead on the enlarged waveform. */}
+        <Radios
+          label="Beat Count Display"
+          value={view.beatCount}
+          choices={[
+            { value: "position", label: "Current Position (Bars)" },
+            { value: "toMemoryBars", label: "Count to the next MEMORY CUE (Bars)" },
+            { value: "toMemoryBeats", label: "Count to the next MEMORY CUE (Beats)" },
+          ]}
+          onChange={(beatCount) => set({ beatCount })}
+        />
+      </Section>
+      <Section title="Click on the waveform for PLAY and CUE">
+        {/* rekordbox's switch is the negative: on means off. Stored the way
+            the deck reads it, and drawn the way the window does. */}
+        <Toggle
+          label="Disable"
+          checked={!view.waveformClick}
+          onChange={(disabled) => set({ waveformClick: !disabled })}
+        />
+        <Note>
+          A click on the enlarged waveform moves the playhead there, sets the
+          cue there when the deck is stopped, and plays. Disabled, a click
+          does nothing; dragging still moves the record.
+        </Note>
+      </Section>
       <Section title="Traffic Light">
         {/* rekordbox's own reaches, from its tooltip: for a track in 2A,
             Same Key lights 2A; Related Key 1 adds 2B; 2 adds 1A and 3A; 3

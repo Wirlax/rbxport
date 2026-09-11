@@ -41,7 +41,10 @@ import {
   scrollOffset,
   pressCue,
   releaseCue,
+  beatCountText,
+  clickSeconds,
   headPercent,
+  isClick,
   parseBeatGrid,
   phraseSpans,
   memoryTime,
@@ -628,6 +631,12 @@ export const Player = memo(function Player({
   // The tempo, for the bar count the frame loop prints.
   const bpm = (track?.bpmX100 ?? 0) / 100;
   const { positionRef, subscribe } = playback;
+  // The memory cues' positions, for the count-down modes of the beat count.
+  const memorySeconds = useMemo(
+    () => cues.filter((cue) => cue.memory).map((cue) => cue.positionMs / 1000),
+    [cues],
+  );
+  const beatCount = viewPrefs.beatCount;
 
   /*
    * The playhead, written straight to its elements every frame.
@@ -658,14 +667,14 @@ export const Player = memo(function Player({
       if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
       if (barsLabel.current) {
         barsLabel.current.style.transform = `translateX(${x}px)`;
-        barsLabel.current.textContent = bpm > 0 ? `${((seconds * bpm) / 60 / 4).toFixed(1)}Bars` : "";
+        barsLabel.current.textContent = beatCountText(seconds, bpm, beatCount, memorySeconds);
       }
     };
     // At once as well as on every frame: a paused player schedules no frames,
     // and the head would otherwise sit where the last track left it.
     apply(positionRef.current);
     return subscribe(apply);
-  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe]);
+  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe, beatCount, memorySeconds]);
 
   /*
    * The layer's new anchor, taken only once it is on screen.
@@ -952,12 +961,30 @@ export const Player = memo(function Player({
    * jump the track by half a window on the first pixel of movement, because
    * the head sits in the middle whatever it is pointing at.
    */
-  const grab = useRef<{ x: number; at: number } | null>(null);
+  const grab = useRef<{ x: number; y: number; at: number } | null>(null);
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
-    grab.current = { x: event.clientX, at: playback.positionRef.current };
+    grab.current = { x: event.clientX, y: event.clientY, at: playback.positionRef.current };
     playback.scrubBegin();
+  };
+
+  /**
+   * A press let go where it landed: View › Display Type › Click on the
+   * waveform for PLAY and CUE. The head goes to the music under the pointer;
+   * a stopped deck takes that as its cue point too and plays, the way a
+   * CUE press followed by PLAY would. Off, a click does nothing.
+   */
+  const clickDetail = (event: React.PointerEvent<HTMLDivElement>, held: { x: number; at: number }) => {
+    if (!viewPrefs.waveformClick || playback.idle || total <= 0) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width <= 0) return;
+    const target = clickSeconds(event.clientX - box.left, box.width, held.at, span, total);
+    playback.seek(target);
+    if (!playback.playing) {
+      setCuePoint(target);
+      playback.toggle();
+    }
   };
 
   const dragDetail = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -968,10 +995,14 @@ export const Player = memo(function Player({
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const held = grab.current;
     grab.current = null;
     playback.scrubEnd();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (held && event.type === "pointerup" && isClick(event.clientX - held.x, event.clientY - held.y)) {
+      clickDetail(event, held);
     }
   };
 

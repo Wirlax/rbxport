@@ -554,18 +554,76 @@ export function waveSlice(
   span: number,
   bytes: number,
   canvasWidth: number,
+  /** Bytes per column of the tag: three for the bands, one or two or six for the others. */
+  stride = 3,
 ): WaveSlice {
   const reach = Math.max(span, 0) / 2;
   const from = progress - reach;
   const to = progress + reach;
   const width_ = Math.max(to - from, 1e-9);
-  const columns = Math.floor(bytes / 3);
+  const columns = Math.floor(bytes / stride);
   const shownFrom = Math.min(Math.max(from, 0), 1);
   const shownTo = Math.min(Math.max(to, 0), 1);
   return {
-    first: Math.floor(shownFrom * columns) * 3,
-    last: Math.min(bytes, Math.ceil(shownTo * columns) * 3),
+    first: Math.floor(shownFrom * columns) * stride,
+    last: Math.min(bytes, Math.ceil(shownTo * columns) * stride),
     x0: Math.round(((shownFrom - from) / width_) * canvasWidth),
     width: Math.round(((shownTo - shownFrom) / width_) * canvasWidth),
   };
+}
+
+/**
+ * The number beside the playhead: View › Display Type › Beat Count Display.
+ *
+ * `position` counts bars from the start, as the deck always did. The other
+ * two count down to the next memory cue at or after the playhead, in bars
+ * to a tenth or in whole beats, the way a CDJ's count-down does; with no
+ * cue ahead there is nothing to count, and nothing is shown. Four beats to
+ * the bar, which is what the grid gives.
+ */
+export function beatCountText(
+  seconds: number,
+  bpm: number,
+  mode: "position" | "toMemoryBars" | "toMemoryBeats",
+  /** Memory cue positions in seconds, in any order. */
+  memorySeconds: readonly number[],
+): string {
+  if (!(bpm > 0) || !Number.isFinite(seconds)) return "";
+  const beatsPerSecond = bpm / 60;
+  if (mode === "position") return `${((seconds * beatsPerSecond) / 4).toFixed(1)}Bars`;
+  let next = Number.POSITIVE_INFINITY;
+  for (const at of memorySeconds) {
+    if (at >= seconds && at < next) next = at;
+  }
+  if (!Number.isFinite(next)) return "";
+  const beats = (next - seconds) * beatsPerSecond;
+  return mode === "toMemoryBars" ? `-${(beats / 4).toFixed(1)}Bars` : `-${Math.ceil(beats - 1e-9)}Beats`;
+}
+
+/**
+ * Where a click on the enlarged waveform lands, in seconds: the playhead is
+ * at the middle, and the music at `x` is as far from it as the window's
+ * span puts it. `dragSeconds` is the same rate the other way round — a drag
+ * moves the record, a click moves the head.
+ */
+export function clickSeconds(
+  x: number,
+  width: number,
+  positionSec: number,
+  span: number,
+  durationSec: number,
+): number {
+  const head = (headPercent() / 100) * width;
+  const target = positionSec - dragSeconds(x - head, width, span, durationSec);
+  return Math.min(Math.max(target, 0), Math.max(durationSec, 0));
+}
+
+/**
+ * Whether a press and release on the waveform was a click rather than a
+ * drag: the pointer stayed within a few pixels. A drag that went nowhere is
+ * a click too, which is what a person who pressed and let go meant.
+ */
+export const CLICK_SLOP_PX = 3;
+export function isClick(dx: number, dy: number): boolean {
+  return Math.abs(dx) <= CLICK_SLOP_PX && Math.abs(dy) <= CLICK_SLOP_PX;
 }
