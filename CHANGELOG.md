@@ -5,6 +5,34 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [0.5.4] — 2026-09-11
+
+### Fixed
+- A rating set in the app is stored as the number of stars, which is how
+  rekordbox stores it. Ratings were written on the wrong scale, so a
+  four-star track showed five stars in the browser, and the information
+  panel read every rating as none.
+- The Histories section is there on every start. It was missing whenever
+  the library came from the app's own snapshot, which is most starts.
+- A folder that has nothing in it yet is drawn and treated as a folder: a
+  playlist made from its menu goes inside it, and its menu offers Delete
+  Folder.
+- Create New Playlist and Create New Folder work from a playlist's menu. They
+  did nothing but show an error, because the tree asked for a parent the
+  library does not know.
+- Dragging a selection onto a playlist adds every selected track, not only
+  the one under the hand; dropped on a deck, the first of the selection
+  loads, as in rekordbox.
+- Right-clicking a selected row keeps the selection, so Remove from
+  Playlist takes every track that was chosen.
+- A rating or comment set after a playlist edit stays set once the library
+  has been re-read, instead of lighting for a moment and going out.
+
+### Changed
+- The library is backed up before the first edit of a session, not before
+  every edit. Each rating click and each drop on a playlist copied the whole
+  database.
+
 ## [0.5.3] — 2026-09-10
 
 ### Fixed
