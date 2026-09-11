@@ -523,8 +523,13 @@ describe("zoomBy", () => {
   });
 
   it("stops at the ends rather than wrapping round to the other extreme", () => {
-    expect(zoomBy(2, -1)).toBe(2);
+    expect(zoomBy(0.5, -1)).toBe(0.5);
     expect(zoomBy(64, 1)).toBe(64);
+  });
+
+  it("goes down to half a bar", () => {
+    expect(zoomBy(2, -1)).toBe(1);
+    expect(zoomBy(1, -1)).toBe(0.5);
   });
 
   it("snaps an unrecognised zoom back to the default", () => {

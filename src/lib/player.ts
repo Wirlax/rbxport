@@ -25,8 +25,12 @@ export const BEATS_PER_BAR = 4;
  */
 export const OVERDRAW = 2;
 
-/** Zoom levels, in bars across, that the +/- buttons and the wheel step through. */
-export const ZOOM_STEPS = [2, 4, 8, 12, 16, 32, 64] as const;
+/**
+ * Zoom levels, in bars across, that the +/- buttons and the wheel step
+ * through. Down to half a bar: the detail waveform is 150 columns a second,
+ * so even two beats at 128 BPM are a hundred and forty columns across.
+ */
+export const ZOOM_STEPS = [0.5, 1, 2, 4, 8, 12, 16, 32, 64] as const;
 
 /**
  * Whether the grid draws every beat, or only the bar lines.
