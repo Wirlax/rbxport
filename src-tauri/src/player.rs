@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rbl_deck::{Deck, DeckEvent, Engine, Render, Sink};
+use rbl_deck::{Deck, DeckEvent, Engine, Render, Sink, StreamWish};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
@@ -119,10 +119,11 @@ pub struct DeckEventDto {
     pub message: Option<String>,
 }
 
-/// Opens the output the engine renders into, given the render callback and
-/// the device the interface chose (`None` is the system default).
+/// Opens the output the engine renders into, given the render callback, the
+/// device the interface chose (`None` is the system default), and the rate
+/// and buffer size it asked for.
 pub type SinkOpener =
-    Box<dyn Fn(Render, Option<String>) -> rbl_deck::Result<Arc<dyn Sink>> + Send + Sync>;
+    Box<dyn Fn(Render, Option<String>, StreamWish) -> rbl_deck::Result<Arc<dyn Sink>> + Send + Sync>;
 
 /// Holds the engine, which is not built until something is played.
 pub struct Player {
@@ -139,6 +140,12 @@ pub struct Player {
     /// devices, and rebuilding costs nothing anyone hears — the decks are
     /// reloaded from where they were.
     device: Mutex<Option<String>>,
+    /// The sample rate and buffer size the interface asked for. Like the
+    /// device, a change drops the engine and the next play opens with it.
+    wish: Mutex<StreamWish>,
+    /// The metronome's click and volume as the interface last set them,
+    /// held for the same reason the limiter is.
+    metronome: Mutex<(rbl_deck::ClickSound, rbl_deck::ClickVolume)>,
     /// The master limiter as the interface last set it.
     ///
     /// Held here as well as in the engine because the engine is built late
@@ -150,8 +157,8 @@ pub struct Player {
 impl Default for Player {
     /// A player on the system's audio output.
     fn default() -> Self {
-        Self::with_sink(Box::new(|render, device| {
-            Ok(Arc::new(rbl_deck::CpalSink::open_named(render, device)?) as Arc<dyn Sink>)
+        Self::with_sink(Box::new(|render, device, wish| {
+            Ok(Arc::new(rbl_deck::CpalSink::open_with(render, device, wish)?) as Arc<dyn Sink>)
         }))
     }
 }
@@ -164,6 +171,8 @@ impl Player {
             open_sink,
             ticking: std::sync::atomic::AtomicBool::new(false),
             device: Mutex::new(None),
+            wish: Mutex::new(StreamWish::default()),
+            metronome: Mutex::new((rbl_deck::ClickSound::Two, rbl_deck::ClickVolume::Large)),
             limiter: Mutex::new(LimiterDto {
                 enabled: true,
                 ceiling_db: rbl_deck::DEFAULT_CEILING_DB,
@@ -199,12 +208,16 @@ impl Player {
             emit_deck_event(&handle, &event);
         });
         let device = self.device.lock().clone();
-        let engine = Engine::with_sink(|render| (self.open_sink)(render, device), &events).map_err(|e| {
+        let wish = *self.wish.lock();
+        let engine = Engine::with_sink(|render| (self.open_sink)(render, device, wish), &events).map_err(|e| {
             AppError::new(ErrorKind::Internal, "The audio device could not be opened.")
                 .with_detail(e.to_string())
         })?;
         // What the interface asked for, before the first callback runs.
         Self::apply_limiter(engine.limiter(), *self.limiter.lock());
+        let (sound, volume) = *self.metronome.lock();
+        engine.metronome().set_sound(sound);
+        engine.metronome().set_volume(volume);
         let engine = Arc::new(engine);
         *held = Some(Arc::clone(&engine));
         Ok(engine)
@@ -249,6 +262,30 @@ impl Player {
 
     pub fn device(&self) -> Option<String> {
         self.device.lock().clone()
+    }
+
+    /// The rate and buffer size to open the device with. A change drops the
+    /// engine, as a device change does: a stream has the rate it was opened at.
+    pub fn set_wish(&self, wish: StreamWish) {
+        if *self.wish.lock() == wish {
+            return;
+        }
+        *self.wish.lock() = wish;
+        *self.engine.lock() = None;
+    }
+
+    pub fn wish(&self) -> StreamWish {
+        *self.wish.lock()
+    }
+
+    /// The metronome's click and volume, now if the engine is up and at its
+    /// build if not.
+    pub fn set_metronome(&self, sound: rbl_deck::ClickSound, volume: rbl_deck::ClickVolume) {
+        *self.metronome.lock() = (sound, volume);
+        if let Some(engine) = self.opened() {
+            engine.metronome().set_sound(sound);
+            engine.metronome().set_volume(volume);
+        }
     }
 
     /// Already-built engine only — for a tick, which must not open a device.

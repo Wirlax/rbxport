@@ -531,6 +531,16 @@ export const Player = memo(function Player({
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
+  // The metronome: a click on every beat of the grid while the deck plays.
+  // Off on every load, as rekordbox's is; the engine holds the grid.
+  const [metronome, setMetronome] = useState(false);
+  const toggleMetronome = useCallback(() => {
+    const on = !metronome;
+    setMetronome(on);
+    void getBackend()
+      .then((backend) => backend.deckMetronome(deck, on))
+      .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The metronome could not be switched."));
+  }, [metronome, deck, onError]);
   const { view: viewPrefs, advanced: advancedPrefs } = usePreferences();
   const tip = useTooltip();
   // QUANTIZE BEAT VALUE in Preferences: the grid every quantized cue snaps
@@ -1562,10 +1572,18 @@ export const Player = memo(function Player({
                           className={styles.editButton}
                           data-mark={edit.id === "mark" || undefined}
                           aria-label={edit.label}
-                          // Saving needs the PQT2 tag, whose payload is not
-                          // understood; an editor that cannot save is a trap.
-                          disabled
-                          title={tip("Grid editing needs the PQT2 tag, which is not yet understood")}
+                          // The metronome is live: it plays the grid rather
+                          // than changing it. Saving the rest needs the PQT2
+                          // tag, whose payload is not understood; an editor
+                          // that cannot save is a trap.
+                          disabled={edit.id !== "metronome" || playback.idle}
+                          aria-pressed={edit.id === "metronome" ? metronome : undefined}
+                          onClick={edit.id === "metronome" ? toggleMetronome : undefined}
+                          title={tip(
+                            edit.id === "metronome"
+                              ? "Metronome: a click on every beat while the deck plays"
+                              : "Grid editing needs the PQT2 tag, which is not yet understood",
+                          )}
                         >
                           {EDIT_ICONS[edit.id]
                             ? // Our own icons: Pioneer's are reference for

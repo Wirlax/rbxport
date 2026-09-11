@@ -363,6 +363,15 @@ export interface Backend {
   deckTempo(deck: DeckId, tempo: number): Promise<void>;
   /** Master Tempo: whether the pitch is held while the speed changes. */
   deckMasterTempo(deck: DeckId, on: boolean): Promise<void>;
+  /** A click on every beat of the deck's grid while it plays. */
+  deckMetronome(deck: DeckId, on: boolean): Promise<void>;
+  /** Preferences › Audio › Metronome: which click (1 to 3) and how loud. */
+  setMetronome(sound: 1 | 2 | 3, volume: "small" | "middle" | "large"): Promise<void>;
+  /**
+   * Preferences › Audio › Sample Rate and Buffer size, asked of the device
+   * the next time a deck plays. Either may be left to the device.
+   */
+  setAudioConfig(sampleRate: number | null, bufferFrames: number | null): Promise<void>;
   /**
    * One deck's channel strip.
    *

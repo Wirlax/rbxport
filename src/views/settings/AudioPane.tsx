@@ -1,23 +1,20 @@
 /**
- * Audio › Configuration. Capture docs/screenshots 9.47.23 PM.
- *
- * The output device, and the master limiter. Sample rate and buffer size are
- * the device's own defaults — the engine opens whatever the device offers
- * rather than asking for a rate — and the metronome is not built, so neither
- * is drawn. Input/Output, the channel routing tab, is not here for the same
- * reason.
- *
- * The limiter is ours, not a control rekordbox's pane has: two decks at full
- * level sum past what the output can carry, and this is where the switch and
- * its two numbers live.
+ * Audio › Configuration. Capture docs/screenshots 9.47.23 PM: the output
+ * device, Sample Rate, Buffer size and the Metronome, and then a section of
+ * ours — the master limiter, which rekordbox's pane does not have: two
+ * decks at full level sum past what the output can carry, and this is where
+ * the switch and its two numbers live. Input/Output, the channel routing
+ * tab, is not here: there is one stereo output and nothing to route.
  */
 import { useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { AudioDevices, Limiter } from "@/ipc/types";
+import { BUFFER_SIZES, SAMPLE_RATES, type SampleRate } from "@/lib/preferences";
 import { CEILING_DB, RELEASE_MS } from "@/store/useLimiter";
+import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Note, Section, Slider, Sub, Toggle } from "./controls";
+import { Note, Radios, Section, Select, Separator, Slider, Sub, Toggle } from "./controls";
 
 export type AudioTab = "configuration";
 
@@ -33,8 +30,19 @@ export interface AudioPaneProps {
   reduction: number;
 }
 
+/** `512 samples (10.7 ms)`, as the capture prints the buffer size. */
+export function bufferCaption(frames: number, sampleRate: number): string {
+  const ms = sampleRate > 0 ? (frames / sampleRate) * 1000 : 0;
+  return `${frames} samples (${ms.toFixed(1)} ms)`;
+}
+
 export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProps) {
   const [audio, setAudio] = useState<AudioDevices | null>(null);
+  const { preferences, update } = usePreferencesContext();
+  const prefs = preferences.audio;
+  const set = (patch: Partial<typeof prefs>) => update("audio", patch);
+  // The slider moves over the stops; the stop is what is stored.
+  const bufferStop = Math.max(0, BUFFER_SIZES.indexOf(prefs.bufferSize));
 
   // Read when the pane opens rather than held: an interface is plugged in
   // while the app is running more often than not, and a list from launch
@@ -53,6 +61,7 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
   }, []);
 
   return (
+    <>
     <Section title="Audio" label="Audio output">
       {audio && audio.devices.length > 0 ? (
         <>
@@ -94,8 +103,69 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
           behind it.
         </Note>
       )}
+    </Section>
 
-      <Sub>Master limiter</Sub>
+    <Section title="Sample Rate">
+      <Select
+        label="Sample Rate"
+        value={String(prefs.sampleRate)}
+        choices={SAMPLE_RATES.map((rate) => ({ value: String(rate), label: `${rate} Hz` }))}
+        onChange={(value) => set({ sampleRate: Number(value) as SampleRate })}
+      />
+      <Note>
+        Asked of the device the next time a deck plays. One that does not
+        offer the rate is opened at its own, and the log says so.
+      </Note>
+    </Section>
+
+    <Section title="Buffer size">
+      <div className={styles.row} data-nested="">
+        <span data-testid="buffer-size">{bufferCaption(prefs.bufferSize, prefs.sampleRate)}</span>
+      </div>
+      <Slider
+        label="Buffer size"
+        value={bufferStop}
+        steps={BUFFER_SIZES.length}
+        ends={[`${BUFFER_SIZES[0]}`, `${BUFFER_SIZES[BUFFER_SIZES.length - 1]}`]}
+        onChange={(stop) => set({ bufferSize: BUFFER_SIZES[stop] ?? prefs.bufferSize })}
+      />
+      <Note>
+        Smaller is quicker to answer a press and easier to underrun; larger
+        is the other way round. Takes effect with the sample rate.
+      </Note>
+    </Section>
+
+    <Section title="Metronome">
+      <Radios
+        label="Metronome"
+        value={String(prefs.metronomeSound)}
+        choices={[
+          { value: "1", label: "Click Sound 01" },
+          { value: "2", label: "Click Sound 02" },
+          { value: "3", label: "Click Sound 03" },
+        ]}
+        onChange={(value) => set({ metronomeSound: Number(value) as 1 | 2 | 3 })}
+      />
+      <Separator />
+      <Sub>Volume</Sub>
+      <Radios
+        label="Metronome volume"
+        nested
+        value={prefs.metronomeVolume}
+        choices={[
+          { value: "small", label: "Small" },
+          { value: "middle", label: "Middle" },
+          { value: "large", label: "Large" },
+        ]}
+        onChange={(metronomeVolume) => set({ metronomeVolume })}
+      />
+      <Note>
+        The metronome button in the deck&rsquo;s GRID EDIT row clicks on every
+        beat of the grid while the deck plays.
+      </Note>
+    </Section>
+
+    <Section title="Master limiter">
       <Toggle
         label={
           limiter.enabled && reduction > 0.05
@@ -133,5 +203,6 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
         letting it clip; off, anything over full scale is flat-topped.
       </Note>
     </Section>
+    </>
   );
 }

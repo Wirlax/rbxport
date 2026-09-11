@@ -134,6 +134,10 @@ async function realBackend(): Promise<Backend> {
     setMasterLimiter: (limiter) => invoke<Limiter>("set_master_limiter", { limiter }),
     deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),
     deckMasterTempo: (deck, on) => invoke<void>("deck_master_tempo", { deck, on }),
+    deckMetronome: (deck, on) => invoke<void>("deck_metronome", { deck, on }),
+    setMetronome: (sound, volume) => invoke<void>("set_metronome", { sound, volume }),
+    setAudioConfig: (sampleRate, bufferFrames) =>
+      invoke<void>("set_audio_config", { sampleRate, bufferFrames }),
     setChannelBand: (deck, band, position) =>
       invoke<void>("set_channel_band", { deck, band, position }),
     setChannelKill: (deck, band, killed) =>

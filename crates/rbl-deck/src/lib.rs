@@ -33,6 +33,7 @@ mod deck;
 mod decode;
 mod fade;
 mod limiter;
+mod metronome;
 mod mixer;
 #[cfg(feature = "rubberband")]
 mod rubberband;
@@ -50,7 +51,7 @@ use rtrb::Consumer;
 pub use clock::{DeckClock, DeckSnapshot};
 pub use fade::FADE_FRAMES;
 pub use sink::{
-    default_output_device, output_devices, AudioDevice, CpalSink, NullSink, Render, Sink,
+    default_output_device, output_devices, AudioDevice, CpalSink, NullSink, Render, Sink, StreamWish,
 };
 
 use block::{Block, RING_BLOCKS};
@@ -61,6 +62,7 @@ pub use limiter::{
     Limiter, LimiterSettings, DEFAULT_CEILING_DB, DEFAULT_RELEASE_MS, MAX_CEILING_DB,
     MAX_RELEASE_MS, MIN_CEILING_DB, MIN_RELEASE_MS,
 };
+pub use metronome::{ClickSound, ClickVolume, GridBeat, Metronome, MetronomeSettings};
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};
 #[cfg(feature = "rubberband")]
 pub use rubberband::RubberBand;
@@ -257,6 +259,8 @@ pub struct Engine {
     master: Arc<Master>,
     mixer: Arc<MixerSettings>,
     limiter: Arc<LimiterSettings>,
+    metronome: Arc<MetronomeSettings>,
+    metronomes: [Arc<Metronome>; 2],
 }
 
 impl Engine {
@@ -279,6 +283,7 @@ impl Engine {
 
     /// The same engine on a sink of the caller's choosing, which is how it is
     /// tested without an audio device.
+    #[allow(clippy::too_many_lines, reason = "the render callback is one closure, and it reads as one")]
     pub fn with_sink<F>(open: F, events: &EventSink) -> Result<Self>
     where
         F: FnOnce(Render) -> Result<Arc<dyn Sink>>,
@@ -313,6 +318,13 @@ impl Engine {
         let strip = Arc::clone(&mixer);
         let limiter = Arc::new(LimiterSettings::default());
         let limiting = Arc::clone(&limiter);
+        // The metronome: settings shared by both decks, a grid and a switch
+        // per deck, and the clicks in flight owned by the callback.
+        let metronome = Arc::new(MetronomeSettings::default());
+        let metronomes: [Arc<Metronome>; 2] =
+            [Arc::new(Metronome::new(Arc::clone(&metronome))), Arc::new(Metronome::new(Arc::clone(&metronome)))];
+        let clicking = metronomes.clone();
+        let mut voices = [metronome::MetronomeVoice::default(), metronome::MetronomeVoice::default()];
         // Built at the first callback with the channels, for the same reason:
         // its lookahead is a number of frames, and that needs the rate.
         let mut limit: Option<Limiter> = None;
@@ -339,10 +351,20 @@ impl Engine {
                     readers.iter_mut().zip(channels.iter_mut()).enumerate()
                 {
                     buffer.fill(0.0);
+                    let before = reader.clock.position();
                     reader.mix_into(buffer);
+                    let after = reader.clock.position();
                     let fader = if i == 0 { fade_a } else { fade_b };
                     let Some(settings) = strip.channels.get(i) else { continue };
                     channel.process(buffer, settings, curve, fader);
+                    // The click after the strip, so an EQ cut does not muffle
+                    // it, and only while the deck is playing: a scrub crosses
+                    // beats too, and nobody wants it clicking.
+                    if reader.clock.playing() && !reader.clock.scrubbing() {
+                        if let (Some(metro), Some(voice)) = (clicking.get(i), voices.get_mut(i)) {
+                            voice.render(metro, before, after, buffer, rate);
+                        }
+                    }
                     for (sample, add) in chunk.iter_mut().zip(buffer.iter()) {
                         *sample += *add;
                     }
@@ -404,7 +426,37 @@ impl Engine {
         let decks: [deck::DeckHandle; 2] = handles
             .try_into()
             .map_err(|_| DeckError::Device("could not start both decks".to_owned()))?;
-        Ok(Self { decks, sink, sample_rate, master, mixer, limiter })
+        Ok(Self { decks, sink, sample_rate, master, mixer, limiter, metronome, metronomes })
+    }
+
+    /// The metronome's click and volume, shared by both decks.
+    pub fn metronome(&self) -> &Arc<MetronomeSettings> {
+        &self.metronome
+    }
+
+    /// Switches a deck's metronome on or off.
+    pub fn set_metronome(&self, deck: Deck, on: bool) {
+        if let Some(metro) = self.metronomes.get(deck as usize) {
+            metro.set_on(on);
+        }
+    }
+
+    pub fn metronome_on(&self, deck: Deck) -> bool {
+        self.metronomes.get(deck as usize).is_some_and(|m| m.is_on())
+    }
+
+    /// The beats a deck's metronome clicks on, in milliseconds from the
+    /// start of the track with whether each is a downbeat. Given on a load;
+    /// converted to output frames here, where the rate is known.
+    pub fn set_metronome_grid(&self, deck: Deck, beats: &[(u32, bool)]) {
+        let Some(metro) = self.metronomes.get(deck as usize) else { return };
+        let rate = u64::from(self.sample_rate);
+        metro.set_grid(
+            beats
+                .iter()
+                .map(|&(ms, downbeat)| GridBeat { frame: u64::from(ms) * rate / 1000, downbeat })
+                .collect(),
+        );
     }
 
     pub fn sample_rate(&self) -> u32 {

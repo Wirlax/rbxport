@@ -701,25 +701,36 @@ pub async fn track_beats(
         if relative.is_empty() {
             return Ok(Vec::new());
         }
-        let path = share.join(relative.trim_start_matches(['/', '\\']));
-        let Ok(bytes) = std::fs::read(&path) else { return Ok(Vec::new()) };
-        let Ok(file) = rbl_anlz::parse(&bytes) else { return Ok(Vec::new()) };
-
-        let mut out: Vec<u8> = Vec::new();
-        for section in &file.sections {
-            let Some(beats) = section.as_beat_grid() else { continue };
-            out.reserve(beats.len().min(MAX_BEATS) * BEAT_BYTES);
-            for beat in beats.iter().take(MAX_BEATS) {
-                out.extend_from_slice(&beat.time_ms.to_le_bytes());
-                // 1 is the downbeat; the tag counts 1..4 within the bar.
-                out.push(u8::try_from(beat.beat_number).unwrap_or(0));
-            }
-            break;
+        let beats = read_beat_grid(&share, relative);
+        let mut out: Vec<u8> = Vec::with_capacity(beats.len() * BEAT_BYTES);
+        for (time_ms, number) in beats {
+            out.extend_from_slice(&time_ms.to_le_bytes());
+            out.push(number);
         }
         Ok(out)
     })
     .await
     .map(tauri::ipc::Response::new)
+}
+
+/// A track's beat grid from its `.DAT`: milliseconds and the beat's number
+/// in the bar (1 is the downbeat), at most `MAX_BEATS` of them. Empty for a
+/// track without one.
+fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8)> {
+    let path = share.join(relative.trim_start_matches(['/', '\\']));
+    let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
+    let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };
+    file.sections
+        .iter()
+        .find_map(rbl_anlz::Section::as_beat_grid)
+        .map(|beats| {
+            beats
+                .iter()
+                .take(MAX_BEATS)
+                .map(|beat| (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Bytes one beat takes in that encoding: `u32` milliseconds, then its number.
@@ -747,6 +758,69 @@ pub async fn deck_load<R: tauri::Runtime>(
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.
     engine.load(which, &path);
+    // And the grid, for the metronome. Read off the async thread: it is a
+    // file, and the deck is loading on its own thread anyway.
+    let share = state.share_root();
+    let relative = library.row_of(&track).map(|row| library.analysis_path.get(row as usize).to_owned());
+    let grid = blocking("deck_load_grid", move || {
+        Ok(relative
+            .filter(|rel| !rel.is_empty())
+            .map(|rel| read_beat_grid(&share, &rel))
+            .unwrap_or_default())
+    })
+    .await?;
+    engine.set_metronome_grid(
+        which,
+        &grid.iter().map(|&(ms, number)| (ms, number == 1)).collect::<Vec<_>>(),
+    );
+    Ok(())
+}
+
+/// Switches a deck's metronome on or off: a click on every beat of the
+/// grid while it plays.
+#[tauri::command]
+pub async fn deck_metronome<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    on: bool,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.set_metronome(crate::player::deck_of(&deck), on);
+    Ok(())
+}
+
+/// Preferences › Audio › Metronome: which click, and how loud.
+#[tauri::command]
+pub async fn set_metronome(
+    player: State<'_, Arc<crate::player::Player>>,
+    sound: u8,
+    volume: String,
+) -> AppResult<()> {
+    let sound = match sound {
+        1 => rbl_deck::ClickSound::One,
+        3 => rbl_deck::ClickSound::Three,
+        _ => rbl_deck::ClickSound::Two,
+    };
+    let volume = match volume.as_str() {
+        "small" => rbl_deck::ClickVolume::Small,
+        "middle" => rbl_deck::ClickVolume::Middle,
+        _ => rbl_deck::ClickVolume::Large,
+    };
+    player.set_metronome(sound, volume);
+    Ok(())
+}
+
+/// Preferences › Audio › Sample Rate and Buffer size. Takes effect the next
+/// time a deck plays, as a device change does: a stream has the rate it was
+/// opened at.
+#[tauri::command]
+pub async fn set_audio_config(
+    player: State<'_, Arc<crate::player::Player>>,
+    sample_rate: Option<u32>,
+    buffer_frames: Option<u32>,
+) -> AppResult<()> {
+    player.set_wish(rbl_deck::StreamWish { sample_rate, buffer_frames });
     Ok(())
 }
 

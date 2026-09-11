@@ -751,6 +751,44 @@ fn a_track_ending_on_one_deck_leaves_the_other_playing() {
 }
 
 #[test]
+fn the_metronome_clicks_on_the_grid_and_only_while_playing() {
+    // Two seconds of silence, so anything heard is the click.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("silence.wav");
+    write_wav(&path, RATE, 2, &vec![0.0_f32; RATE as usize * 2 * 2]);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    // Beats every half second, the first a downbeat.
+    h.engine.set_metronome_grid(Deck::A, &[(0, true), (500, false), (1000, false), (1500, false)]);
+
+    // Off: silence stays silence.
+    h.engine.play(Deck::A);
+    let quiet = h.play_until(Deck::A, RATE as u64 / 4);
+    assert!(quiet.iter().all(|s| s.abs() < 1e-6), "no click with the metronome off");
+
+    // On: the beat at 0.5 s is heard, and the silence between beats is silent.
+    h.engine.set_metronome(Deck::A, true);
+    assert!(h.engine.metronome_on(Deck::A));
+    let out = h.play_until(Deck::A, RATE as u64 * 3 / 4);
+    let loudest = out.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+    assert!(loudest > 0.05, "the click is heard: {loudest}");
+    // The window began at 0.25 s: the first frames, before the beat, are silent.
+    assert!(out[..1000].iter().all(|s| s.abs() < 1e-6), "nothing before the beat");
+
+    // Paused: no clicks, however many beats the grid holds.
+    h.engine.pause(Deck::A);
+    std::thread::sleep(Duration::from_millis(50));
+    let mut paused = Vec::new();
+    for _ in 0..40 {
+        paused.extend(h.sink.pull(512));
+    }
+    // The pause's own fade and the click's tail are over well within 40 pulls.
+    let tail = &paused[paused.len() / 2..];
+    assert!(tail.iter().all(|s| s.abs() < 1e-4), "a paused deck does not click");
+}
+
+#[test]
 fn unloading_clears_the_deck() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ramp.wav");

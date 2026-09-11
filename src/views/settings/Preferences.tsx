@@ -45,6 +45,7 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
 /** Which stored pane a sidebar pane's Reset to defaults clears. */
 const RESETS: Partial<Record<Pane, PreferencePane>> = {
   view: "view",
+  audio: "audio",
   analysis: "analysis",
   djSystem: "djSystem",
   advanced: "advanced",

@@ -286,6 +286,22 @@ export function App() {
   // Read at start so the remembered setting reaches the engine before the
   // first thing plays, not when Settings is next opened.
   const limiter = useLimiter();
+
+  // Preferences › Audio, handed to the engine: the rate and buffer the
+  // device is opened with, and the metronome's click. On start and on every
+  // change, from this window or the Preferences window's storage event.
+  const audioPrefs = prefs.preferences.audio;
+  useEffect(() => {
+    void (async () => {
+      const backend = await getBackend();
+      try {
+        await backend.setAudioConfig(audioPrefs.sampleRate, audioPrefs.bufferSize);
+        await backend.setMetronome(audioPrefs.metronomeSound, audioPrefs.metronomeVolume);
+      } catch (e) {
+        console.warn("the audio settings did not reach the engine", e);
+      }
+    })();
+  }, [audioPrefs]);
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {

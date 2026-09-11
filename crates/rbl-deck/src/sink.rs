@@ -72,12 +72,22 @@ impl CpalSink {
     /// rather than refusing to play — a missing interface should not be a
     /// silent app.
     pub fn open_named(render: Render, wanted: Option<String>) -> Result<Self> {
+        Self::open_with(render, wanted, StreamWish::default())
+    }
+
+    /// The same, asking the device for a rate and a buffer size.
+    ///
+    /// Asked, not demanded: a device that does not offer the rate is opened
+    /// at its default, and a buffer size outside what it supports is left to
+    /// it, with a warning either way. The rate actually opened is what
+    /// `sample_rate` reports and what the decks resample to.
+    pub fn open_with(render: Render, wanted: Option<String>, wish: StreamWish) -> Result<Self> {
         let (ask_tx, ask_rx) = std::sync::mpsc::channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
 
         std::thread::Builder::new()
             .name("rbl-deck-device".to_owned())
-            .spawn(move || device_thread(render, wanted.as_deref(), &ask_rx, &ready_tx))
+            .spawn(move || device_thread(render, wanted.as_deref(), wish, &ask_rx, &ready_tx))
             .map_err(DeckError::Io)?;
 
         // The rate decides what the decoders resample to, so opening is not
@@ -124,10 +134,11 @@ impl Drop for CpalSink {
 fn device_thread(
     render: Render,
     wanted: Option<&str>,
+    wish: StreamWish,
     ask: &Receiver<Ask>,
     ready: &Sender<Result<u32>>,
 ) {
-    let stream = match build_stream(render, wanted) {
+    let stream = match build_stream(render, wanted, wish) {
         Ok((stream, rate)) => {
             if ready.send(Ok(rate)).is_err() {
                 return;
@@ -213,7 +224,60 @@ pub fn default_output_device() -> Option<AudioDevice> {
     Some(AudioDevice { id: id.to_string(), name: device.to_string() })
 }
 
-fn build_stream(render: Render, wanted: Option<&str>) -> Result<(cpal::Stream, u32)> {
+/// What Preferences › Audio asks of the device: a sample rate and a buffer
+/// size, either of which may be left to the device.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StreamWish {
+    pub sample_rate: Option<u32>,
+    /// Frames per callback.
+    pub buffer_frames: Option<u32>,
+}
+
+/// The device's configuration for a wish: its default, at the wished rate
+/// if it offers that rate, with the wished buffer if that is in its range.
+fn configure(device: &cpal::Device, wish: StreamWish) -> Result<(cpal::StreamConfig, cpal::SampleFormat)> {
+    let supported = device
+        .default_output_config()
+        .map_err(|e| DeckError::Device(e.to_string()))?;
+    let format = supported.sample_format();
+    let buffer_range = *supported.buffer_size();
+    let mut config: cpal::StreamConfig = supported.into();
+
+    if let Some(rate) = wish.sample_rate {
+        // Among the device's ranges, one at the default format that covers
+        // the rate; a device that cannot run there keeps its default.
+        let offers = device.supported_output_configs().is_ok_and(|mut ranges| {
+            ranges.any(|range| {
+                range.sample_format() == format
+                    && range.channels() == config.channels
+                    && range.min_sample_rate() <= rate
+                    && rate <= range.max_sample_rate()
+            })
+        });
+        if offers {
+            config.sample_rate = rate;
+        } else {
+            tracing::warn!(rate, opened = config.sample_rate, "the audio device does not offer that sample rate");
+        }
+    }
+    if let Some(frames) = wish.buffer_frames {
+        match buffer_range {
+            cpal::SupportedBufferSize::Range { min, max } if (min..=max).contains(&frames) => {
+                config.buffer_size = cpal::BufferSize::Fixed(frames);
+            }
+            cpal::SupportedBufferSize::Range { min, max } => {
+                tracing::warn!(frames, min, max, "the audio device does not offer that buffer size");
+            }
+            cpal::SupportedBufferSize::Unknown => {
+                // The device will not say; asking is harmless, and it may take it.
+                config.buffer_size = cpal::BufferSize::Fixed(frames);
+            }
+        }
+    }
+    Ok((config, format))
+}
+
+fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish) -> Result<(cpal::Stream, u32)> {
     let host = cpal::default_host();
     // The named one if it is there, and the default if it is not: a device
     // that has been unplugged since it was chosen should not stop the app
@@ -231,13 +295,10 @@ fn build_stream(render: Render, wanted: Option<&str>) -> Result<(cpal::Stream, u
             tracing::warn!(wanted, opened = %device, "that audio device is not here; using another");
         }
     }
-    let supported = device
-        .default_output_config()
-        .map_err(|e| DeckError::Device(e.to_string()))?;
-    let format = supported.sample_format();
-    let config: cpal::StreamConfig = supported.into();
+    let (config, format) = configure(&device, wish)?;
     let rate = config.sample_rate;
     let channels = config.channels;
+    tracing::info!(device = %device, rate, buffer = ?config.buffer_size, "audio output opened");
 
     let error = |e: cpal::Error| tracing::error!(error = %e, "audio device error");
     let stream = match format {

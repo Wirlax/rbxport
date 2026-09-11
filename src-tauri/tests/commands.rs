@@ -54,7 +54,7 @@ fn shell() -> Shell {
 
     let sink: Arc<Mutex<Option<Arc<NullSink>>>> = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&sink);
-    let player = Player::with_sink(Box::new(move |render, _device| {
+    let player = Player::with_sink(Box::new(move |render, _device, _wish| {
         let opened = Arc::new(NullSink::new(RATE, render));
         *slot.lock().unwrap() = Some(Arc::clone(&opened));
         Ok(opened as Arc<dyn Sink>)

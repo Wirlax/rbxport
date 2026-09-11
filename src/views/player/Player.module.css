@@ -902,6 +902,8 @@
   padding: 0;
 }
 .editButton:disabled { color: var(--c-pad-label); }
+/* Lit while the metronome clicks, the way the pads light for a set cue. */
+.editButton[aria-pressed="true"] { background: var(--c-pad-active); color: var(--c-icon-on); }
 .editIcon { width: 12px; height: 12px; }
 /* The mark button carries rekordbox's red bar rather than a glyph. */
 .editButton[data-mark] { color: var(--c-downbeat); font-size: var(--f-size-ui); }
