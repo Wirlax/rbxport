@@ -209,3 +209,30 @@ test("with the library protected, the tree menu will not create or delete", asyn
     page.getByRole("menu", { name: "Track" }).getByRole("menuitem", { name: "Remove from Playlist" }),
   ).toBeDisabled();
 });
+
+test("a rating set after a playlist edit stays set once the reload lands", async ({ page }) => {
+  // A playlist edit and a rating both end in a reload the backend announces
+  // with its generation. The view must key on that number alone: a count the
+  // interface bumped itself on the playlist edit could land on the same value
+  // the backend then announced for the rating, and a generation that does not
+  // change is a page that is not refetched — the star lit for a moment and
+  // went out when the overlay was dropped.
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Create New Playlist");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New playlist.");
+  await chooseFromTreeMenu(page, item(page, "CURRENT"), "Create New Folder");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New folder.");
+
+  // A star the row does not already have: clicking the set one clears it.
+  const stars = rows(page).nth(3).locator('[data-col="rating"] [role="radiogroup"]');
+  const had = (await stars.getByRole("radio", { checked: true }).count()) > 0
+    ? await stars.getByRole("radio", { checked: true }).getAttribute("aria-label")
+    : null;
+  const pick = had === "3 of 5" ? 2 : 3;
+  await stars.getByRole("radio", { name: `${pick} of 5` }).click();
+  await expect(page.getByRole("contentinfo")).toContainText(`Rated ${pick} of 5`);
+  // Past the moment the optimistic overlay is dropped for the re-read rows.
+  await page.waitForTimeout(500);
+  await expect(stars.getByRole("radio", { name: `${pick} of 5` })).toHaveAttribute("aria-checked", "true");
+  await expect(stars).toHaveText(`${"★".repeat(pick)}${"☆".repeat(5 - pick)}`);
+});

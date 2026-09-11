@@ -614,8 +614,13 @@ export function App() {
   const afterWrite = useCallback(
     async (said: string) => {
       const backend = await getBackend();
+      // The tree now, so the node that was made is there when the note says
+      // so. The generation is the backend's alone, announced as
+      // `library:changed` after every write: a count bumped here as well
+      // could land on the number the backend announces for the next edit,
+      // and a generation that does not change is a page that is not
+      // refetched — a rating lit for a moment and went out.
       setTree(await backend.playlistTree());
-      setLibraryGeneration((generation) => generation + 1);
       report(said);
     },
     [report],
