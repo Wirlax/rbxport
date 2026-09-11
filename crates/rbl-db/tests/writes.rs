@@ -368,9 +368,11 @@ fn deleting_a_track_removes_it_from_every_playlist_and_renumbers_each() {
 
 #[test]
 fn a_rating_is_stored_as_rekordbox_stores_it() {
-    // Stars are multiples of 51, so five stars is 255 rather than 5.
+    // Stars as a count, 0 to 5: the reference library's 269 rated rows hold
+    // 1 to 5 and nothing else [OBS]. The multiples of 51 the XML export uses
+    // do not belong here — stored, the index reads any of them as five stars.
     let mut f = fixture();
-    for (stars, stored) in [(0_u8, 0_i64), (1, 51), (3, 153), (5, 255)] {
+    for (stars, stored) in [(0_u8, 0_i64), (1, 1), (3, 3), (5, 5)] {
         f.writer.set_rating(&track_id(0), stars).unwrap();
         let value: i64 = f.one("SELECT Rating FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
         assert_eq!(value, stored, "{stars} stars");

@@ -132,8 +132,8 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
                 mix_name: text(r, 13),
                 message: text(r, 14),
                 color: text(r, 15),
-                // Stored as multiples of 51, so five stars is 255.
-                rating: u8::try_from(number(r, 16) / 51).unwrap_or(5).min(5),
+                // Stars as a count, 0 to 5, as the index reads them.
+                rating: u8::try_from(number(r, 16)).unwrap_or(5).min(5),
                 bpm_x100: small(number(r, 17)),
                 duration_sec: small(number(r, 18)),
                 year: small(number(r, 19)),
@@ -261,7 +261,7 @@ mod tests {
             "UPDATE djmdContent SET ArtistID = 'a1', AlbumID = 'al1', OrgArtistID = 'a3',
                 ComposerID = 'a4', RemixerID = 'a5', GenreID = 'g1', LabelID = 'l1', KeyID = 'k1',
                 Lyricist = 'Words', Subtitle = 'extended mix', DeliveryComment = 'hello',
-                ColorID = '2', Rating = 204, ReleaseYear = 2023, TrackNo = 4, DiscNo = 2,
+                ColorID = '2', Rating = 4, ReleaseYear = 2023, TrackNo = 4, DiscNo = 2,
                 DJPlayCount = 7, FileType = 11, FileSize = 47322584, BitRate = 1411,
                 SampleRate = 44100, BitDepth = 16, DateCreated = '2023-08-06',
                 ReleaseDate = '2023-08-01', HotCueAutoLoad = 'on', DeliveryControl = 'on'

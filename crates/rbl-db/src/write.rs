@@ -756,8 +756,10 @@ impl Writer {
         if stars > 5 {
             return Err(DbError::WriteRefused(format!("{stars} is not a rating between 0 and 5")));
         }
-        // rekordbox stores stars as multiples of 51, so five stars is 255.
-        self.touch_content(content, "Rating", &Value::Integer(i64::from(stars) * 51))
+        // Stars as they are. The reference library holds 0 to 5 and nothing
+        // else across 38,681 rows [OBS]; the multiples of 51 are the XML
+        // export's scale, not the database's.
+        self.touch_content(content, "Rating", &Value::Integer(i64::from(stars)))
     }
 
     /// Sets a track's comment.
