@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyClick, emptySelection, keepsSelection, modifierFor } from "./selection";
+import { applyClick, clickSettles, emptySelection, modifierFor, pressSelects } from "./selection";
 
 describe("selection", () => {
   it("reads the modifier from the event", () => {
@@ -9,12 +9,25 @@ describe("selection", () => {
     expect(modifierFor({ shiftKey: true, metaKey: true, ctrlKey: false })).toBe("range");
   });
 
-  it("the right button keeps a selection it lands in, and only that", () => {
-    expect(keepsSelection({ button: 2 }, true)).toBe(true);
-    // Outside the selection it selects, like the left button.
-    expect(keepsSelection({ button: 2 }, false)).toBe(false);
-    // The left button always applies the click.
-    expect(keepsSelection({ button: 0 }, true)).toBe(false);
+  it("a plain press on a selected row waits for the release; every other press applies", () => {
+    const plain = { button: 0, shiftKey: false, metaKey: false, ctrlKey: false };
+    // Selected and plain: this may be a drag of the selection.
+    expect(pressSelects(plain, true)).toBe(false);
+    expect(clickSettles(plain, true)).toBe(true);
+    // Not selected: the press selects, and the click that follows changes nothing.
+    expect(pressSelects(plain, false)).toBe(true);
+    expect(clickSettles(plain, false)).toBe(false);
+    // Modified presses are never drags and apply at once.
+    expect(pressSelects({ ...plain, shiftKey: true }, true)).toBe(true);
+    expect(pressSelects({ ...plain, metaKey: true }, true)).toBe(true);
+    expect(clickSettles({ ...plain, metaKey: true }, true)).toBe(false);
+  });
+
+  it("the right button keeps a selection it lands in, and selects outside it", () => {
+    const right = { button: 2, shiftKey: false, metaKey: false, ctrlKey: false };
+    expect(pressSelects(right, true)).toBe(false);
+    expect(clickSettles(right, true)).toBe(false);
+    expect(pressSelects(right, false)).toBe(true);
   });
 
   it("a plain click replaces the selection and moves the anchor", () => {

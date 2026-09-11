@@ -12,7 +12,9 @@ import type { DeckId, RowDto, SortColumn, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
-import { applyClick, emptySelection, keepsSelection, modifierFor, type SelectionState } from "@/lib/selection";
+import {
+  applyClick, clickSettles, emptySelection, modifierFor, pressSelects, type SelectionState,
+} from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
 import { trackMenuFor } from "@/lib/contextMenus";
 import { WaveformPreview } from "./WaveformPreview";
@@ -254,7 +256,12 @@ const TrackRow = memo(function TrackRow({
       data-even={index % 2 === 1 || undefined}
       style={{ transform: `translate3d(0, ${top}px, 0)` }}
       onMouseDown={(e) => {
-        if (!keepsSelection(e, selected)) onSelect(index, row.id, e);
+        if (pressSelects(e, selected)) onSelect(index, row.id, e);
+      }}
+      // The plain click a press on a selected row held back, now that the
+      // release has shown it was not a drag.
+      onClick={(e) => {
+        if (clickSettles(e, selected)) onSelect(index, row.id, e);
       }}
       onDoubleClick={() => onOpen(index)}
       onContextMenu={(e) => {

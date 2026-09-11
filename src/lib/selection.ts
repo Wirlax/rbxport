@@ -15,20 +15,43 @@ export const emptySelection: SelectionState = { ids: new Set(), anchorIndex: nul
 
 export type ClickModifier = "none" | "toggle" | "range";
 
-/**
- * Whether a press should leave the selection as it is: the right button on a
- * row already in it. The menu that follows acts on the selection, and a
- * right-click that collapsed five rows to one would remove one track where
- * five were meant — rekordbox keeps them, as every native list does. On a row
- * outside the selection the right button selects it like the left.
- */
-export function keepsSelection(e: { button: number }, selected: boolean): boolean {
-  return e.button === 2 && selected;
-}
-
 export function modifierFor(e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): ClickModifier {
   if (e.shiftKey) return "range";
   return e.metaKey || e.ctrlKey ? "toggle" : "none";
+}
+
+/** The parts of a mouse event the press rules read. */
+export interface Press {
+  button: number;
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+}
+
+/**
+ * Whether a press on a row applies the click at once.
+ *
+ * Not on a row already selected, when the press is plain: that is the start
+ * of a drag as often as a click, and what gets dragged is the selection the
+ * row is in — collapsing it on the press dropped one track on a playlist
+ * where five were chosen. The release settles it (`clickSettles`). The right
+ * button on a selected row keeps it too, since the menu that follows acts on
+ * the selection; rekordbox keeps it in both cases, as every native list does.
+ * A modified press (shift, ⌘/ctrl) is never a drag's start and applies now.
+ */
+export function pressSelects(e: Press, selected: boolean): boolean {
+  if (!selected) return true;
+  if (e.button === 2) return false;
+  return modifierFor(e) !== "none";
+}
+
+/**
+ * Whether a click — a press and a release with no drag between — applies
+ * the click a plain press on a selected row held back. The browser sends no
+ * click after a drag, which is what makes the two tell apart.
+ */
+export function clickSettles(e: Press, selected: boolean): boolean {
+  return selected && e.button === 0 && modifierFor(e) === "none";
 }
 
 /**

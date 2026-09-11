@@ -99,6 +99,30 @@ test("a track dropped on a new playlist is in it, and its menu takes it out agai
   await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
 });
 
+test("dragging a selection drops every row in it, not just the one under the hand", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Hardstyle"), "Create New Playlist");
+  const made = item(page, "New playlist");
+  await expect(made).toBeVisible();
+
+  // Three rows, shift-click; the press that starts the drag lands on a row
+  // already selected, and must not collapse the selection to it.
+  await rows(page).nth(1).locator('[data-col="title"]').click();
+  await rows(page).nth(3).locator('[data-col="title"]').click({ modifiers: ["Shift"] });
+  await expect(page.getByText("Selected: 3 Tracks")).toBeVisible();
+  await rows(page).nth(2).dragTo(made);
+  await expect(page.getByRole("contentinfo")).toContainText("Added 3 tracks to New playlist.");
+  await expect(page.getByText("Selected: 3 Tracks")).toBeVisible();
+
+  // A plain click on a selected row, released without a drag, does collapse
+  // to it — the ordinary click still works.
+  await rows(page).nth(2).locator('[data-col="title"]').click();
+  await expect(page.getByText("Selected: 1 Track")).toBeVisible();
+
+  await made.click();
+  await expect(page.getByTestId("browser-title")).toHaveText("New playlist (3 Tracks)");
+});
+
 test("removing from an existing playlist shortens it by exactly the selection", async ({ page }) => {
   await open(page);
   const playlist = item(page, "Eurodance");
