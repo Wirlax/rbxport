@@ -7,7 +7,27 @@
  * pass: once a node is collapsed, everything deeper than it is skipped until
  * the depth comes back up.
  */
-import type { TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type TreeNode } from "@/ipc/types";
+
+/**
+ * Where a new playlist made from `node`'s menu goes: the folder itself, or
+ * the folder a playlist is in, or the root of the tree — the id the backend
+ * takes as a parent.
+ *
+ * The flat array carries no parent ids: a playlist's folder is the nearest
+ * node above it one level up, and a playlist at depth 1 is under the
+ * `Playlists` heading, which is not a folder anything can be made in.
+ */
+export function parentFor(nodes: readonly TreeNode[], node: TreeNode): string {
+  if (node.kind === "folder") return node.id;
+  const at = nodes.findIndex((n) => n.id === node.id);
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const above = nodes[i];
+    if (above === undefined || above.depth >= node.depth) continue;
+    return above.kind === "folder" ? above.id : TREE_ROOT;
+  }
+  return TREE_ROOT;
+}
 
 /** A node can be collapsed only if something sits under it. */
 export function hasChildren(nodes: readonly TreeNode[], index: number): boolean {

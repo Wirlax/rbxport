@@ -39,6 +39,7 @@ import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { isLooseId } from "@/lib/explorer";
+import { parentFor } from "@/lib/tree";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -635,26 +636,26 @@ export function App() {
   );
 
   const createPlaylistIn = useCallback(
-    (parent: TreeNode) => {
+    (node: TreeNode) => {
       // rekordbox's own default name, from german.lang, and the node the menu
-      // was opened on is the parent — a folder holds it, a playlist's own
-      // folder does.
+      // was opened on says where — a folder holds it, a playlist's own
+      // folder does, and one at the top goes at the top.
       write(async (backend) => {
-        await backend.edits.createPlaylist("New playlist", parent.kind === "folder" ? parent.id : "");
+        await backend.edits.createPlaylist("New playlist", parentFor(tree, node));
         return "Created New playlist.";
       });
     },
-    [write],
+    [write, tree],
   );
 
   const createFolderIn = useCallback(
-    (parent: TreeNode) => {
+    (node: TreeNode) => {
       write(async (backend) => {
-        await backend.edits.createFolder("New folder", parent.kind === "folder" ? parent.id : "");
+        await backend.edits.createFolder("New folder", parentFor(tree, node));
         return "Created New folder.";
       });
     },
-    [write],
+    [write, tree],
   );
 
   const deleteNode = useCallback(

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import {
-  branchIds, emptySources, hasChildren, newlyClosed, nodesForSource, sourceOf, toggle, visibleNodes,
+  branchIds, emptySources, hasChildren, newlyClosed, nodesForSource, parentFor, sourceOf, toggle, visibleNodes,
 } from "./tree";
 
 /** `"a"` at depth 0, `"  b"` at depth 1, and so on. */
@@ -263,5 +263,36 @@ describe("newlyClosed", () => {
     const later = [...first, { id: "d", name: "d", kind: "directory" as const, depth: 1, expanded: false }];
     expect(newlyClosed(later, new Set(["a", "b", "c"]))).toEqual(["d"]);
     expect(newlyClosed(later, new Set(["a", "b", "c", "d"]))).toEqual([]);
+  });
+});
+
+describe("parentFor", () => {
+  const nodes: TreeNode[] = [
+    { id: "playlists", name: "Playlists", kind: "collection", depth: 0 },
+    { id: "top", name: "Top", kind: "playlist", depth: 1 },
+    { id: "gigs", name: "Gigs", kind: "folder", depth: 1, expanded: true },
+    { id: "friday", name: "Friday", kind: "playlist", depth: 2 },
+    { id: "inner", name: "Inner", kind: "folder", depth: 2, expanded: true },
+    { id: "deep", name: "Deep", kind: "playlist", depth: 3 },
+    { id: "saturday", name: "Saturday", kind: "playlist", depth: 2 },
+  ];
+  const by = (id: string) => nodes.find((n) => n.id === id)!;
+
+  it("a folder holds what is made from its menu", () => {
+    expect(parentFor(nodes, by("gigs"))).toBe("gigs");
+  });
+
+  it("a playlist's own folder does, however far down", () => {
+    expect(parentFor(nodes, by("friday"))).toBe("gigs");
+    expect(parentFor(nodes, by("deep"))).toBe("inner");
+    // Past a deeper sibling branch to the folder it is actually in.
+    expect(parentFor(nodes, by("saturday"))).toBe("gigs");
+  });
+
+  it("a playlist at the top goes at the top, under the backend's root id", () => {
+    // The `Playlists` heading is not a folder; "" is not a parent the
+    // writer knows, and was what the tree used to send.
+    expect(parentFor(nodes, by("top"))).toBe(TREE_ROOT);
+    expect(parentFor(nodes, { id: "gone", name: "Gone", kind: "playlist", depth: 1 })).toBe(TREE_ROOT);
   });
 });
