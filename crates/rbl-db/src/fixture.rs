@@ -233,6 +233,43 @@ fn add_histories(conn: &Connection, shape: Shape, stamp: &str) -> Result<()> {
     Ok(())
 }
 
+/// Points the `index`th track at a real audio file, so a deck can play it.
+///
+/// The row's path, name and length follow the file; nothing checks that the
+/// file exists here, because the fixture may be built on one machine for
+/// another — the path is the other machine's.
+pub fn point_at_audio(location: &LibraryLocation, index: usize, path: &str, seconds: u32) -> Result<()> {
+    let conn = open_fixture(location)?;
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned();
+    let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).to_owned();
+    conn.execute(
+        "UPDATE djmdContent SET FolderPath = ?1, FileNameL = ?2, Title = ?3, Length = ?4 WHERE ID = ?5",
+        params![path, name, stem, seconds, track_id(index)],
+    )?;
+    Ok(())
+}
+
+/// Writes the `options.json` rekordbox's agent would keep for this library,
+/// with `master_db_as` as the path it will have where it is read — the
+/// detector resolves `share/` beside it. What `REKORDBOX_LITE_OPTIONS` points
+/// the compiled app at.
+pub fn write_options_json(to: &Path, master_db_as: &str, passphrase: &str) -> Result<()> {
+    let dp = crate::key::wrap_password(passphrase)?;
+    let json = serde_json::json!({ "options": [["db-path", master_db_as], ["dp", dp]] });
+    std::fs::write(to, serde_json::to_vec_pretty(&json).map_err(|e| DbError::Open(e.to_string()))?)?;
+    Ok(())
+}
+
+/// A fixture's database, keyed, for one more statement.
+fn open_fixture(location: &LibraryLocation) -> Result<Connection> {
+    let conn = Connection::open(&location.master_db)
+        .map_err(|e| DbError::Open(format!("{}: {e}", location.master_db.display())))?;
+    conn.pragma_update(None, "cipher", "sqlcipher")?;
+    conn.pragma_update(None, "legacy", 4)?;
+    conn.pragma_update(None, "key", &location.passphrase)?;
+    Ok(conn)
+}
+
 /// The id of the nth fixture track.
 #[must_use]
 pub fn track_id(index: usize) -> String {

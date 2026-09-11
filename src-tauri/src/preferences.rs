@@ -46,11 +46,19 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
     // loads at all (0.5.1, verified on chris-win11). Setting the hash from
     // an initialization script runs before the page's own scripts on every
     // platform and puts no fragment in a path.
-    WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::App("index.html".into()))
         .initialization_script(format!(
             "if (!location.hash) location.hash = '#preferences/{pane}';"
         ))
-        .title("Preferences")
+        .title("Preferences");
+    // The same debugging port as the main window's, when one was asked for;
+    // both webviews share one browser process, but the arguments are the
+    // window's to declare (see `crate::browser_args`). A no-op off Windows.
+    let builder = match crate::browser_args() {
+        Some(args) => builder.additional_browser_args(&args),
+        None => builder,
+    };
+    builder
         // Said in the log, because a window that opens blank says nothing
         // itself: which URL the webview was sent to and whether the page
         // started and finished loading. What 0.5.1's blank white window on

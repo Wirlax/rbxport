@@ -8,7 +8,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use blowfish::Blowfish;
-use cipher::{BlockDecrypt, KeyInit};
+use cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 
 use crate::{DbError, Result};
 
@@ -53,11 +53,38 @@ pub fn derive_password(dp_base64: &str) -> Result<String> {
         .map_err(|e| DbError::KeyDerivation(format!("passphrase is not UTF-8: {e}")))
 }
 
+/// The inverse: wraps a passphrase the way rekordbox's agent does, so a
+/// fixture can carry an `options.json` the detector reads like the real one.
+///
+/// NUL-padded to a whole block, which `derive_password` trims off again.
+pub fn wrap_password(passphrase: &str) -> Result<String> {
+    let cipher = Blowfish::<byteorder::BigEndian>::new_from_slice(MAGIC)
+        .map_err(|e| DbError::KeyDerivation(format!("bad Blowfish key: {e}")))?;
+    let mut plaintext = passphrase.as_bytes().to_vec();
+    // At least one block: an empty passphrase still has to decode to
+    // something `derive_password` accepts.
+    let short = plaintext.len() % BLOCK;
+    if short != 0 || plaintext.is_empty() {
+        plaintext.resize(plaintext.len() + BLOCK - short, 0);
+    }
+    for block in plaintext.chunks_exact_mut(BLOCK) {
+        cipher.encrypt_block(block.into());
+    }
+    Ok(STANDARD.encode(&plaintext))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use blowfish::cipher::BlockEncrypt;
+
+    #[test]
+    fn a_wrapped_passphrase_derives_back_whatever_its_length() {
+        for secret in ["a", "rekordbox-lite-fixture", "exactly eight bytes!!!!!", ""] {
+            let dp = wrap_password(secret).unwrap();
+            assert_eq!(derive_password(&dp).unwrap(), secret, "{secret:?}");
+        }
+    }
 
     /// Round-trips through our own encryptor so the test needs no real secret.
     #[test]

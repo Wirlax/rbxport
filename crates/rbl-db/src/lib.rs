@@ -64,8 +64,22 @@ pub enum OpenMode {
     ReadWrite,
 }
 
+/// Names an `options.json` to use instead of the installed agent's.
+///
+/// What points the compiled app at a fixture library on a test machine —
+/// see `scripts/e2e-win/`. Unset in ordinary use.
+pub const OPTIONS_ENV: &str = "REKORDBOX_LITE_OPTIONS";
+
 /// The agent's options file, which holds the db path and the wrapped passphrase.
 fn options_path() -> Result<PathBuf> {
+    if let Some(chosen) = std::env::var_os(OPTIONS_ENV) {
+        let path = PathBuf::from(chosen);
+        return if path.is_file() {
+            Ok(path)
+        } else {
+            Err(DbError::NotInstalled(format!("{OPTIONS_ENV} names {}, which is not a file", path.display())))
+        };
+    }
     let base = if cfg!(target_os = "windows") {
         dirs::config_dir().map(|p| p.join("Pioneer"))
     } else {

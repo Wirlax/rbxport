@@ -264,9 +264,41 @@ fn install_tracing() {
     }));
 }
 
+/// Names a port for `WebView2`'s remote debugging, on Windows.
+///
+/// Set, the webviews accept a Chrome `DevTools` Protocol connection on
+/// `127.0.0.1:<port>`, which is how `scripts/e2e-win/` drives the compiled
+/// app with Playwright. Unset — every ordinary launch — nothing listens.
+/// An environment variable rather than a build flag because the point is to
+/// test the build that ships. `WebView2`'s own `WEBVIEW2_ADDITIONAL_BROWSER_
+/// ARGUMENTS` is not honoured once the host sets arguments of its own, which
+/// wry does, so it has to be passed here.
+pub const DEVTOOLS_PORT_ENV: &str = "REKORDBOX_LITE_DEVTOOLS_PORT";
+
+/// The browser arguments for every webview: wry's defaults, which setting
+/// any argument replaces, plus the debugging port when one is asked for.
+/// `None` when nothing is asked for, so wry's own defaults stand untouched.
+pub fn browser_args() -> Option<String> {
+    let port = std::env::var(DEVTOOLS_PORT_ENV).ok()?.parse::<u16>().ok()?;
+    // What wry passes when left alone (`wry/src/webview2/mod.rs`), with the
+    // autoplay policy this app's audio elements rely on.
+    Some(format!(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+         --autoplay-policy=no-user-gesture-required --remote-debugging-port={port}"
+    ))
+}
+
 #[allow(clippy::too_many_lines, reason = "the command list is one line per command, and that is the whole function")]
 pub fn run() {
     install_tracing();
+
+    let mut context = tauri::generate_context!();
+    if let Some(args) = browser_args() {
+        tracing::info!(port = %std::env::var(DEVTOOLS_PORT_ENV).unwrap_or_default(), "webview remote debugging on");
+        for window in &mut context.config_mut().app.windows {
+            window.additional_browser_args = Some(args.clone());
+        }
+    }
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -398,7 +430,7 @@ pub fn run() {
             details::track_lookups,
             details::set_track_field,
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     match result {
         Ok(app) => app.run(|_handle, _event| {}),
