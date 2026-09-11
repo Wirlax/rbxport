@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyClick, emptySelection, modifierFor } from "./selection";
+import { applyClick, emptySelection, keepsSelection, modifierFor } from "./selection";
 
 describe("selection", () => {
   it("reads the modifier from the event", () => {
@@ -7,6 +7,14 @@ describe("selection", () => {
     expect(modifierFor({ shiftKey: false, metaKey: true, ctrlKey: false })).toBe("toggle");
     expect(modifierFor({ shiftKey: false, metaKey: false, ctrlKey: true })).toBe("toggle");
     expect(modifierFor({ shiftKey: true, metaKey: true, ctrlKey: false })).toBe("range");
+  });
+
+  it("the right button keeps a selection it lands in, and only that", () => {
+    expect(keepsSelection({ button: 2 }, true)).toBe(true);
+    // Outside the selection it selects, like the left button.
+    expect(keepsSelection({ button: 2 }, false)).toBe(false);
+    // The left button always applies the click.
+    expect(keepsSelection({ button: 0 }, true)).toBe(false);
   });
 
   it("a plain click replaces the selection and moves the anchor", () => {

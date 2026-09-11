@@ -15,6 +15,17 @@ export const emptySelection: SelectionState = { ids: new Set(), anchorIndex: nul
 
 export type ClickModifier = "none" | "toggle" | "range";
 
+/**
+ * Whether a press should leave the selection as it is: the right button on a
+ * row already in it. The menu that follows acts on the selection, and a
+ * right-click that collapsed five rows to one would remove one track where
+ * five were meant — rekordbox keeps them, as every native list does. On a row
+ * outside the selection the right button selects it like the left.
+ */
+export function keepsSelection(e: { button: number }, selected: boolean): boolean {
+  return e.button === 2 && selected;
+}
+
 export function modifierFor(e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): ClickModifier {
   if (e.shiftKey) return "range";
   return e.metaKey || e.ctrlKey ? "toggle" : "none";
