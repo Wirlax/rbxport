@@ -232,3 +232,62 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
   await menu.getByRole("menuitem", { name: "Analyze Track" }).click();
   await expect(page.getByRole("contentinfo")).toContainText(/Analyzing: \d+ of \d+|\d+ failed|analy[sz]ed/i);
 });
+
+test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", async ({ page }) => {
+  await open(page);
+  await load(page);
+  const deck = player(page);
+  const bpm = deck.getByTestId("player-bpm");
+  const resting = Number(await bpm.innerText());
+  expect(resting).toBeGreaterThan(0);
+
+  // Typed: the deck plays at the BPM asked for.
+  await bpm.dblclick();
+  const box = deck.getByRole("textbox", { name: "BPM" });
+  await box.fill(String(resting + 3));
+  await box.press("Enter");
+  await expect(bpm).toHaveText(`${(resting + 3).toFixed(2)}`);
+  // Escape leaves it alone.
+  await bpm.dblclick();
+  await box.fill("999");
+  await box.press("Escape");
+  await expect(bpm).toHaveText(`${(resting + 3).toFixed(2)}`);
+  await deck.getByRole("button", { name: "Reset tempo" }).click();
+  await expect(bpm).toHaveText(resting.toFixed(2));
+
+  // Dragged: the fader opens under the number and the same drag drives it —
+  // down is faster, as a CDJ's is.
+  const at = await bpm.boundingBox();
+  if (!at) throw new Error("no BPM field");
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2 + 30, { steps: 6 });
+  const fader = deck.getByRole("dialog", { name: "Tempo" });
+  await expect(fader).toBeVisible();
+  await page.mouse.up();
+  await expect(fader.getByRole("radio", { name: "±6" })).toHaveAttribute("aria-checked", "true");
+  expect(Number(await bpm.innerText())).toBeGreaterThan(resting);
+  await expect(fader.getByTestId("tempo-percent")).toHaveText(/^\+\d\.\d\d%$/);
+
+  // WIDE reaches double speed; the range buttons keep the tempo where it is.
+  await fader.getByRole("radio", { name: "WIDE" }).click();
+  await expect(fader.getByRole("slider", { name: "Tempo" })).toHaveAttribute("aria-valuemax", "100");
+  await fader.getByRole("slider", { name: "Tempo" }).focus();
+  const shown = Number(await bpm.innerText());
+  await page.keyboard.press("ArrowDown");
+  expect(Number(await bpm.innerText())).toBeGreaterThan(shown);
+
+  // A semitone either way, shown beside the fader.
+  const shift = fader.getByTestId("key-shift");
+  await expect(shift).toHaveText("KEY");
+  await fader.getByRole("button", { name: "Key up a semitone" }).click();
+  await expect(shift).toHaveText("+1 st");
+  await fader.getByRole("button", { name: "Key down a semitone" }).click();
+  await fader.getByRole("button", { name: "Key down a semitone" }).click();
+  await expect(shift).toHaveText("−1 st");
+  // The BPM is untouched by the key.
+  expect(Number(await bpm.innerText())).toBeCloseTo(Number(await bpm.innerText()), 2);
+
+  await page.keyboard.press("Escape");
+  await expect(fader).toBeHidden();
+});

@@ -1,0 +1,110 @@
+/* The BPM field and the tempo fader that opens under it.
+   The field is the measured one from Player.module.css (`bpmField`); the
+   fader is ours — rekordbox's on-screen tempo slider is a CDJ's, and no
+   capture of it has been measured, so its sizes are chosen to read on the
+   pad row rather than measured [ASSUME]. Every colour is a token. */
+.field { position: relative; }
+
+/* The box — width, height, face — is the host's (`bpmField` in the deck's
+   own stylesheet); this only adds what the field needs to be handled. */
+.bpm,
+.input {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+.bpm[aria-disabled] { color: var(--c-pad-label); }
+.input { text-align: center; outline: 1px solid var(--c-accent); }
+
+.fader {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  top: calc(100% + 4px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--c-context-menu);
+  border: 1px solid var(--c-context-menu-border);
+  box-shadow: inset 0 0 0 0.5px var(--c-context-menu-inner), 0 4px 12px rgb(0 0 0 / 45%);
+  color: var(--c-context-menu-text);
+  font-family: var(--f-ui);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+}
+
+.ranges { display: flex; gap: 3px; }
+.range {
+  border: 0;
+  border-radius: 2px;
+  padding: 3px 6px;
+  background: var(--c-button);
+  color: var(--c-pad-label);
+  font: inherit;
+  cursor: default;
+}
+.range[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
+
+.readout { font-variant-numeric: tabular-nums; color: var(--c-text); }
+
+/* The track: a well with the centre marked and the knob a bar across it.
+   Down is faster, as a CDJ's fader is. */
+.track {
+  position: relative;
+  width: 44px;
+  height: 120px;
+  background: var(--c-pad-well);
+  border-radius: 2px;
+  touch-action: none;
+  outline: none;
+}
+.track:focus-visible { outline: 1px solid var(--c-accent); }
+.centre {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 1px;
+  background: var(--c-downbeat);
+}
+.knob {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 1px;
+  background: var(--c-icon-on);
+}
+.end {
+  position: absolute;
+  right: 100%;
+  margin-right: 4px;
+  color: var(--c-pad-label);
+  font-variant-numeric: tabular-nums;
+}
+.end[data-end="top"] { top: 0; }
+.end[data-end="bottom"] { bottom: 0; }
+
+.keys { display: flex; align-items: center; gap: 4px; }
+.key {
+  border: 0;
+  border-radius: 2px;
+  width: 22px;
+  height: 20px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--f-size-sm);
+  cursor: default;
+}
+.key:disabled { color: var(--c-pad-label); }
+.keyShift { min-width: 40px; text-align: center; color: var(--c-text); font-variant-numeric: tabular-nums; }

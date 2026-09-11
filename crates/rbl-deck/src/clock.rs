@@ -5,7 +5,7 @@
 //! control side and read by both. Atomics rather than a lock: the callback is
 //! realtime and must never wait for a reader.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// One deck's shared state.
 #[derive(Debug, Default)]
@@ -33,6 +33,9 @@ pub struct DeckClock {
     /// anything extrapolating the playhead between ticks.
     tempo: AtomicU32,
     master_tempo: AtomicBool,
+    /// The key shift in semitones, as an `i8` widened: 0 is the track's own
+    /// key. Read by the interface for its key readout.
+    key_shift: AtomicI32,
     /// Output frames still to pass before a started deck makes a sound.
     ///
     /// Quantized play on a synced deck: the deck is playing as far as the
@@ -56,6 +59,8 @@ pub struct DeckSnapshot {
     pub tempo: f32,
     /// Whether the pitch is held while the speed changes.
     pub master_tempo: bool,
+    /// Semitones the key is shifted by; 0 is the track's own.
+    pub key_shift: i8,
     /// Output frames until a started deck sounds; 0 once it is under way.
     pub start_in_frames: u64,
 }
@@ -71,6 +76,7 @@ impl DeckClock {
             loaded: self.loaded.load(Ordering::Relaxed),
             tempo: self.tempo(),
             master_tempo: self.master_tempo(),
+            key_shift: self.key_shift(),
             start_in_frames: self.start_in.load(Ordering::Relaxed),
         }
     }
@@ -112,6 +118,14 @@ impl DeckClock {
 
     pub fn set_master_tempo(&self, on: bool) {
         self.master_tempo.store(on, Ordering::Relaxed);
+    }
+
+    pub fn key_shift(&self) -> i8 {
+        i8::try_from(self.key_shift.load(Ordering::Relaxed)).unwrap_or(0)
+    }
+
+    pub fn set_key_shift(&self, semitones: i8) {
+        self.key_shift.store(i32::from(semitones), Ordering::Relaxed);
     }
 
     pub fn position(&self) -> u64 {

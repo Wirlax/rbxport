@@ -205,6 +205,24 @@ impl Harness {
         out
     }
 
+    /// `play_until`, pulled no faster than a device would: a debug build of
+    /// the key-lock stretcher shifting a whole octave cannot outrun a loop
+    /// that pulls as fast as it can, and an underrun is a fade, not a fault.
+    fn play_until_paced(&self, deck: Deck, frames: u64) -> Vec<f32> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut out = Vec::new();
+        let mut next = Instant::now();
+        while self.position(deck) < frames && Instant::now() < deadline {
+            let now = Instant::now();
+            if now < next {
+                std::thread::sleep(next - now);
+            }
+            out.extend(self.sink.pull(512));
+            next += Duration::from_micros(512 * 1_000_000 / u64::from(RATE));
+        }
+        out
+    }
+
     fn position(&self, deck: Deck) -> u64 {
         match deck {
             Deck::A => self.engine.snapshot().a.position_frames,
@@ -786,6 +804,51 @@ fn the_metronome_clicks_on_the_grid_and_only_while_playing() {
     // The pause's own fade and the click's tail are over well within 40 pulls.
     let tail = &paused[paused.len() / 2..];
     assert!(tail.iter().all(|s| s.abs() < 1e-4), "a paused deck does not click");
+}
+
+/// Frequency from rising zero crossings over the settled middle of a tone.
+fn hz_of(out: &[f32], rate: u32) -> f32 {
+    let left: Vec<f32> = out.chunks_exact(2).map(|f| f[0]).collect();
+    let mid = &left[left.len() / 4..left.len() * 3 / 4];
+    let crossings = mid.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+    crossings as f32 * rate as f32 / mid.len() as f32
+}
+
+#[test]
+#[cfg_attr(not(feature = "rubberband"), ignore = "only the Rubber Band backend shifts a key")]
+fn a_key_shift_of_an_octave_doubles_the_pitch_and_keeps_the_tempo() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tone.wav");
+    tone(&path, RATE as usize * 4);
+    let h = harness();
+    h.engine.limiter().set_enabled(false);
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    assert!(rbl_deck::Engine::shifts_key());
+
+    // Master Tempo off, an octave up: the pitch doubles and the speed does not.
+    h.engine.set_key_shift(Deck::A, 12);
+    // The deck's own thread takes the shift; the snapshot says when it has.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while h.engine.snapshot().a.key_shift != 12 {
+        assert!(Instant::now() < deadline, "the key shift never reached the deck");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    h.engine.play(Deck::A);
+    let out = h.play_until_paced(Deck::A, u64::from(RATE) * 2);
+    // The last part only: what the ring held before the shift reached the
+    // deck plays first, at the track's own pitch.
+    let hz = hz_of(&out[out.len() * 3 / 4..], RATE);
+    assert!((hz - 440.0).abs() < 8.0, "an octave up from 220 Hz reads {hz} Hz");
+    // Two seconds of track took about two seconds of output: the tempo held.
+    let frames_out = out.len() / 2;
+    assert!((frames_out as f32 / RATE as f32 - 2.0).abs() < 0.25, "{frames_out} output frames for two seconds of track");
+
+    // Back to the track's own key, still at its own speed.
+    h.engine.set_key_shift(Deck::A, 0);
+    let out = h.play_until_paced(Deck::A, u64::from(RATE) * 3);
+    let hz = hz_of(&out[out.len() * 3 / 4..], RATE);
+    assert!((hz - 220.0).abs() < 8.0, "the track's own 220 Hz reads {hz} Hz");
 }
 
 #[test]

@@ -631,3 +631,48 @@ export const CLICK_SLOP_PX = 3;
 export function isClick(dx: number, dy: number): boolean {
   return Math.abs(dx) <= CLICK_SLOP_PX && Math.abs(dy) <= CLICK_SLOP_PX;
 }
+
+/**
+ * The tempo slider's ranges, as a CDJ offers them: ±6, ±10, ±20 and WIDE.
+ * WIDE is everything the engine can play — half speed to double — so its
+ * two halves are not alike: the fader's lower half spans −50 % and its upper
+ * +100 %, with the file's own speed still at the middle.
+ */
+export type TempoRange = 6 | 10 | 20 | "wide";
+export const TEMPO_RANGES: readonly TempoRange[] = [6, 10, 20, "wide"];
+
+/** What a range's ends are, as a percentage either side of the file's speed. */
+export function tempoRangeEnds(range: TempoRange): { down: number; up: number } {
+  return range === "wide" ? { down: 50, up: 100 } : { down: range, up: range };
+}
+
+/**
+ * The fader's position for a tempo, −1 at the slow end to +1 at the fast
+ * end, 0 at the file's own speed. Past the end is the end.
+ */
+export function tempoToFader(tempo: number, range: TempoRange): number {
+  const { down, up } = tempoRangeEnds(range);
+  const pct = (tempo - 1) * 100;
+  const at = pct >= 0 ? pct / up : pct / down;
+  return Math.min(Math.max(at, -1), 1);
+}
+
+/** The tempo at a fader position, the inverse of `tempoToFader`. */
+export function faderToTempo(at: number, range: TempoRange): number {
+  const { down, up } = tempoRangeEnds(range);
+  const clamped = Math.min(Math.max(at, -1), 1);
+  const pct = clamped >= 0 ? clamped * up : clamped * down;
+  return 1 + pct / 100;
+}
+
+/**
+ * The tempo for a BPM somebody typed, against the track's own: 130 typed
+ * over a 128 BPM track is 1.5625 % up. Nothing to type against — no grid,
+ * or a number that is not one — leaves the tempo alone.
+ */
+export function tempoForTypedBpm(typed: string, trackBpmX100: number): number | null {
+  const bpm = Number.parseFloat(typed.trim().replace(",", "."));
+  if (!(bpm > 0) || !(trackBpmX100 > 0)) return null;
+  const tempo = bpm / (trackBpmX100 / 100);
+  return Math.min(Math.max(tempo, 0.5), 2);
+}

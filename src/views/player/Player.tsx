@@ -58,6 +58,7 @@ import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
 import { ContextMenu } from "@/components/ContextMenu";
 import { deckMenu, type DeckAction } from "@/lib/contextMenus";
+import { TempoField } from "./TempoField";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import { beatNudgeFor, beatWait, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
@@ -1486,7 +1487,12 @@ export const Player = memo(function Player({
             idle={playback.idle}
             readOnly={readOnly}
             memory={memory}
-            bpm={formatBpm(Math.round((track?.bpmX100 ?? 0) * playback.tempo))}
+            trackBpmX100={track?.bpmX100 ?? 0}
+            tempo={playback.tempo}
+            onTempo={playback.setTempo}
+            keyShift={playback.keyShift}
+            shiftsKey={playback.shiftsKey}
+            onKeyShift={playback.setKeyShift}
             onNudgeTempo={playback.nudgeTempo}
             synced={synced}
             masterTempo={playback.masterTempo}
@@ -1754,9 +1760,17 @@ export const Player = memo(function Player({
             >
               −
             </button>
-            <span className={styles.bpmField} data-testid="player-bpm">
-              {formatBpm(Math.round((track?.bpmX100 ?? 0) * playback.tempo))}
-            </span>
+            <TempoField
+              trackBpmX100={track?.bpmX100 ?? 0}
+              tempo={playback.tempo}
+              onTempo={playback.setTempo}
+              keyShift={playback.keyShift}
+              shiftsKey={playback.shiftsKey}
+              onKeyShift={playback.setKeyShift}
+              disabled={playback.idle || synced}
+              disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
+              fieldClassName={styles.bpmField}
+            />
             <button
               type="button"
               className={styles.step}

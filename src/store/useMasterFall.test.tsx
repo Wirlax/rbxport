@@ -36,13 +36,13 @@ let clock: number;
 
 const idle: Tick["a"] = {
   frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-  tempo: 1, masterTempo: false, startInFrames: 0,
+  tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
 };
 
 function stubBackend(): Backend {
   return {
     deckState: () => Promise.resolve({
-      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: 1, reduction: 0,
+      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: 1, reduction: 0, shiftsKey: true,
     } satisfies Tick),
     onDeckTick: () => () => {},
     onDeckEvent: () => () => {},

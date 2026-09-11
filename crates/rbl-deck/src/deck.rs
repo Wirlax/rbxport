@@ -47,9 +47,14 @@ pub enum Command {
     SetTempo(f32),
     /// Master Tempo: whether the pitch is held while the speed changes.
     SetMasterTempo(bool),
+    /// The key, in semitones from the track's own.
+    SetKeyShift(i8),
     Unload,
     Quit,
 }
+
+/// How far the key can be shifted either way, in semitones: an octave.
+pub const KEY_SHIFT_RANGE: i8 = 12;
 
 /// How long the thread waits between top-ups while the ring is full and audio
 /// is running. Short enough that a device buffer can never outrun it.
@@ -114,6 +119,7 @@ pub fn spawn(
                 varispeed: Varispeed::new(device_rate),
                 tempo: 1.0,
                 master_tempo: false,
+                key_shift: 0,
                 head: 0.0,
                 feed: vec![0.0; BLOCK_FRAMES * 2],
                 fed: 0,
@@ -151,6 +157,11 @@ struct Worker {
     varispeed: Varispeed,
     tempo: f32,
     master_tempo: bool,
+    /// Semitones from the track's own key. Any shift puts the key-lock
+    /// stretcher in the path, since only it can move the pitch on its own;
+    /// with Master Tempo off it is asked for the pitch a record would have
+    /// at this speed, and the shift on top of that.
+    key_shift: i8,
     /// Where the audio coming out of the stretcher sits in the track, in
     /// input frames.
     ///
@@ -221,8 +232,21 @@ impl Worker {
                 // The two hold different audio, so switching between them
                 // starts the new one from where the old one had reached
                 // rather than from what it happened to have buffered.
+                let was = self.keylock_in_path();
                 self.master_tempo = on;
-                self.restart_stretch();
+                self.apply_pitch();
+                if was != self.keylock_in_path() {
+                    self.restart_stretch();
+                }
+            }
+            Command::SetKeyShift(semitones) => {
+                let was = self.keylock_in_path();
+                self.key_shift = semitones.clamp(-KEY_SHIFT_RANGE, KEY_SHIFT_RANGE);
+                self.clock.set_key_shift(self.key_shift);
+                self.apply_pitch();
+                if was != self.keylock_in_path() {
+                    self.restart_stretch();
+                }
             }
             Command::Unload => self.unload(),
             Command::Wake => {}
@@ -297,11 +321,26 @@ impl Worker {
         self.keylock.set_ratio(safe);
         self.varispeed.set_ratio(safe);
         self.clock.set_tempo(safe);
+        self.apply_pitch();
+    }
+
+    /// Whether the key-lock stretcher, rather than plain resampling, is
+    /// playing: Master Tempo on, or a key shift that only it can make.
+    fn keylock_in_path(&self) -> bool {
+        self.master_tempo || self.key_shift != 0
+    }
+
+    /// The pitch the key-lock stretcher is asked for: the shift, on top of
+    /// the pitch a record would have at this speed when Master Tempo is off.
+    fn apply_pitch(&mut self) {
+        let shift = 2_f32.powf(f32::from(self.key_shift) / 12.0);
+        let base = if self.master_tempo { 1.0 } else { self.tempo };
+        self.keylock.set_pitch_scale(base * shift);
     }
 
     /// Whichever of the two is in the path.
     fn stretcher(&mut self) -> &mut dyn Stretcher {
-        if self.master_tempo { &mut *self.keylock } else { &mut self.varispeed }
+        if self.keylock_in_path() { &mut *self.keylock } else { &mut self.varispeed }
     }
 
     /// Empties both, so nothing of the last position or the last mode is
@@ -451,7 +490,9 @@ impl Worker {
             return false;
         }
 
-        if (self.tempo - 1.0).abs() > f32::EPSILON {
+        // Through the stretcher whenever the speed or the key is not the
+        // file's own; at unity with no shift the decoded audio goes straight.
+        if (self.tempo - 1.0).abs() > f32::EPSILON || self.key_shift != 0 {
             return self.produce_stretched(generation);
         }
         let mut block = Block::empty(generation, 0);
@@ -557,7 +598,7 @@ impl Worker {
             // one method borrowing all of `self` would have meant a fresh
             // allocation for every block a stretched deck plays.
             let stretcher: &mut dyn Stretcher =
-                if self.master_tempo { &mut *self.keylock } else { &mut self.varispeed };
+                if self.master_tempo || self.key_shift != 0 { &mut *self.keylock } else { &mut self.varispeed };
             let Some(from) = self.feed.get(..take * 2) else { break };
             let taken = stretcher.feed(from);
             // What was not taken stays at the front for the next pass.

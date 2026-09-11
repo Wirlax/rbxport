@@ -22,6 +22,7 @@ import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import { formatKey } from "@/lib/preferences";
+import { TempoField } from "./TempoField";
 
 /** A time split the way `splitTime` returns it. */
 interface Split {
@@ -156,7 +157,13 @@ export interface DualControlsProps {
     store: () => void;
   };
   /** The BPM the deck is playing at, already formatted. */
-  bpm: string;
+  /** The BPM field: the track's own BPM, the tempo, and the key shift. */
+  trackBpmX100: number;
+  tempo: number;
+  onTempo: (tempo: number) => void;
+  keyShift: number;
+  shiftsKey: boolean;
+  onKeyShift: (semitones: number) => void;
   onNudgeTempo: (direction: number) => void;
   /** Following the master: the tempo is not this deck's to step. */
   synced: boolean;
@@ -179,7 +186,8 @@ export interface DualControlsProps {
  * loops are not built — with the reason on each.
  */
 export const DualControls = memo(function DualControls({
-  idle, readOnly, memory, bpm, onNudgeTempo, synced, masterTempo, onMasterTempo,
+  idle, readOnly, memory, trackBpmX100, tempo, onTempo, keyShift, shiftsKey, onKeyShift,
+  onNudgeTempo, synced, masterTempo, onMasterTempo,
   atUnity, onResetTempo, quantize, onQuantize,
 }: DualControlsProps) {
   const gridReason = "Grid editing needs the PQT2 tag, which is not yet understood";
@@ -236,7 +244,17 @@ export const DualControls = memo(function DualControls({
         >
           −
         </button>
-        <span className={styles.bpmField} data-testid="player-bpm">{bpm}</span>
+        <TempoField
+          trackBpmX100={trackBpmX100}
+          tempo={tempo}
+          onTempo={onTempo}
+          keyShift={keyShift}
+          shiftsKey={shiftsKey}
+          onKeyShift={onKeyShift}
+          disabled={idle || synced}
+          disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
+          fieldClassName={styles.bpmField}
+        />
         <button
           type="button"
           className={styles.tempoStep}

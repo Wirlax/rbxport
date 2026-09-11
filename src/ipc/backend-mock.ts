@@ -752,14 +752,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const TICK_MS = 100;
   const deckA = {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-    tempo: 1, masterTempo: false, startInFrames: 0,
+    tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
   };
   // Deck B holds its own tempo and key lock even though a browser has no
   // audio to apply them to: a control that snapped back on the next tick would
   // read as a broken one, and the deck it stands for does keep them.
   const deckB = {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-    tempo: 1, masterTempo: false, startInFrames: 0,
+    tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
   };
   const deckTickListeners = new Set<(tick: Tick) => void>();
   const deckEventListeners = new Set<(event: DeckEvent) => void>();
@@ -787,6 +787,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     peakRight: 0,
     master,
     reduction: 0,
+    // The mock stands in for the build that ships, which carries Rubber Band.
+    shiftsKey: true,
   });
 
   const sendTick = () => {
@@ -1252,6 +1254,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     deckMetronome: () => wait(undefined),
+    deckKeyShift: (deck, semitones) => {
+      (deck === "b" ? deckB : deckA).keyShift = Math.max(-12, Math.min(12, Math.round(semitones)));
+      sendTick();
+      return wait(undefined);
+    },
     setMetronome: () => wait(undefined),
     setAudioConfig: () => wait(undefined),
     setChannelBand: () => wait(undefined),

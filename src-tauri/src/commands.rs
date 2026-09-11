@@ -776,6 +776,19 @@ pub async fn deck_load<R: tauri::Runtime>(
     Ok(())
 }
 
+/// The key, in semitones from the track's own — a CDJ's key shift.
+#[tauri::command]
+pub async fn deck_key_shift<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    semitones: i8,
+) -> AppResult<()> {
+    let engine = player.engine(&app)?;
+    engine.set_key_shift(crate::player::deck_of(&deck), semitones);
+    Ok(())
+}
+
 /// Switches a deck's metronome on or off: a click on every beat of the
 /// grid while it plays.
 #[tauri::command]

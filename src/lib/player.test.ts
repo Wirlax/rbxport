@@ -16,6 +16,9 @@ import {
   nextJumpSize,
   showsEveryBeat,
   waveSlice,
+  tempoToFader,
+  faderToTempo,
+  tempoForTypedBpm,
   beatCountText,
   clickSeconds,
   isClick,
@@ -663,5 +666,43 @@ describe("isClick", () => {
     expect(isClick(3, -3)).toBe(true);
     expect(isClick(4, 0)).toBe(false);
     expect(isClick(0, 12)).toBe(false);
+  });
+});
+
+describe("the tempo fader", () => {
+  it("maps a range's ends to ±1 and the file's speed to 0", () => {
+    expect(tempoToFader(1, 6)).toBe(0);
+    expect(tempoToFader(1.06, 6)).toBeCloseTo(1, 6);
+    expect(tempoToFader(0.9, 10)).toBeCloseTo(-1, 6);
+    expect(tempoToFader(1.1, 20)).toBeCloseTo(0.5, 6);
+    // Past the end is the end.
+    expect(tempoToFader(1.3, 6)).toBe(1);
+  });
+
+  it("WIDE is half speed to double, with the middle still the file's own", () => {
+    expect(faderToTempo(-1, "wide")).toBe(0.5);
+    expect(faderToTempo(1, "wide")).toBe(2);
+    expect(faderToTempo(0, "wide")).toBe(1);
+    expect(tempoToFader(0.75, "wide")).toBeCloseTo(-0.5, 6);
+    expect(tempoToFader(1.5, "wide")).toBeCloseTo(0.5, 6);
+  });
+
+  it("goes back and forth without drift", () => {
+    for (const range of [6, 10, 20, "wide"] as const) {
+      for (const at of [-1, -0.3, 0, 0.42, 1]) {
+        expect(tempoToFader(faderToTempo(at, range), range)).toBeCloseTo(at, 6);
+      }
+    }
+  });
+
+  it("a typed BPM is a tempo against the track's own", () => {
+    expect(tempoForTypedBpm("130", 12_800)).toBeCloseTo(130 / 128, 6);
+    expect(tempoForTypedBpm(" 128,5 ", 12_800)).toBeCloseTo(1.00390625, 6);
+    // Clamped to what the engine plays.
+    expect(tempoForTypedBpm("400", 12_800)).toBe(2);
+    expect(tempoForTypedBpm("10", 12_800)).toBe(0.5);
+    // Nothing to work with.
+    expect(tempoForTypedBpm("fast", 12_800)).toBeNull();
+    expect(tempoForTypedBpm("130", 0)).toBeNull();
   });
 });

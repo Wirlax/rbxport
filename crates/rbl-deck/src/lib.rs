@@ -486,6 +486,24 @@ impl Engine {
         }
     }
 
+    /// The key, in semitones from the track's own: a CDJ's key shift.
+    ///
+    /// Only the Rubber Band backend holds a pitch to within a cent; the
+    /// WSOLA one is out by up to a quarter of a semitone, so a build without
+    /// Rubber Band reports `shifts_key` false and the interface greys the
+    /// buttons rather than offer a wrong key.
+    pub fn set_key_shift(&self, deck: Deck, semitones: i8) {
+        if let Some(handle) = self.decks.get(deck.index()) {
+            handle.send(deck::Command::SetKeyShift(semitones));
+        }
+    }
+
+    /// Whether this build can shift a key without moving the tempo.
+    #[must_use]
+    pub fn shifts_key() -> bool {
+        cfg!(feature = "rubberband")
+    }
+
     /// The channel strips and the crossfader.
     pub fn mixer(&self) -> &Arc<MixerSettings> {
         &self.mixer
@@ -690,6 +708,7 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             loaded: false,
             tempo: 1.0,
             master_tempo: false,
+            key_shift: 0,
             start_in_frames: 0,
         })
     }

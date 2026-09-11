@@ -365,6 +365,8 @@ export interface Backend {
   deckMasterTempo(deck: DeckId, on: boolean): Promise<void>;
   /** A click on every beat of the deck's grid while it plays. */
   deckMetronome(deck: DeckId, on: boolean): Promise<void>;
+  /** The key, in semitones from the track's own; −12 to 12. */
+  deckKeyShift(deck: DeckId, semitones: number): Promise<void>;
   /** Preferences › Audio › Metronome: which click (1 to 3) and how loud. */
   setMetronome(sound: 1 | 2 | 3, volume: "small" | "middle" | "large"): Promise<void>;
   /**
@@ -572,6 +574,8 @@ export interface DeckTick {
   tempo: number;
   /** Whether the pitch is held while that speed changes. */
   masterTempo: boolean;
+  /** Semitones from the track's own key: a CDJ's key shift. */
+  keyShift: number;
   /** Output frames until a started deck sounds: a play held for the beat. */
   startInFrames: number;
 }
@@ -589,6 +593,12 @@ export interface Tick {
   master: number;
   /** How far the limiter turned the sum down since the last tick, in dB. */
   reduction: number;
+  /**
+   * Whether this build can shift a key without moving the tempo. Only the
+   * Rubber Band backend holds a pitch to within a cent; without it the
+   * semitone buttons are drawn greyed rather than offer a wrong key.
+   */
+  shiftsKey: boolean;
 }
 
 /** The master's meters and level, on their own faster beat. */

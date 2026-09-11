@@ -81,6 +81,11 @@ export interface Playback {
   tempo: number;
   /** Whether the pitch is held while the speed changes: rekordbox's MT. */
   masterTempo: boolean;
+  /** Semitones from the track's own key: the KEY SHIFT buttons. */
+  keyShift: number;
+  /** Whether this build can shift a key at all (the Rubber Band backend). */
+  shiftsKey: boolean;
+  setKeyShift: (semitones: number) => void;
   setTempo: (tempo: number) => void;
   /** One step of the tempo control, up or down. */
   nudgeTempo: (direction: number) => void;
@@ -159,6 +164,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const [playing, setPlaying] = useState(false);
   const [tempo, setTempoState] = useState(1);
   const [masterTempo, setMasterTempoState] = useState(false);
+  const [keyShift, setKeyShiftState] = useState(0);
+  const [shiftsKey, setShiftsKey] = useState(true);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +211,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       // shows what it is doing.
       setTempoState(deck.tempo > 0 ? deck.tempo : 1);
       setMasterTempoState(deck.masterTempo);
+      setKeyShiftState(deck.keyShift);
+      setShiftsKey(tick.shiftsKey);
       // A drag owns the playhead, and the deck's head is not under the
       // pointer: it is rate-limited so the drag stays audible, so it trails a
       // fast hand and rests a block past a still one. Taking it as the anchor
@@ -529,6 +538,23 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     [setTempo, tempo],
   );
 
+  const setKeyShift = useCallback(
+    (semitones: number) => {
+      if (idle || !Number.isFinite(semitones)) return;
+      const safe = Math.max(-12, Math.min(12, Math.round(semitones)));
+      setKeyShiftState(safe);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          await backend.deckKeyShift(DECK, safe);
+        } catch (failure) {
+          setError(reasonFrom(failure));
+        }
+      })();
+    },
+    [idle, DECK],
+  );
+
   const setMasterTempo = useCallback(
     (on: boolean) => {
       if (idle) return;
@@ -597,6 +623,6 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   return {
     playing, position, duration, idle, error, toggle, playAfter, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
-    tempo, masterTempo, setTempo, nudgeTempo, setMasterTempo,
+    tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
   };
 }

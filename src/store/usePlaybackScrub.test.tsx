@@ -34,19 +34,21 @@ function tickAt(seconds: number, generation: number, playing = true): Tick {
     loaded: true,
     tempo: 1,
     masterTempo: false,
+    keyShift: 0,
     startInFrames: 0,
   };
   return {
     a: deck,
     b: {
       frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-      tempo: 1, masterTempo: false, startInFrames: 0,
+      tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
     },
     sampleRate: RATE,
     peakLeft: 0,
     peakRight: 0,
     master: 1,
     reduction: 0,
+    shiftsKey: true,
   };
 }
 

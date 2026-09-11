@@ -390,6 +390,7 @@ pub fn run() {
             update::install_update,
             commands::deck_tempo,
             commands::deck_metronome,
+            commands::deck_key_shift,
             commands::set_metronome,
             commands::set_audio_config,
             commands::deck_master_tempo,

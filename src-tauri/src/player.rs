@@ -45,6 +45,8 @@ pub struct DeckTickDto {
     pub tempo: f32,
     /// Whether the pitch is held while that speed changes.
     pub master_tempo: bool,
+    /// Semitones from the track's own key.
+    pub key_shift: i8,
     /// Output frames until a started deck sounds: a play held for the beat.
     pub start_in_frames: u64,
 }
@@ -65,6 +67,8 @@ pub struct TickDto {
     pub master: f32,
     /// How far the limiter turned the sum down since the last tick, in dB.
     pub reduction: f32,
+    /// Whether this build can shift a key: the Rubber Band backend is in.
+    pub shifts_key: bool,
 }
 
 impl TickDto {
@@ -79,6 +83,7 @@ impl TickDto {
             loaded: false,
             tempo: 1.0,
             master_tempo: false,
+            key_shift: 0,
             start_in_frames: 0,
         };
         Self {
@@ -89,6 +94,7 @@ impl TickDto {
             peak_right: 0.0,
             master: 1.0,
             reduction: 0.0,
+            shifts_key: Engine::shifts_key(),
         }
     }
 }
@@ -390,6 +396,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         loaded: s.loaded,
         tempo: s.tempo,
         master_tempo: s.master_tempo,
+        key_shift: s.key_shift,
         start_in_frames: s.start_in_frames,
     };
     let (peak_left, peak_right) = master.peaks();
@@ -401,6 +408,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         peak_right,
         master: master.gain(),
         reduction: master.reduction_db(),
+        shifts_key: Engine::shifts_key(),
     }
 }
 
