@@ -1,22 +1,26 @@
 //! Tauri shell. Command bodies live in the `rbl-*` crates; everything here is
 //! a thin adapter so the backend stays testable without a webview.
+//!
+//! The commands, their DTOs and the state are public so `tests/` can drive
+//! them against a mock app and a fixture library, the way the webview does
+//! against the real one.
 
 mod windowfit;
-mod commands;
-mod cues;
-mod details;
+pub mod commands;
+pub mod cues;
+pub mod details;
 mod diagnostics;
 mod explorer;
 mod link;
 pub mod menu;
-mod player;
+pub mod player;
 mod preferences;
 mod protocol;
 mod relocate;
 mod device_settings;
-mod dto;
+pub mod dto;
 mod error;
-mod state;
+pub mod state;
 mod update;
 
 pub use error::{AppError, AppResult, ErrorKind};
@@ -51,7 +55,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
                 let db_version = db.schema().db_version;
-                let share_root = db.location().share_root.clone();
+                let location = db.location().clone();
                 let master_db = db.location().master_db.clone();
                 let cache_path = cache_path(&app);
                 // Reading 38,681 rows out of SQLCipher is 543 ms of the 680 ms
@@ -72,7 +76,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         tracing::info!(tracks = library.len(), load_ms, "library from cache");
                         let read_only = rbl_db::is_rekordbox_running();
                         app.state::<Arc<AppState>>().set_library(
-                            library, read_only, db_version, load_ms, share_root,
+                            library, read_only, db_version, load_ms, location,
                         );
                         let _ = tauri::Emitter::emit(&app, "library:ready", ());
                         return;
@@ -92,7 +96,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         // re-check per transaction; the banner reflects it now.
                         let read_only = rbl_db::is_rekordbox_running();
                         app.state::<Arc<AppState>>()
-                            .set_library(library, read_only, db_version, load_ms, share_root);
+                            .set_library(library, read_only, db_version, load_ms, location);
                         let _ = tauri::Emitter::emit(&app, "library:ready", ());
 
                         // Written after the interface is live, and only if the

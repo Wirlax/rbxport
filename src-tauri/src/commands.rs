@@ -24,7 +24,7 @@ use crate::state::{rows_to_dto, spec_from_wire, AppState};
 
 /// Rows per request. The frontend asks a page at a time; this bound is what
 /// keeps a response inside the 64 KB cap.
-pub(crate) const MAX_ROWS: u32 = 128;
+pub const MAX_ROWS: u32 = 128;
 
 /// Beats returned for one track. A four-minute track at 128 BPM has about 500
 /// and a three-hour mix around 23,000; this bounds the response without
@@ -405,12 +405,6 @@ pub async fn analyse_track(
 
 // ---------------------------------------------------------------- editing
 
-/// Opens the library for writing, runs one action, and reloads the index.
-///
-/// The writer is opened per action rather than held: holding it would keep the
-/// database open read-write for the life of the app, and rekordbox launching
-/// behind us must be able to take the file back. Opening is cheap next to the
-/// user's own thinking time between edits.
 /// What an edit changed, and therefore how much has to be re-read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Touched {
@@ -421,8 +415,13 @@ pub(crate) enum Touched {
     Tracks,
 }
 
-pub(crate) async fn edit<F>(
-    app: tauri::AppHandle,
+/// Opens the library for writing, runs one action, and reloads the index.
+///
+/// The writer is opened per action rather than held (see
+/// [`AppState::open_writer`]); opening is cheap next to the user's own
+/// thinking time between edits.
+pub(crate) async fn edit<R: tauri::Runtime, F>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     name: &'static str,
     touched: Touched,
@@ -432,10 +431,9 @@ where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
 {
     let state = Arc::clone(&state);
+    let writing = Arc::clone(&state);
     let changed = blocking(name, move || {
-        let location = rbl_db::detect().map_err(write_error)?;
-        let backups = backup_dir();
-        let mut writer = rbl_db::write::Writer::open(location, backups).map_err(write_error)?;
+        let mut writer = writing.open_writer().map_err(write_error)?;
         action(&mut writer).map_err(write_error)?;
         Ok(())
     })
@@ -448,9 +446,9 @@ where
 }
 
 /// Re-reads the playlist tree only, leaving the track columns in place.
-async fn reload_playlists(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
+async fn reload_playlists<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
     let generation = blocking("reload_playlists", move || {
-        let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
+        let db = state.open_read_only().map_err(write_error)?;
         let library = state.library()?;
         let playlists = rbl_index::reload_playlists(&db, &library)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
@@ -463,13 +461,6 @@ async fn reload_playlists(app: tauri::AppHandle, state: Arc<AppState>) -> AppRes
     Ok(generation)
 }
 
-/// Where backups of the library go before the first write of a session.
-pub(crate) fn backup_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("rekordbox-lite/backups")
-}
-
 /// Maps a database refusal onto the error kind the frontend distinguishes.
 pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
     match error {
@@ -479,17 +470,17 @@ pub(crate) fn write_error(error: rbl_db::DbError) -> AppError {
 }
 
 /// Re-reads the library and returns the new generation.
-pub(crate) async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppResult<u32> {
+pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
     let generation = blocking("reload", move || {
-        let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
+        let db = state.open_read_only().map_err(write_error)?;
         let db_version = db.schema().db_version;
-        let share_root = db.location().share_root.clone();
+        let location = db.location().clone();
         let started = std::time::Instant::now();
         let (library, _) = rbl_index::load(&db)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let read_only = rbl_db::is_rekordbox_running();
-        state.set_library(library, read_only, db_version, load_ms, share_root);
+        state.set_library(library, read_only, db_version, load_ms, location);
         Ok(state.summary().3)
     })
     .await?;
@@ -504,8 +495,8 @@ pub(crate) async fn reload(app: tauri::AppHandle, state: Arc<AppState>) -> AppRe
 /// the database server's menus, which are not built, and a device that
 /// announces and then cannot answer is worse than one that stays quiet.
 #[tauri::command]
-pub async fn start_link_listening(
-    app: tauri::AppHandle,
+pub async fn start_link_listening<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<LinkStatusDto> {
     if state.link_running() {
@@ -540,8 +531,8 @@ pub async fn stop_link_listening(state: State<'_, Arc<AppState>>) -> AppResult<(
 /// `exportExt.pdb` and `exportLibrary.db`. Never re-analyses: an export moves
 /// what the library already knows.
 #[tauri::command]
-pub async fn export_playlist(
-    app: tauri::AppHandle,
+pub async fn export_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     playlist: String,
     destination: String,
@@ -739,8 +730,8 @@ const BEAT_BYTES: usize = 5;
 /// with a `deck:loaded` event, because opening a file means reading from a
 /// disk that may be asleep.
 #[tauri::command]
-pub async fn deck_load(
-    app: tauri::AppHandle,
+pub async fn deck_load<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
@@ -770,8 +761,8 @@ pub async fn deck_unload(
 }
 
 #[tauri::command]
-pub async fn deck_play(
-    app: tauri::AppHandle,
+pub async fn deck_play<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
 ) -> AppResult<()> {
@@ -785,8 +776,8 @@ pub async fn deck_play(
 /// Starts a deck after `delay_ms` of silence, counted by the audio callback:
 /// quantized play on a synced deck, held for the master's next beat.
 #[tauri::command]
-pub async fn deck_play_after(
-    app: tauri::AppHandle,
+pub async fn deck_play_after<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     delay_ms: f64,
@@ -818,8 +809,8 @@ pub async fn deck_pause(
 
 /// Moves a deck's playhead. Frame-exact, whatever the file's packet size.
 #[tauri::command]
-pub async fn deck_seek(
-    app: tauri::AppHandle,
+pub async fn deck_seek<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     // Fractional: a cue point is a place in the music, and a whole
@@ -841,8 +832,8 @@ pub async fn deck_seek(
 /// the level is the audio callback's to apply, and the interface reads what it
 /// actually did rather than what it was asked for.
 #[tauri::command]
-pub async fn set_master_level(
-    app: tauri::AppHandle,
+pub async fn set_master_level<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     level: f32,
 ) -> AppResult<()> {
@@ -857,8 +848,8 @@ pub async fn set_master_level(
 /// position means is the mixer's to decide, and it changes with the EQ /
 /// ISOLATOR switch. The interface should not have to know the curve.
 #[tauri::command]
-pub async fn set_channel_band(
-    app: tauri::AppHandle,
+pub async fn set_channel_band<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     band: String,
@@ -872,8 +863,8 @@ pub async fn set_channel_band(
 }
 
 #[tauri::command]
-pub async fn set_channel_kill(
-    app: tauri::AppHandle,
+pub async fn set_channel_kill<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     band: String,
@@ -888,8 +879,8 @@ pub async fn set_channel_kill(
 
 /// The deck's gain, 0 to 2 — up to +6 dB, as a mixer's trim gives.
 #[tauri::command]
-pub async fn set_channel_trim(
-    app: tauri::AppHandle,
+pub async fn set_channel_trim<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     trim: f32,
@@ -903,8 +894,8 @@ pub async fn set_channel_trim(
 
 /// The crossfader: 0 is deck A alone, 1 is deck B alone, 0.5 is both.
 #[tauri::command]
-pub async fn set_crossfade(
-    app: tauri::AppHandle,
+pub async fn set_crossfade<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     position: f32,
 ) -> AppResult<()> {
@@ -915,8 +906,8 @@ pub async fn set_crossfade(
 
 /// EQ or ISOLATOR, which is what the bottom of each band's travel means.
 #[tauri::command]
-pub async fn set_eq_curve(
-    app: tauri::AppHandle,
+pub async fn set_eq_curve<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     isolator: bool,
 ) -> AppResult<()> {
@@ -944,8 +935,8 @@ fn band_of(name: &str) -> Band {
 /// A ratio rather than a BPM: what BPM that comes to depends on the track, and
 /// the deck does not need to know the track's to play it faster.
 #[tauri::command]
-pub async fn deck_tempo(
-    app: tauri::AppHandle,
+pub async fn deck_tempo<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     tempo: f32,
@@ -957,8 +948,8 @@ pub async fn deck_tempo(
 
 /// Master Tempo: whether the pitch is held while the speed changes.
 #[tauri::command]
-pub async fn deck_master_tempo(
-    app: tauri::AppHandle,
+pub async fn deck_master_tempo<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     on: bool,
@@ -1030,8 +1021,8 @@ pub async fn set_master_limiter(
 /// about one track in thirty of the reference library sits on a volume that
 /// is not mounted.
 #[tauri::command]
-pub async fn reveal_track(
-    app: tauri::AppHandle,
+pub async fn reveal_track<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<()> {
@@ -1067,8 +1058,8 @@ pub async fn app_diagnostics() -> AppResult<crate::diagnostics::Diagnostics> {
 /// which is what a hand on a record does and what a seek per pointer move
 /// cannot do.
 #[tauri::command]
-pub async fn deck_scrub_begin(
-    app: tauri::AppHandle,
+pub async fn deck_scrub_begin<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
 ) -> AppResult<()> {
@@ -1095,8 +1086,8 @@ pub async fn deck_scrub_to(
 
 /// Ends a drag. The playhead stays where the head came to rest.
 #[tauri::command]
-pub async fn deck_scrub_end(
-    app: tauri::AppHandle,
+pub async fn deck_scrub_end<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
 ) -> AppResult<()> {
@@ -1271,15 +1262,15 @@ pub async fn missing_tracks(
 /// folder of a hundred tracks with two unreadable ones should import
 /// ninety-eight, not nothing.
 #[tauri::command]
-pub async fn import_files(
-    app: tauri::AppHandle,
+pub async fn import_files<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     paths: Vec<String>,
 ) -> AppResult<ImportReportDto> {
     let state_for_edit = Arc::clone(&state);
+    let writing = Arc::clone(&state);
     let report = blocking("import_files", move || {
-        let location = rbl_db::detect().map_err(write_error)?;
-        let mut writer = rbl_db::write::Writer::open(location, backup_dir()).map_err(write_error)?;
+        let mut writer = writing.open_writer().map_err(write_error)?;
         let mut imported = 0_u32;
         let mut skipped = Vec::new();
         let mut tracks = Vec::new();
@@ -1315,8 +1306,8 @@ pub async fn import_files(
 }
 
 #[tauri::command]
-pub async fn relocate_track(
-    app: tauri::AppHandle,
+pub async fn relocate_track<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     path: String,
@@ -1328,8 +1319,8 @@ pub async fn relocate_track(
 }
 
 #[tauri::command]
-pub async fn create_playlist(
-    app: tauri::AppHandle,
+pub async fn create_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     name: String,
     parent: String,
@@ -1338,8 +1329,8 @@ pub async fn create_playlist(
 }
 
 #[tauri::command]
-pub async fn create_folder(
-    app: tauri::AppHandle,
+pub async fn create_folder<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     name: String,
     parent: String,
@@ -1348,8 +1339,8 @@ pub async fn create_folder(
 }
 
 #[tauri::command]
-pub async fn rename_playlist(
-    app: tauri::AppHandle,
+pub async fn rename_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
     name: String,
@@ -1358,8 +1349,8 @@ pub async fn rename_playlist(
 }
 
 #[tauri::command]
-pub async fn move_playlist(
-    app: tauri::AppHandle,
+pub async fn move_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
     parent: String,
@@ -1368,8 +1359,8 @@ pub async fn move_playlist(
 }
 
 #[tauri::command]
-pub async fn delete_playlist(
-    app: tauri::AppHandle,
+pub async fn delete_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> AppResult<u32> {
@@ -1377,8 +1368,8 @@ pub async fn delete_playlist(
 }
 
 #[tauri::command]
-pub async fn add_tracks_to_playlist(
-    app: tauri::AppHandle,
+pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     playlist: String,
     tracks: Vec<String>,
@@ -1390,8 +1381,8 @@ pub async fn add_tracks_to_playlist(
 }
 
 #[tauri::command]
-pub async fn remove_tracks_from_playlist(
-    app: tauri::AppHandle,
+pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     playlist: String,
     tracks: Vec<String>,
@@ -1403,8 +1394,8 @@ pub async fn remove_tracks_from_playlist(
 }
 
 #[tauri::command]
-pub async fn reorder_playlist(
-    app: tauri::AppHandle,
+pub async fn reorder_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     playlist: String,
     tracks: Vec<String>,
@@ -1413,8 +1404,8 @@ pub async fn reorder_playlist(
 }
 
 #[tauri::command]
-pub async fn set_track_rating(
-    app: tauri::AppHandle,
+pub async fn set_track_rating<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     stars: u8,
@@ -1423,8 +1414,8 @@ pub async fn set_track_rating(
 }
 
 #[tauri::command]
-pub async fn set_track_comment(
-    app: tauri::AppHandle,
+pub async fn set_track_comment<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     comment: String,
@@ -1434,8 +1425,8 @@ pub async fn set_track_comment(
 }
 
 #[tauri::command]
-pub async fn set_track_color(
-    app: tauri::AppHandle,
+pub async fn set_track_color<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     color: Option<String>,

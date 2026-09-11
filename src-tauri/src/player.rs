@@ -16,9 +16,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rbl_deck::{Deck, DeckEvent, Engine};
+use rbl_deck::{Deck, DeckEvent, Engine, Render, Sink};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::dto::LimiterDto;
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -119,9 +119,17 @@ pub struct DeckEventDto {
     pub message: Option<String>,
 }
 
+/// Opens the output the engine renders into, given the render callback and
+/// the device the interface chose (`None` is the system default).
+pub type SinkOpener =
+    Box<dyn Fn(Render, Option<String>) -> rbl_deck::Result<Arc<dyn Sink>> + Send + Sync>;
+
 /// Holds the engine, which is not built until something is played.
 pub struct Player {
     engine: Mutex<Option<Arc<Engine>>>,
+    /// How the engine's output is opened: the audio device in the app, and a
+    /// sink the test pulls by hand in its tests.
+    open_sink: SinkOpener,
     /// Whether a ticker is already running, so play does not start a second.
     ticking: std::sync::atomic::AtomicBool,
     /// The output the engine should open, as an id from `rbl_deck`.
@@ -140,9 +148,20 @@ pub struct Player {
 }
 
 impl Default for Player {
+    /// A player on the system's audio output.
     fn default() -> Self {
+        Self::with_sink(Box::new(|render, device| {
+            Ok(Arc::new(rbl_deck::CpalSink::open_named(render, device)?) as Arc<dyn Sink>)
+        }))
+    }
+}
+
+impl Player {
+    /// A player whose engine renders into whatever `open_sink` opens.
+    pub fn with_sink(open_sink: SinkOpener) -> Self {
         Self {
             engine: Mutex::new(None),
+            open_sink,
             ticking: std::sync::atomic::AtomicBool::new(false),
             device: Mutex::new(None),
             limiter: Mutex::new(LimiterDto {
@@ -170,7 +189,7 @@ impl Player {
     /// Opening it is what makes noise possible, so it happens when a deck is
     /// asked to do something and not before. The stream itself stays paused
     /// until something plays.
-    pub fn engine(&self, app: &AppHandle) -> AppResult<Arc<Engine>> {
+    pub fn engine<R: Runtime>(&self, app: &AppHandle<R>) -> AppResult<Arc<Engine>> {
         let mut held = self.engine.lock();
         if let Some(engine) = held.as_ref() {
             return Ok(Arc::clone(engine));
@@ -180,7 +199,7 @@ impl Player {
             emit_deck_event(&handle, &event);
         });
         let device = self.device.lock().clone();
-        let engine = Engine::on_device(&events, device).map_err(|e| {
+        let engine = Engine::with_sink(|render| (self.open_sink)(render, device), &events).map_err(|e| {
             AppError::new(ErrorKind::Internal, "The audio device could not be opened.")
                 .with_detail(e.to_string())
         })?;
@@ -242,7 +261,7 @@ impl Player {
     }
 }
 
-fn emit_deck_event(app: &AppHandle, event: &DeckEvent) {
+fn emit_deck_event<R: Runtime>(app: &AppHandle<R>, event: &DeckEvent) {
     let (name, payload) = match event {
         DeckEvent::Loaded { deck, total_frames, sample_rate } => (
             "deck:loaded",
@@ -272,7 +291,7 @@ fn emit_deck_event(app: &AppHandle, event: &DeckEvent) {
 ///
 /// It stops as soon as neither deck is playing, which is what keeps an idle
 /// window at no measurable cost. Every play starts it again.
-pub fn start_ticker(app: &AppHandle) {
+pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     let player = app.state::<Arc<Player>>();
     if player.ticking().swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;

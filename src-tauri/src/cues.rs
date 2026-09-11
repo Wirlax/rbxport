@@ -17,7 +17,7 @@ use rbl_index::Cue;
 use serde::Deserialize;
 use tauri::State;
 
-use crate::commands::{backup_dir, blocking, write_error};
+use crate::commands::{blocking, write_error};
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::AppState;
 
@@ -131,21 +131,21 @@ fn owner_of(writer: &rbl_db::write::Writer, cue: &str) -> AppResult<String> {
 
 /// Opens the writer, applies one edit, re-reads that track's cues, and tells
 /// the interface which track changed.
-async fn edit_cues(
-    app: tauri::AppHandle,
+async fn edit_cues<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     name: &'static str,
     edit: CueEdit,
 ) -> AppResult<CueChange> {
     let library = state.library()?;
+    let state = Arc::clone(&state);
     let change = blocking(name, move || {
-        let location = rbl_db::detect().map_err(write_error)?;
-        let mut writer = rbl_db::write::Writer::open(location, backup_dir()).map_err(write_error)?;
+        let mut writer = state.open_writer().map_err(write_error)?;
         let change = apply(&mut writer, edit)?;
         // The writer holds the file read-write; it is dropped before the
         // read-only handle below opens, as an edit in `commands.rs` is.
         drop(writer);
-        let db = rbl_db::Library::open_installed_read_only().map_err(write_error)?;
+        let db = state.open_read_only().map_err(write_error)?;
         rbl_index::reload_cues_of(&db, &library, &change.track)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         Ok(change)
@@ -158,8 +158,8 @@ async fn edit_cues(
 }
 
 #[tauri::command]
-pub async fn add_cue(
-    app: tauri::AppHandle,
+pub async fn add_cue<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     kind: CueKind,
@@ -174,8 +174,8 @@ pub async fn add_cue(
 /// beats when the caller knows it, and left out when In and Out are all
 /// there is — which is what most of the library's loops record.
 #[tauri::command]
-pub async fn add_loop(
-    app: tauri::AppHandle,
+pub async fn add_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     kind: CueKind,
@@ -188,8 +188,8 @@ pub async fn add_loop(
 }
 
 #[tauri::command]
-pub async fn move_cue(
-    app: tauri::AppHandle,
+pub async fn move_cue<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     cue: String,
     position_ms: u32,
@@ -198,8 +198,8 @@ pub async fn move_cue(
 }
 
 #[tauri::command]
-pub async fn delete_cue(
-    app: tauri::AppHandle,
+pub async fn delete_cue<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     cue: String,
 ) -> AppResult<()> {

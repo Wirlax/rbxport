@@ -20,6 +20,8 @@ const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
     inner: RwLock<Inner>,
+    /// Where backups go before the first write of a session.
+    backup_dir: std::path::PathBuf,
     /// A read-only handle to the database for point reads, opened on first
     /// use. Opening costs 50 ms on the reference library — the `SQLCipher`
     /// key derivation — and a point read under 1 ms, so the handle is kept
@@ -31,8 +33,11 @@ pub struct AppState {
 #[derive(Default)]
 struct Inner {
     library: Option<Arc<Library>>,
-    /// Root of rekordbox's share tree, where analysis files live.
-    share_root: std::path::PathBuf,
+    /// Where the library is, decided once when it is loaded. Every later open
+    /// — the reader, the writer, a reload — goes through this rather than
+    /// detecting again, which is also what lets a test point the whole shell
+    /// at a fixture.
+    location: Option<rbl_db::LibraryLocation>,
     read_only: bool,
     db_version: Option<i64>,
     load_ms: u64,
@@ -55,11 +60,54 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// State for the installed library, with backups under the app's own
+    /// data directory.
     pub fn new() -> Self {
+        Self::with_backups(default_backup_dir())
+    }
+
+    /// State that backs the library up under `backup_dir`. The location is
+    /// not chosen here: it arrives with the library, in [`Self::set_library`].
+    pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
         Self {
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
+            backup_dir: backup_dir.into(),
             reader: parking_lot::Mutex::new(None),
         }
+    }
+
+    /// Where the loaded library is.
+    pub fn location(&self) -> AppResult<rbl_db::LibraryLocation> {
+        self.inner
+            .read()
+            .location
+            .clone()
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "The library has not finished loading yet."))
+    }
+
+    /// A fresh read-only handle to the loaded library.
+    ///
+    /// Blocking — call from `spawn_blocking`, never from a command body.
+    pub fn open_read_only(&self) -> Result<rbl_db::Library, rbl_db::DbError> {
+        let location = self
+            .location()
+            .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
+        rbl_db::Library::open(location, rbl_db::OpenMode::ReadOnly)
+    }
+
+    /// The library open for writing, backed up first if this is the session's
+    /// first write. Refused while rekordbox is running.
+    ///
+    /// Opened per edit rather than held: holding it would keep the database
+    /// open read-write for the life of the app, and rekordbox launching
+    /// behind us must be able to take the file back.
+    ///
+    /// Blocking — call from `spawn_blocking`, never from a command body.
+    pub fn open_writer(&self) -> Result<rbl_db::write::Writer, rbl_db::DbError> {
+        let location = self
+            .location()
+            .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
+        rbl_db::write::Writer::open(location, self.backup_dir.clone())
     }
 
     /// Runs one read against the database, opening the handle if needed.
@@ -75,7 +123,7 @@ impl AppState {
     ) -> Result<T, rbl_db::DbError> {
         let mut slot = self.reader.lock();
         if slot.is_none() {
-            *slot = Some(rbl_db::Library::open_installed_read_only()?);
+            *slot = Some(self.open_read_only()?);
         }
         let Some(db) = slot.as_ref() else {
             return Err(rbl_db::DbError::Open("no reader".to_owned()));
@@ -93,11 +141,16 @@ impl AppState {
         read_only: bool,
         db_version: Option<i64>,
         load_ms: u64,
-        share_root: std::path::PathBuf,
+        location: rbl_db::LibraryLocation,
     ) {
+        // The reader is a handle to wherever the previous library was. Dropped
+        // before `inner` is taken: `read_db` holds the reader while it opens,
+        // and opening reads `inner`, so taking them the other way round here
+        // would be a deadlock waiting for a reload during a point read.
+        *self.reader.lock() = None;
         let mut inner = self.inner.write();
         inner.library = Some(Arc::new(library));
-        inner.share_root = share_root;
+        inner.location = Some(location);
         inner.read_only = read_only;
         inner.db_version = db_version;
         inner.load_ms = load_ms;
@@ -139,9 +192,10 @@ impl AppState {
             .ok_or_else(|| AppError::new(ErrorKind::NotFound, "The library has not finished loading yet."))
     }
 
-    /// Where analysis files live for the loaded library.
+    /// Where analysis files live for the loaded library, or nowhere useful
+    /// before it has loaded.
     pub fn share_root(&self) -> std::path::PathBuf {
-        self.inner.read().share_root.clone()
+        self.inner.read().location.as_ref().map(|l| l.share_root.clone()).unwrap_or_default()
     }
 
     pub fn summary(&self) -> (bool, Option<i64>, u64, u32) {
@@ -181,6 +235,14 @@ impl AppState {
                 .with_detail(format!("view {view_id} was evicted or never existed"))
         })
     }
+}
+
+/// Where backups of the installed library go before the first write of a
+/// session.
+fn default_backup_dir() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("rekordbox-lite/backups")
 }
 
 /// A view of either kind, on its way into the table.

@@ -157,8 +157,8 @@ pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLo
 /// names the writer accepts is the whole list of what is safe to write; a
 /// name it does not know is refused here rather than mapped to a guess.
 #[tauri::command]
-pub async fn set_track_field(
-    app: tauri::AppHandle,
+pub async fn set_track_field<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track: String,
     field: String,

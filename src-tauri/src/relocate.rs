@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::{backup_dir, blocking, reload, write_error};
+use crate::commands::{blocking, reload, write_error};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -86,13 +86,14 @@ fn file_name(path: &str) -> Option<String> {
 
 /// Points every missing track at a same-named file under the folders.
 #[tauri::command]
-pub async fn auto_relocate(
-    app: tauri::AppHandle,
+pub async fn auto_relocate<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     folders: Vec<String>,
 ) -> AppResult<RelocateReportDto> {
     let library = state.library()?;
     let state_for_reload = Arc::clone(&state);
+    let writing = Arc::clone(&state);
     // `blocking` is `spawn_blocking` with a name: the walk and the writes
     // happen off the async thread.
     let report = blocking("auto_relocate", move || {
@@ -115,8 +116,7 @@ pub async fn auto_relocate(
         let roots: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
         let found = index_folders(&roots);
 
-        let location = rbl_db::detect().map_err(write_error)?;
-        let mut writer = rbl_db::write::Writer::open(location, backup_dir()).map_err(write_error)?;
+        let mut writer = writing.open_writer().map_err(write_error)?;
         let mut relocated = 0_u32;
         let mut unresolved = 0_u32;
         for (id, name) in &missing {
