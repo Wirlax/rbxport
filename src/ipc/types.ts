@@ -55,9 +55,16 @@ export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
   | "bpm" | "key" | "duration" | "rating" | "dateAdded" | "releaseDate";
 
+/**
+ * What the backend sorts by. The columns, plus the key round the Camelot
+ * wheel: the Key column sorts by what it shows, and with the alphanumeric
+ * display that is `1A` to `12B`, not the classic names' alphabet.
+ */
+export type SortKey = SortColumn | "keyCamelot";
+
 export interface ViewSpec {
   source: TrackSource;
-  sort: SortColumn;
+  sort: SortKey;
   descending: boolean;
   /** Free-text search, matched the way the Rust index folds it. */
   query: string;

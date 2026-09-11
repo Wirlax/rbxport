@@ -309,6 +309,7 @@ pub fn sort_from_wire(name: &str) -> SortColumn {
         "genre" => SortColumn::Genre,
         "label" => SortColumn::Label,
         "key" => SortColumn::Key,
+        "keyCamelot" => SortColumn::KeyCamelot,
         "bpm" => SortColumn::Bpm,
         "duration" => SortColumn::Duration,
         "rating" => SortColumn::Rating,

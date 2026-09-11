@@ -28,6 +28,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
+import { usePreferences } from "@/store/usePreferences";
 import { TrackTable, type TrackTableProps } from "@/views/browser/TrackTable";
 import { TreeView, type TreeViewProps } from "@/views/tree/TreeView";
 import { useColumns } from "@/store/useColumns";
@@ -158,9 +159,10 @@ export function SubBrowser({
   // to share the main table's widths would make it useless.
   const cols = useColumns("subBrowser");
 
+  const keyDisplay = usePreferences().view.keyDisplay;
   const spec: ViewSpec = useMemo(
-    () => specForNode(selected, query, sort),
-    [selected, query, sort],
+    () => specForNode(selected, query, sort, keyDisplay),
+    [selected, query, sort, keyDisplay],
   );
 
   const onSortChange = useCallback((column: SortColumn) => {

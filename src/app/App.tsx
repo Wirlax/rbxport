@@ -389,12 +389,12 @@ export function App() {
   // capture cannot say which rekordbox uses.
   const masterBpmX100 = (syncMaster === "b" ? playerTrackB : playerTrack)?.bpmX100 ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = specForNode(selectedNode, query, sortState);
+    const base = specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay);
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100]);
+  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar

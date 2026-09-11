@@ -20,13 +20,17 @@ pub enum SortColumn {
     Rating,
     DateAdded,
     ReleaseDate,
+    /// The key column round the Camelot wheel, for the alphanumeric display:
+    /// rekordbox sorts the column by what it shows.
+    KeyCamelot,
 }
 
 impl SortColumn {
-    pub(crate) const ALL: [SortColumn; 12] = [
+    pub(crate) const ALL: [SortColumn; 13] = [
         SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
         SortColumn::Genre, SortColumn::Label, SortColumn::Key, SortColumn::Bpm,
         SortColumn::Duration, SortColumn::Rating, SortColumn::DateAdded, SortColumn::ReleaseDate,
+        SortColumn::KeyCamelot,
     ];
 
     pub(crate) fn rank_slot(self) -> usize {
@@ -43,6 +47,7 @@ impl SortColumn {
             SortColumn::Rating => 9,
             SortColumn::DateAdded => 10,
             SortColumn::ReleaseDate => 11,
+            SortColumn::KeyCamelot => 12,
         }
     }
 }
@@ -181,7 +186,14 @@ impl Library {
                 SortColumn::Album => order.sort_by(|&a, &b| Self::folded_lookup(&self.albums, &self.album, a).cmp(Self::folded_lookup(&self.albums, &self.album, b))),
                 SortColumn::Genre => order.sort_by(|&a, &b| Self::folded_lookup(&self.genres, &self.genre, a).cmp(Self::folded_lookup(&self.genres, &self.genre, b))),
                 SortColumn::Label => order.sort_by(|&a, &b| Self::folded_lookup(&self.labels, &self.label, a).cmp(Self::folded_lookup(&self.labels, &self.label, b))),
-                SortColumn::Key => order.sort_by(|&a, &b| Self::folded_lookup(&self.keys, &self.key, a).cmp(Self::folded_lookup(&self.keys, &self.key, b))),
+                // By the key's own rule, not the fold: the fold drops `#`,
+                // which put F and F# on top of each other.
+                SortColumn::Key => order.sort_by(|&a, &b| crate::key::cmp_names(self.key_name(a), self.key_name(b))),
+                SortColumn::KeyCamelot => order.sort_by(|&a, &b| {
+                    crate::key::camelot_rank(self.key_name(a))
+                        .cmp(&crate::key::camelot_rank(self.key_name(b)))
+                        .then_with(|| crate::key::cmp_names(self.key_name(a), self.key_name(b)))
+                }),
                 SortColumn::DateAdded => order.sort_by(|&a, &b| self.date_added.get(a as usize).cmp(self.date_added.get(b as usize))),
                 SortColumn::ReleaseDate => order.sort_by(|&a, &b| self.release_date.get(a as usize).cmp(self.release_date.get(b as usize))),
             }

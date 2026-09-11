@@ -11,7 +11,7 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, Limiter, RowDto, SortColumn, Tick, TrackDetails, TrackField,
+  FilterValues, LibrarySummary, Limiter, RowDto, SortKey, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -269,8 +269,17 @@ function makeTree(): TreeNode[] {
 
 const collator = new Intl.Collator("en", { sensitivity: "base", numeric: true });
 
-function compare(a: RowDto, b: RowDto, col: SortColumn): number {
+function compare(a: RowDto, b: RowDto, col: SortKey): number {
   switch (col) {
+    case "keyCamelot": {
+      // Round the wheel, unknown keys last, as the index ranks them.
+      const rank = (key: string) => {
+        const code = toCamelot(key);
+        if (code === "") return Number.MAX_SAFE_INTEGER;
+        return Number(code.slice(0, -1)) * 2 + (code.endsWith("B") ? 1 : 0);
+      };
+      return rank(a.key) - rank(b.key) || collator.compare(a.key, b.key);
+    }
     case "trackNo": return a.trackNo - b.trackNo;
     case "bpm": return a.bpmX100 - b.bpmX100;
     case "duration": return a.durationSec - b.durationSec;

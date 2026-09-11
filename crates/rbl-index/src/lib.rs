@@ -14,6 +14,7 @@
 
 pub mod cache;
 pub mod folder;
+pub mod key;
 pub mod strings;
 pub mod testing;
 mod filter;

@@ -31,6 +31,34 @@ fn spec(sort: SortColumn, descending: bool, query: &str) -> ViewSpec {
 }
 
 #[test]
+fn sorts_keys_by_their_names_with_the_sharps_apart_and_blanks_last() {
+    let keyed: Vec<TestTrack> = [(1, "Fm"), (2, "F#"), (3, ""), (4, "F"), (5, "F#m"), (6, "Abm"), (7, "A")]
+        .into_iter()
+        .map(|(id, key)| TestTrack { id, title: "t", key, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&keyed);
+    let view = lib.open_view(&spec(SortColumn::Key, false, ""));
+    let keys: Vec<&str> = view.rows.iter().map(|&r| lib.key_name(r)).collect();
+    // The general fold drops `#`, which used to put F and F# on top of each other.
+    assert_eq!(keys, ["A", "Abm", "F", "F#", "F#m", "Fm", ""]);
+}
+
+#[test]
+fn sorts_keys_round_the_camelot_wheel_for_the_alphanumeric_display() {
+    let keyed: Vec<TestTrack> = [(1, "A"), (2, "Abm"), (3, "B"), (4, "Ebm"), (5, "E"), (6, "Odd"), (7, "G#m")]
+        .into_iter()
+        .map(|(id, key)| TestTrack { id, title: "t", key, ..TestTrack::default() })
+        .collect();
+    let lib = library_from(&keyed);
+    let view = lib.open_view(&spec(SortColumn::KeyCamelot, false, ""));
+    let keys: Vec<&str> = view.rows.iter().map(|&r| lib.key_name(r)).collect();
+    // 1A, 1A (an enharmonic spelling), 1B, 2A, 11B, 12B, and what is not a key.
+    assert_eq!(keys, ["Abm", "G#m", "B", "Ebm", "A", "E", "Odd"]);
+    let view = lib.open_view(&spec(SortColumn::KeyCamelot, true, ""));
+    assert_eq!(lib.key_name(view.rows[0]), "Odd", "descending is the same order reversed");
+}
+
+#[test]
 fn sorts_by_title_case_and_accent_insensitively() {
     let lib = library_from(&sample());
     let view = lib.open_view(&spec(SortColumn::Title, false, ""));

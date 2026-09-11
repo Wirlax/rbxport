@@ -70,3 +70,16 @@ describe("the Explorer's views", () => {
     expect(specForNode(node, "", null).source).toEqual({ kind: "folder", path: "" });
   });
 });
+
+describe("the Key column sorts by what it shows", () => {
+  const node = { id: "all", name: "All Tracks", kind: "allTracks" as const, depth: 0 };
+  it("classic names alphabetically", () => {
+    expect(specForNode(node, "", { column: "key", descending: false }, "classic").sort).toBe("key");
+  });
+  it("Camelot codes round the wheel", () => {
+    expect(specForNode(node, "", { column: "key", descending: true }, "alphanumeric").sort).toBe("keyCamelot");
+  });
+  it("only the key column changes with the display", () => {
+    expect(specForNode(node, "", { column: "bpm", descending: false }, "alphanumeric").sort).toBe("bpm");
+  });
+});

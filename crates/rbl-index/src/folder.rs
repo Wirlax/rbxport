@@ -260,16 +260,26 @@ impl Library {
         // cheap; the library's rank arrays cannot place a loose file anyway.
         match spec.sort {
             SortColumn::TrackNo => {}
-            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating => {
+            SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating | SortColumn::KeyCamelot => {
                 let key = |entry: &FolderEntry| match *entry {
                     FolderEntry::Track(row) => match spec.sort {
                         SortColumn::Bpm => self.bpm_x100.get(row as usize).copied().unwrap_or(0),
                         SortColumn::Duration => self.length_sec.get(row as usize).copied().unwrap_or(0),
+                        SortColumn::KeyCamelot => crate::key::camelot_rank(self.key_name(row)),
                         _ => u32::from(self.rating.get(row as usize).copied().unwrap_or(0)),
                     },
-                    FolderEntry::File(_) => 0,
+                    // A loose file has no key or number; it goes with the
+                    // blanks, which is last for a key and first for a number.
+                    FolderEntry::File(_) => if spec.sort == SortColumn::KeyCamelot { u32::MAX } else { 0 },
                 };
                 view.entries.sort_by_key(key);
+            }
+            SortColumn::Key => {
+                let name = |entry: &FolderEntry| match *entry {
+                    FolderEntry::Track(row) => self.key_name(row),
+                    FolderEntry::File(_) => "",
+                };
+                view.entries.sort_by(|a, b| crate::key::cmp_names(name(a), name(b)));
             }
             column => {
                 let files = &view.files;
@@ -308,10 +318,10 @@ impl Library {
             SortColumn::Album => self.albums.folded(id(&self.album)),
             SortColumn::Genre => self.genres.folded(id(&self.genre)),
             SortColumn::Label => self.labels.folded(id(&self.label)),
-            SortColumn::Key => self.keys.folded(id(&self.key)),
             SortColumn::DateAdded => self.date_added.get(row as usize),
             SortColumn::ReleaseDate => self.release_date.get(row as usize),
-            SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating => "",
+            SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating
+            | SortColumn::Key | SortColumn::KeyCamelot => "",
         }
     }
 }
