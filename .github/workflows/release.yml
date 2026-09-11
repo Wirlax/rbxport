@@ -2,7 +2,7 @@ name: Release
 
 # A tag is the release. `v1.2.3` builds macOS and Windows, signs them where the
 # signing secrets exist, and publishes the installers to the R2 bucket as
-# `rekordbox-lite-1.2.3-<platform>.<ext>` — flat keys, the version in the
+# `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
 # name — plus `latest.json`, so a page can find the newest version without
 # a folder listing.
 #
@@ -158,7 +158,7 @@ jobs:
         # dozens of its own source files "missing". They were not missing;
         # their paths were too long. The runner's workspace already sits ~95
         # characters deep (`C:\Users\…\.arc\instances\windows\<runner>\_work\
-        # rekordbox-lite\rekordbox-lite`), openssl-src copies its tree under
+        # rbxport\rbxport`), openssl-src copies its tree under
         # `target\<triple>\release\build\openssl-sys-<hash>\out\openssl-build\`
         # on top of that, and the deepest files then cross MAX_PATH (260) and
         # silently fail to copy. A short target directory outside the
@@ -301,7 +301,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          KEYCHAIN="$RUNNER_TEMP/rekordbox-lite-signing.keychain-db"
+          KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "::add-mask::$KEYCHAIN_PASSWORD"
 
@@ -432,18 +432,18 @@ jobs:
 
           # Renamed here, not at upload time, so the artifact and the object in
           # the bucket carry the same name. The bundlers produce
-          # `rekordbox-lite_0.1.0_universal.dmg` and
-          # `rekordbox-lite_0.1.0_x64-setup.exe`; what gets published is
-          # `rekordbox-lite-<semver>-<platform>[-setup].<ext>`, which is the
+          # `rbxport_0.1.0_universal.dmg` and
+          # `rbxport_0.1.0_x64-setup.exe`; what gets published is
+          # `rbxport-<semver>-<platform>[-setup].<ext>`, which is the
           # one shape a person can read, type and grep. Bare semver, because
           # the leading `v` belongs to the tag and nothing else.
           for f in out/*; do
             case "$f" in
-              *.dmg)            want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.dmg" ;;
-              *.app.tar.gz)     want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz" ;;
-              *.app.tar.gz.sig) want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
-              *-setup.exe)      want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
-              *-setup.exe.sig)  want="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+              *.dmg)            want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.dmg" ;;
+              *.app.tar.gz)     want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz" ;;
+              *.app.tar.gz.sig) want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
+              *-setup.exe)      want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
+              *-setup.exe.sig)  want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
               *) echo "::error::unexpected bundle $f"; exit 1 ;;
             esac
             [ "$f" = "$want" ] || mv "$f" "$want"
@@ -456,8 +456,8 @@ jobs:
           # loud: a bare `test -s` failed the first 0.5.0 build with nothing
           # in the log but an exit code.
           case "${{ matrix.slug }}" in
-            darwin-*)  sig="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
-            windows-*) sig="out/rekordbox-lite-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+            darwin-*)  sig="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
+            windows-*) sig="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
           esac
           if [ ! -s "$sig" ]; then
             echo "::error::no updater signature at $sig — was the updater artifact bundled and TAURI_SIGNING_PRIVATE_KEY set?"
@@ -548,7 +548,7 @@ jobs:
         if: always() && runner.os == 'macOS' && env.HAVE_APPLE == 'true'
         shell: bash
         run: |
-          KEYCHAIN="$RUNNER_TEMP/rekordbox-lite-signing.keychain-db"
+          KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
           if [ -f "$RUNNER_TEMP/keychains.before" ]; then
             # shellcheck disable=SC2046
             security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
@@ -626,7 +626,7 @@ jobs:
         # nothing and costs a URL nobody can read, type or grep for; one
         # namespace also means a stale prefix cannot shadow a new upload. The
         # build job has already named the files
-        # `rekordbox-lite-<semver>-<platform>[-setup].<ext>`.
+        # `rbxport-<semver>-<platform>[-setup].<ext>`.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

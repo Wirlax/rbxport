@@ -15,7 +15,7 @@ project takes the GPL. Its own copyright and terms are in
 Linking it makes the binary a combined work, so **anything distributed from a
 default build is distributable only under the GPL** — source offer included.
 MIT is compatible with that: this repository's own files stay MIT and can be
-reused under those terms, but a shipped `rekordbox-lite` cannot.
+reused under those terms, but a shipped `rbxport` cannot.
 
 It is here because a DJ deck needs a stretcher that holds a pitch. The WSOLA
 backend written for this crate stretches tempo well and misses an interval by

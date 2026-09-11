@@ -35,7 +35,7 @@ export function StatusBar({
   const tip = useTooltip();
   return (
     <footer className={styles.statusBar}>
-      <span className={styles.logo}>rekordbox-lite</span>
+      <span className={styles.logo}>rbxport</span>
       {readOnly ? (
         <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
           Read-only

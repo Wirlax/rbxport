@@ -100,7 +100,7 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
         </Section>
         <Section title="Update Manager">
           <Toggle
-            label="Check for a new version when rekordbox-lite starts."
+            label="Check for a new version when rbxport starts."
             checked={advanced.checkUpdates}
             onChange={(checkUpdates) => set({ checkUpdates })}
           />

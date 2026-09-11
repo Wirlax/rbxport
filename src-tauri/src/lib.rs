@@ -255,7 +255,7 @@ fn install_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rekordbox_lite=info,rbl_db=info,rbl_index=info".into()),
+                .unwrap_or_else(|_| "rbxport=info,rbl_db=info,rbl_index=info".into()),
         )
         .init();
 
@@ -273,7 +273,7 @@ fn install_tracing() {
 /// test the build that ships. `WebView2`'s own `WEBVIEW2_ADDITIONAL_BROWSER_
 /// ARGUMENTS` is not honoured once the host sets arguments of its own, which
 /// wry does, so it has to be passed here.
-pub const DEVTOOLS_PORT_ENV: &str = "REKORDBOX_LITE_DEVTOOLS_PORT";
+pub const DEVTOOLS_PORT_ENV: &str = "RBXPORT_DEVTOOLS_PORT";
 
 /// The browser arguments for every webview: wry's defaults, which setting
 /// any argument replaces, plus the debugging port when one is asked for.

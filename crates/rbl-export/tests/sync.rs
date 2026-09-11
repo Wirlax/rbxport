@@ -73,6 +73,27 @@ fn a_second_export_of_the_same_tracks_copies_nothing() {
 }
 
 #[test]
+fn a_stick_written_before_the_rename_is_still_ours() {
+    // The record used to live under PIONEER/rekordbox-lite. A stick from
+    // then is recognised, synced rather than rewritten, and its record moves.
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let tracks = vec![track(src.path(), 1, "All U Need", "TRIODE")];
+    export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    let new_path = Manifest::path(dest.path());
+    let old_path = dest.path().join(rbl_export::manifest::OLD_MANIFEST_PATH);
+    std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+    std::fs::rename(&new_path, &old_path).unwrap();
+    assert!(Manifest::load(dest.path()).is_some(), "read from the old place");
+
+    let second = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
+    assert_eq!(second.reused, 1);
+    assert_eq!(second.bytes_copied, 0);
+    assert!(new_path.exists(), "the record is back in its place");
+    assert!(!old_path.exists(), "and the old one is gone");
+}
+
+#[test]
 fn a_changed_source_is_copied_again() {
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();

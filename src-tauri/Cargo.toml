@@ -1,5 +1,5 @@
 [package]
-name = "rekordbox-lite"
+name = "rbxport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 description = "Rekordbox-compatible export-mode library manager."
 
 [lib]
-name = "rekordbox_lite_lib"
+name = "rbxport_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [lints]

@@ -1,5 +1,5 @@
 //! Exercises the command layer's logic against the REAL library, read-only,
-//! without a webview. `cargo run -p rekordbox-lite --example ipc_smoke`
+//! without a webview. `cargo run -p rbxport --example ipc_smoke`
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use std::time::Instant;

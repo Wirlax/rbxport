@@ -764,13 +764,13 @@ fn the_metronome_clicks_on_the_grid_and_only_while_playing() {
 
     // Off: silence stays silence.
     h.engine.play(Deck::A);
-    let quiet = h.play_until(Deck::A, RATE as u64 / 4);
+    let quiet = h.play_until(Deck::A, u64::from(RATE) / 4);
     assert!(quiet.iter().all(|s| s.abs() < 1e-6), "no click with the metronome off");
 
     // On: the beat at 0.5 s is heard, and the silence between beats is silent.
     h.engine.set_metronome(Deck::A, true);
     assert!(h.engine.metronome_on(Deck::A));
-    let out = h.play_until(Deck::A, RATE as u64 * 3 / 4);
+    let out = h.play_until(Deck::A, u64::from(RATE) * 3 / 4);
     let loudest = out.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
     assert!(loudest > 0.05, "the click is heard: {loudest}");
     // The window began at 0.25 s: the first frames, before the beat, are silent.

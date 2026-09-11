@@ -1073,7 +1073,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           hasDeviceLibrary: true,
           hasOneLibrary: true,
           hasLibrarySettings: true,
-          deviceName: settings.deviceName || "REKORDBOX-LITE",
+          deviceName: settings.deviceName || "RBXPORT",
         });
       }
       return wait({

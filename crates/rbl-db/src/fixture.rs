@@ -16,7 +16,7 @@ use crate::{DbError, LibraryLocation, Result};
 
 /// The passphrase a fixture is encrypted with. Fixed, because a fixture holds
 /// nothing worth protecting and a test must be able to reopen it.
-pub const FIXTURE_PASSPHRASE: &str = "rekordbox-lite-fixture";
+pub const FIXTURE_PASSPHRASE: &str = "rbxport-fixture";
 
 /// Verbatim from the installed library, `DBVersion` 6000.
 const SCHEMA: &[&str] = &[
@@ -251,7 +251,7 @@ pub fn point_at_audio(location: &LibraryLocation, index: usize, path: &str, seco
 
 /// Writes the `options.json` rekordbox's agent would keep for this library,
 /// with `master_db_as` as the path it will have where it is read — the
-/// detector resolves `share/` beside it. What `REKORDBOX_LITE_OPTIONS` points
+/// detector resolves `share/` beside it. What `RBXPORT_OPTIONS` points
 /// the compiled app at.
 pub fn write_options_json(to: &Path, master_db_as: &str, passphrase: &str) -> Result<()> {
     let dp = crate::key::wrap_password(passphrase)?;

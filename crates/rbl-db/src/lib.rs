@@ -68,7 +68,7 @@ pub enum OpenMode {
 ///
 /// What points the compiled app at a fixture library on a test machine —
 /// see `scripts/e2e-win/`. Unset in ordinary use.
-pub const OPTIONS_ENV: &str = "REKORDBOX_LITE_OPTIONS";
+pub const OPTIONS_ENV: &str = "RBXPORT_OPTIONS";
 
 /// The agent's options file, which holds the db path and the wrapped passphrase.
 fn options_path() -> Result<PathBuf> {

@@ -53,7 +53,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let updates = MenuItemBuilder::with_id("updates", "Check for Updates…").build(app)?;
 
     // The application menu, whose first item macOS names after the app.
-    let application = SubmenuBuilder::new(app, "rekordbox-lite")
+    let application = SubmenuBuilder::new(app, "rbxport")
         .item(&PredefinedMenuItem::about(app, None, None)?)
         .item(&updates)
         .separator()

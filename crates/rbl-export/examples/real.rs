@@ -76,7 +76,7 @@ fn main() {
 
     let _ = std::fs::remove_dir_all(&dest);
     let playlists = vec![rbl_export::SourcePlaylist {
-        name: "rekordbox-lite test".to_owned(),
+        name: "rbxport test".to_owned(),
         track_indices: playlist_indices,
     }];
 

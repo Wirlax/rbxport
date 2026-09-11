@@ -266,7 +266,7 @@ impl AppState {
 fn default_backup_dir() -> std::path::PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("rekordbox-lite/backups")
+        .join("rbxport/backups")
 }
 
 /// A view of either kind, on its way into the table.

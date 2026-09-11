@@ -26,7 +26,7 @@ fn main() {
 /// Every id the menu emits, in the order the menus are laid out.
 #[cfg(target_os = "macos")]
 fn ids(app: &tauri::AppHandle<tauri::test::MockRuntime>) -> Vec<String> {
-    let menu = rekordbox_lite_lib::menu::build(app).expect("the menu builds");
+    let menu = rbxport_lib::menu::build(app).expect("the menu builds");
     let mut out = Vec::new();
     for item in menu.items().expect("top level") {
         let Some(submenu) = item.as_submenu() else { continue };
@@ -54,7 +54,7 @@ fn the_menu_offers_the_clipboard_items_a_text_field_needs() {
     // Without a predefined Edit menu the standard shortcuts never reach the
     // webview on macOS, and renaming a playlist stops accepting paste.
     let app = tauri::test::mock_app();
-    let menu = rekordbox_lite_lib::menu::build(&app.handle().clone()).expect("the menu builds");
+    let menu = rbxport_lib::menu::build(&app.handle().clone()).expect("the menu builds");
     let titles: Vec<String> = menu
         .items()
         .expect("top level")

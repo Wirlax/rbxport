@@ -188,7 +188,7 @@ test("About shows the version and the update check switch, which Advanced shares
   await open(page);
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "About" }).click();
-  await expect(dialog.getByRole("heading", { name: "rekordbox lite" })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "rbxport" })).toBeVisible();
   await expect(dialog.getByTestId("about-version")).toHaveText("0.4.0");
   const auto = dialog.getByRole("switch", { name: "Automatically check for updates" });
   await expect(auto).toBeChecked();

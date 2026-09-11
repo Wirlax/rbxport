@@ -43,7 +43,7 @@ impl AppError {
     }
 
     pub fn internal(detail: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Internal, "Something went wrong inside rekordbox-lite.")
+        Self::new(ErrorKind::Internal, "Something went wrong inside rbxport.")
             .with_detail(detail)
     }
 }

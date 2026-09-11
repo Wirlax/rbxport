@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn a_wrapped_passphrase_derives_back_whatever_its_length() {
-        for secret in ["a", "rekordbox-lite-fixture", "exactly eight bytes!!!!!", ""] {
+        for secret in ["a", "rbxport-fixture", "exactly eight bytes!!!!!", ""] {
             let dp = wrap_password(secret).unwrap();
             assert_eq!(derive_password(&dp).unwrap(), secret, "{secret:?}");
         }

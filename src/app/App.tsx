@@ -991,7 +991,7 @@ export function App() {
         {/* What the app is costing, in the corner: its own component, so a
             reading does not re-render the window around it. */}
         <AppCost className={styles.cost} />
-        <span className={styles.appName}>rekordbox lite</span>
+        <span className={styles.appName}>rbxport</span>
       </div>
       <TopBar
         clock={clock}

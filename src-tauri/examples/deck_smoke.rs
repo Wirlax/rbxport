@@ -1,5 +1,5 @@
 //! Plays tracks from the REAL library through the engine, read-only, without a
-//! webview. `cargo run --release -p rekordbox-lite --example deck_smoke`
+//! webview. `cargo run --release -p rbxport --example deck_smoke`
 //!
 //! This is how playback is checked against the user's own files: the engine's
 //! own tests use generated WAVs, and what those cannot tell you is whether a

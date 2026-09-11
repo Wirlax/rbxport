@@ -33,7 +33,7 @@ export function AboutPane() {
 
   return (
     <>
-      <Section title="rekordbox lite">
+      <Section title="rbxport">
         <dl className={styles.facts}>
           <dt>Version</dt>
           <dd data-testid="about-version">{version ?? "—"}</dd>

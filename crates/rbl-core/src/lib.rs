@@ -1,4 +1,4 @@
-//! Primitives shared across every rekordbox-lite crate.
+//! Primitives shared across every rbxport crate.
 //!
 //! Nothing here touches the filesystem, the network, or Tauri.
 

@@ -90,7 +90,7 @@ describe("UpdateManager", () => {
 
   it("says the running version is the latest", () => {
     mount({ phase: "upToDate", currentVersion: "0.4.0" });
-    expect(text()).toContain("rekordbox-lite 0.4.0 is the latest version.");
+    expect(text()).toContain("rbxport 0.4.0 is the latest version.");
     expect(buttons()).toEqual(["OK"]);
     expect(host.querySelector('[aria-label="Close"]')).not.toBeNull();
   });

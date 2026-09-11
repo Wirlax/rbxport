@@ -146,7 +146,7 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
             <p className={styles.status}>Checking for updates…</p>
           ) : state.phase === "upToDate" ? (
             <p className={styles.status}>
-              rekordbox-lite {state.currentVersion} is the latest version.
+              rbxport {state.currentVersion} is the latest version.
             </p>
           ) : check ? (
             <>

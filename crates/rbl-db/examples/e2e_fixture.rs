@@ -4,7 +4,7 @@
 //!
 //! Writes `master.db` (the real schema, encrypted), `share/`, three short WAVs
 //! under `audio/`, and an `options.json` whose `db-path` is where `master.db`
-//! will be on the other machine, so `REKORDBOX_LITE_OPTIONS` can point the
+//! will be on the other machine, so `RBXPORT_OPTIONS` can point the
 //! app at it. The first three tracks play those WAVs; the rest point nowhere,
 //! as the fixture's always have.
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]

@@ -1,4 +1,4 @@
-# rekordbox-lite
+# rbxport
 
 A Rekordbox 7 clone that does **export mode only**: manage the shared Rekordbox
 library, analyze tracks, write USB exports, and (in progress) serve the library
