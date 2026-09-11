@@ -15,12 +15,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
 
 import {
-  PrefAdvancedIcon, PrefAnalysisIcon, PrefAudioIcon, PrefDjSystemIcon, PrefKeyboardIcon,
-  PrefViewIcon,
+  PrefAboutIcon, PrefAdvancedIcon, PrefAnalysisIcon, PrefAudioIcon, PrefDjSystemIcon,
+  PrefKeyboardIcon, PrefViewIcon,
 } from "@/components/icons";
 import type { LibrarySummary, Limiter } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
+import { AboutPane } from "./AboutPane";
 import { AdvancedPane, ADVANCED_TABS, type AdvancedTab } from "./AdvancedPane";
 import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
@@ -30,8 +31,11 @@ import styles from "./Preferences.module.css";
 import { Button } from "./controls";
 import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
 
-/** The sidebar, in the capture's order and wording, less PLAN and CLOUD. */
-export type Pane = "view" | "audio" | "analysis" | "djSystem" | "keyboard" | "advanced";
+/**
+ * The sidebar, in the capture's order and wording, less PLAN and CLOUD, and
+ * with About at the end — ours, for the version and the update check.
+ */
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "keyboard" | "advanced" | "about";
 
 const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: "view", label: "View", Icon: PrefViewIcon },
@@ -40,6 +44,7 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
   { id: "djSystem", label: "DJ System", Icon: PrefDjSystemIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+  { id: "about", label: "About", Icon: PrefAboutIcon },
 ];
 
 /** Which stored pane a sidebar pane's Reset to defaults clears. */
@@ -234,6 +239,8 @@ export function Preferences({
                   <DjSystemPane tab={tabs.djSystem} />
                 ) : pane === "keyboard" ? (
                   <KeyboardPane />
+                ) : pane === "about" ? (
+                  <AboutPane />
                 ) : (
                   <AdvancedPane tab={tabs.advanced} summary={summary} />
                 )}

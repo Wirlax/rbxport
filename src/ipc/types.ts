@@ -405,6 +405,8 @@ export interface Backend {
 
   /** A reading of this process, sampled on demand. */
   appDiagnostics(): Promise<Diagnostics>;
+  /** The version this build carries, for About; no network is asked. */
+  appVersion(): Promise<string>;
 
   /** Shows a track's file in the Finder. */
   revealTrack(trackId: string): Promise<void>;

@@ -1119,6 +1119,14 @@ pub async fn reveal_track<R: tauri::Runtime>(
 ///
 /// Sampled on demand: nothing keeps this up to date in the background, so a
 /// window with the readout hidden pays nothing for it.
+/// The version this build carries — the tag it was built from, or 0.1.0
+/// for a development build — for the About pane. Nothing is asked over the
+/// network; that is the Update Manager's job.
+#[tauri::command]
+pub async fn app_version<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResult<String> {
+    Ok(app.package_info().version.to_string())
+}
+
 #[tauri::command]
 pub async fn app_diagnostics() -> AppResult<crate::diagnostics::Diagnostics> {
     // The sampler is kept between calls: CPU is a difference between two

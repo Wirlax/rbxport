@@ -207,6 +207,12 @@ export const PrefKeyboardIcon = (props: IconProps) => (
   </svg>
 );
 
+export const PrefAboutIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" fillRule="evenodd" d="M8 .5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 1.6a5.9 5.9 0 1 0 0 11.8A5.9 5.9 0 0 0 8 2.1zM8 6.6c.5 0 .9.4.9.9v4a.9.9 0 0 1-1.8 0v-4c0-.5.4-.9.9-.9zm0-2.8a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2z"/>
+  </svg>
+);
+
 export const PrefViewIcon = (props: IconProps) => (
   <svg viewBox="0 0 18 13" aria-hidden focusable="false" {...props}>
     <path d="M9 1C5.2 1 2.2 3.6 1 6.5 2.2 9.4 5.2 12 9 12s6.8-2.6 8-5.5C15.8 3.6 12.8 1 9 1z" fill="none" stroke="currentColor" strokeWidth="1.4"/> <circle cx="9" cy="6.5" r="2.6" fill="currentColor"/>

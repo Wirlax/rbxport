@@ -1251,6 +1251,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       sendTick();
       return wait(undefined);
     },
+    deckMetronome: () => wait(undefined),
+    setMetronome: () => wait(undefined),
+    setAudioConfig: () => wait(undefined),
     setChannelBand: () => wait(undefined),
     setChannelKill: () => wait(undefined),
     setChannelTrim: () => wait(undefined),

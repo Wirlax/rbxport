@@ -379,6 +379,7 @@ pub fn run() {
             commands::deck_scrub_to,
             commands::deck_scrub_end,
             commands::app_diagnostics,
+            commands::app_version,
             commands::reveal_track,
             commands::set_master_level,
             commands::audio_devices,
