@@ -277,41 +277,49 @@ export interface Binding {
   /** rekordbox's description of the command. */
   label: string;
   chord: KeyChord;
+  /**
+   * rekordbox's command id for it in `keymap.ts`, when it is one of
+   * rekordbox's: the Keyboard pane draws that row live. A binding without
+   * one is this app's own, listed under `pane`.
+   */
+  command?: string;
+  /** Where the Keyboard pane files a binding that is this app's own. */
+  pane?: "Browse" | "View" | "Track" | "File";
 }
 
 export const BINDINGS: readonly Binding[] = [
-  { group: "Browse", label: "Search", chord: { key: "f", metaKey: true } },
-  { group: "Browse", label: "Select All", chord: { key: "a", metaKey: true } },
-  { group: "Browse", label: "Cursor to Top", chord: { key: "Home" } },
-  { group: "Browse", label: "Cursor to Bottom", chord: { key: "End" } },
-  { group: "Browse", label: "Analyze Track", chord: { key: "a" } },
-  { group: "Player A", label: "Play/Pause", chord: { key: " " } },
-  { group: "Player A", label: "Quantize", chord: { key: "q" } },
-  { group: "Player A", label: "Cue", chord: { key: "c" } },
-  { group: "Player A", label: "Jump Reverse", chord: { key: "ArrowLeft" } },
-  { group: "Player A", label: "Jump Forward", chord: { key: "ArrowRight" } },
-  { group: "Player A", label: "Memory Cue", chord: { key: "m" } },
-  { group: "Player A", label: "Call Previous Memory Cue", chord: { key: "b" } },
-  { group: "Player A", label: "Call Next Memory Cue", chord: { key: "n" } },
-  { group: "Player A", label: "Delete Memory Cue", chord: { key: "x" } },
-  { group: "Player A", label: "Set Hot Cue A", chord: { key: "1" } },
-  { group: "Player A", label: "Set Hot Cue B", chord: { key: "2" } },
-  { group: "Player A", label: "Set Hot Cue C", chord: { key: "3" } },
-  { group: "Player A", label: "Clear Hot Cue A", chord: { key: "1", metaKey: true } },
-  { group: "Player A", label: "Clear Hot Cue B", chord: { key: "2", metaKey: true } },
-  { group: "Player A", label: "Clear Hot Cue C", chord: { key: "3", metaKey: true } },
-  { group: "Player A", label: "Show Memory Cues", chord: { key: "F10" } },
-  { group: "Player A", label: "Show Hot Cues", chord: { key: "F11" } },
-  { group: "Player A", label: "Show Information", chord: { key: "F12" } },
-  { group: "Menu", label: "Import File", chord: { key: "o", metaKey: true } },
-  { group: "Menu", label: "Preferences", chord: { key: ",", metaKey: true } },
-  { group: "Menu", label: "Information Window", chord: { key: "i", metaKey: true } },
-  { group: "Menu", label: "Sub Browser", chord: { key: "b", metaKey: true } },
-  { group: "Menu", label: "1 Player", chord: { key: "7", metaKey: true } },
-  { group: "Menu", label: "2 Players", chord: { key: "8", metaKey: true } },
-  { group: "Menu", label: "Simple Player", chord: { key: "9", metaKey: true } },
-  { group: "Menu", label: "Full Browser", chord: { key: "0", metaKey: true } },
-  { group: "Menu", label: "Full Screen", chord: { key: "f", metaKey: true, shiftKey: true } },
+  { group: "Browse", label: "Search", chord: { key: "f", metaKey: true }, command: "7003" },
+  { group: "Browse", label: "Select All", chord: { key: "a", metaKey: true }, pane: "Browse" },
+  { group: "Browse", label: "Cursor to Top", chord: { key: "Home" }, pane: "Browse" },
+  { group: "Browse", label: "Cursor to Bottom", chord: { key: "End" }, pane: "Browse" },
+  { group: "Browse", label: "Analyze Track", chord: { key: "a" }, pane: "Browse" },
+  { group: "Player A", label: "Play/Pause", chord: { key: " " }, command: "3006" },
+  { group: "Player A", label: "Quantize", chord: { key: "q" }, command: "301c" },
+  { group: "Player A", label: "Cue", chord: { key: "c" }, command: "3007" },
+  { group: "Player A", label: "Jump Reverse", chord: { key: "ArrowLeft" }, command: "3009" },
+  { group: "Player A", label: "Jump Forward", chord: { key: "ArrowRight" }, command: "3008" },
+  { group: "Player A", label: "Memory Cue", chord: { key: "m" }, command: "3024" },
+  { group: "Player A", label: "Call Previous Memory Cue", chord: { key: "b" }, command: "303a" },
+  { group: "Player A", label: "Call Next Memory Cue", chord: { key: "n" }, command: "3039" },
+  { group: "Player A", label: "Delete Memory Cue", chord: { key: "x" }, command: "303b" },
+  { group: "Player A", label: "Set Hot Cue A", chord: { key: "1" }, command: "301e" },
+  { group: "Player A", label: "Set Hot Cue B", chord: { key: "2" }, command: "301f" },
+  { group: "Player A", label: "Set Hot Cue C", chord: { key: "3" }, command: "3020" },
+  { group: "Player A", label: "Clear Hot Cue A", chord: { key: "1", metaKey: true }, command: "3021" },
+  { group: "Player A", label: "Clear Hot Cue B", chord: { key: "2", metaKey: true }, command: "3022" },
+  { group: "Player A", label: "Clear Hot Cue C", chord: { key: "3", metaKey: true }, command: "3023" },
+  { group: "Player A", label: "Show Memory Cues", chord: { key: "F10" }, command: "303f" },
+  { group: "Player A", label: "Show Hot Cues", chord: { key: "F11" }, command: "3040" },
+  { group: "Player A", label: "Show Information", chord: { key: "F12" }, command: "3041" },
+  { group: "Menu", label: "Import File", chord: { key: "o", metaKey: true }, command: "2000" },
+  { group: "Menu", label: "Preferences", chord: { key: ",", metaKey: true }, command: "200a" },
+  { group: "Menu", label: "Information Window", chord: { key: "i", metaKey: true }, command: "b103" },
+  { group: "Menu", label: "Sub Browser", chord: { key: "b", metaKey: true }, pane: "View" },
+  { group: "Menu", label: "1 Player", chord: { key: "7", metaKey: true }, command: "b040" },
+  { group: "Menu", label: "2 Players", chord: { key: "8", metaKey: true }, command: "b043" },
+  { group: "Menu", label: "Simple Player", chord: { key: "9", metaKey: true }, command: "b041" },
+  { group: "Menu", label: "Full Browser", chord: { key: "0", metaKey: true }, command: "b042" },
+  { group: "Menu", label: "Full Screen", chord: { key: "f", metaKey: true, shiftKey: true }, command: "b04e" },
 ];
 
 /** The names rekordbox prints in a key badge for keys that are not letters. */
