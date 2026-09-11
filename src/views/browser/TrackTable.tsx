@@ -393,7 +393,13 @@ const TrackRow = memo(function TrackRow({
  * takes: a deck holds one track, and dropping four onto it has no meaning.
  */
 export interface TrackDrag {
+  /** Every track travelling: the selection, or the one row grabbed outside it. */
   ids: readonly string[];
+  /**
+   * The one a deck takes: the topmost of them in the list, as rekordbox
+   * loads the first of a dropped selection rather than the row the hand
+   * was on [OBS].
+   */
   row: RowDto;
 }
 
@@ -649,12 +655,26 @@ export function TrackTable({
       // Whatever is selected, plus the row grabbed if it was not part of it —
       // dragging an unselected row should move that row, not the selection
       // somewhere else on screen.
-      const ids = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
-      // The grabbed row travels with them, because a deck takes one track and
-      // that is the one the hand is on. A playlist takes all of them.
-      onDragTracks?.({ ids, row });
+      if (!selection.ids.has(row.id)) {
+        onDragTracks?.({ ids: [row.id], row });
+        return;
+      }
+      // A playlist takes all of them; a deck takes the first in list order,
+      // which is what rekordbox loads from a dropped selection — not the row
+      // under the hand. Found by walking the list from the top: the rows the
+      // selection was made from are in the cache, and the walk ends at the
+      // first hit. Once per drag, not per frame.
+      let first = row;
+      for (let i = 0; i < view.count; i += 1) {
+        const at = view.rowAt(i);
+        if (at && selection.ids.has(at.id)) {
+          first = at;
+          break;
+        }
+      }
+      onDragTracks?.({ ids: [...selection.ids], row: first });
     },
-    [selection.ids, onDragTracks],
+    [selection.ids, onDragTracks, view],
   );
 
   const endDraggingTracks = useCallback(() => onDragTracks?.(null), [onDragTracks]);

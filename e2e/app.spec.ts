@@ -805,6 +805,22 @@ test("tracks can be dragged from the browser onto a playlist", async ({ page }) 
   await expect(page.getByRole("contentinfo")).toContainText(/Added \d+ track/);
 });
 
+test("a selection dragged onto a deck loads its first track, not the one under the hand", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
+  const topTitle = (await rows.nth(2).locator('[data-col="title"]').innerText()).trim();
+
+  // Rows 3 to 5, then the drag starts on the last of them.
+  await rows.nth(2).locator('[data-col="title"]').click();
+  await rows.nth(4).locator('[data-col="title"]').click({ modifiers: ["Shift"] });
+  await expect(page.getByText("Selected: 3 Tracks")).toBeVisible();
+  await rows.nth(4).dragTo(page.getByRole("region", { name: "Preview player" }));
+
+  // rekordbox loads the first of a dropped selection in list order.
+  await expect(page.getByRole("region", { name: "Preview player" }).getByTestId("player-title")).toHaveText(topTitle);
+});
+
 test("a track dragged onto a deck loads there", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
