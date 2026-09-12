@@ -97,9 +97,9 @@ fn mounting_an_export_that_is_not_offered_fails_before_any_lookup() {
 
 /// A handler that answers a menu request with a header, some rows and a footer.
 ///
-/// The row contents are ours, not rekordbox's: what a real player accepts is
-/// still unverified (`rbl_dbserver::UNVERIFIED`). What this proves is the
-/// transport — framing, multiple messages per reply, and reassembly.
+/// The row contents are ours, not a real menu's: what this proves is the
+/// transport — framing, multiple messages per reply, and reassembly. The
+/// menus themselves are `rbl_dbserver::session`, tested against the capture.
 struct Menu(Arc<MenuRows>);
 
 struct MenuRows {
@@ -124,6 +124,7 @@ impl Session for MenuSession {
             kind::RENDER => {
                 let mut out = vec![menu_header(
                     message.transaction,
+                    u32::from(kind::RENDER),
                     u32::try_from(this.rows.len()).unwrap(),
                 )];
                 for (index, row) in this.rows.iter().enumerate() {

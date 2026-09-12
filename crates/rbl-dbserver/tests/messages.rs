@@ -165,7 +165,7 @@ fn decodes_the_narrow_number_tags_a_player_may_send() {
 #[test]
 fn several_messages_in_one_segment_are_all_decoded() {
     let sent = vec![
-        menu_header(3, 128),
+        menu_header(3, 0x1105, 128),
         Message::new(3, kind::MENU_ITEM, vec![Argument::String("Melodic Vox".into())]),
         menu_footer(3),
     ];
@@ -183,11 +183,11 @@ fn several_messages_in_one_segment_are_all_decoded() {
 fn a_message_split_across_segments_is_left_for_the_next_read() {
     let whole = Message::new(9, kind::MENU_ITEM, vec![Argument::String("Tech House".into())]);
     let wire = {
-        let mut w = menu_header(9, 1).encode();
+        let mut w = menu_header(9, 0x1105, 1).encode();
         w.extend_from_slice(&whole.encode());
         w
     };
-    let first = menu_header(9, 1).encode().len();
+    let first = menu_header(9, 0x1105, 1).encode().len();
 
     // Every split point inside the second message must yield exactly one
     // complete message and leave the partial bytes behind.
@@ -255,11 +255,11 @@ fn an_unknown_field_tag_is_reported_not_guessed() {
 
 #[test]
 fn decode_all_stops_at_garbage_rather_than_looping() {
-    let mut wire = menu_header(1, 0).encode();
+    let mut wire = menu_header(1, 0x1000, 0).encode();
     wire.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22]);
     let (got, used) = Message::decode_all(&wire);
     assert_eq!(got.len(), 1);
-    assert_eq!(used, menu_header(1, 0).encode().len());
+    assert_eq!(used, menu_header(1, 0x1000, 0).encode().len());
 }
 
 #[test]
@@ -289,7 +289,3 @@ fn the_port_query_string_is_nul_terminated() {
     assert_eq!(rbl_dbserver::PORT_QUERY, 12_523);
 }
 
-#[test]
-fn what_still_needs_a_capture_is_recorded() {
-    assert!(!rbl_dbserver::UNVERIFIED.is_empty());
-}

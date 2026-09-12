@@ -14,7 +14,11 @@
 //!
 //! Nothing here opens a socket; it is a codec, so it is testable exhaustively.
 
+pub mod catalog;
+pub mod item;
+pub mod keys;
 pub mod net;
+pub mod session;
 
 /// Every message starts with this.
 pub const MAGIC: u32 = 0x8723_49ae;
@@ -299,24 +303,59 @@ pub mod kind {
     pub const TEARDOWN: u16 = 0x0100;
     /// The top-level menu for a media slot.
     pub const ROOT_MENU: u16 = 0x1000;
-    /// Playlists and folders.
-    pub const PLAYLIST_MENU: u16 = 0x1105;
-    /// Tracks by title.
+    pub const ARTIST_MENU: u16 = 0x1002;
+    pub const ALBUM_MENU: u16 = 0x1003;
+    /// Every track.
     pub const TRACK_MENU: u16 = 0x1004;
+    pub const HISTORY_MENU: u16 = 0x1012;
+    pub const KEY_MENU: u16 = 0x1014;
+    /// An artist's albums.
+    pub const ARTIST_ALBUMS: u16 = 0x1102;
+    /// An album's tracks.
+    pub const ALBUM_TRACKS: u16 = 0x1103;
+    /// Playlists and folders (last argument 1), or a playlist's tracks (0).
+    pub const PLAYLIST_MENU: u16 = 0x1105;
+    /// A session's tracks.
+    pub const HISTORY_TRACKS: u16 = 0x1112;
+    /// The three related-key rows for a key.
+    pub const RELATED_KEYS: u16 = 0x1114;
+    /// An artist's tracks, on one album or all.
+    pub const ARTIST_ALBUM_TRACKS: u16 = 0x1202;
+    /// Tracks in a key, widened by a distance.
+    pub const KEY_TRACKS: u16 = 0x1214;
     /// Search by text.
     pub const SEARCH: u16 = 0x1300;
+    /// The sort options a track list offers.
+    pub const SORT_MENU: u16 = 0x1400;
+    /// DATE ADDED: the years.
+    pub const YEARS: u16 = 0x1708;
+    /// A year's months.
+    pub const MONTHS: u16 = 0x1808;
+    /// A month's days.
+    pub const DAYS: u16 = 0x1908;
+    /// The tracks added on a day, in a month, or in a year. `[ASSUME]` by
+    /// the pattern of the three above; not captured.
+    pub const DATE_TRACKS: u16 = 0x1a08;
     /// Metadata for one track.
     pub const METADATA: u16 = 0x2002;
     /// Album art.
     pub const ARTWORK: u16 = 0x2003;
+    /// The small waveform preview.
+    pub const WAVEFORM_PREVIEW: u16 = 0x2004;
+    /// Track information: the path and the copyright text (7 rows).
+    pub const TRACK_INFO: u16 = 0x2102;
     /// The beat grid.
     pub const BEAT_GRID: u16 = 0x2204;
     /// Cues and loops.
-    pub const CUES: u16 = 0x2104;
-    /// A whole analysis tag, e.g. a colour waveform.
+    pub const CUES: u16 = 0x2504;
+    /// The waveform detail.
+    pub const WAVEFORM_DETAIL: u16 = 0x2904;
+    /// Cues and loops with names and colours.
+    pub const EXTENDED_CUES: u16 = 0x2b04;
+    /// A whole analysis tag from the `.EXT` file.
     pub const ANLZ_TAG: u16 = 0x2c04;
-    /// Track information: the path and the copyright text (7 rows).
-    pub const TRACK_INFO: u16 = 0x2102;
+    /// A whole analysis tag from the `.2EX` file.
+    pub const ANLZ_TAG_2EX: u16 = 0x2d04;
     /// Asks for the rows of the menu just requested.
     pub const RENDER: u16 = 0x3000;
     /// The player tells us which of our tracks it has loaded.
@@ -325,23 +364,21 @@ pub mod kind {
     pub const MENU_HEADER: u16 = 0x4000;
     /// Opens a rendered menu: `[1, offset]`.
     pub const RENDER_HEADER: u16 = 0x4001;
+    pub const ARTWORK_REPLY: u16 = 0x4002;
+    /// The query failed.
+    pub const ERROR: u16 = 0x4003;
     /// One row of a menu.
     pub const MENU_ITEM: u16 = 0x4101;
     /// End of a menu.
     pub const MENU_FOOTER: u16 = 0x4201;
-    /// The query failed.
-    pub const ERROR: u16 = 0x4003;
+    pub const WAVEFORM_PREVIEW_REPLY: u16 = 0x4402;
+    pub const CUES_REPLY: u16 = 0x4502;
+    pub const BEAT_GRID_REPLY: u16 = 0x4602;
+    pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;
+    pub const EXTENDED_CUES_REPLY: u16 = 0x4e02;
+    pub const ANLZ_TAG_REPLY: u16 = 0x4f02;
 }
 
-/// Things a capture must settle before a real player is expected to browse us.
-///
-/// Recorded as a list rather than as comments so it can be worked through.
-pub const UNVERIFIED: &[&str] = &[
-    "which root-menu item types rekordbox exposes as a source, versus a CDJ media slot",
-    "how rekordbox advertises its database port back over 12523",
-    "the exact MenuHeader/MenuItem/MenuFooter sequence a player accepts",
-    "the item set and path format returned for a track-info request",
-];
 
 /// A requester device number a real database server will answer.
 ///
@@ -372,12 +409,13 @@ pub fn setup_reply(transaction: u32, our_device: u8) -> Message {
     )
 }
 
-/// Builds the header that tells a client how many rows its query matched.
-pub fn menu_header(transaction: u32, item_count: u32) -> Message {
+/// Builds the header that tells a client how many rows its query matched:
+/// the request's own kind, then the count (measured).
+pub fn menu_header(transaction: u32, request_kind: u32, item_count: u32) -> Message {
     Message::new(
         transaction,
         kind::MENU_HEADER,
-        vec![Argument::Number(0), Argument::Number(item_count)],
+        vec![Argument::Number(request_kind), Argument::Number(item_count)],
     )
 }
 
