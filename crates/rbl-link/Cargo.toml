@@ -1,0 +1,24 @@
+[package]
+name = "rbl-link"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Link export: the library served to players over Pro DJ Link, as rekordbox serves it."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-anlz = { path = "../rbl-anlz" }
+rbl-dbserver = { path = "../rbl-dbserver" }
+rbl-index = { path = "../rbl-index" }
+rbl-nfs = { path = "../rbl-nfs" }
+rbl-prolink = { path = "../rbl-prolink" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rbl-db = { path = "../rbl-db" }
+rbl-fakecdj = { path = "../rbl-fakecdj" }
+tempfile = "3"
