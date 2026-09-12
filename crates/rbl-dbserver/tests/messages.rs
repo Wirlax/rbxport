@@ -289,3 +289,16 @@ fn the_port_query_string_is_nul_terminated() {
     assert_eq!(rbl_dbserver::PORT_QUERY, 12_523);
 }
 
+
+#[test]
+fn a_twelve_byte_zero_padded_tag_list_is_accepted_too() {
+    // What alphatheta-connect sends: the count says two, the list is twelve.
+    let mut bytes = Message::new(1, kind::ROOT_MENU, vec![]).encode();
+    bytes[14] = 2;
+    bytes[16..20].copy_from_slice(&12_u32.to_be_bytes());
+    bytes.extend_from_slice(&[0x06, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    bytes.extend_from_slice(&[0x11, 0, 0, 0, 7, 0x11, 0, 0, 0, 9]);
+    let (message, used) = Message::decode(&bytes).unwrap();
+    assert_eq!(message.arguments, vec![Argument::Number(7), Argument::Number(9)]);
+    assert_eq!(used, bytes.len());
+}

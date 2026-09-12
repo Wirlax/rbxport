@@ -189,8 +189,12 @@ impl Message {
         if count as usize > TAG_SLOTS {
             return Err(DbError::TooManyArguments(count));
         }
+        // rekordbox and the CDJ-3000 send a tag list exactly `count` long;
+        // alphatheta-connect (Now Playing) and its kin send a fixed twelve
+        // bytes zero-padded, and players answer them. Both are accepted: the
+        // first `count` tags are read and the rest of the list skipped.
         let tags = be32(bytes, 16) as usize;
-        if tags != count as usize {
+        if tags < count as usize || tags > TAG_SLOTS {
             return Err(DbError::BadMagic(magic));
         }
 
@@ -198,7 +202,7 @@ impl Message {
         if bytes.len() < at {
             return Err(DbError::Truncated { wanted: at, had: bytes.len() });
         }
-        let declared: Vec<u8> = bytes.get(HEADER_LEN..at).unwrap_or(&[]).to_vec();
+        let declared: Vec<u8> = bytes.get(HEADER_LEN..HEADER_LEN + count as usize).unwrap_or(&[]).to_vec();
         let mut arguments = Vec::with_capacity(count as usize);
         for declared_tag in declared {
             // An empty blob is not sent at all. The number before a blob is
