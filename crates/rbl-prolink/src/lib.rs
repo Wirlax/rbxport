@@ -94,11 +94,7 @@ impl AnnounceKind {
 pub enum DeviceType {
     Cdj,
     Mixer,
-    /// rekordbox acting as a media source.
-    ///
-    /// **Unverified on this machine.** Recorded in the protocol analysis; must
-    /// be confirmed by capturing real rekordbox before a player is expected to
-    /// accept it.
+    /// rekordbox acting as a media source (measured: byte `0x34` = `04`).
     Rekordbox,
     Other(u8),
 }
@@ -123,20 +119,28 @@ impl DeviceType {
     }
 }
 
-/// The device number rekordbox takes when it announces itself.
-///
-/// **Unverified on this machine** — from the protocol analysis, corroborated by
-/// the CDJ-3000 emulator showing rekordbox as `USB LINK17`.
+/// The device number rekordbox takes when it announces itself (measured;
+/// the CDJ-3000 lists it as `USB LINK17`).
 pub const REKORDBOX_DEVICE_NUMBER: u8 = 0x11;
 
 /// The name rekordbox announces.
 pub const REKORDBOX_NAME: &str = "rekordbox";
 
-/// How often a keep-alive goes out. Players hold two seconds tightly; a peer
-/// that has not been heard from in three intervals is considered gone.
-pub const KEEP_ALIVE_INTERVAL_MS: u64 = 1_500;
+/// How often a keep-alive goes out: rekordbox 7.2.11 sends one every 2.0 s
+/// and a CDJ-3000 every 1.5 s (measured). A peer that has not been heard
+/// from in three intervals is considered gone.
+pub const KEEP_ALIVE_INTERVAL_MS: u64 = 2_000;
 
 /// A parsed keep-alive (`kind 06`), the packet that says a device is present.
+///
+/// Layout, measured from rekordbox 7.2.11, a CDJ-3000 and Now Playing on the
+/// same network (`docs/pre-release/design-notes/link-export-capture.md`):
+/// after the name, `01`, a generation byte (`03` for rekordbox 7 and the
+/// CDJ-3000, `02` for older players and virtual CDJs), the length `0036`,
+/// the device number, `01`, the MAC, the IP, the peer count, a byte that is
+/// `01` on rekordbox and `00` on a CDJ-3000, two zeros, the device type
+/// (`04` rekordbox, `01` player, `02` mixer), and a final byte (`08` on
+/// rekordbox, `64` on a CDJ-3000).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeepAlive {
     pub name: String,
@@ -146,9 +150,9 @@ pub struct KeepAlive {
     pub ip: Ipv4Addr,
     /// Devices seen on the network, including this one.
     pub peers: u8,
-    /// Whether this device was first onto the network (`02`) or joined one
-    /// that already had devices (`01`). Latched at startup.
-    pub was_first: bool,
+    /// Byte `0x21`: `03` for rekordbox 7 and CDJ-3000 class devices, `02`
+    /// for the rest.
+    pub generation: u8,
 }
 
 /// Byte length of a keep-alive.
@@ -190,24 +194,39 @@ pub fn packet_kind(packet: &[u8]) -> Result<u8> {
 }
 
 impl KeepAlive {
+    /// rekordbox's own keep-alive for a given address: device 17, type 4,
+    /// generation 3, and the tail bytes rekordbox 7.2.11 sends.
+    pub fn rekordbox(mac: [u8; 6], ip: Ipv4Addr, peers: u8) -> Self {
+        Self {
+            name: REKORDBOX_NAME.to_owned(),
+            device_number: REKORDBOX_DEVICE_NUMBER,
+            device_type: DeviceType::Rekordbox,
+            mac,
+            ip,
+            peers,
+            generation: 0x03,
+        }
+    }
+
     /// Encodes the packet.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(KEEP_ALIVE_LEN);
         write_header(&mut out, AnnounceKind::KeepAlive.to_u8(), 0x00, &self.name);
         out.push(0x01);
-        out.push(self.device_type.to_u8());
+        out.push(self.generation);
         out.extend_from_slice(&u16::try_from(KEEP_ALIVE_LEN).unwrap_or(0).to_be_bytes());
         out.push(self.device_number);
-        out.push(if self.was_first { 0x02 } else { 0x01 });
+        out.push(0x01);
         out.extend_from_slice(&self.mac);
         out.extend_from_slice(&self.ip.octets());
         out.push(self.peers);
-        // The tail: byte 0x34 is 01 on a CDJ and 02 on a mixer. rekordbox is
-        // reported to send mixer-shaped status packets, so this follows the
-        // device type rather than being fixed.
-        out.extend_from_slice(&[0, 0, 0]);
-        out.push(if self.device_type == DeviceType::Mixer { 0x02 } else { 0x01 });
-        out.push(0);
+        let (after_peers, last) = match self.device_type {
+            DeviceType::Rekordbox => (0x01, 0x08),
+            _ => (0x00, 0x64),
+        };
+        out.extend_from_slice(&[after_peers, 0, 0]);
+        out.push(self.device_type.to_u8());
+        out.push(last);
         debug_assert_eq!(out.len(), KEEP_ALIVE_LEN);
         out
     }
@@ -228,14 +247,69 @@ impl KeepAlive {
         }
         Ok(Self {
             name: device_name(packet)?,
-            device_type: DeviceType::from_u8(at(0x21)),
+            generation: at(0x21),
             device_number: at(0x24),
-            was_first: at(0x25) == 0x02,
+            device_type: DeviceType::from_u8(at(0x34)),
             mac,
             ip: Ipv4Addr::new(at(0x2c), at(0x2d), at(0x2e), at(0x2f)),
             peers: at(0x30),
-            })
+        })
     }
+}
+
+/// The status rekordbox broadcasts on port 50002 five times a second: the
+/// mixer-style packet (`kind 29`), 56 bytes, carrying the master tempo and
+/// a beat counter (measured from rekordbox 7.2.11; players show the tempo
+/// as MASTER BPM).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    pub name: String,
+    pub device_number: u8,
+    pub bpm_x100: u16,
+    /// 1 to 4, advancing with the beat; what the value means when nothing
+    /// plays is `[UNKNOWN]` — rekordbox kept sending 1.
+    pub beat: u8,
+}
+
+/// Byte length of a status packet.
+pub const STATUS_LEN: usize = 0x38;
+
+/// Status-port packets (50002) carry the name straight after the kind byte,
+/// with no subtype: name at `0x0b`, then the fields.
+fn write_status_header(out: &mut Vec<u8>, kind: u8, name: &str) {
+    out.extend_from_slice(&MAGIC);
+    out.push(kind);
+    let mut padded = [0_u8; NAME_LEN];
+    for (slot, byte) in padded.iter_mut().zip(name.as_bytes()) {
+        *slot = *byte;
+    }
+    out.extend_from_slice(&padded);
+}
+
+impl Status {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(STATUS_LEN);
+        write_status_header(&mut out, 0x29, &self.name);
+        out.extend_from_slice(&[0x01, 0x01, self.device_number, 0x00, 0x38, self.device_number]);
+        out.extend_from_slice(&[0x00, 0x00, 0xc0, 0x00, 0x10, 0x00, 0x00, 0x80, 0x00]);
+        out.extend_from_slice(&self.bpm_x100.to_be_bytes());
+        out.extend_from_slice(&[0x00, 0x10, 0x00, 0x00, 0x00, 0x09, 0xff, self.beat]);
+        debug_assert_eq!(out.len(), STATUS_LEN);
+        out
+    }
+}
+
+/// Byte length of the connect greeting.
+pub const CONNECT_GREETING_LEN: usize = 0x30;
+
+/// The packet rekordbox unicasts to a player's port 50002 when the player
+/// connects (`kind 16`, 48 bytes; measured, meaning unknown).
+pub fn connect_greeting(name: &str, device_number: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CONNECT_GREETING_LEN);
+    write_status_header(&mut out, 0x16, name);
+    out.extend_from_slice(&[0x01, 0x01, device_number]);
+    out.resize(CONNECT_GREETING_LEN, 0);
+    out
 }
 
 /// A device-number claim, sent three times in each of three stages at startup.

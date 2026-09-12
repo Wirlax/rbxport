@@ -10,15 +10,59 @@ use rbl_prolink::{
 };
 
 fn sample() -> KeepAlive {
-    KeepAlive {
+    KeepAlive::rekordbox([0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33], Ipv4Addr::new(192, 168, 1, 42), 2)
+}
+
+fn hex(s: &str) -> Vec<u8> {
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+}
+
+/// rekordbox 7.2.11's keep-alive with one player on the network, verbatim
+/// from the capture of 2026-09-12 (MAC 00:e0:4c:cf:63:2e, 192.168.1.14).
+const CAPTURED_REKORDBOX_KEEP_ALIVE: &str =
+    "5173707431576d4a4f4c060072656b6f7264626f78000000000000000000000001030036110100e04ccf632ec0a8010e020100000408";
+/// The CDJ-3000's, from the same capture (player 1, 192.168.1.152).
+const CAPTURED_CDJ_KEEP_ALIVE: &str =
+    "5173707431576d4a4f4c060043444a2d333030300000000000000000000000000103003601012497ed0b4043c0a80198030000000164";
+/// rekordbox's status beacon while the deck was master at 78.08 BPM.
+const CAPTURED_REKORDBOX_STATUS: &str =
+    "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000c00010000080001e80001000000009ff01";
+/// The packet rekordbox unicasts to a player that has just connected.
+const CAPTURED_CONNECT_GREETING: &str =
+    "5173707431576d4a4f4c1672656b6f7264626f7800000000000000000000000101110000000000000000000000000000";
+
+#[test]
+fn rekordboxs_keep_alive_is_reproduced_byte_for_byte() {
+    let alive = KeepAlive::rekordbox([0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e], Ipv4Addr::new(192, 168, 1, 14), 2);
+    assert_eq!(alive.encode(), hex(CAPTURED_REKORDBOX_KEEP_ALIVE));
+    assert_eq!(KeepAlive::decode(&hex(CAPTURED_REKORDBOX_KEEP_ALIVE)).unwrap(), alive);
+}
+
+#[test]
+fn a_cdj_3000s_keep_alive_decodes_to_a_player() {
+    let deck = KeepAlive::decode(&hex(CAPTURED_CDJ_KEEP_ALIVE)).unwrap();
+    assert_eq!(deck.name, "CDJ-3000");
+    assert_eq!(deck.device_number, 1);
+    assert_eq!(deck.device_type, DeviceType::Cdj);
+    assert_eq!(deck.ip, Ipv4Addr::new(192, 168, 1, 152));
+    assert_eq!(deck.peers, 3);
+    assert_eq!(deck.generation, 3);
+    assert_eq!(deck.encode(), hex(CAPTURED_CDJ_KEEP_ALIVE));
+}
+
+#[test]
+fn the_status_beacon_and_the_connect_greeting_match_the_capture() {
+    let status = rbl_prolink::Status {
         name: REKORDBOX_NAME.to_owned(),
         device_number: REKORDBOX_DEVICE_NUMBER,
-        device_type: DeviceType::Rekordbox,
-        mac: [0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33],
-        ip: Ipv4Addr::new(192, 168, 1, 42),
-        peers: 2,
-        was_first: false,
-    }
+        bpm_x100: 0x1e80,
+        beat: 1,
+    };
+    assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS));
+    assert_eq!(
+        rbl_prolink::connect_greeting(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER),
+        hex(CAPTURED_CONNECT_GREETING)
+    );
 }
 
 #[test]
@@ -71,24 +115,13 @@ fn a_long_name_is_truncated_to_the_field_rather_than_overflowing() {
 fn keep_alive_fields_land_where_the_protocol_says() {
     let bytes = sample().encode();
     assert_eq!(bytes[0x0a], 0x06, "kind: keep-alive");
-    assert_eq!(bytes[0x21], DeviceType::Rekordbox.to_u8());
+    assert_eq!(bytes[0x21], 0x03, "generation");
+    assert_eq!(bytes[0x34], DeviceType::Rekordbox.to_u8());
     assert_eq!(u16::from_be_bytes([bytes[0x22], bytes[0x23]]) as usize, KEEP_ALIVE_LEN);
     assert_eq!(bytes[0x24], REKORDBOX_DEVICE_NUMBER);
     assert_eq!(&bytes[0x26..0x2c], &[0x00, 0x1e, 0x1d, 0x11, 0x22, 0x33]);
     assert_eq!(&bytes[0x2c..0x30], &[192, 168, 1, 42]);
     assert_eq!(bytes[0x30], 2, "peer count");
-}
-
-#[test]
-fn the_first_on_network_flag_is_carried_both_ways() {
-    let mut alive = sample();
-    alive.was_first = true;
-    assert_eq!(alive.encode()[0x25], 0x02);
-    assert!(KeepAlive::decode(&alive.encode()).unwrap().was_first);
-
-    alive.was_first = false;
-    assert_eq!(alive.encode()[0x25], 0x01);
-    assert!(!KeepAlive::decode(&alive.encode()).unwrap().was_first);
 }
 
 #[test]
