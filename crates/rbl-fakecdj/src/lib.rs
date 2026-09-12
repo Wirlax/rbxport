@@ -317,6 +317,13 @@ impl Database {
         stream.set_read_timeout(Some(TIMEOUT))?;
         stream.set_nodelay(true)?;
         let mut session = Self { stream, transaction: 0, pending: Vec::new() };
+        // Greeting first, both ways, as a player does (measured).
+        session.stream.write_all(rbl_dbserver::GREETING)?;
+        let mut greeting = [0_u8; 5];
+        session.stream.read_exact(&mut greeting)?;
+        if greeting != rbl_dbserver::GREETING {
+            return Err(CdjError::NoDatabasePort);
+        }
         session.send(&rbl_dbserver::setup_request(our_device))?;
         session.receive()?;
         Ok(session)

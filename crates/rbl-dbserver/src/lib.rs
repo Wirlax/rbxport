@@ -22,8 +22,13 @@ pub const MAGIC: u32 = 0x8723_49ae;
 /// The port a client asks for the database server's real port.
 pub const PORT_QUERY: u16 = 12_523;
 
-/// What a client sends to the port-query service, and what it expects back.
-pub const PORT_QUERY_REQUEST: &[u8] = b"RemoteDBServer\0";
+/// What a player sends to the port-query service: a four-byte big-endian
+/// length, then the name with its NUL (measured: `00 00 00 0f RemoteDBServer 00`).
+pub const PORT_QUERY_REQUEST: &[u8] = b"\x00\x00\x00\x0fRemoteDBServer\0";
+
+/// The five bytes each side sends first on the database connection
+/// (measured; a number field holding 1).
+pub const GREETING: &[u8] = &[0x11, 0x00, 0x00, 0x00, 0x01];
 
 /// Transaction id used for setup and teardown.
 pub const SETUP_TXID: u32 = 0xffff_fffe;
@@ -102,10 +107,16 @@ pub struct Message {
     pub arguments: Vec<Argument>,
 }
 
-/// Bytes of header before the arguments begin.
-const HEADER_LEN: usize = 4 + 4 + 2 + 1 + 1 + 4 + 12;
-/// The type-tag list is always this long, however few arguments there are.
-const TAG_SLOTS: usize = 12;
+/// Bytes of header before the tag list: each field carries its own type tag
+/// — `11` magic, `11` transaction, `10` kind, `0f` argument count — and then
+/// the tag list opens as a blob (`14`, four-byte length). Measured from
+/// rekordbox 7.2.11 serving a CDJ-3000 (`verification/link`, 2026-09-12): the
+/// earlier layout here had no field tags and a fixed twelve-byte tag list,
+/// and matched nothing on the wire.
+const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 1 + 2 + 1 + 1 + 1 + 4;
+/// The most arguments a message may carry; the tag list holds one byte each.
+/// A menu item carries sixteen.
+const TAG_SLOTS: usize = 32;
 
 fn be32(b: &[u8], at: usize) -> u32 {
     u32::from_be_bytes([
@@ -122,18 +133,28 @@ impl Message {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(HEADER_LEN + self.arguments.len() * 8);
+        let count = self.arguments.len().min(TAG_SLOTS);
+        let mut out = Vec::with_capacity(HEADER_LEN + count * 8);
+        out.push(0x11);
         out.extend_from_slice(&MAGIC.to_be_bytes());
+        out.push(0x11);
         out.extend_from_slice(&self.transaction.to_be_bytes());
+        out.push(0x10);
         out.extend_from_slice(&self.kind.to_be_bytes());
-        out.push(u8::try_from(self.arguments.len().min(TAG_SLOTS)).unwrap_or(0));
-        // The tag list is itself a blob field of a fixed twelve bytes.
+        out.push(0x0f);
+        out.push(u8::try_from(count).unwrap_or(0));
+        // The tag list is itself a blob field, one byte an argument.
         out.push(0x14);
-        out.extend_from_slice(&12_u32.to_be_bytes());
-        for slot in 0..TAG_SLOTS {
-            out.push(self.arguments.get(slot).map_or(0, Argument::arg_tag));
+        out.extend_from_slice(&u32::try_from(count).unwrap_or(0).to_be_bytes());
+        for argument in self.arguments.iter().take(count) {
+            out.push(argument.arg_tag());
         }
-        for argument in self.arguments.iter().take(TAG_SLOTS) {
+        for argument in self.arguments.iter().take(count) {
+            // An empty blob is declared in the tag list and not written; the
+            // number before it, its length, says it is absent.
+            if matches!(argument, Argument::Blob(b) if b.is_empty()) {
+                continue;
+            }
             argument.encode(&mut out);
         }
         out
@@ -147,27 +168,46 @@ impl Message {
         if bytes.len() < HEADER_LEN {
             return Err(DbError::Truncated { wanted: HEADER_LEN, had: bytes.len() });
         }
-        let magic = be32(bytes, 0);
-        if magic != MAGIC {
+        // The field tags are checked as part of the magic: a stream that is
+        // not at a message boundary fails here rather than misreading a body.
+        let magic = be32(bytes, 1);
+        if bytes[0] != 0x11 || magic != MAGIC || bytes[5] != 0x11 || bytes[10] != 0x10
+            || bytes[13] != 0x0f || bytes[15] != 0x14
+        {
             return Err(DbError::BadMagic(magic));
         }
-        let transaction = be32(bytes, 4);
+        let transaction = be32(bytes, 6);
         let kind = u16::from_be_bytes([
-            bytes.get(8).copied().unwrap_or(0),
-            bytes.get(9).copied().unwrap_or(0),
+            bytes.get(11).copied().unwrap_or(0),
+            bytes.get(12).copied().unwrap_or(0),
         ]);
-        let count = bytes.get(10).copied().unwrap_or(0);
+        let count = bytes.get(14).copied().unwrap_or(0);
         if count as usize > TAG_SLOTS {
             return Err(DbError::TooManyArguments(count));
         }
+        let tags = be32(bytes, 16) as usize;
+        if tags != count as usize {
+            return Err(DbError::BadMagic(magic));
+        }
 
-        let mut at = HEADER_LEN;
+        let mut at = HEADER_LEN + tags;
+        if bytes.len() < at {
+            return Err(DbError::Truncated { wanted: at, had: bytes.len() });
+        }
+        let declared: Vec<u8> = bytes.get(HEADER_LEN..at).unwrap_or(&[]).to_vec();
         let mut arguments = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let tag = bytes.get(at).copied().ok_or(DbError::Truncated {
-                wanted: at + 1,
-                had: bytes.len(),
-            })?;
+        for declared_tag in declared {
+            // An empty blob is not sent at all. The number before a blob is
+            // always its length, and when that number is 0 the blob field is
+            // absent — the "no artwork" reply declares four arguments and
+            // carries three, and a player's metadata request declares five
+            // and carries four. [DOC] Deep Symmetry, track_metadata; measured
+            // both ways in the capture.
+            if declared_tag == 0x03 && matches!(arguments.last(), Some(Argument::Number(0)) | None) {
+                arguments.push(Argument::Blob(Vec::new()));
+                continue;
+            }
+            let tag = bytes.get(at).copied().ok_or(DbError::Truncated { wanted: at + 1, had: bytes.len() })?;
             at += 1;
             match tag {
                 0x0f..=0x11 => {
@@ -275,10 +315,16 @@ pub mod kind {
     pub const CUES: u16 = 0x2104;
     /// A whole analysis tag, e.g. a colour waveform.
     pub const ANLZ_TAG: u16 = 0x2c04;
+    /// Track information: the path and the copyright text (7 rows).
+    pub const TRACK_INFO: u16 = 0x2102;
     /// Asks for the rows of the menu just requested.
     pub const RENDER: u16 = 0x3000;
+    /// The player tells us which of our tracks it has loaded.
+    pub const LOADED: u16 = 0x3100;
     /// "Here is how many items your query matched."
     pub const MENU_HEADER: u16 = 0x4000;
+    /// Opens a rendered menu: `[1, offset]`.
+    pub const RENDER_HEADER: u16 = 0x4001;
     /// One row of a menu.
     pub const MENU_ITEM: u16 = 0x4101;
     /// End of a menu.
@@ -308,15 +354,21 @@ pub fn is_answerable_device(device: u8) -> bool {
 
 /// Builds the setup message a client sends first.
 pub fn setup_request(device: u8) -> Message {
-    Message::new(SETUP_TXID, kind::SETUP, vec![Argument::Number(u32::from(device))])
+    Message::new(SETUP_TXID, kind::SETUP, vec![Argument::Number(u32::from(device)), Argument::Number(SETUP_MAGIC)])
 }
 
+/// The second setup argument, sent by both sides; meaning unknown, value
+/// measured.
+pub const SETUP_MAGIC: u32 = 0x14;
+
 /// Builds the reply to a setup message, carrying our own device number.
+///
+/// The reply has the request's own kind, not a menu header (measured).
 pub fn setup_reply(transaction: u32, our_device: u8) -> Message {
     Message::new(
         transaction,
-        kind::MENU_HEADER,
-        vec![Argument::Number(0), Argument::Number(u32::from(our_device))],
+        kind::SETUP,
+        vec![Argument::Number(u32::from(our_device)), Argument::Number(SETUP_MAGIC)],
     )
 }
 

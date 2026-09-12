@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use rbl_dbserver::net::{Bound as DbBound, Handler};
+use rbl_dbserver::net::{Bound as DbBound, Handler, Session};
 use rbl_dbserver::{kind, menu_footer, menu_header, Argument, Message};
 use rbl_fakecdj::{database_port, mount, CdjError, Database};
 use rbl_nfs::net::Bound as NfsBound;
@@ -100,22 +100,33 @@ fn mounting_an_export_that_is_not_offered_fails_before_any_lookup() {
 /// The row contents are ours, not rekordbox's: what a real player accepts is
 /// still unverified (`rbl_dbserver::UNVERIFIED`). What this proves is the
 /// transport — framing, multiple messages per reply, and reassembly.
-struct Menu {
+struct Menu(Arc<MenuRows>);
+
+struct MenuRows {
     rows: Vec<String>,
     seen: AtomicUsize,
 }
 
 impl Handler for Menu {
-    fn handle(&self, message: &Message) -> Vec<Message> {
-        self.seen.fetch_add(1, Ordering::Relaxed);
+    fn open(&self) -> Box<dyn Session> {
+        Box::new(MenuSession(Arc::clone(&self.0)))
+    }
+}
+
+struct MenuSession(Arc<MenuRows>);
+
+impl Session for MenuSession {
+    fn handle(&mut self, message: &Message) -> Vec<Message> {
+        let this = &self.0;
+        this.seen.fetch_add(1, Ordering::Relaxed);
         match message.kind {
             kind::SETUP => vec![rbl_dbserver::setup_reply(message.transaction, 0x11)],
             kind::RENDER => {
                 let mut out = vec![menu_header(
                     message.transaction,
-                    u32::try_from(self.rows.len()).unwrap(),
+                    u32::try_from(this.rows.len()).unwrap(),
                 )];
-                for (index, row) in self.rows.iter().enumerate() {
+                for (index, row) in this.rows.iter().enumerate() {
                     out.push(Message::new(
                         message.transaction,
                         kind::MENU_ITEM,
@@ -137,11 +148,11 @@ impl Handler for Menu {
     }
 }
 
-fn menu_server(rows: Vec<String>) -> (Arc<Menu>, DbBound) {
-    let handler = Arc::new(Menu { rows, seen: AtomicUsize::new(0) });
-    let bound =
-        DbBound::start(Arc::clone(&handler) as Arc<dyn Handler>, LOOPBACK, 0, 0).unwrap();
-    (handler, bound)
+fn menu_server(rows: Vec<String>) -> (Arc<MenuRows>, DbBound) {
+    let shared = Arc::new(MenuRows { rows, seen: AtomicUsize::new(0) });
+    let handler: Arc<dyn Handler> = Arc::new(Menu(Arc::clone(&shared)));
+    let bound = DbBound::start(handler, LOOPBACK, 0, 0).unwrap();
+    (shared, bound)
 }
 
 #[test]

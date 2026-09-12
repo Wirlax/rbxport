@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{Message, PORT_QUERY_REQUEST};
+use crate::{Message, GREETING, PORT_QUERY_REQUEST};
 
 /// How long a session may sit idle before we close it.
 const IDLE: Duration = Duration::from_secs(30);
@@ -20,11 +20,18 @@ const READ_TIMEOUT: Duration = Duration::from_millis(200);
 /// A session's reassembly buffer never legitimately grows past this.
 const MAX_PENDING: usize = 64 * 1024;
 
-/// Answers messages. Implemented over the library index; kept as a trait so
-/// the codec and the socket layer can be tested without one.
+/// Opens a session per connection. Implemented over the library index; kept
+/// as a trait so the codec and the socket layer can be tested without one.
 pub trait Handler: Send + Sync {
+    fn open(&self) -> Box<dyn Session>;
+}
+
+/// One player's conversation. A menu request is answered with a count and
+/// the rows come on a later render request, so a session remembers what was
+/// asked last.
+pub trait Session: Send {
     /// Returns the messages to send back, which may be none.
-    fn handle(&self, message: &Message) -> Vec<Message>;
+    fn handle(&mut self, message: &Message) -> Vec<Message>;
 }
 
 /// Serves one already-accepted session until the peer closes it or `stop` is set.
@@ -36,9 +43,13 @@ pub fn serve_session(
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_nodelay(true)?;
 
+    let mut session = handler.open();
     let mut pending: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0_u8; 4096];
     let mut idle_since = std::time::Instant::now();
+    // Both sides open with the same five bytes before any message (measured);
+    // ours goes out as soon as the player's has arrived.
+    let mut greeted = false;
 
     while !stop.load(Ordering::Relaxed) {
         match stream.read(&mut chunk) {
@@ -62,10 +73,23 @@ pub fn serve_session(
             return Ok(());
         }
 
+        if !greeted {
+            if pending.len() < GREETING.len() {
+                continue;
+            }
+            if !pending.starts_with(GREETING) {
+                // Not a player; say nothing rather than guess.
+                return Ok(());
+            }
+            pending.drain(..GREETING.len());
+            stream.write_all(GREETING)?;
+            greeted = true;
+        }
+
         let (messages, used) = Message::decode_all(&pending);
         pending.drain(..used);
         for message in messages {
-            for reply in handler.handle(&message) {
+            for reply in session.handle(&message) {
                 stream.write_all(&reply.encode())?;
             }
         }
