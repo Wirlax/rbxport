@@ -120,26 +120,33 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
 export type Source = "playlists" | "histories" | "explorer" | "devices";
 
 /**
- * The nodes belonging to one source.
+ * The nodes belonging to one source: what the tree shows while that rail
+ * button is lit.
  *
- * The backend sends one flat tree covering every section, so the rail narrows
- * it here rather than asking for a different tree — switching sections is then
+ * rekordbox's rail is a filter — Histories shows the sessions and nothing
+ * else, Playlists shows All Tracks and the playlists [OBS 7.2.11]. The backend
+ * sends one flat tree covering every section, so the rail narrows it here
+ * rather than asking for a different tree — switching sections is then
  * instant and costs no round trip.
  */
 export function nodesForSource(nodes: readonly TreeNode[], source: Source): TreeNode[] {
   switch (source) {
     case "histories":
-      // The section's own heading first, so jumping there lands on it rather
-      // than inside a year that may be closed.
+      // The section's own heading first, so jumping there lands on it.
       return nodes.filter((n) => n.kind === "histories" || n.kind === "history");
     case "devices":
       return nodes.filter((n) => n.kind === "device");
     case "explorer":
       // The heading first, as with histories: jumping there lands on the
-      // section, which rekordbox opens as an empty Explorer.
-      return nodes.filter((n) => n.kind === "explorer" || n.kind === "directory");
+      // section, which rekordbox opens as an empty Explorer. A note is the
+      // Explorer's own — a folder cut short says how many were left out.
+      return nodes.filter((n) => n.kind === "explorer" || n.kind === "directory" || n.kind === "note");
     case "playlists":
-      return nodes.filter((n) => n.kind === "folder" || n.kind === "playlist" || n.kind === "collection");
+      // All Tracks belongs here: rekordbox shows it above the playlists and
+      // in no other section.
+      return nodes.filter(
+        (n) => n.kind === "allTracks" || n.kind === "collection" || n.kind === "folder" || n.kind === "playlist",
+      );
   }
 }
 

@@ -206,12 +206,11 @@ test("a folder in the tree collapses and expands", async ({ page }) => {
   await page.goto("/");
   const tree = page.getByRole("tree");
   await expect(tree.getByRole("treeitem").first()).toBeVisible();
-  // Connected devices join the tree, and they arrive after the playlists do.
-  // Counting before they land makes the count move under the test.
-  await expect(tree.getByRole("treeitem").filter({ hasText: "DJ STICK" })).toBeVisible();
 
-  // A folder the mock nests playlists under.
+  // A folder the mock nests playlists under. Connected devices arrive later,
+  // but in their own section, so they do not move this count.
   const folder = tree.getByRole("treeitem").filter({ hasText: "CURRENT" }).first();
+  await expect(folder).toBeVisible();
   const before = await tree.getByRole("treeitem").count();
 
   await folder.getByRole("button").click();
@@ -473,14 +472,17 @@ test("the source rail switches which part of the library the tree shows", async 
   await expect(rail.getByRole("tab")).toHaveCount(4);
   await expect(rail.getByRole("tab", { name: "Collection" })).toHaveCount(0);
 
-  // A shortcut, not a filter: the tree keeps showing everything and the rail
-  // jumps the selection to that section. browseSetting.xml calls it
-  // TreeShortcut, and rekordbox does the same.
+  // A filter, as rekordbox's is: the tree shows the lit section and nothing
+  // else, so the playlists go when Devices is picked and come back with
+  // Playlists. All Tracks belongs to the playlists section.
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 
   await rail.getByRole("tab", { name: "Devices" }).click();
   await expect(rail.getByRole("tab", { name: "Devices" })).toHaveAttribute("aria-selected", "true");
-  // Still there, not filtered away.
+  await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toHaveCount(0);
+  await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toHaveCount(0);
+
+  await rail.getByRole("tab", { name: "Playlists" }).click();
   await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toBeVisible();
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
 });
@@ -494,19 +496,23 @@ test("the Histories section opens on the sessions rekordbox recorded", async ({ 
   const histories = rail.getByRole("tab", { name: "Histories" });
   await expect(histories).not.toHaveAttribute("data-empty", "true");
 
-  // Closed on arrival: the real library files 187 sessions under a folder per
-  // year and per month, and they would otherwise open over the playlists.
+  // Not in the playlists section: the rail filters.
   const session = tree.getByRole("treeitem").filter({ hasText: "LINK HISTORY 2026-09-04" });
   await expect(session).toHaveCount(0);
 
   await histories.click();
   const heading = tree.getByRole("treeitem").filter({ hasText: /^Histories$/ });
   await expect(heading).toHaveAttribute("aria-selected", "true");
+  // The sessions and nothing else: the playlists are in another section.
+  await expect(tree.getByRole("treeitem").filter({ hasText: "CURRENT" })).toHaveCount(0);
 
-  // Year, then month, then the session itself.
-  await heading.getByRole("button").click();
-  await tree.getByRole("treeitem").filter({ hasText: /^2026$/ }).getByRole("button").click();
-  await tree.getByRole("treeitem").filter({ hasText: /^9$/ }).getByRole("button").click();
+  // The heading and the year arrive open, the month closed and under its
+  // name rather than its number, as rekordbox files it.
+  await expect(tree.getByRole("treeitem").filter({ hasText: /^2026$/ })).toBeVisible();
+  const month = tree.getByRole("treeitem").filter({ hasText: /^September$/ });
+  await expect(month).toBeVisible();
+  await expect(session).toHaveCount(0);
+  await month.getByRole("button").click();
 
   await session.click();
   // A session is a track source of its own, not the whole collection.
@@ -766,6 +772,8 @@ test("the # column sorts a playlist by its own order, and back", async ({ page }
 test("the Layout tab hides the Explorer and shows playlist counts", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const rail = page.getByRole("tablist", { name: "Library sources" });
+  await rail.getByRole("tab", { name: "Explorer" }).click();
   await expect(page.locator('[role="treeitem"][data-kind="explorer"]')).toHaveCount(1);
 
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
@@ -775,7 +783,10 @@ test("the Layout tab hides the Explorer and shows playlist counts", async ({ pag
   await dialog.getByRole("checkbox", { name: /number of tracks in a playlist/ }).click();
   await page.keyboard.press("Escape");
 
+  // Gone from the tree, and its rail button dims because it leads nowhere.
   await expect(page.locator('[role="treeitem"][data-kind="explorer"]')).toHaveCount(0);
+  await expect(rail.getByRole("tab", { name: "Explorer" })).toHaveAttribute("data-empty", "true");
+  await rail.getByRole("tab", { name: "Playlists" }).click();
   await expect(page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first()).toContainText(/\(\d+\)/);
 });
 

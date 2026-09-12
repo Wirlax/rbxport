@@ -256,11 +256,11 @@ function makeTree(): TreeNode[] {
     }
   }
   // Histories, filed as rekordbox files them: a folder per year, one per month
-  // inside it, and the sessions under that. Closed, because the real library
-  // has 187 of them and they would otherwise open over the playlists.
-  nodes.push({ id: "histories", name: "Histories", kind: "histories", depth: 0, expanded: false });
-  nodes.push({ id: "hist-2026", name: "2026", kind: "history", depth: 1, expanded: false });
-  nodes.push({ id: "hist-202609", name: "9", kind: "history", depth: 2, expanded: false });
+  // inside it under the month's name, and the sessions under that. The year
+  // open and the month closed, as the shell sends them.
+  nodes.push({ id: "histories", name: "Histories", kind: "histories", depth: 0, expanded: true });
+  nodes.push({ id: "hist-2026", name: "2026", kind: "history", depth: 1, expanded: true });
+  nodes.push({ id: "hist-202609", name: "September", kind: "history", depth: 2, expanded: false });
   for (const day of ["2026-09-04", "2026-08-30", "2026-08-23"]) {
     nodes.push({ id: `hist-${day}`, name: `LINK HISTORY ${day}`, kind: "history", depth: 3 });
   }

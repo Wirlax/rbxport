@@ -161,7 +161,7 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
     })
 }
 
-/// A year folder, a month inside it, and the sessions filed under that.
+/// A year folder, two months inside it, and the sessions filed under one.
 ///
 /// Which is how rekordbox files them: `djmdHistory` holds all three, told
 /// apart by `Attribute` — 1 for a folder, 0 for a session — and the tracks
@@ -192,6 +192,9 @@ fn add_histories(conn: &Connection, shape: Shape, stamp: &str) -> Result<()> {
     };
     folder("2026", "2026", 1, "root")?;
     folder("202609", "9", 9, "2026")?;
+    // A month made after September's folder, so its `Seq` is later although
+    // the month is earlier: the tree has to file it by date, not by `Seq`.
+    folder("202608", "8", 10, "2026")?;
 
     for h in 0..shape.history_sessions {
         conn.execute(

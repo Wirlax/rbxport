@@ -31,10 +31,10 @@ fn spec(source: TrackSource) -> ViewSpec {
 fn the_sessions_and_the_folders_they_are_filed_under_are_all_read() {
     let f = open(Shape::default());
     let histories = f.library.histories();
-    // Two sessions, a month folder and a year folder: rekordbox files sessions
-    // under a folder per year and per month, and all four are rows in the same
-    // table told apart by `Attribute`.
-    assert_eq!(histories.len(), 4);
+    // Two sessions, two month folders and a year folder: rekordbox files
+    // sessions under a folder per year and per month, and all five are rows
+    // in the same table told apart by `Attribute`.
+    assert_eq!(histories.len(), 5);
     let names: Vec<&str> = (0..histories.len()).map(|i| histories.name(i)).collect();
     assert!(names.contains(&"2026"), "{names:?}");
     assert!(names.contains(&"HISTORY 2026-09-01"), "{names:?}");

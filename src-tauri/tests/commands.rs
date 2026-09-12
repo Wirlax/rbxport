@@ -224,6 +224,31 @@ fn the_summary_and_the_tree_describe_the_loaded_library() {
 }
 
 #[test]
+fn histories_are_filed_by_year_and_named_month_in_calendar_order() {
+    let s = shell();
+    let tree = s.tree();
+    let at = tree.iter().position(|n| n.kind == "histories").unwrap();
+    let section: Vec<(&str, u32, Option<bool>)> = tree[at..]
+        .iter()
+        .map(|n| (n.name.as_str(), n.depth, n.expanded))
+        .collect();
+    // The section and its years open, the months closed; the months under
+    // their names in calendar order although August's row has the later Seq;
+    // the sessions in the order they were played.
+    assert_eq!(
+        section,
+        vec![
+            ("Histories", 0, Some(true)),
+            ("2026", 1, Some(true)),
+            ("August", 2, Some(false)),
+            ("September", 2, Some(false)),
+            ("HISTORY 2026-09-01", 3, None),
+            ("HISTORY 2026-09-02", 3, None),
+        ]
+    );
+}
+
+#[test]
 fn a_view_is_a_window_over_rows_the_backend_sorted_and_searched() {
     let s = shell();
 

@@ -101,7 +101,7 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
         },
     ];
 
-    push_lists(&mut nodes, &playlists, ListKinds { folder: "folder", leaf: "playlist" }, 2);
+    push_lists(&mut nodes, &playlists, ListStyle::PLAYLISTS, 2);
 
     // Histories only when there are some: an empty section is a heading that
     // leads nowhere, and the rail already dims what has nothing in it.
@@ -111,35 +111,57 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
             name: "Histories".into(),
             kind: "histories",
             depth: 0,
-            // Closed. Sessions are filed under a folder per year and per month
-            // and there are 187 of them in the reference library, which would
-            // otherwise open over the playlists.
-            expanded: Some(false),
+            // Open, with the years under it open and the months closed: the
+            // rail shows one section at a time, so the sessions — 187 of them
+            // in the reference library — open over nothing else.
+            expanded: Some(true),
             child_count: Some(u32::try_from(histories.len()).unwrap_or(u32::MAX)),
         });
         // A year folder and a session are both "history": they are one
         // section, and what tells them apart in the tree is whether anything
         // sits under them.
-        push_lists(&mut nodes, &histories, ListKinds { folder: "history", leaf: "history" }, 0);
+        push_lists(&mut nodes, &histories, ListStyle::HISTORIES, 2);
     }
     nodes
 }
 
-/// What to call a list with children, and one without.
+/// What to call a list with children, and one without, and how to order them.
 #[derive(Debug, Clone, Copy)]
-struct ListKinds {
+struct ListStyle {
     folder: &'static str,
     leaf: &'static str,
+    /// Filed by date rather than by hand: folders are a year and a month,
+    /// which rekordbox shows in calendar order under their month's name, not
+    /// in the order they were made. Sessions keep their `Seq`, which is the
+    /// order they were played in.
+    calendar: bool,
 }
 
-/// Flattens one list tree onto `nodes`, depth-first, in `Seq` order.
+impl ListStyle {
+    const PLAYLISTS: Self = Self { folder: "folder", leaf: "playlist", calendar: false };
+    const HISTORIES: Self = Self { folder: "history", leaf: "history", calendar: true };
+}
+
+/// A month folder's name as rekordbox shows it: `djmdHistory` stores the
+/// month as its number.
+fn month_name(number: &str) -> Option<&'static str> {
+    const MONTHS: [&str; 12] = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ];
+    let month = number.parse::<usize>().ok()?;
+    MONTHS.get(month.checked_sub(1)?).copied()
+}
+
+/// Flattens one list tree onto `nodes`, depth-first, in `Seq` order — or, for
+/// a calendar, with the year and month folders in date order.
 ///
 /// `open_to` is the depth below which branches arrive expanded: the tree opens
-/// on the playlists, and closed on everything filed by date.
+/// on the playlists and on the years, and closed on the months.
 fn push_lists(
     nodes: &mut Vec<TreeNodeDto>,
     lists: &rbl_index::Playlists,
-    kinds: ListKinds,
+    style: ListStyle,
     open_to: u32,
 ) {
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); lists.len()];
@@ -152,6 +174,21 @@ fn push_lists(
                 }
             }
             _ => roots.push(index),
+        }
+    }
+    if style.calendar {
+        // A year is "2026" and a month "9": the number is the date. A folder
+        // named anything else sorts after the dated ones, in `Seq` order.
+        let by_date = |index: &usize| -> (u64, u32) {
+            if lists.is_folder(*index) {
+                (lists.name(*index).parse::<u64>().unwrap_or(u64::MAX), 0)
+            } else {
+                (u64::MAX, lists.seq.get(*index).copied().unwrap_or(u32::MAX))
+            }
+        };
+        roots.sort_by_key(by_date);
+        for bucket in &mut children {
+            bucket.sort_by_key(by_date);
         }
     }
 
@@ -172,10 +209,16 @@ fn push_lists(
         // is a folder only in the second sense, an empty playlist folder only
         // in the first.
         let folder = lists.is_folder(index) || under > 0;
+        let name = lists.name(index);
+        // Depth 2 under the section's heading is the month, filed in a year.
+        let name = match (style.calendar && folder && depth == 2, month_name(name)) {
+            (true, Some(month)) => month.to_owned(),
+            _ => name.to_owned(),
+        };
         nodes.push(TreeNodeDto {
             id: lists.ids.get(index).copied().unwrap_or(0).to_string(),
-            name: lists.name(index).to_owned(),
-            kind: if folder { kinds.folder } else { kinds.leaf },
+            name,
+            kind: if folder { style.folder } else { style.leaf },
             depth,
             expanded: if folder { Some(depth < open_to) } else { None },
             child_count: Some(

@@ -67,6 +67,7 @@ test("the Explorer's columns are the FolderTracks header, in the capture's order
     /Key/, /File Name/,
   ]);
   // And the collection keeps its own: the two are separate layouts.
+  await rail.getByRole("tab", { name: "Playlists" }).click();
   await page.getByRole("treeitem", { name: /All Tracks/ }).click();
   await expect(page.getByRole("columnheader", { name: /File Name/ })).toHaveCount(0);
 });

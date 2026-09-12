@@ -139,8 +139,8 @@ describe("nodesForSource", () => {
     { id: "h", name: "2026-09-07", kind: "history", depth: 1 },
   ];
 
-  it("gives playlists the folders and lists", () => {
-    expect(nodesForSource(mixed, "playlists").map((n) => n.id)).toEqual(["pl", "f", "p"]);
+  it("gives playlists All Tracks, the folders and the lists", () => {
+    expect(nodesForSource(mixed, "playlists").map((n) => n.id)).toEqual(["all", "pl", "f", "p"]);
   });
 
   it("gives histories the history nodes", () => {
@@ -162,7 +162,8 @@ describe("emptySources", () => {
   it("names the sections with nothing in them", () => {
     const only = [{ id: "all", name: "All Tracks", kind: "allTracks" as const, depth: 0 }];
     const empty = emptySources(only);
-    expect(empty.has("playlists")).toBe(true);
+    // All Tracks is in the playlists section, so that one leads somewhere.
+    expect(empty.has("playlists")).toBe(false);
     expect(empty.has("histories")).toBe(true);
     expect(empty.has("devices")).toBe(true);
   });

@@ -35,9 +35,12 @@ const Row = memo(function Row({
   onToggle: (node: TreeNode) => void;
 }) {
   // A history node is a session, or the year or month one is filed under —
-  // one kind, told apart by whether anything sits beneath it.
+  // one kind, told apart by whether anything sits beneath it. A month whose
+  // every session was deleted has nothing beneath it but is still a folder,
+  // which the backend says by sending it an open/closed state.
+  const historyFolder = node.kind === "history" && (branch || node.expanded !== undefined);
   const Icon =
-    node.kind === "folder" || node.kind === "directory" || (node.kind === "history" && branch)
+    node.kind === "folder" || node.kind === "directory" || historyFolder
       ? FolderIcon
       : node.kind === "history"
         ? HistoryIcon
@@ -186,16 +189,19 @@ export function TreeView({
   const empty = useMemo(() => emptySources(nodes), [nodes]);
   // Both derived in one pass each; per-row lookups would scan the array.
   const branches = useMemo(() => branchIds(nodes), [nodes]);
-  const visible = useMemo(() => visibleNodes(nodes, collapsed), [nodes, collapsed]);
 
-  // The rail is a shortcut, not a filter — `browseSetting.xml` calls it
-  // TreeShortcut. rekordbox keeps one tree and jumps to a section; filtering
-  // instead would hide All Tracks whenever Playlists was picked.
+  // The rail filters: the tree shows one section at a time, the one the
+  // selection is in, which is what rekordbox does [OBS 7.2.11] — Histories
+  // lit shows the sessions and nothing else. Where you are is read from the
+  // selection rather than kept apart from it, so the two cannot disagree.
   const source = useMemo(() => sourceOf(nodes, selectedId), [nodes, selectedId]);
+  const visible = useMemo(
+    () => visibleNodes(nodesForSource(nodes, source), collapsed),
+    [nodes, source, collapsed],
+  );
   // Set by a rail click, read once the selection has moved: the section's
-  // row is scrolled to the top, which is what the capture shows — the
-  // Explorer heading first in the pane with the playlists above it out of
-  // sight. A click on a node scrolls nothing; it was in view to be clicked.
+  // heading is scrolled to the top. A click on a node scrolls nothing; it
+  // was in view to be clicked.
   const list = useRef<HTMLDivElement>(null);
   const jumped = useRef(false);
   const jumpTo = useCallback(
@@ -236,9 +242,8 @@ export function TreeView({
         {visible.length === 0 ? (
           <p className={styles.emptyNote}>Nothing here yet.</p>
         ) : null}
-        {/* Room to scroll the last section to the top of the pane, as the
-            capture shows the Explorer with the playlists above it out of
-            sight and nothing but panel below its last row [OBS]. */}
+        {/* Panel below the last row, as the capture shows under the
+            Explorer's [OBS]. */}
         <div className={styles.tail} aria-hidden />
       </div>
 
