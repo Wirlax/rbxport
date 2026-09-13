@@ -17,7 +17,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 memchr = "2"
 parking_lot = "0.12"
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 [dev-dependencies]
 # For the Explorer example, which lists a real folder against the real library.

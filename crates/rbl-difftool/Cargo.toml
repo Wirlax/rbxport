@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 rbl-db = { path = "../rbl-db" }
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 flate2 = "1"

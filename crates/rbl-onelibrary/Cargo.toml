@@ -13,7 +13,7 @@ workspace = true
 rbl-core = { path = "../rbl-core" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 flate2 = "1"
 
 [dev-dependencies]
