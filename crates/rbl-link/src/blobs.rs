@@ -77,13 +77,6 @@ pub fn waveform_detail_blob(pwv3: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The plain cue-list reply (`4502`): rekordbox sends 1,604 bytes that are
-/// zero but for a few uninitialised trailing ones, whatever the track's
-/// cues; the player takes its cues from the extended list.
-pub fn cue_list_blob() -> Vec<u8> {
-    vec![0; 1604]
-}
-
 /// Byte at `0x34` of every extended cue entry, constant, meaning unknown.
 const EXTENDED_CUE_UNKNOWN: u8 = 0x56;
 /// The word after a comment, constant, meaning unknown.

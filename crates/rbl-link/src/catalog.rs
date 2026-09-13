@@ -422,7 +422,13 @@ impl Catalog for IndexCatalog {
         let library = self.source.library()?;
         let row = Self::row_of(&library, track)?;
         match what {
-            Wanted::CueList => Some(blobs::cue_list_blob()),
+            // rekordbox's plain cue-list reply (2504) is 1,604 bytes that are
+            // all but a few trailing bytes zero; a stub of 1,604 zeros here
+            // SIGSEGVs a CDJ-3000's firmware as it loads the track (the cue
+            // parser faults on the all-zero content), so until the exact bytes
+            // are captured we send none — an empty reply the player accepts,
+            // taking its cues from the extended list (2b04) instead.
+            Wanted::CueList => None,
             Wanted::ExtendedCueList => {
                 let cues: Vec<ExtendedCue> = library.cues_of(row).iter().map(ExtendedCue::from).collect();
                 Some(blobs::extended_cues_blob(&cues).0)
@@ -622,10 +628,13 @@ mod tests {
     }
 
     #[test]
-    fn a_track_without_analysis_has_cues_but_no_waveforms() {
+    fn a_track_without_analysis_has_no_blobs() {
         let c = catalog();
         assert!(c.analysis(10, &Wanted::BeatGrid).is_none());
-        assert_eq!(c.analysis(10, &Wanted::CueList).unwrap().len(), 1604);
+        // The plain cue list (2504) is sent empty: a 1,604-zero stub SIGSEGVs a
+        // CDJ-3000 as it loads, so we send none and let the extended list carry
+        // the cues.
+        assert!(c.analysis(10, &Wanted::CueList).is_none());
         assert_eq!(c.analysis(10, &Wanted::ExtendedCueList).unwrap(), Vec::<u8>::new());
     }
 }

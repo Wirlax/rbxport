@@ -68,13 +68,6 @@ fn the_extended_cue_list_matches_the_capture() {
 }
 
 #[test]
-fn the_plain_cue_list_is_the_empty_buffer_rekordbox_sends() {
-    let blob = blobs::cue_list_blob();
-    assert_eq!(blob.len(), 1604);
-    assert!(blob.iter().all(|&b| b == 0));
-}
-
-#[test]
 fn an_index_cue_becomes_an_extended_cue_by_its_hot_letter() {
     let hot_d = Cue { id: 1, position_ms: 100, out_ms: 0, kind: 5, colour: 0 };
     assert_eq!(ExtendedCue::from(&hot_d).hot_slot, 4, "kind 5 is D");
