@@ -129,6 +129,12 @@ export const LayoutTwoIcon = (props: IconProps) => (
   </svg>
 );
 
+export const LinkIcon = (props: IconProps) => (
+  <svg viewBox="0 0 28 28" aria-hidden focusable="false" {...props}>
+    <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" d="M6 10h13l-3.2-3.4M22 18H9l3.2 3.4"/>
+  </svg>
+);
+
 export const ListIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
     <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M1 7.5h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/>
@@ -177,6 +183,12 @@ export const NoteIcon = (props: IconProps) => (
   </svg>
 );
 
+export const PrefAboutIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" fillRule="evenodd" d="M8 .5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 1.6a5.9 5.9 0 1 0 0 11.8A5.9 5.9 0 0 0 8 2.1zM8 6.6c.5 0 .9.4.9.9v4a.9.9 0 0 1-1.8 0v-4c0-.5.4-.9.9-.9zm0-2.8a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2z"/>
+  </svg>
+);
+
 export const PrefAdvancedIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 12" aria-hidden focusable="false" {...props}>
     <g fill="currentColor"> <rect x="0" y="0.5" width="16" height="1.6"/> <rect x="0" y="5.2" width="16" height="1.6"/> <rect x="0" y="9.9" width="16" height="1.6"/> </g>
@@ -204,12 +216,6 @@ export const PrefDjSystemIcon = (props: IconProps) => (
 export const PrefKeyboardIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" fillRule="evenodd" d="M2 0.5h12A1.5 1.5 0 0 1 15.5 2v12a1.5 1.5 0 0 1-1.5 1.5H2A1.5 1.5 0 0 1 .5 14V2A1.5 1.5 0 0 1 2 .5zM7 3.5 3.6 12.8h1.9l.8-2.4h3.4l.8 2.4h1.9L9 3.5zm1 2.4L6.8 8.9h2.4z"/>
-  </svg>
-);
-
-export const PrefAboutIcon = (props: IconProps) => (
-  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <path fill="currentColor" fillRule="evenodd" d="M8 .5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zm0 1.6a5.9 5.9 0 1 0 0 11.8A5.9 5.9 0 0 0 8 2.1zM8 6.6c.5 0 .9.4.9.9v4a.9.9 0 0 1-1.8 0v-4c0-.5.4-.9.9-.9zm0-2.8a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2z"/>
   </svg>
 );
 

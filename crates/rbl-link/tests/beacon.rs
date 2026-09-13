@@ -90,6 +90,11 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     assert_eq!(players[0].kind, DeviceType::Cdj);
     assert_eq!(players[0].loaded, None);
 
+    // A player heard for the first time is greeted, as rekordbox greets one.
+    let greeting = receive(&player, 0x16);
+    assert_eq!(greeting.len(), 0x30);
+    assert_eq!(&greeting[0x0b..0x14], b"rekordbox");
+
     // The media query is answered with the library's counts. The captured
     // query names 192.168.1.152 as the asker; ours has to name us.
     let mut query = hex(MEDIA_QUERY);
@@ -105,11 +110,9 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     assert_eq!(reply.len(), 0x48);
     assert_eq!(reply[0x21], 0x11);
 
-    // The first status from the player earns the greeting; its content
-    // says what it has loaded from us and whether it is master.
+    // The player's status says what it has loaded from us and whether it is
+    // master.
     player.send_to(STATUS_PLAYING_OURS, status).unwrap();
-    let greeting = receive(&player, 0x16);
-    assert_eq!(greeting.len(), 0x30);
     let players = wait_for(&beacon, |p| p[0].loaded.is_some());
     assert_eq!(players[0].loaded, Some(17_181));
     assert!(players[0].playing);

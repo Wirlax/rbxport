@@ -326,6 +326,57 @@ pub fn connect_greeting(name: &str, device_number: u8) -> Vec<u8> {
     out
 }
 
+/// The startup ladder rekordbox 7.2.11 broadcasts before it settles into
+/// keep-alives, measured on the wire (2026-09-12): three first-stage claims
+/// (`00`), then a second-stage claim (`02`) for each of the six device
+/// numbers it reserves — 0x11, 0x12, 0x29, 0x2a, 0x2b, 0x2c — repeated with
+/// a counter 1..=6. A CDJ-3000 mounts rekordbox's library only after this
+/// sequence, not from the generic virtual-CDJ ladder. `[OBS]` the numbers
+/// and the shape; why rekordbox reserves that particular block is `[UNKNOWN]`.
+pub const REKORDBOX_CLAIM_NUMBERS: [u8; 6] = [0x11, 0x12, 0x29, 0x2a, 0x2b, 0x2c];
+
+/// One first-stage claim (`00`, 44 bytes): the counter, `04`, then the MAC.
+pub fn rekordbox_claim_stage1(mac: [u8; 6], counter: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(0x2c);
+    write_header(&mut out, 0x00, 0x00, REKORDBOX_NAME);
+    out.extend_from_slice(&[0x01, 0x03, 0x00, 0x2c]);
+    out.push(counter);
+    out.push(0x04);
+    out.extend_from_slice(&mac);
+    debug_assert_eq!(out.len(), 0x2c);
+    out
+}
+
+/// One second-stage claim (`02`, 50 bytes): the IP, the MAC, the number
+/// being claimed, the counter, then `04 01`.
+pub fn rekordbox_claim_stage2(mac: [u8; 6], ip: Ipv4Addr, number: u8, counter: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(0x32);
+    write_header(&mut out, 0x02, 0x00, REKORDBOX_NAME);
+    out.extend_from_slice(&[0x01, 0x03, 0x00, 0x32]);
+    out.extend_from_slice(&ip.octets());
+    out.extend_from_slice(&mac);
+    out.push(number);
+    out.push(counter);
+    out.extend_from_slice(&[0x04, 0x01]);
+    debug_assert_eq!(out.len(), 0x32);
+    out
+}
+
+/// rekordbox's whole startup ladder in order: `00`×3, then `02` for each
+/// reserved number with counter 1..=6.
+pub fn rekordbox_startup_ladder(mac: [u8; 6], ip: Ipv4Addr) -> Vec<Vec<u8>> {
+    let mut ladder = Vec::with_capacity(3 + REKORDBOX_CLAIM_NUMBERS.len() * 6);
+    for counter in 1..=3 {
+        ladder.push(rekordbox_claim_stage1(mac, counter));
+    }
+    for &number in &REKORDBOX_CLAIM_NUMBERS {
+        for counter in 1..=6 {
+            ladder.push(rekordbox_claim_stage2(mac, ip, number, counter));
+        }
+    }
+    ladder
+}
+
 /// A player's question about one media slot on one device (`kind 05`, 48
 /// bytes, unicast to port 50002): which device, which slot.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -55,6 +55,9 @@ struct Inner {
     generation: u32,
     /// The LINK session, while one is running.
     link: Option<crate::link::Session>,
+    /// The passive network watcher, running from startup: who is on the
+    /// network, so the shell can offer LINK when a player appears.
+    watcher: Option<rbl_link::Watcher>,
 }
 
 impl Default for AppState {
@@ -217,6 +220,21 @@ impl AppState {
 
     pub fn link_running(&self) -> bool {
         self.inner.read().link.is_some()
+    }
+
+    /// Installs the network watcher, replacing any previous one.
+    pub fn set_watcher(&self, watcher: Option<rbl_link::Watcher>) -> Option<rbl_link::Watcher> {
+        std::mem::replace(&mut self.inner.write().watcher, watcher)
+    }
+
+    /// Whether the watcher is running.
+    pub fn watching(&self) -> bool {
+        self.inner.read().watcher.is_some()
+    }
+
+    /// The peers the watcher has heard.
+    pub fn link_peers(&self) -> Vec<rbl_link::Player> {
+        self.inner.read().watcher.as_ref().map(rbl_link::Watcher::peers).unwrap_or_default()
     }
 
     /// The LINK session as the window shows it, or `None` when LINK is off.

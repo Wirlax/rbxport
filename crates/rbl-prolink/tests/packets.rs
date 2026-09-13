@@ -264,3 +264,23 @@ fn the_link_handshake_reply_matches_the_capture() {
         hex(CAPTURED_HANDSHAKE_REPLY)
     );
 }
+
+#[test]
+fn the_rekordbox_startup_ladder_matches_the_capture() {
+    let mac = [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e];
+    let ip = Ipv4Addr::new(192, 168, 1, 14);
+    assert_eq!(
+        rbl_prolink::rekordbox_claim_stage1(mac, 1),
+        hex("5173707431576d4a4f4c000072656b6f7264626f7800000000000000000000000103002c010400e04ccf632e")
+    );
+    assert_eq!(
+        rbl_prolink::rekordbox_claim_stage2(mac, ip, 0x11, 1),
+        hex("5173707431576d4a4f4c020072656b6f7264626f78000000000000000000000001030032c0a8010e00e04ccf632e11010401")
+    );
+    assert_eq!(
+        rbl_prolink::rekordbox_claim_stage2(mac, ip, 0x2c, 6),
+        hex("5173707431576d4a4f4c020072656b6f7264626f78000000000000000000000001030032c0a8010e00e04ccf632e2c060401")
+    );
+    // 3 first-stage + 6 numbers × 6 counters.
+    assert_eq!(rbl_prolink::rekordbox_startup_ladder(mac, ip).len(), 3 + 36);
+}

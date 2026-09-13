@@ -539,6 +539,13 @@ pub async fn link_status(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatu
     Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(None)))
 }
 
+/// The players and mixers heard on the network, whether or not LINK is on.
+/// The shell shows the LINK button once this is non-empty.
+#[tauri::command]
+pub async fn link_peers(state: State<'_, Arc<AppState>>) -> AppResult<Vec<crate::link::PeerDto>> {
+    Ok(crate::link::peers(&state))
+}
+
 /// Turns LINK on: announces as `rekordbox` on `interface` (the first one
 /// when none is named) and serves the library to every player that asks.
 ///

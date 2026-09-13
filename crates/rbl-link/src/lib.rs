@@ -20,6 +20,7 @@ pub mod beacon;
 pub mod blobs;
 pub mod catalog;
 pub mod files;
+pub mod watch;
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -28,6 +29,7 @@ use rbl_dbserver::session::CatalogHandler;
 use rbl_index::Library;
 
 pub use beacon::Player;
+pub use watch::Watcher;
 pub use catalog::{IndexCatalog, Source};
 pub use rbl_prolink::DeviceType;
 

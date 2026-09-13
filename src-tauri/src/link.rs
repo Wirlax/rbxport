@@ -44,6 +44,39 @@ pub struct LoadedDto {
     pub artist: String,
 }
 
+/// A device heard on the network before LINK is on: enough to say "a player
+/// is here", not what it has loaded.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerDto {
+    pub number: u8,
+    pub name: String,
+    /// `player`, `mixer`, `rekordbox` or `device`.
+    pub kind: String,
+    pub address: String,
+}
+
+/// How a device type reads for the window.
+fn kind_name(kind: rbl_link::DeviceType) -> &'static str {
+    match kind {
+        rbl_link::DeviceType::Cdj => "player",
+        rbl_link::DeviceType::Mixer => "mixer",
+        rbl_link::DeviceType::Rekordbox => "rekordbox",
+        rbl_link::DeviceType::Other(_) => "device",
+    }
+}
+
+impl PeerDto {
+    fn from_player(player: &rbl_link::Player) -> Self {
+        Self {
+            number: player.number,
+            name: player.name.clone(),
+            kind: kind_name(player.kind).to_owned(),
+            address: player.address.to_string(),
+        }
+    }
+}
+
 /// A player on the link, as the window shows it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -194,13 +227,7 @@ fn players(library: Option<&rbl_index::Library>, snapshot: &Snapshot) -> Vec<Pla
         .map(|player| PlayerDto {
             number: player.number,
             name: player.name.clone(),
-            kind: match player.kind {
-                rbl_link::DeviceType::Cdj => "player",
-                rbl_link::DeviceType::Mixer => "mixer",
-                rbl_link::DeviceType::Rekordbox => "rekordbox",
-                rbl_link::DeviceType::Other(_) => "device",
-            }
-            .to_owned(),
+            kind: kind_name(player.kind).to_owned(),
             address: player.address.to_string(),
             loaded: player.loaded.map(|id| {
                 let row = library.and_then(|l| l.row_of_id(u64::from(id)));
@@ -214,6 +241,29 @@ fn players(library: Option<&rbl_index::Library>, snapshot: &Snapshot) -> Vec<Pla
             master: player.master,
         })
         .collect()
+}
+
+/// Starts the passive network watcher on the announce port, reporting peers
+/// to `report`. Binding proves rekordbox is not holding the port. Returns
+/// `None` when the port cannot be bound (rekordbox is running).
+pub fn start_watcher<F>(report: F) -> Option<rbl_link::Watcher>
+where
+    F: Fn(Vec<PeerDto>) + Send + 'static,
+{
+    match rbl_link::Watcher::start(rbl_link::Ports::REKORDBOX.announce, move |players| {
+        report(players.iter().map(PeerDto::from_player).collect());
+    }) {
+        Ok(watcher) => Some(watcher),
+        Err(error) => {
+            tracing::info!(%error, "network watcher not started (rekordbox may hold the port)");
+            None
+        }
+    }
+}
+
+/// The peers heard so far, as the window shows them.
+pub fn peers(state: &AppState) -> Vec<PeerDto> {
+    state.link_peers().iter().map(PeerDto::from_player).collect()
 }
 
 /// Why LINK cannot start now, if it cannot: rekordbox holds the ports.

@@ -321,6 +321,20 @@ pub fn run() {
         .manage(Arc::new(crate::update::Updates::default()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());
+            // Join the network on start: a passive watcher that hears every
+            // player and mixer and reports them, so the shell can offer LINK
+            // the moment one appears. Nothing is transmitted until LINK is on.
+            {
+                let handle = app.handle().clone();
+                let state = Arc::clone(app.state::<Arc<AppState>>().inner());
+                tauri::async_runtime::spawn_blocking(move || {
+                    let emitter = handle.clone();
+                    let watcher = crate::link::start_watcher(move |peers| {
+                        let _ = tauri::Emitter::emit(&emitter, "link:peers", peers);
+                    });
+                    drop(state.set_watcher(watcher));
+                });
+            }
             app.set_menu(crate::menu::build(app.handle())?)?;
             Ok(())
         })
@@ -362,6 +376,7 @@ pub fn run() {
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.
             commands::link_status,
+            commands::link_peers,
             commands::start_link_export,
             commands::stop_link_export,
             commands::export_playlist,

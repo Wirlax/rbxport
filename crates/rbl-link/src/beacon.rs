@@ -18,9 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use alphatheta_connect::status::types::PlayState;
 use alphatheta_connect::status::utils::status_from_packet;
 use alphatheta_connect::types::MediaSlot;
-use alphatheta_connect::status::types::PlayState;
 use parking_lot::Mutex;
 use rbl_prolink::{
     connect_greeting, link_handshake_reply, packet_kind, DeviceTable, DeviceType, KeepAlive, MediaQuery,
@@ -30,6 +30,13 @@ use rbl_prolink::{
 
 /// rekordbox's keep-alive interval, measured.
 const KEEP_ALIVE_EVERY: Duration = Duration::from_millis(2000);
+/// The startup ladder's spacing: `0a` ×3, `00` ×3, `02` ×3, `04` ×3, as
+/// alphatheta-connect sends it (verified against a CDJ-3000 as a virtual
+/// player). A CDJ-3000 that only ever hears keep-alives from a new device
+/// does not list it; it listed rekordbox only after this. `[ASSUME]` the
+/// layouts for a device of rekordbox's type — the capture began with
+/// rekordbox already up.
+const STARTUP_STAGE_EVERY: Duration = Duration::from_millis(300);
 /// rekordbox's status interval, measured.
 const STATUS_EVERY: Duration = Duration::from_millis(200);
 /// How long a receive blocks before the thread looks at the clock again.
@@ -87,6 +94,9 @@ struct Shared {
     players: HashMap<u8, Player>,
     /// Players greeted since the beacon started, by address.
     greeted: Vec<Ipv4Addr>,
+    /// Players heard on the announce port and not yet greeted; the status
+    /// loop sends the greeting, from the port rekordbox sends it from.
+    to_greet: Vec<Ipv4Addr>,
 }
 
 /// The running beacon.
@@ -180,20 +190,36 @@ fn now_ms(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Keep-alives out every two seconds, everyone else's into the peer table.
+/// The startup ladder, then keep-alives every two seconds; everyone else's
+/// packets into the peer table.
 fn announce_loop(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shared: &Mutex<Shared>) {
     let started = Instant::now();
     let to = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.announce_port));
     let mut buffer = [0_u8; DATAGRAM];
+
+    // rekordbox's own startup ladder, not the generic virtual-CDJ one: a
+    // CDJ-3000 mounts rekordbox's library only after this exact sequence
+    // (`rbl_prolink::rekordbox_startup_ladder`, measured on the wire).
+    let mut ladder = rbl_prolink::rekordbox_startup_ladder(config.mac, config.address).into_iter();
+
     let mut next_send = Instant::now();
     while !stop.load(Ordering::Relaxed) {
+        // Send when due, but never stop reading: incoming keep-alives must be
+        // heard throughout the startup ladder, not only after it.
         if Instant::now() >= next_send {
-            next_send += KEEP_ALIVE_EVERY;
-            // Peers seen, plus ourselves.
-            let peers = u8::try_from(shared.lock().peers.len() + 1).unwrap_or(u8::MAX);
-            let packet = KeepAlive::rekordbox(config.mac, config.address, peers).encode();
-            if let Err(error) = socket.send_to(&packet, to) {
-                tracing::debug!(%error, "keep-alive not sent");
+            if let Some(rung) = ladder.next() {
+                next_send += STARTUP_STAGE_EVERY;
+                if let Err(error) = socket.send_to(&rung, to) {
+                    tracing::debug!(%error, "startup packet not sent");
+                }
+            } else {
+                next_send += KEEP_ALIVE_EVERY;
+                // Peers seen, plus ourselves.
+                let peers = u8::try_from(shared.lock().peers.len() + 1).unwrap_or(u8::MAX);
+                let packet = KeepAlive::rekordbox(config.mac, config.address, peers).encode();
+                if let Err(error) = socket.send_to(&packet, to) {
+                    tracing::debug!(%error, "keep-alive not sent");
+                }
             }
         }
         match socket.recv_from(&mut buffer) {
@@ -224,6 +250,15 @@ fn announce_loop(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, s
                     if let Some(player) = shared.players.get_mut(&keep_alive.device_number) {
                         player.last_seen = Instant::now();
                         player.name.clone_from(&keep_alive.name);
+                    }
+                    // A player is greeted when first heard: in the capture the
+                    // greeting is what the player's portmap query follows,
+                    // six milliseconds later.
+                    if keep_alive.device_type == DeviceType::Cdj
+                        && !shared.greeted.contains(from.ip())
+                        && !shared.to_greet.contains(from.ip())
+                    {
+                        shared.to_greet.push(*from.ip());
                     }
                 }
             }
@@ -266,6 +301,16 @@ fn status_loop(
             if let Err(error) = socket.send_to(&packet, broadcast) {
                 tracing::debug!(%error, "status not sent");
             }
+        }
+        let pending: Vec<Ipv4Addr> = {
+            let mut shared = shared.lock();
+            let pending = std::mem::take(&mut shared.to_greet);
+            shared.greeted.extend(pending.iter().copied());
+            pending
+        };
+        for player in pending {
+            let greeting = connect_greeting(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER);
+            send(socket, &greeting, player, config.player_port, "greeting");
         }
         let (len, from) = match socket.recv_from(&mut buffer) {
             Ok(received) => received,
