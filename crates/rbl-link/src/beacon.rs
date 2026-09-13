@@ -23,9 +23,9 @@ use alphatheta_connect::status::utils::status_from_packet;
 use alphatheta_connect::types::MediaSlot;
 use parking_lot::Mutex;
 use rbl_prolink::{
-    connect_greeting, link_handshake_reply, packet_kind, DeviceTable, DeviceType, KeepAlive, MediaQuery,
-    MediaResponse, Status, LINK_HANDSHAKE_KIND, PLAYER_STATUS_KIND, REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME,
-    SLOT_REKORDBOX,
+    connect_greeting, connect_identity, link_handshake_reply, packet_kind, DeviceTable, DeviceType, KeepAlive,
+    MediaQuery, MediaResponse, Status, DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, PLAYER_STATUS_KIND,
+    REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME, SLOT_REKORDBOX,
 };
 
 /// rekordbox's keep-alive interval, measured.
@@ -62,6 +62,8 @@ pub struct BeaconConfig {
     /// The port players listen on for status, replies and the greeting:
     /// 50002 on the link. A test's player binds its own.
     pub player_port: u16,
+    /// This computer's name, as rekordbox puts it in the identity reply.
+    pub computer_name: String,
 }
 
 /// What the media response tells a player about the library. Read on every
@@ -342,6 +344,14 @@ fn status_loop(
         // nothing below handles.
         let Ok(kind) = packet_kind(packet) else { continue };
         match kind {
+            DEVICE_IDENTITY_QUERY_KIND => {
+                // The player announces itself with `10`; rekordbox answers
+                // with its own identity (`11`), and only then does the player
+                // go on to the media query and the mount. Sent to the status
+                // port, as rekordbox sends it, not the player's source port.
+                let identity = connect_identity(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, &config.computer_name);
+                send(socket, &identity, *from.ip(), config.player_port, "identity");
+            }
             0x05 => {
                 let Ok(query) = MediaQuery::decode(packet) else { continue };
                 if query.device_number != REKORDBOX_DEVICE_NUMBER || query.slot != SLOT_REKORDBOX {

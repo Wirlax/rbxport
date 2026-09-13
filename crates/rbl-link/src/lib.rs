@@ -162,6 +162,7 @@ impl LinkExport {
                 announce_port: ports.announce,
                 status_port: ports.status,
                 player_port: rbl_prolink::PORT_STATUS,
+                computer_name: computer_name(),
             },
             Arc::new(Facts(source)),
         )
@@ -247,4 +248,25 @@ fn explain(error: &std::io::Error, protocol: &str, port: u16) -> String {
         std::io::ErrorKind::PermissionDenied => format!("Not allowed to bind {protocol} port {port}."),
         _ => format!("Could not bind {protocol} port {port}: {error}"),
     }
+}
+
+/// This computer's name, for the identity reply a player asks for. Windows
+/// hands it out in the environment; elsewhere `hostname` does, trimmed of any
+/// domain. Falls back to `rekordbox` — the reply's presence is what a player
+/// waits on, not the exact name.
+fn computer_name() -> String {
+    if let Ok(name) = std::env::var("COMPUTERNAME") {
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    if let Ok(output) = std::process::Command::new("hostname").output() {
+        if let Ok(name) = String::from_utf8(output.stdout) {
+            let name = name.trim().split('.').next().unwrap_or("").trim();
+            if !name.is_empty() {
+                return name.to_owned();
+            }
+        }
+    }
+    rbl_prolink::REKORDBOX_NAME.to_owned()
 }

@@ -333,6 +333,31 @@ pub fn connect_greeting(name: &str, device_number: u8) -> Vec<u8> {
     out
 }
 
+/// Byte length of the device-identity reply.
+pub const CONNECT_IDENTITY_LEN: usize = 296;
+
+/// The kind a player sends its own identity with, on port 50002 (`10`,
+/// 36 bytes: magic, the byte, the player's name). rekordbox answers it and
+/// only then does the player carry on to the media query and the mount.
+pub const DEVICE_IDENTITY_QUERY_KIND: u8 = 0x10;
+
+/// rekordbox's answer to a player's `10` identity packet (`kind 11`,
+/// 296 bytes, measured 2026-09-13 on the emulator's bridge): magic, the
+/// byte, the 20-byte name, `01 01 <dev> 01 04 <dev> 01 00 00`, then the
+/// computer's name in UTF-16BE, zero-padded. Without this reply the player
+/// keeps re-sending its `10` and never lists us; it is the step the wire
+/// captures had missed.
+pub fn connect_identity(name: &str, device_number: u8, computer_name: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CONNECT_IDENTITY_LEN);
+    write_status_header(&mut out, 0x11, name);
+    out.extend_from_slice(&[0x01, 0x01, device_number, 0x01, 0x04, device_number, 0x01, 0x00, 0x00]);
+    for unit in computer_name.encode_utf16() {
+        out.extend_from_slice(&unit.to_be_bytes());
+    }
+    out.resize(CONNECT_IDENTITY_LEN, 0);
+    out
+}
+
 /// The startup ladder rekordbox 7.2.11 broadcasts before it settles into
 /// keep-alives, measured on the wire (2026-09-12): three first-stage claims
 /// (`00`), then a second-stage claim (`02`) for each of the six device

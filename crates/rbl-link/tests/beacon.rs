@@ -44,6 +44,7 @@ fn start() -> (Beacon, UdpSocket) {
             announce_port: 0,
             status_port: 0,
             player_port: player.local_addr().unwrap().port(),
+            computer_name: "test-mac".to_owned(),
         },
         Arc::new(Facts),
     )
