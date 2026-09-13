@@ -104,8 +104,14 @@ impl Beacon {
         // Bound to every interface, not the chosen one: on macOS a socket
         // bound to one address does not receive broadcasts. The chosen
         // interface is what we *send* on, by way of its subnet broadcast.
-        let announce = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, config.announce_port))?;
-        let status = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, config.status_port))?;
+        //
+        // Shared, unlike rekordbox's, which holds 50000 exclusively: a
+        // listener beside us — the CDJ-3000 emulator's test harness hears
+        // announcements on a socket of its own — costs nothing, and
+        // rekordbox already running still refuses us, since its bind is
+        // the exclusive one.
+        let announce = shared_udp(config.announce_port)?;
+        let status = shared_udp(config.status_port)?;
         for socket in [&announce, &status] {
             socket.set_broadcast(true)?;
             socket.set_read_timeout(Some(POLL))?;
@@ -158,6 +164,16 @@ impl Drop for Beacon {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+/// A UDP socket on every interface that other listeners may share.
+fn shared_udp(port: u16) -> io::Result<UdpSocket> {
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    socket.bind(&SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).into())?;
+    Ok(socket.into())
 }
 
 fn now_ms(since: Instant) -> u64 {

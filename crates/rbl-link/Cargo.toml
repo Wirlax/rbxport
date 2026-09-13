@@ -21,6 +21,7 @@ rbl-dbserver = { path = "../rbl-dbserver" }
 rbl-index = { path = "../rbl-index" }
 rbl-nfs = { path = "../rbl-nfs" }
 rbl-prolink = { path = "../rbl-prolink" }
+socket2 = "0.6"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
