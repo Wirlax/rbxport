@@ -148,7 +148,9 @@ pub struct KeepAlive {
     pub device_type: DeviceType,
     pub mac: [u8; 6],
     pub ip: Ipv4Addr,
-    /// Devices seen on the network, including this one.
+    /// Byte `0x30`: the count of *other* devices seen on the network, not
+    /// counting this one (rekordbox 7.2.11 sent `0x02` with two peers present,
+    /// captured 2026-09-12).
     pub peers: u8,
     /// Byte `0x21`: `03` for rekordbox 7 and CDJ-3000 class devices, `02`
     /// for the rest.

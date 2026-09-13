@@ -214,8 +214,11 @@ fn announce_loop(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, s
                 }
             } else {
                 next_send += KEEP_ALIVE_EVERY;
-                // Peers seen, plus ourselves.
-                let peers = u8::try_from(shared.lock().peers.len() + 1).unwrap_or(u8::MAX);
+                // The count of *other* devices we see, not counting ourselves:
+                // captured 2026-09-12 against rekordbox 7.2.11, which sent 0x02
+                // at keep-alive offset 0x30 with a deck and one other client on
+                // the LAN (two peers), where rbxport had been sending 0x03.
+                let peers = u8::try_from(shared.lock().peers.len()).unwrap_or(u8::MAX);
                 let packet = KeepAlive::rekordbox(config.mac, config.address, peers).encode();
                 if let Err(error) = socket.send_to(&packet, to) {
                     tracing::debug!(%error, "keep-alive not sent");
