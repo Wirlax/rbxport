@@ -22,6 +22,8 @@ pub mod xdr;
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub use vfs::{Attributes, Exports, Handle, NodeKind, Vfs, HANDLE_LEN, MAX_READ};
 use xdr::{Reader, Writer};
@@ -112,11 +114,55 @@ pub struct Server {
     nfs_port: u16,
     /// The port the mount program is bound to, reported by portmap.
     mount_port: u16,
+    /// The files being read, kept open: a player reads a track in 32 KB
+    /// pieces, and opening the file for each piece is a syscall and a
+    /// directory walk per piece. Most recently used last.
+    open: Mutex<Vec<OpenFile>>,
 }
+
+#[derive(Debug)]
+struct OpenFile {
+    path: PathBuf,
+    file: File,
+    used: std::time::Instant,
+}
+
+/// How many files stay open between reads: a player keeps two mounts and
+/// reads one track through both, and a few players may load at once.
+const OPEN_FILES: usize = 8;
+/// A handle unused for this long is closed, so a file replaced on disk is
+/// read afresh rather than from the old inode for as long as it is cached.
+const OPEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Server {
     pub fn new(exports: Exports, nfs_port: u16, mount_port: u16) -> Self {
-        Self { exports, nfs_port, mount_port }
+        Self { exports, nfs_port, mount_port, open: Mutex::new(Vec::with_capacity(OPEN_FILES)) }
+    }
+
+    /// Reads `len` bytes at `offset` of the file at `path`, through the
+    /// open-file cache.
+    fn read_at(&self, path: &Path, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
+        let mut open = self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = std::time::Instant::now();
+        open.retain(|entry| now.duration_since(entry.used) < OPEN_FOR);
+        let at = if let Some(at) = open.iter().position(|entry| entry.path == path) {
+            at
+        } else {
+            if open.len() >= OPEN_FILES {
+                open.remove(0);
+            }
+            open.push(OpenFile { path: path.to_path_buf(), file: File::open(path)?, used: now });
+            open.len() - 1
+        };
+        let mut entry = open.remove(at);
+        let outcome = read_at(&entry.file, offset, len);
+        // A read that failed drops the handle: the file may have been
+        // replaced, and the next read opens whatever is there now.
+        if outcome.is_ok() {
+            entry.used = now;
+            open.push(entry);
+        }
+        outcome
     }
 
     pub fn exports(&self) -> &Exports {
@@ -338,7 +384,7 @@ impl Server {
         let wanted = (count as usize).min(MAX_READ);
         // A file that vanished between the export and the read is the normal
         // case here, not an I/O fault worth distinguishing.
-        let Ok(data) = read_at(source, u64::from(offset), wanted) else {
+        let Ok(data) = self.read_at(source, u64::from(offset), wanted) else {
             return Self::status_only(call.xid, nfs_status::IO);
         };
 
@@ -441,8 +487,7 @@ fn write_attributes(writer: &mut Writer, attributes: &Attributes) {
 
 /// Reads at most `len` bytes from `offset`. A short read at the end of the
 /// file is not an error; NFS signals the end by returning fewer bytes.
-fn read_at(path: &std::path::Path, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-    let mut file = File::open(path)?;
+fn read_at(mut file: &File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
     file.seek(SeekFrom::Start(offset))?;
     let mut out = vec![0_u8; len];
     let mut filled = 0;
