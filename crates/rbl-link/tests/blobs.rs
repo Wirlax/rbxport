@@ -47,6 +47,15 @@ fn analysis_tags_match_the_capture_including_the_padding() {
 }
 
 #[test]
+fn the_plain_cue_list_matches_the_capture() {
+    // rekordbox's 2504 reply is a fixed 1,604-byte buffer, zero for a track
+    // with no old-format cues. The fixture is the captured blob with the three
+    // uninitialised tail bytes rekordbox leaked (0x640..0x643) cleared, since
+    // they vary between captures and carry no cue data.
+    assert_eq!(blobs::cue_list_blob(), include_bytes!("fixtures/captured-cue-list.bin"));
+}
+
+#[test]
 fn the_extended_cue_list_matches_the_capture() {
     // The track's cues as `djmdCue` holds them: hot cues A–D and four
     // memory cues at the same places (rekordbox's auto cues).

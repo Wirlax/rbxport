@@ -131,6 +131,22 @@ pub fn extended_cues_blob(cues: &[ExtendedCue]) -> (Vec<u8>, u32) {
     (out, u32::try_from(hot.len() + memory.len()).unwrap_or(u32::MAX))
 }
 
+/// The length of the plain cue-list reply (`4502`): rekordbox always sends
+/// this many bytes.
+const CUE_LIST_LEN: usize = 1604;
+
+/// The plain cue-list reply (`4502`): the pre-nexus2 cue format, which a
+/// CDJ-3000 reads only for its `chunks_exact(0x24)` entries and takes its
+/// real cues from the extended list (`4e02`). rekordbox sends a fixed
+/// 1,604-byte buffer — 44 thirty-six-byte slots and a 20-byte tail — left
+/// zero for a track with no old-format cues, which is every track it was
+/// captured serving; the entries there are all zero, so a player parses no
+/// cues from it. The reply must still carry these bytes with a success
+/// status: an empty "unavailable" reply hangs a CDJ-3000 mid-load.
+pub fn cue_list_blob() -> Vec<u8> {
+    vec![0_u8; CUE_LIST_LEN]
+}
+
 /// One entry: a fixed head to `0x48`, the comment's UTF-16LE byte length,
 /// the comment with its NUL, a constant word, the colour (hot cues only),
 /// and zero padding to the length rekordbox writes.
