@@ -1,4 +1,6 @@
 import styles from "./StatusBar.module.css";
+import { LinkControl } from "./LinkControl";
+import type { LinkPeerSeen, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 
@@ -21,8 +23,14 @@ export interface StatusBarProps {
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
   analysisFailures?: number;
-  /** Present while LINK is on: how many players are on the network. */
-  link?: { players: number } | null;
+  /** Devices heard on the network, for the LINK control. */
+  linkPeers?: LinkPeerSeen[];
+  /** The LINK session, for the LINK control. */
+  linkStatus?: LinkStatus | null;
+  /** Turn LINK on or off. */
+  onLinkToggle?: () => void;
+  /** True while a LINK start/stop is in flight. */
+  linkBusy?: boolean;
 }
 
 export function StatusBar({
@@ -33,24 +41,21 @@ export function StatusBar({
   protectedLibrary = false,
   onCancelAnalysis,
   analysisFailures = 0,
-  link = null,
+  linkPeers = [],
+  linkStatus = null,
+  onLinkToggle,
+  linkBusy = false,
 }: StatusBarProps) {
   const tip = useTooltip();
   return (
     <footer className={styles.statusBar}>
+      {onLinkToggle ? (
+        <LinkControl peers={linkPeers} link={linkStatus} onToggle={onLinkToggle} busy={linkBusy} />
+      ) : null}
       <span className={styles.logo}>rbxport</span>
       {readOnly ? (
         <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
           Read-only
-        </span>
-      ) : null}
-      {link ? (
-        <span
-          className={styles.link}
-          data-testid="link-on"
-          title={tip("PRO DJ LINK is on: players on the network can browse and play this library")}
-        >
-          LINK · {link.players === 1 ? "1 player" : `${link.players} players`}
         </span>
       ) : null}
       {/*

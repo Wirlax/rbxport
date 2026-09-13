@@ -51,7 +51,7 @@ import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { FilterValues, LinkStatus } from "@/ipc/types";
+import type { FilterValues, LinkPeerSeen, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 
 function useClock(): string {
@@ -403,23 +403,39 @@ export function App() {
   // Read once and then by event, so the strip follows Preferences' switch
   // without owning it.
   const [link, setLink] = useState<LinkStatus | null>(null);
+  const [linkPeers, setLinkPeers] = useState<LinkPeerSeen[]>([]);
+  const [linkBusy, setLinkBusy] = useState(false);
   useEffect(() => {
     let live = true;
-    let stop: (() => void) | undefined;
+    const stops: Array<() => void> = [];
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
-      stop = backend.onLinkStatus((status) => {
-        if (live) setLink(status);
-      });
-      const status = await backend.linkStatus();
-      if (live) setLink(status);
+      stops.push(backend.onLinkStatus((status) => live && setLink(status)));
+      stops.push(backend.onLinkPeers((peers) => live && setLinkPeers(peers)));
+      const [status, peers] = await Promise.all([backend.linkStatus(), backend.linkPeers()]);
+      if (live) {
+        setLink(status);
+        setLinkPeers(peers);
+      }
     })();
     return () => {
       live = false;
-      stop?.();
+      stops.forEach((stop) => stop());
     };
   }, []);
+
+  const toggleLink = useCallback(() => {
+    setLinkBusy(true);
+    void (async () => {
+      const backend = await getBackend();
+      try {
+        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport());
+      } finally {
+        setLinkBusy(false);
+      }
+    })();
+  }, [link?.on]);
 
   // The master player's BPM for the filter's `MASTER PLAYER ±` list: the
   // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not
@@ -1310,7 +1326,10 @@ export function App() {
         selection={selectionText}
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}
-        link={link?.on ? { players: link.players.length } : null}
+        linkPeers={linkPeers}
+        linkStatus={link}
+        onLinkToggle={toggleLink}
+        linkBusy={linkBusy}
       />
     </div>
     </PreferencesProvider>

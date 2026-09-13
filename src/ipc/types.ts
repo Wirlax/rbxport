@@ -285,6 +285,10 @@ export interface Backend {
 
   /** LINK as it stands: on or off, on what, and who is listening. */
   linkStatus(): Promise<LinkStatus>;
+  /** Players and mixers heard on the network, whether or not LINK is on. */
+  linkPeers(): Promise<LinkPeerSeen[]>;
+  /** Called as the set of devices heard on the network changes (from start). */
+  onLinkPeers(listener: (peers: LinkPeerSeen[]) => void): () => void;
   /**
    * Turns LINK on: the app announces itself as `rekordbox` on the named
    * interface (the first one when none is given) and serves the library to
@@ -717,6 +721,15 @@ export interface Beat {
   timeMs: number;
   /** The first beat of a bar, drawn heavier than the rest. */
   downbeat: boolean;
+}
+
+/** A device heard on the network before LINK is on. */
+export interface LinkPeerSeen {
+  number: number;
+  name: string;
+  /** `player`, `mixer`, `rekordbox` or `device`. */
+  kind: string;
+  address: string;
 }
 
 /** A network interface LINK can run on. */
