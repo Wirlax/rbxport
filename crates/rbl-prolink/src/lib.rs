@@ -401,8 +401,11 @@ pub fn rekordbox_startup_ladder(mac: [u8; 6], ip: Ipv4Addr) -> Vec<Vec<u8>> {
     for counter in 1..=3 {
         ladder.push(rekordbox_claim_stage1(mac, counter));
     }
-    for &number in &REKORDBOX_CLAIM_NUMBERS {
-        for counter in 1..=6 {
+    // Counter-major, as rekordbox 7.2.11 sends it on a cold LINK-on (measured
+    // 2026-09-13): all six numbers at counter 1, then all six at counter 2, and
+    // so on — not each number's six counters in turn.
+    for counter in 1..=6 {
+        for &number in &REKORDBOX_CLAIM_NUMBERS {
             ladder.push(rekordbox_claim_stage2(mac, ip, number, counter));
         }
     }
