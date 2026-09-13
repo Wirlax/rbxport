@@ -31,6 +31,7 @@ import { usePreferences, useTooltip } from "@/store/usePreferences";
 import type { KeyDisplay } from "@/ipc/types";
 import { ColumnMenu } from "./ColumnMenu";
 import { setRowDragImage } from "./dragGhost";
+import { detectPlatform, dispatch } from "@/lib/shortcuts";
 
 const ROW_H = 25; // --s-row-height
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
@@ -649,6 +650,81 @@ export function TrackTable({
     // cannot drift a header's worth out of step with what is rendered.
     view.ensureRange(firstIndex, lastIndex + 1);
   }, [firstIndex, lastIndex, view, view.count, view.token]);
+
+  // Up/Down move a single highlight through the list, and PageUp/PageDown and
+  // Home/End jump it, wherever the focus is — the keyboard counterpart of
+  // clicking a row. Enter (loading Player 1) and the arrows the deck owns are
+  // handled elsewhere; this only moves the browser's cursor.
+  const platform = useMemo(detectPlatform, []);
+  const moveCursor = useCallback(
+    (to: number) => {
+      const count = view.count;
+      if (count === 0) return;
+      const index = Math.max(0, Math.min(to, count - 1));
+      virtualizer.scrollToIndex(index);
+      const row = view.rowAt(index);
+      if (row) {
+        setSelection({ ids: new Set([row.id]), anchorIndex: index });
+        return;
+      }
+      // Off screen and not yet fetched: the backend resolves the id at that
+      // index, since the selection is by id and survives a re-sort.
+      void view.idsInRange(index, index).then((ids) => {
+        const id = ids[0];
+        setSelection(
+          id === undefined
+            ? (s) => ({ ...s, anchorIndex: index })
+            : { ids: new Set([id]), anchorIndex: index },
+        );
+      });
+    },
+    [view, virtualizer],
+  );
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const action = dispatch(event, platform, target);
+      if (action === null || view.count === 0) return;
+      // A focused knob or fader owns the up/down keys — turning one must not
+      // also walk the track list. `dispatch` already yields the text fields.
+      const role = target?.getAttribute?.("role");
+      if (role === "slider" || role === "spinbutton") return;
+      // The first press with nothing highlighted picks the top visible row;
+      // after that the keys step from where the highlight is.
+      const start = firstIndex < 0 ? 0 : firstIndex;
+      const cursor = selection.anchorIndex ?? start;
+      const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 0) / rowH) - 1);
+      let to: number;
+      switch (action) {
+        case "moveDown":
+          to = selection.anchorIndex === null ? start : cursor + 1;
+          break;
+        case "moveUp":
+          to = selection.anchorIndex === null ? start : cursor - 1;
+          break;
+        case "pageDown":
+          to = cursor + page;
+          break;
+        case "pageUp":
+          to = cursor - page;
+          break;
+        case "toTop":
+          to = 0;
+          break;
+        case "toBottom":
+          to = view.count - 1;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      moveCursor(to);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor]);
 
   const startDraggingTracks = useCallback(
     (row: RowDto) => {
