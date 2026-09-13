@@ -305,7 +305,12 @@ impl Status {
         let mut out = Vec::with_capacity(STATUS_LEN);
         write_status_header(&mut out, 0x29, &self.name);
         out.extend_from_slice(&[0x01, 0x01, self.device_number, 0x00, 0x38, self.device_number]);
-        out.extend_from_slice(&[0x00, 0x00, 0xc0, 0x00, 0x10, 0x00, 0x00, 0x80, 0x00]);
+        // The byte before the tempo is 0x80 when a master tempo is being
+        // broadcast and 0x00 when idle (measured: idle rekordbox sends 0x00
+        // with beat 0, playing rekordbox 0x80 with the beat). We broadcast a
+        // tempo only when a player on the link is master.
+        let master = if self.bpm_x100 != 0 { 0x80 } else { 0x00 };
+        out.extend_from_slice(&[0x00, 0x00, 0xc0, 0x00, 0x10, 0x00, 0x00, master, 0x00]);
         out.extend_from_slice(&self.bpm_x100.to_be_bytes());
         out.extend_from_slice(&[0x00, 0x10, 0x00, 0x00, 0x00, 0x09, 0xff, self.beat]);
         debug_assert_eq!(out.len(), STATUS_LEN);

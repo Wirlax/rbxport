@@ -295,7 +295,9 @@ fn status_loop(
             // capture began with a master already playing. Zero here.
             let master = shared.lock().players.values().find(|p| p.master).cloned();
             let bpm_x100 = master.as_ref().map_or(0, |p| u16::try_from(p.bpm_x100).unwrap_or(u16::MAX));
-            let packet = Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat }
+            // Idle, rekordbox sends beat 0; with a master it advances 1..4.
+            let sent_beat = if bpm_x100 == 0 { 0 } else { beat };
+            let packet = Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat: sent_beat }
                 .encode();
             beat = if beat >= 4 { 1 } else { beat + 1 };
             if let Err(error) = socket.send_to(&packet, broadcast) {

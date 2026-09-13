@@ -284,3 +284,19 @@ fn the_rekordbox_startup_ladder_matches_the_capture() {
     // 3 first-stage + 6 numbers × 6 counters.
     assert_eq!(rbl_prolink::rekordbox_startup_ladder(mac, ip).len(), 3 + 36);
 }
+
+/// rekordbox's status with nothing loaded (cold-start capture, 2026-09-12):
+/// the master byte is 0x00 and the beat is 0.
+const CAPTURED_REKORDBOX_STATUS_IDLE: &str =
+    "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000c00010000000000000001000000009ff00";
+
+#[test]
+fn the_idle_status_matches_the_capture() {
+    let status = rbl_prolink::Status {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+        bpm_x100: 0,
+        beat: 0,
+    };
+    assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS_IDLE));
+}
