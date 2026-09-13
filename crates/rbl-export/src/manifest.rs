@@ -16,11 +16,6 @@ use serde::{Deserialize, Serialize};
 /// Where the record sits, relative to the root of the stick.
 pub const MANIFEST_PATH: &str = "PIONEER/rbxport/manifest.json";
 
-/// Where the app wrote it before it was called rbxport. Still read, so a
-/// stick exported by an older build is recognised as ours and synced rather
-/// than written again from nothing; the next save moves it.
-pub const OLD_MANIFEST_PATH: &str = "PIONEER/rekordbox-lite/manifest.json";
-
 /// Bumped when a field changes meaning. An older or newer manifest is ignored
 /// rather than guessed at, which costs one full export and never a wrong one.
 pub const MANIFEST_VERSION: u32 = 1;
@@ -85,9 +80,7 @@ impl Manifest {
     /// Every failure — absent, truncated, from another version — reads as "no
     /// record", because the only cost of that is copying more than we had to.
     pub fn load(destination: &Path) -> Option<Self> {
-        let bytes = std::fs::read(Self::path(destination))
-            .or_else(|_| std::fs::read(destination.join(OLD_MANIFEST_PATH)))
-            .ok()?;
+        let bytes = std::fs::read(Self::path(destination)).ok()?;
         let manifest: Self = serde_json::from_slice(&bytes).ok()?;
         (manifest.version == MANIFEST_VERSION).then_some(manifest)
     }
@@ -106,15 +99,6 @@ impl Manifest {
         let temporary = path.with_extension("json.part");
         std::fs::write(&temporary, &bytes)?;
         std::fs::rename(&temporary, &path)?;
-        // The record an older build left is superseded; a stick with two
-        // would have the old one read the next time the new one went missing.
-        let old = destination.join(OLD_MANIFEST_PATH);
-        if old.exists() {
-            let _ = std::fs::remove_file(&old);
-            if let Some(dir) = old.parent() {
-                let _ = std::fs::remove_dir(dir);
-            }
-        }
         Ok(())
     }
 }

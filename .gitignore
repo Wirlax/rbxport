@@ -7,18 +7,18 @@ target/
 # Tauri
 src-tauri/gen/
 
-# IMPORTANT — before this repository goes public, uncomment the line below
-# and remove docs/pre-release/ from the index (`git rm -r --cached
-# docs/pre-release`). It holds Chris's private notes and grounding docs
-# for the pre-release phase — the plan, research appendices, measurements
-# off rekordbox — and is not for publication. It is tracked for now so it
-# survives across machines and worktrees.
-# docs/pre-release/
+# Private research and captured reference material. Never commit these.
+docs/pre-release/
+design/reference/
+docs/screenshots/
+recordings/
+verification/
+CLAUDE.md
+TODO.md
+.claude/worktrees/
 
 # generated / local-only
 design/sketch/dist/
-design/reference/**/*@2x.png
-docs/screenshots/
 fixtures/build/
 test-results/
 playwright-report/
@@ -26,10 +26,3 @@ e2e/**/__screenshots__/**/*-actual.png
 .perf-gate-stamp
 test-results/
 playwright-report/
-
-# Diff recordings contain the user's library
-recordings/*.json
-recordings/*.json.gz
-
-# Integration-check evidence: screenshots of somebody's desktop
-/verification/
