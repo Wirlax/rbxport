@@ -284,6 +284,17 @@ fn status_loop(
     // Status goes where the players listen, which on the link is the same
     // port we listen on.
     let broadcast = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.player_port));
+    // rekordbox sends its STATUS from an EPHEMERAL source port, not from 50002
+    // (measured on the wire: 51839/59681/…, a different one each time). A CDJ
+    // may key its "this is a real rekordbox source" test off that, so status
+    // goes out from an ephemeral socket while `socket` stays bound to 50002 for
+    // receiving and for the unicast replies (which rekordbox does send from
+    // 50002). Falls back to `socket` if the extra bind fails.
+    let sender = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok();
+    if let Some(s) = sender.as_ref() {
+        let _ = s.set_broadcast(true);
+    }
+    let out = sender.as_ref().unwrap_or(socket);
     let mut buffer = [0_u8; DATAGRAM];
     let mut next_send = Instant::now();
     let mut beat: u8 = 1;
@@ -300,7 +311,7 @@ fn status_loop(
             let packet = Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat: sent_beat }
                 .encode();
             beat = if beat >= 4 { 1 } else { beat + 1 };
-            if let Err(error) = socket.send_to(&packet, broadcast) {
+            if let Err(error) = out.send_to(&packet, broadcast) {
                 tracing::debug!(%error, "status not sent");
             }
         }
