@@ -27,6 +27,15 @@ const CAPTURED_CDJ_KEEP_ALIVE: &str =
 /// rekordbox's status beacon while the deck was master at 78.08 BPM.
 const CAPTURED_REKORDBOX_STATUS: &str =
     "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000c00010000080001e80001000000009ff01";
+/// The player's question about rekordbox's library slot, and rekordbox's
+/// answer (38,681 tracks, 627 playlists), then the `46` packet and its
+/// `47` reply, all from the same capture.
+const CAPTURED_MEDIA_QUERY: &str =
+    "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801980000001100000003";
+const CAPTURED_MEDIA_RESPONSE: &str =
+    "5173707431576d4a4f4c0672656b6f7264626f780000000000000000000000010111009c000000110000000300720065006b006f007200640062006f007800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009719000001010000027300000000000000000000000000000000";
+const CAPTURED_HANDSHAKE_REPLY: &str =
+    "5173707431576d4a4f4c4772656b6f7264626f7800000000000000000000000101110024110400001234567800000001010104010101000002000000000000000000000000000000";
 /// The packet rekordbox unicasts to a player that has just connected.
 const CAPTURED_CONNECT_GREETING: &str =
     "5173707431576d4a4f4c1672656b6f7264626f7800000000000000000000000101110000000000000000000000000000";
@@ -229,4 +238,29 @@ fn several_devices_are_tracked_separately() {
 #[test]
 fn an_empty_table_hands_back_the_preferred_number() {
     assert_eq!(DeviceTable::new().free_device_number(REKORDBOX_DEVICE_NUMBER), REKORDBOX_DEVICE_NUMBER);
+}
+
+#[test]
+fn the_media_query_decodes_and_the_response_matches_the_capture() {
+    let query = rbl_prolink::MediaQuery::decode(&hex(CAPTURED_MEDIA_QUERY)).unwrap();
+    assert_eq!(query.name, "CDJ-3000");
+    assert_eq!(query.from, Ipv4Addr::new(192, 168, 1, 152));
+    assert_eq!(query.device_number, REKORDBOX_DEVICE_NUMBER);
+    assert_eq!(query.slot, rbl_prolink::SLOT_REKORDBOX);
+
+    let response = rbl_prolink::MediaResponse {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+        tracks: 38_681,
+        playlists: 627,
+    };
+    assert_eq!(response.encode(), hex(CAPTURED_MEDIA_RESPONSE));
+}
+
+#[test]
+fn the_link_handshake_reply_matches_the_capture() {
+    assert_eq!(
+        rbl_prolink::link_handshake_reply(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER),
+        hex(CAPTURED_HANDSHAKE_REPLY)
+    );
 }

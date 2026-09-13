@@ -182,6 +182,20 @@ pub fn device_name(packet: &[u8]) -> Result<String> {
     Ok(String::from_utf8_lossy(raw.get(..end).unwrap_or(&[])).into_owned())
 }
 
+/// The device name of a status-port packet (50002), where the name follows
+/// the kind byte directly, at `0x0b`.
+pub fn status_device_name(packet: &[u8]) -> Result<String> {
+    if packet.len() < NAME_AT - 1 + NAME_LEN {
+        return Err(PacketError::TooShort(packet.len()));
+    }
+    if packet.get(0..10) != Some(&MAGIC) {
+        return Err(PacketError::BadMagic);
+    }
+    let raw = packet.get(NAME_AT - 1..NAME_AT - 1 + NAME_LEN).unwrap_or(&[]);
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    Ok(String::from_utf8_lossy(raw.get(..end).unwrap_or(&[])).into_owned())
+}
+
 /// The kind byte of any DJ Link packet.
 pub fn packet_kind(packet: &[u8]) -> Result<u8> {
     if packet.len() <= 0x0a {
@@ -311,6 +325,105 @@ pub fn connect_greeting(name: &str, device_number: u8) -> Vec<u8> {
     out.resize(CONNECT_GREETING_LEN, 0);
     out
 }
+
+/// A player's question about one media slot on one device (`kind 05`, 48
+/// bytes, unicast to port 50002): which device, which slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaQuery {
+    pub name: String,
+    /// The asking device's address, which the answer goes back to.
+    pub from: Ipv4Addr,
+    pub device_number: u8,
+    pub slot: u8,
+}
+
+/// Byte length of a media query.
+pub const MEDIA_QUERY_LEN: usize = 0x30;
+/// The slot number a player uses for rekordbox's library.
+pub const SLOT_REKORDBOX: u8 = 0x03;
+
+impl MediaQuery {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < MEDIA_QUERY_LEN {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if kind != 0x05 {
+            return Err(PacketError::WrongKind(kind));
+        }
+        let at = |i: usize| packet.get(i).copied().unwrap_or(0);
+        Ok(Self {
+            name: status_device_name(packet)?,
+            from: Ipv4Addr::new(at(0x24), at(0x25), at(0x26), at(0x27)),
+            device_number: at(0x2b),
+            slot: at(0x2f),
+        })
+    }
+}
+
+/// rekordbox's answer to a media query about its library (`kind 06`, 192
+/// bytes, unicast back to the player's port 50002; measured 2026-09-12): the
+/// name again in UTF-16BE, the track and playlist counts, and the fixed
+/// bytes that say the tracks are rekordbox-analysed and there are settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaResponse {
+    pub name: String,
+    pub device_number: u8,
+    pub tracks: u16,
+    pub playlists: u16,
+}
+
+/// Byte length of a media response.
+pub const MEDIA_RESPONSE_LEN: usize = 0xc0;
+
+impl MediaResponse {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(MEDIA_RESPONSE_LEN);
+        write_status_header(&mut out, 0x06, &self.name);
+        out.extend_from_slice(&[0x01, 0x01, self.device_number]);
+        out.extend_from_slice(&u16::try_from(MEDIA_RESPONSE_LEN - 0x24).unwrap_or(0).to_be_bytes());
+        out.extend_from_slice(&u32::from(self.device_number).to_be_bytes());
+        out.extend_from_slice(&u32::from(SLOT_REKORDBOX).to_be_bytes());
+        // The name as the player shows it, UTF-16BE in a 64-byte field.
+        let mut utf16: Vec<u8> = self.name.encode_utf16().take(31).flat_map(u16::to_be_bytes).collect();
+        utf16.resize(0x40, 0);
+        out.extend_from_slice(&utf16);
+        // Creation date and the rest: zero for rekordbox.
+        out.resize(0xa6, 0);
+        out.extend_from_slice(&self.tracks.to_be_bytes());
+        // Colour none; tracks are rekordbox's; settings present.
+        out.extend_from_slice(&[0x00, 0x00, 0x01, 0x01, 0x00, 0x00]);
+        out.extend_from_slice(&self.playlists.to_be_bytes());
+        out.resize(MEDIA_RESPONSE_LEN, 0);
+        debug_assert_eq!(out.len(), MEDIA_RESPONSE_LEN);
+        out
+    }
+}
+
+/// The kind of the 48-byte packet a player unicasts to port 50002 right
+/// after the media response, whose meaning is unknown; rekordbox answers
+/// it with [`link_handshake_reply`].
+pub const LINK_HANDSHAKE_KIND: u8 = 0x46;
+
+/// Byte length of the handshake reply.
+pub const LINK_HANDSHAKE_REPLY_LEN: usize = 0x48;
+
+/// rekordbox's reply to a `46` packet (`kind 47`, 72 bytes, unicast;
+/// measured once, 2026-09-12). Every byte after the device number is copied
+/// from the capture, meaning unknown.
+pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(LINK_HANDSHAKE_REPLY_LEN);
+    write_status_header(&mut out, 0x47, name);
+    out.extend_from_slice(&[0x01, 0x01, device_number, 0x00, 0x24, device_number, 0x04, 0x00, 0x00]);
+    out.extend_from_slice(&[0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x01]);
+    out.extend_from_slice(&[0x01, 0x01, 0x04, 0x01, 0x01, 0x01, 0x00, 0x00, 0x02]);
+    out.resize(LINK_HANDSHAKE_REPLY_LEN, 0);
+    debug_assert_eq!(out.len(), LINK_HANDSHAKE_REPLY_LEN);
+    out
+}
+
+/// The kind of a player's status packet on port 50002.
+pub const PLAYER_STATUS_KIND: u8 = 0x0a;
 
 /// A device-number claim, sent three times in each of three stages at startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
