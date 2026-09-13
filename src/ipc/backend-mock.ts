@@ -11,7 +11,7 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, Limiter, RowDto, SortKey, Tick, TrackDetails, TrackField,
+  FilterValues, LibrarySummary, Limiter, LinkStatus, RowDto, SortKey, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -822,6 +822,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const wait = <T>(value: T): Promise<T> =>
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
+  /** LINK in a browser: off, with nothing to run it on. */
+  const linkOff = (): LinkStatus => ({ on: false, problem: null, interface: null, players: [], interfaces: [] });
+
   return {
     librarySummary: () =>
       ready
@@ -1313,16 +1316,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       };
     },
 
-    // No network in a browser, so there is nothing to listen to. Saying why
-    // is better than a panel that silently shows nothing.
-    startLinkListening: () =>
+    // No network in a browser, so LINK cannot turn on. Saying why is better
+    // than a switch that silently does nothing.
+    linkStatus: () => wait(linkOff()),
+    startLinkExport: () =>
       wait({
-        listening: false,
-        problem: "Link needs the desktop application; a browser has no access to the network.",
-        peers: [],
+        ...linkOff(),
+        problem: "LINK needs the desktop application; a browser has no access to the network.",
       }),
-    stopLinkListening: () => wait(undefined),
-    onLinkPeers: () => () => undefined,
+    stopLinkExport: () => wait(linkOff()),
+    onLinkStatus: () => () => undefined,
 
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.

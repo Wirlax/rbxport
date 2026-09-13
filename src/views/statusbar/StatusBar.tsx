@@ -21,6 +21,8 @@ export interface StatusBarProps {
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
   analysisFailures?: number;
+  /** Present while LINK is on: how many players are on the network. */
+  link?: { players: number } | null;
 }
 
 export function StatusBar({
@@ -31,6 +33,7 @@ export function StatusBar({
   protectedLibrary = false,
   onCancelAnalysis,
   analysisFailures = 0,
+  link = null,
 }: StatusBarProps) {
   const tip = useTooltip();
   return (
@@ -39,6 +42,15 @@ export function StatusBar({
       {readOnly ? (
         <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
           Read-only
+        </span>
+      ) : null}
+      {link ? (
+        <span
+          className={styles.link}
+          data-testid="link-on"
+          title={tip("PRO DJ LINK is on: players on the network can browse and play this library")}
+        >
+          LINK · {link.players === 1 ? "1 player" : `${link.players} players`}
         </span>
       ) : null}
       {/*

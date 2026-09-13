@@ -361,8 +361,9 @@ pub fn run() {
             commands::analyse_track,
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.
-            commands::start_link_listening,
-            commands::stop_link_listening,
+            commands::link_status,
+            commands::start_link_export,
+            commands::stop_link_export,
             commands::export_playlist,
             commands::list_devices,
             commands::track_beats,

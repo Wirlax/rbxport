@@ -1180,7 +1180,7 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
   await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 15_000 });
 });
 
-test("settings can look for link devices, and says why a browser cannot", async ({ page }) => {
+test("settings has the LINK switch, and says why a browser cannot turn it on", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Preferences" });
@@ -1188,11 +1188,13 @@ test("settings can look for link devices, and says why a browser cannot", async 
   await dialog.getByRole("tab", { name: "Others" }).click();
 
   const section = page.getByRole("region", { name: "Link" });
-  // Honest about listening only, rather than implying it appears as a source.
-  await expect(section).toContainText("Nothing is sent");
+  // Off, and honest about what on would do.
+  await expect(section).toContainText("Off.");
+  await expect(page.getByTestId("link-on")).toHaveCount(0);
 
-  await section.getByRole("button", { name: /look for devices/i }).click();
+  await section.getByRole("button", { name: "Turn LINK on" }).click();
   await expect(section).toContainText("browser has no access to the network");
+  await expect(section.getByRole("button", { name: "Turn LINK on" })).toBeVisible();
 });
 
 test("the detail waveform shows a window, not the whole track again", async ({ page }) => {

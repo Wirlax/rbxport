@@ -10,13 +10,13 @@
  * Not here: the account nickname (no account), the background colour (its
  * choices have not been seen), the jog image (not written), My Settings
  * (`MYSETTING.DAT` is not written), and the Device tab (history import is
- * not built). Others holds our PRO DJ LINK listener in place of rekordbox's
+ * not built). Others holds the PRO DJ LINK switch in place of rekordbox's
  * mixer settings.
  */
 import { useEffect, useMemo, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { LinkPeer, LinkStatus, MenuSlot } from "@/ipc/types";
+import type { LinkStatus, MenuSlot } from "@/ipc/types";
 import { displayName, isFixed } from "@/lib/deviceSettings";
 import { usePreferencesContext } from "@/store/usePreferences";
 import { ListPairTab } from "@/views/devices/ListPairTab";
@@ -183,69 +183,107 @@ function ColumnSection({ sorts, subColumn, onChange }: {
   );
 }
 
-/** Our PRO DJ LINK listener: who is on the network. Listening only. */
+/**
+ * PRO DJ LINK: the LINK switch, the interface it runs on, and the players
+ * on the network with what each has loaded from us.
+ *
+ * Status arrives by event as it changes and is read once on open; the
+ * session itself outlives the pane, as LINK does — a source that vanished
+ * when Preferences closed would be no source at all.
+ */
 function LinkSection() {
   const [link, setLink] = useState<LinkStatus | null>(null);
-  const [peers, setPeers] = useState<LinkPeer[]>([]);
+  const [iface, setIface] = useState<string>("");
+  const [busy, setBusy] = useState(false);
 
-  // Only while the pane is open: a listener outliving it would keep a
-  // socket and a thread for nothing.
   useEffect(() => {
+    let live = true;
     let stop: (() => void) | undefined;
     void (async () => {
       const backend = await getBackend();
-      stop = backend.onLinkPeers(setPeers);
+      if (!live) return;
+      stop = backend.onLinkStatus((status) => {
+        if (live) setLink(status);
+      });
+      const status = await backend.linkStatus();
+      if (live) setLink(status);
     })();
     return () => {
+      live = false;
       stop?.();
-      void (async () => {
-        const backend = await getBackend();
-        await backend.stopLinkListening();
-      })();
     };
   }, []);
 
+  const interfaces = link?.interfaces ?? [];
+  const chosen = iface !== "" && interfaces.some((i) => i.name === iface)
+    ? iface
+    : (interfaces[0]?.name ?? "");
+
+  const toggle = () => {
+    setBusy(true);
+    void (async () => {
+      const backend = await getBackend();
+      try {
+        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(chosen || undefined));
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
   return (
     <Section title="PRO DJ LINK" label="Link">
-      {link === null ? (
+      <div className={styles.actions}>
+        <Button onClick={toggle} disabled={busy || link === null}>
+          {link?.on ? "Turn LINK off" : "Turn LINK on"}
+        </Button>
+        {link?.on ? null : (
+          <Select
+            label="Network interface"
+            plain
+            value={chosen}
+            disabled={interfaces.length === 0}
+            choices={interfaces.map((i) => ({ value: i.name, label: `${i.name} — ${i.address}` }))}
+            onChange={setIface}
+          />
+        )}
+      </div>
+      {link === null ? null : link.on ? (
         <>
-          <div className={styles.actions}>
-            <Button
-              onClick={() => {
-                void (async () => {
-                  const backend = await getBackend();
-                  setLink(await backend.startLinkListening());
-                })();
-              }}
-            >
-              Look for devices
-            </Button>
-          </div>
           <Note>
-            Listens for players and mixers announcing themselves. Nothing is
-            sent — appearing as a source needs the database server, which is
-            not built.
+            On as <b>rekordbox</b>
+            {link.interface ? ` on ${link.interface.name} (${link.interface.address})` : ""}.
+            Players list the library under LINK.
           </Note>
+          {link.players.length === 0 ? (
+            <Note>No players have announced themselves yet.</Note>
+          ) : (
+            <ul className={styles.list} aria-label="Players on the link">
+              {link.players.map((player) => (
+                <li key={player.number}>
+                  <span className={styles.listTitle}>
+                    {player.name} — {player.kind} {player.number}
+                    {player.master ? " · MASTER" : ""}
+                  </span>
+                  <span className={styles.listPath}>
+                    {player.loaded
+                      ? `${player.playing ? "Playing" : "Loaded"}: ${player.loaded.title}` +
+                        (player.loaded.artist ? ` — ${player.loaded.artist}` : "")
+                      : `Nothing of ours loaded · ${player.address}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </>
-      ) : link.listening ? (
-        peers.length === 0 ? (
-          <Note>Listening. No devices have announced themselves yet.</Note>
-        ) : (
-          <ul className={styles.list}>
-            {peers.map((peer) => (
-              <li key={peer.deviceNumber}>
-                <span className={styles.listTitle}>
-                  {peer.name} — device {peer.deviceNumber}
-                </span>
-                <span className={styles.listPath}>
-                  {peer.kind} at {peer.address}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )
+      ) : link.problem ? (
+        <Note failed>{link.problem}</Note>
       ) : (
-        <Note>{link.problem}</Note>
+        <Note>
+          Off. On, the library is served to every player on the chosen
+          network the way rekordbox serves it — browsing, waveforms, cues and
+          the audio itself. Nothing is written to the library.
+        </Note>
       )}
     </Section>
   );

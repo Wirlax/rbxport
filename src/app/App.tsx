@@ -51,7 +51,7 @@ import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { FilterValues } from "@/ipc/types";
+import type { FilterValues, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 
 function useClock(): string {
@@ -398,6 +398,28 @@ export function App() {
     // `restored` is read once and never changes, but the rule cannot know that
     // and the id is genuinely read here.
   }, [restored.selectedNodeId]);
+
+  // LINK, for the status bar: on or off and how many players are on it.
+  // Read once and then by event, so the strip follows Preferences' switch
+  // without owning it.
+  const [link, setLink] = useState<LinkStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onLinkStatus((status) => {
+        if (live) setLink(status);
+      });
+      const status = await backend.linkStatus();
+      if (live) setLink(status);
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
 
   // The master player's BPM for the filter's `MASTER PLAYER ±` list: the
   // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not
@@ -1288,6 +1310,7 @@ export function App() {
         selection={selectionText}
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}
+        link={link?.on ? { players: link.players.length } : null}
       />
     </div>
     </PreferencesProvider>

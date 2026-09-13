@@ -8,7 +8,7 @@ import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
-  LibrarySummary, LinkPeer, Meters,
+  LibrarySummary, Meters,
   LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
@@ -166,21 +166,10 @@ async function realBackend(): Promise<Backend> {
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
     onMenu: (listener) => subscribe<string>("menu", listener),
-    startLinkListening: () => invoke<LinkStatus>("start_link_listening"),
-    stopLinkListening: () => invoke<void>("stop_link_listening"),
-    onLinkPeers: (listener) => {
-      let live = true;
-      let stop: (() => void) | undefined;
-      void import("@tauri-apps/api/event").then(async ({ listen }) => {
-        const unlisten = await listen<LinkPeer[]>("link:peers", (e) => listener(e.payload));
-        if (live) stop = unlisten;
-        else unlisten();
-      });
-      return () => {
-        live = false;
-        stop?.();
-      };
-    },
+    linkStatus: () => invoke<LinkStatus>("link_status"),
+    startLinkExport: (iface) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null }),
+    stopLinkExport: () => invoke<LinkStatus>("stop_link_export"),
+    onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
     relocateTrack: async (trackId) => {
       const { open } = await import("@tauri-apps/plugin-dialog");

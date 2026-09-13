@@ -283,15 +283,17 @@ export interface Backend {
    */
   onMenu(listener: (id: string) => void): () => void;
 
+  /** LINK as it stands: on or off, on what, and who is listening. */
+  linkStatus(): Promise<LinkStatus>;
   /**
-   * Listens for devices on the link network. Listen-only — nothing is
-   * transmitted, because announcing as a source needs the database server's
-   * menus, which are not built.
+   * Turns LINK on: the app announces itself as `rekordbox` on the named
+   * interface (the first one when none is given) and serves the library to
+   * every player that asks. Refused, with the reason, while rekordbox runs.
    */
-  startLinkListening(): Promise<LinkStatus>;
-  stopLinkListening(): Promise<void>;
-  /** Called as the set of devices on the network changes. */
-  onLinkPeers(listener: (peers: LinkPeer[]) => void): () => void;
+  startLinkExport(iface?: string): Promise<LinkStatus>;
+  stopLinkExport(): Promise<LinkStatus>;
+  /** Called as LINK turns on or off and as the players change. */
+  onLinkStatus(listener: (status: LinkStatus) => void): () => void;
 
   /**
    * The decks.
@@ -717,20 +719,34 @@ export interface Beat {
   downbeat: boolean;
 }
 
-/** A device heard on the Pro DJ Link network. */
-export interface LinkPeer {
+/** A network interface LINK can run on. */
+export interface LinkInterface {
+  /** The OS name: `en0`, `Ethernet 2`. */
   name: string;
-  deviceNumber: number;
+  address: string;
+}
+
+/** A player on the link, and what it has loaded from us. */
+export interface LinkPlayer {
+  number: number;
+  name: string;
+  /** `player`, `mixer`, `rekordbox` or `device`. */
   kind: string;
   address: string;
-  lastSeenMs: number;
+  loaded: { id: string; title: string; artist: string } | null;
+  playing: boolean;
+  master: boolean;
 }
 
 export interface LinkStatus {
-  listening: boolean;
-  /** Why not, when it is not. */
+  on: boolean;
+  /** Why it could not be turned on, when it could not. */
   problem: string | null;
-  peers: LinkPeer[];
+  /** What it runs on, while on. */
+  interface: LinkInterface | null;
+  players: LinkPlayer[];
+  /** What it could run on, for the picker. */
+  interfaces: LinkInterface[];
 }
 
 /** What analysing one track found. */

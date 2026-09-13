@@ -1,136 +1,225 @@
-//! Listening for devices on a Pro DJ Link network.
+//! Link export in the app: LINK on and off, and what the players are doing.
 //!
-//! Listen-only. Every player and mixer announces itself on UDP 50000 every
-//! 1.5 seconds, so a socket bound there sees the whole network without saying
-//! anything. **Nothing is transmitted**: announcing ourselves as a source is
-//! the part that needs the database server's menus, which are not built, and a
-//! device that announces and then cannot answer is worse than one that stays
-//! quiet.
+//! `rbl-link` owns the protocol; this is the glue — the library it reads is
+//! the app's, reloaded or not, through a weak handle to the state, and the
+//! players it hears are reported to the window as an event whenever they
+//! change, no more than twice a second.
 //!
-//! The port is shared with rekordbox, which holds it whenever it is running,
-//! so binding is expected to fail sometimes and says so rather than retrying.
+//! LINK is refused while rekordbox runs: it holds every port a player looks
+//! for, and two sources called `rekordbox` on one network would be worse
+//! than one that says why it stays off.
 
-use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
-use rbl_prolink::{DeviceTable, KeepAlive, PORT_ANNOUNCE};
+use rbl_link::{Interface, LinkExport, Ports, Snapshot, Source};
 use serde::Serialize;
 
-/// How long a read blocks before the thread checks whether it should stop.
-const POLL: Duration = Duration::from_millis(250);
+use crate::state::AppState;
 
-/// Peers are reported no more often than this, however chatty the network is:
-/// six devices announcing at 1.5 s each is four events a second otherwise.
+/// How often the players are looked at for a change worth reporting.
 const REPORT_EVERY: Duration = Duration::from_millis(500);
 
-/// A device on the network, as the interface shows it.
-#[derive(Debug, Clone, Serialize)]
+/// A network interface LINK can run on, as the interface offers it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PeerDto {
+pub struct InterfaceDto {
     pub name: String,
-    pub device_number: u8,
+    pub address: String,
+}
+
+impl From<&Interface> for InterfaceDto {
+    fn from(interface: &Interface) -> Self {
+        Self { name: interface.name.clone(), address: interface.address.to_string() }
+    }
+}
+
+/// A track a player has loaded from us, named for the window.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedDto {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+}
+
+/// A player on the link, as the window shows it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerDto {
+    pub number: u8,
+    pub name: String,
     pub kind: String,
     pub address: String,
-    pub last_seen_ms: u64,
+    pub loaded: Option<LoadedDto>,
+    pub playing: bool,
+    pub master: bool,
 }
 
-/// Whether the network can be listened to, and who is on it.
-#[derive(Debug, Clone, Serialize)]
+/// Whether LINK is on, on what, and who is listening.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkStatusDto {
-    pub listening: bool,
-    /// Why not, when it is not.
+    pub on: bool,
+    /// Why it could not be turned on, when it could not.
     pub problem: Option<String>,
-    pub peers: Vec<PeerDto>,
+    pub interface: Option<InterfaceDto>,
+    pub players: Vec<PlayerDto>,
+    /// What LINK could run on, for the picker.
+    pub interfaces: Vec<InterfaceDto>,
 }
 
-/// A running listener.
-#[derive(Debug)]
-pub struct Listener {
+impl LinkStatusDto {
+    pub fn off(problem: Option<String>) -> Self {
+        Self { on: false, problem, interface: None, players: Vec::new(), interfaces: interfaces() }
+    }
+}
+
+/// The interfaces on offer, as the window lists them.
+pub fn interfaces() -> Vec<InterfaceDto> {
+    rbl_link::interfaces().iter().map(InterfaceDto::from).collect()
+}
+
+/// The app's library, as the link reads it. Weak so the state does not own
+/// a session that owns the state.
+struct StateSource(Weak<AppState>);
+
+impl Source for StateSource {
+    fn library(&self) -> Option<Arc<rbl_index::Library>> {
+        self.0.upgrade()?.library().ok()
+    }
+
+    fn share_root(&self) -> std::path::PathBuf {
+        self.0.upgrade().map(|state| state.share_root()).unwrap_or_default()
+    }
+
+    fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
+        let state = self.0.upgrade()?;
+        state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
+    }
+}
+
+/// A running LINK session: the export, and the thread that reports it.
+pub struct Session {
+    export: Option<LinkExport>,
     stop: Arc<AtomicBool>,
+    reporter: Option<std::thread::JoinHandle<()>>,
 }
 
-impl Listener {
-    /// Binds the announce port and reports peers until stopped.
+impl Session {
+    /// Turns LINK on for `interface`, or the first interface when none is
+    /// named, and reports the players to `report` as they change.
     ///
-    /// Binds to all interfaces: a link network is usually a second adapter,
-    /// and guessing which would mean guessing the user's setup.
-    pub fn start<F>(mut report: F) -> std::io::Result<Self>
+    /// Blocking: binds seven sockets and walks every track's path.
+    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, report: F) -> Result<Self, String>
     where
-        F: FnMut(Vec<PeerDto>) + Send + 'static,
+        F: Fn(LinkStatusDto) + Send + 'static,
     {
-        let socket = UdpSocket::bind(("0.0.0.0", PORT_ANNOUNCE))?;
-        socket.set_read_timeout(Some(POLL))?;
-        // Players announce to the broadcast address, so the socket has to
-        // accept broadcast traffic to see them at all.
-        socket.set_broadcast(true)?;
+        let available = rbl_link::interfaces();
+        let chosen = match interface {
+            Some(name) => available.iter().find(|i| i.name == name).cloned(),
+            None => available.first().cloned(),
+        }
+        .ok_or_else(|| match interface {
+            Some(name) => format!("No network interface called {name}."),
+            None => "No network interface to run LINK on.".to_owned(),
+        })?;
+
+        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state)));
+        let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
 
         let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        std::thread::spawn(move || {
-            let mut table = DeviceTable::new();
-            let started = Instant::now();
-            let mut last_report = Instant::now();
-            let mut buffer = [0_u8; 512];
-
-            while !thread_stop.load(Ordering::Relaxed) {
-                let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                if let Ok((len, _from)) = socket.recv_from(&mut buffer) {
-                    if let Ok(keep_alive) =
-                        KeepAlive::decode(buffer.get(..len).unwrap_or(&[]))
-                    {
-                        table.observe(&keep_alive, now_ms);
+        let weak = Arc::downgrade(state);
+        let reporter = {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut last: Option<Vec<PlayerDto>> = None;
+                while !stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(REPORT_EVERY);
+                    let Some(state) = weak.upgrade() else { return };
+                    let Some(status) = state.link_status() else { return };
+                    if last.as_ref() != Some(&status.players) {
+                        last = Some(status.players.clone());
+                        report(status);
                     }
                 }
-                // Expiring on every pass, not only on a packet: a device that
-                // goes quiet has to disappear from the list.
-                table.expire(now_ms);
-
-                if last_report.elapsed() >= REPORT_EVERY {
-                    last_report = Instant::now();
-                    report(
-                        table
-                            .peers()
-                            .iter()
-                            .map(|peer| PeerDto {
-                                name: peer.name.clone(),
-                                device_number: peer.device_number,
-                                kind: format!("{:?}", peer.device_type),
-                                address: peer.ip.to_string(),
-                                last_seen_ms: now_ms.saturating_sub(peer.last_seen_ms),
-                            })
-                            .collect(),
-                    );
-                }
-            }
-        });
-
-        Ok(Self { stop })
+            })
+        };
+        Ok(Self { export: Some(export), stop, reporter: Some(reporter) })
     }
 
-    pub fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-}
-
-impl Drop for Listener {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-/// Why the announce port could not be bound, in words worth showing.
-pub fn explain(error: &std::io::Error) -> String {
-    match error.kind() {
-        std::io::ErrorKind::AddrInUse => format!(
-            "Something already has UDP {PORT_ANNOUNCE} — usually rekordbox itself. \
-             Quit it to listen."
-        ),
-        std::io::ErrorKind::PermissionDenied => {
-            format!("Not allowed to bind UDP {PORT_ANNOUNCE}.")
+    /// The session as the window shows it, with the loaded tracks named
+    /// from `library`. The library is an argument rather than read from the
+    /// state here: the caller holds the state's lock already.
+    pub fn status(&self, library: Option<&rbl_index::Library>) -> LinkStatusDto {
+        let Some(export) = &self.export else {
+            return LinkStatusDto::off(None);
+        };
+        let snapshot = export.snapshot();
+        LinkStatusDto {
+            on: true,
+            problem: None,
+            interface: Some(InterfaceDto::from(&snapshot.interface)),
+            players: players(library, &snapshot),
+            interfaces: interfaces(),
         }
-        _ => format!("Could not listen on UDP {PORT_ANNOUNCE}: {error}"),
     }
+
+    /// After an analysis run: the players get fresh files.
+    pub fn analysis_changed(&self) {
+        if let Some(export) = &self.export {
+            export.analysis_changed();
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(export) = self.export.take() {
+            export.stop();
+        }
+        if let Some(reporter) = self.reporter.take() {
+            drop(reporter.join());
+        }
+    }
+}
+
+/// The players with their loaded tracks named from the library.
+fn players(library: Option<&rbl_index::Library>, snapshot: &Snapshot) -> Vec<PlayerDto> {
+    snapshot
+        .players
+        .iter()
+        .map(|player| PlayerDto {
+            number: player.number,
+            name: player.name.clone(),
+            kind: match player.kind {
+                rbl_link::DeviceType::Cdj => "player",
+                rbl_link::DeviceType::Mixer => "mixer",
+                rbl_link::DeviceType::Rekordbox => "rekordbox",
+                rbl_link::DeviceType::Other(_) => "device",
+            }
+            .to_owned(),
+            address: player.address.to_string(),
+            loaded: player.loaded.map(|id| {
+                let row = library.and_then(|l| l.row_of_id(u64::from(id)));
+                LoadedDto {
+                    id: id.to_string(),
+                    title: row.zip(library).map(|(r, l)| l.title.get(r as usize).to_owned()).unwrap_or_default(),
+                    artist: row.zip(library).map(|(r, l)| l.artist_name(r).to_owned()).unwrap_or_default(),
+                }
+            }),
+            playing: player.playing,
+            master: player.master,
+        })
+        .collect()
+}
+
+/// Why LINK cannot start now, if it cannot: rekordbox holds the ports.
+pub fn refusal() -> Option<String> {
+    if rbl_db::is_rekordbox_running() {
+        return Some("rekordbox is running and holds the link ports. Quit it to turn LINK on.".to_owned());
+    }
+    None
 }

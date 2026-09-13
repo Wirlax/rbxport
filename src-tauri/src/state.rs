@@ -53,8 +53,8 @@ struct Inner {
     next_view_id: u32,
     /// Bumped when the library is reloaded; invalidates cached pages.
     generation: u32,
-    /// The Pro DJ Link listener, while one is running.
-    link: Option<crate::link::Listener>,
+    /// The LINK session, while one is running.
+    link: Option<crate::link::Session>,
 }
 
 impl Default for AppState {
@@ -182,6 +182,11 @@ impl AppState {
         inner.folders.clear();
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
+        // A reload follows every write, including a new analysis: the
+        // players must not be served what was parsed before it.
+        if let Some(session) = inner.link.as_ref() {
+            session.analysis_changed();
+        }
     }
 
     /// Drops every open view and bumps the generation.
@@ -195,18 +200,33 @@ impl AppState {
         inner.folders.clear();
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
+        // A reload follows every write, including a new analysis: the
+        // players must not be served what was parsed before it.
+        if let Some(session) = inner.link.as_ref() {
+            session.analysis_changed();
+        }
         inner.generation
     }
 
-    /// Starts or replaces the link listener. Returns the previous one, if any,
-    /// so the caller can drop it outside the lock.
-    pub fn set_link(&self, listener: Option<crate::link::Listener>) -> Option<crate::link::Listener> {
-        std::mem::replace(&mut self.inner.write().link, listener)
+    /// Starts or replaces the LINK session. Returns the previous one, if
+    /// any, so the caller can drop it — which unbinds its ports and joins
+    /// its threads — outside the lock.
+    pub fn set_link(&self, session: Option<crate::link::Session>) -> Option<crate::link::Session> {
+        std::mem::replace(&mut self.inner.write().link, session)
     }
 
     pub fn link_running(&self) -> bool {
         self.inner.read().link.is_some()
     }
+
+    /// The LINK session as the window shows it, or `None` when LINK is off.
+    pub fn link_status(&self) -> Option<crate::link::LinkStatusDto> {
+        // One read lock at a time: a second, nested read would wait behind a
+        // writer queued between them and never get it.
+        let library = self.library().ok();
+        self.inner.read().link.as_ref().map(|session| session.status(library.as_deref()))
+    }
+
 
     pub fn library(&self) -> AppResult<Arc<Library>> {
         self.inner

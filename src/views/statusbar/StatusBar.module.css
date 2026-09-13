@@ -21,6 +21,15 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-xs);
 }
+/* LINK on, drawn as the read-only pill is: a state of the library, said once. */
+.link {
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--c-raised);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-xs);
+  white-space: nowrap;
+}
 /* Failures, in the one place the eye already goes for what the app is doing. */
 .error { color: var(--c-error); }
 

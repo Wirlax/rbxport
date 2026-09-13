@@ -533,40 +533,67 @@ pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: A
     Ok(generation)
 }
 
-/// Starts listening for devices on the link network.
-///
-/// Listen-only: nothing is transmitted. Announcing ourselves as a source needs
-/// the database server's menus, which are not built, and a device that
-/// announces and then cannot answer is worse than one that stays quiet.
+/// LINK as it stands: on or off, on which interface, and who is listening.
 #[tauri::command]
-pub async fn start_link_listening<R: tauri::Runtime>(
+pub async fn link_status(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatusDto> {
+    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(None)))
+}
+
+/// Turns LINK on: announces as `rekordbox` on `interface` (the first one
+/// when none is named) and serves the library to every player that asks.
+///
+/// Refused while rekordbox runs — it holds the ports. Starting binds seven
+/// sockets and walks every track's path, so it runs off the async thread.
+#[tauri::command]
+pub async fn start_link_export<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
+    interface: Option<String>,
 ) -> AppResult<LinkStatusDto> {
-    if state.link_running() {
-        return Ok(LinkStatusDto { listening: true, problem: None, peers: Vec::new() });
+    if let Some(status) = state.link_status() {
+        return Ok(status);
     }
+    if let Some(problem) = crate::link::refusal() {
+        return Ok(LinkStatusDto::off(Some(problem)));
+    }
+    let owner = Arc::clone(&state);
     let emitter = app.clone();
-    match crate::link::Listener::start(move |peers| {
-        let _ = tauri::Emitter::emit(&emitter, "link:peers", peers);
-    }) {
-        Ok(listener) => {
-            drop(state.set_link(Some(listener)));
-            Ok(LinkStatusDto { listening: true, problem: None, peers: Vec::new() })
+    let started = blocking("start_link_export", move || {
+        Ok(crate::link::Session::start(&owner, interface.as_deref(), move |status| {
+            let _ = tauri::Emitter::emit(&emitter, "link:status", status);
+        }))
+    })
+    .await?;
+    match started {
+        Ok(session) => {
+            let status = session.status(state.library().ok().as_deref());
+            // A session started twice at once: the second is dropped
+            // outside the lock, which unbinds it.
+            drop(state.set_link(Some(session)));
+            let _ = tauri::Emitter::emit(&app, "link:status", status.clone());
+            Ok(status)
         }
-        Err(e) => Ok(LinkStatusDto {
-            listening: false,
-            problem: Some(crate::link::explain(&e)),
-            peers: Vec::new(),
-        }),
+        Err(problem) => Ok(LinkStatusDto::off(Some(problem))),
     }
 }
 
+/// Turns LINK off: the players lose the source.
 #[tauri::command]
-pub async fn stop_link_listening(state: State<'_, Arc<AppState>>) -> AppResult<()> {
-    // Dropped outside the lock: the listener's Drop stops its thread.
-    drop(state.set_link(None));
-    Ok(())
+pub async fn stop_link_export<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<LinkStatusDto> {
+    // Dropped outside the lock, and off the async thread: stopping joins
+    // the servers' threads.
+    let session = state.set_link(None);
+    blocking("stop_link_export", move || {
+        drop(session);
+        Ok(())
+    })
+    .await?;
+    let status = LinkStatusDto::off(None);
+    let _ = tauri::Emitter::emit(&app, "link:status", status.clone());
+    Ok(status)
 }
 
 /// Writes a playlist to a stick.
