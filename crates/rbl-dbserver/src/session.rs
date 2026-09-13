@@ -393,12 +393,24 @@ impl Session for LinkSession {
     }
 }
 
-/// The number of cues an extended cue list holds: its first u32,
-/// little-endian, per the layout the catalog builds.
+/// The number of cues an extended cue list holds, which the reply repeats as
+/// its trailing argument. The blob is the entries concatenated with no count
+/// header, each led by its own byte length as a little-endian u32, so the
+/// count is recovered by walking them — the way rekordbox's own count matches
+/// its blob. Reading a fixed offset instead gave a CDJ a nonsense count (the
+/// first entry's own fields) and it faulted allocating for that many cues.
 fn extended_cue_count(blob: &[u8]) -> u32 {
-    blob.get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map_or(0, u32::from_le_bytes)
+    let mut offset = 0;
+    let mut count = 0;
+    while let [a, b, c, d] = blob.get(offset..offset + 4).unwrap_or(&[]) {
+        let entry_len = u32::from_le_bytes([*a, *b, *c, *d]) as usize;
+        if entry_len < 4 {
+            break;
+        }
+        offset += entry_len;
+        count += 1;
+    }
+    count
 }
 
 /// The sixteen rows of a metadata reply, one per column, in rekordbox's order.

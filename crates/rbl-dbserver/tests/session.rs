@@ -318,3 +318,41 @@ fn tracks_are_sorted_the_way_the_player_asked() {
     s.handle(&Message::new(3, kind::SEARCH, vec![Argument::Number(CTX), Argument::Number(0), Argument::Number(8), Argument::String("ACID".into()), Argument::Number(0)]));
     assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Search("ACID".into()), sort: Sort::Default }));
 }
+
+#[test]
+fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
+    // The 2b04 blob is entries concatenated, each led by its own little-endian
+    // byte length; the reply's trailing argument is how many there are. A CDJ
+    // reads that count to size its cue table, so it must be the entry count,
+    // not the word at a fixed offset — which is a cue's own fields (here a
+    // deceptively large 0xffff) and once made a deck fault on 65 535 cues.
+    struct Cued;
+    impl Catalog for Cued {
+        fn list(&self, _: &Query) -> Vec<Row> { Vec::new() }
+        fn track_row(&self, _: u32) -> Option<TrackRow> { None }
+        fn track(&self, _: u32) -> Option<TrackDetails> { None }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, what: &Analysis) -> Option<Vec<u8>> {
+            match what {
+                Analysis::ExtendedCueList => {
+                    // Three 16-byte entries. Byte 4 of the first is 0xffff, the
+                    // value the old code mistook for the count.
+                    let mut blob = Vec::new();
+                    for _ in 0..3 {
+                        let mut e = vec![0_u8; 16];
+                        e[0..4].copy_from_slice(&16_u32.to_le_bytes());
+                        e[4..6].copy_from_slice(&0xffff_u16.to_le_bytes());
+                        blob.extend_from_slice(&e);
+                    }
+                    Some(blob)
+                }
+                _ => None,
+            }
+        }
+    }
+    let handler = CatalogHandler::new(Arc::new(Cued));
+    let mut s = handler.open();
+    s.handle(&setup_request(1));
+    let reply = s.handle(&numbers(kind::EXTENDED_CUES, 0x1c0, &[0x0108_0301, TRACK, 0]));
+    assert_eq!(args(&reply[0]), "0x2b04, 0x0, 0x30, blob[48], 0x3");
+}
