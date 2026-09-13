@@ -49,6 +49,13 @@ describe("actionFor", () => {
     expect(actionFor({ key: "ArrowUp", ctrlKey: true }, WIN)).toBe("toTop");
   });
 
+  it("loads Player 1 on plain Enter, but leaves modified Enter alone", () => {
+    expect(actionFor({ key: "Enter" }, MAC)).toBe("loadPlayer1");
+    expect(actionFor({ key: "Enter", shiftKey: true }, MAC)).toBe("loadPlayer1");
+    expect(actionFor({ key: "Enter", metaKey: true }, MAC)).toBeNull();
+    expect(actionFor({ key: "Enter", ctrlKey: true }, WIN)).toBeNull();
+  });
+
   it("returns null for anything it does not claim", () => {
     // A claimed-but-unhandled key would be swallowed, and browser and OS
     // shortcuts would stop working inside the app. The arrows are claimed now
@@ -73,6 +80,8 @@ describe("dispatch", () => {
   it("lets a field keep its own arrow keys and selection", () => {
     expect(dispatch({ key: "ArrowDown" }, MAC, field)).toBeNull();
     expect(dispatch({ key: "a", metaKey: true }, MAC, field)).toBeNull();
+    // Enter in the search box is the box's, not a load of Player 1.
+    expect(dispatch({ key: "Enter" }, MAC, field)).toBeNull();
   });
 
   it("still focuses and clears the search from inside a field", () => {

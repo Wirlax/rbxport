@@ -1089,6 +1089,7 @@ export function App() {
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
             onLoadSelected={loadSelectedInto.a}
+            selectedTrackId={selectedRow?.id ?? null}
             transportSlot={deckCount(layout) > 1 ? transportA : null}
             dual={deckCount(layout) > 1}
             publishZoom={deckCount(layout) > 1 ? publishZoom.a : undefined}

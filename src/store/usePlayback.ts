@@ -57,6 +57,13 @@ export interface Playback {
    * in its own output frames; the playhead here waits the same time.
    */
   playAfter: (delayMs: number) => void;
+  /**
+   * Play the next track loaded, once, when it lands — for swapping the track
+   * under a deck that is already playing so the sound carries on. Armed with
+   * the id about to be loaded; a different load disarms it, so it never plays a
+   * track the caller did not ask to keep running.
+   */
+  playWhenLoaded: (trackId: string) => void;
   seek: (seconds: number) => void;
   /** Seek by fraction, for clicking the waveform. */
   seekFraction: (fraction: number) => void;
@@ -179,6 +186,8 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const shownGeneration = useRef(0);
   /** Which track this deck was told to load, so a stale tick is ignored. */
   const loading = useRef<string | null>(null);
+  /** A track that should start playing the moment its load lands, or null. */
+  const resumeTarget = useRef<string | null>(null);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
   /** When a drag let go, until the seek that ends it comes back. */
@@ -314,6 +323,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   useEffect(() => {
     if (!canPlay) return;
     loading.current = trackId;
+    // A resume armed for another track never fires: only the load it was armed
+    // for should carry on playing.
+    if (resumeTarget.current !== null && resumeTarget.current !== trackId) {
+      resumeTarget.current = null;
+    }
     // The deck already holds this track: the view was put away and brought
     // back around it, and the engine never stopped. Asking again would. Where
     // it has got to arrives with `deckState` above, and with the next tick.
@@ -329,8 +343,20 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       try {
         const backend = await getBackend();
         if (loading.current !== trackId) return;
-        if (trackId === null) await backend.deckUnload(DECK);
-        else await backend.deckLoad(DECK, trackId);
+        if (trackId === null) {
+          await backend.deckUnload(DECK);
+        } else {
+          await backend.deckLoad(DECK, trackId);
+          // Swapped under a playing deck: carry the sound on into the new
+          // track rather than cueing it, but only if this is still the load
+          // that was armed and nothing newer has taken over.
+          if (loading.current === trackId && resumeTarget.current === trackId) {
+            resumeTarget.current = null;
+            setPlaying(true);
+            anchor.current = { ...anchor.current, playing: true, at: performance.now() };
+            await backend.deckPlay(DECK);
+          }
+        }
       } catch (failure) {
         // A missing file, or no audio device at all. Either way the deck has
         // nothing, and which of the two it was is the whole of what the person
@@ -407,6 +433,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     },
     [idle, playing, DECK],
   );
+
+  const playWhenLoaded = useCallback((next: string) => {
+    resumeTarget.current = next;
+  }, []);
 
   const seek = useCallback(
     (seconds: number) => {
@@ -621,7 +651,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   );
 
   return {
-    playing, position, duration, idle, error, toggle, playAfter, seek, seekFraction,
+    playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
   };

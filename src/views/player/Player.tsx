@@ -197,6 +197,11 @@ export interface PlayerProps {
    */
   onLoadSelected?: (() => void) | undefined;
   /**
+   * The id of the highlighted browser row, so Enter can load it onto Player 1
+   * and — when this deck is already playing — carry the sound straight into it.
+   */
+  selectedTrackId?: string | null;
+  /**
    * rekordbox holds the database. The MEMORY cluster and the list's ✕ are
    * drawn and disabled, with the same reason the menus give.
    */
@@ -481,7 +486,8 @@ const PANELS = [
 ] as const;
 
 export const Player = memo(function Player({
-  track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, dragging = false, deck = "a",
+  track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, selectedTrackId = null,
+  dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
@@ -877,10 +883,20 @@ export const Player = memo(function Player({
       const action = dispatch(event, platform, event.target as HTMLElement | null);
       if (action === null) return;
       if (action === "jumpBack" || action === "jumpForward") {
-        if (!armed) return;
-        // Otherwise the list scrolls under the deck at the same time.
+        // Left/Right always beat-jump Player 1, wherever the focus is; the
+        // other decks leave the arrows to the browser.
+        if (deck !== "a") return;
         event.preventDefault();
         jump(action === "jumpForward" ? 1 : -1);
+        return;
+      }
+      if (action === "loadPlayer1") {
+        // Enter loads the highlighted track onto Player 1. A deck already
+        // playing carries the sound into the new track; a stopped one cues it.
+        if (deck !== "a" || !onLoadSelected || selectedTrackId === null) return;
+        event.preventDefault();
+        if (playback.playing) playback.playWhenLoaded(selectedTrackId);
+        onLoadSelected();
         return;
       }
       if (playback.idle && action !== "showMemory" && action !== "showHotCues"
@@ -968,7 +984,7 @@ export const Player = memo(function Player({
       globalThis.removeEventListener("keyup", onKeyUp);
       globalThis.removeEventListener("blur", onBlur);
     };
-  }, [armed, jump, platform, playback, holdCue, dropCue, memory, hot, togglePlay]);
+  }, [deck, jump, platform, playback, onLoadSelected, selectedTrackId, holdCue, dropCue, memory, hot, togglePlay]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding

@@ -21,6 +21,9 @@ export type Action =
   | "pageDown"
   | "toTop"
   | "toBottom"
+  // Enter loads the highlighted track onto Player 1 (deck A), wherever the
+  // focus is in the browser — the keyboard counterpart of double-clicking it.
+  | "loadPlayer1"
   // The deck. Every key below is rekordbox's own, transcribed from the Export
   // preset in `KeyMappings/rekordbox_0000000000030.mappings` — the key map the
   // mode we clone ships with, not a guess at what feels natural.
@@ -193,6 +196,8 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
         break;
     }
     switch (chord.key) {
+      case "Enter":
+        return "loadPlayer1";
       case "Escape":
         return "clearSearch";
       case "ArrowUp":
@@ -293,6 +298,7 @@ export const BINDINGS: readonly Binding[] = [
   { group: "Browse", label: "Cursor to Top", chord: { key: "Home" }, pane: "Browse" },
   { group: "Browse", label: "Cursor to Bottom", chord: { key: "End" }, pane: "Browse" },
   { group: "Browse", label: "Analyze Track", chord: { key: "a" }, pane: "Browse" },
+  { group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, pane: "Browse" },
   { group: "Player A", label: "Play/Pause", chord: { key: " " }, command: "3006" },
   { group: "Player A", label: "Quantize", chord: { key: "q" }, command: "301c" },
   { group: "Player A", label: "Cue", chord: { key: "c" }, command: "3007" },
@@ -325,6 +331,7 @@ export const BINDINGS: readonly Binding[] = [
 /** The names rekordbox prints in a key badge for keys that are not letters. */
 const KEY_NAMES: Record<string, string> = {
   " ": "spacebar",
+  Enter: "enter",
   ArrowLeft: "cursor left",
   ArrowRight: "cursor right",
   ArrowUp: "cursor up",
