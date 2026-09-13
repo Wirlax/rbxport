@@ -152,7 +152,12 @@ impl LinkExport {
         let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
         let database = rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
             .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
-        let files = rbl_nfs::net::Bound::start(files::exports(&library), listen_on, ports.portmap, ports.mount, ports.nfs)
+        // The mount EXPORT reply must offer the export to the player's subnet,
+        // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
+        // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
+        let export_host = (!interface.address.is_loopback())
+            .then(|| format!("{}/{}", interface.address, interface.netmask));
+        let files = rbl_nfs::net::Bound::start(files::exports(&library), listen_on, ports.portmap, ports.mount, ports.nfs, export_host)
             .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
         let beacon = beacon::Beacon::start(
             beacon::BeaconConfig {

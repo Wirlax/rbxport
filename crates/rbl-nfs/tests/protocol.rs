@@ -261,6 +261,22 @@ fn the_export_list_is_a_terminated_linked_list() {
 }
 
 #[test]
+fn each_export_offers_the_host_group_a_cdj_checks_itself_against() {
+    let (dir, server) = fixture();
+    let server = server.with_export_host("192.168.1.14/255.255.255.0");
+    let _ = &dir;
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORT, vec![]);
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), 1, "one entry follows");
+    assert_eq!(reader.utf16().unwrap(), "/");
+    assert_eq!(reader.u32().unwrap(), 1, "a group follows");
+    assert_eq!(reader.string().unwrap(), "192.168.1.14/255.255.255.0");
+    assert_eq!(reader.u32().unwrap(), 0, "no more groups");
+    assert_eq!(reader.u32().unwrap(), 0, "end of list");
+    assert_eq!(reader.remaining(), 0);
+}
+
+#[test]
 fn mounting_an_export_that_does_not_exist_says_so() {
     let (_dir, server) = fixture();
     let mut args = Writer::new();

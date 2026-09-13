@@ -85,6 +85,7 @@ impl Bound {
         portmap_port: u16,
         mount_port: u16,
         nfs_port: u16,
+        export_host: Option<String>,
     ) -> io::Result<Self> {
         let portmap_socket = UdpSocket::bind(SocketAddr::new(address, portmap_port))?;
         let mount_socket = UdpSocket::bind(SocketAddr::new(address, mount_port))?;
@@ -98,7 +99,11 @@ impl Bound {
 
         // Portmap must report the ports actually bound, which with ephemeral
         // ports are not known until now.
-        let server = Arc::new(Server::new(exports, nfs.port(), mount.port()));
+        let mut server = Server::new(exports, nfs.port(), mount.port());
+        if let Some(host) = export_host {
+            server = server.with_export_host(host);
+        }
+        let server = Arc::new(server);
         let stop = Arc::new(AtomicBool::new(false));
 
         let mut threads = Vec::with_capacity(3);

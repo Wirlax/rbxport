@@ -114,6 +114,10 @@ pub struct Server {
     nfs_port: u16,
     /// The port the mount program is bound to, reported by portmap.
     mount_port: u16,
+    /// The host group each export is offered to, `<ip>/<netmask>`, as
+    /// rekordbox names its own subnet in the mount EXPORT reply. A CDJ checks
+    /// itself against this list and will not mount an export that offers none.
+    export_host: Option<String>,
     /// The files being read, kept open: a player reads a track in 32 KB
     /// pieces, and opening the file for each piece is a syscall and a
     /// directory walk per piece. Most recently used last.
@@ -136,7 +140,15 @@ const OPEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Server {
     pub fn new(exports: Exports, nfs_port: u16, mount_port: u16) -> Self {
-        Self { exports, nfs_port, mount_port, open: Mutex::new(Vec::with_capacity(OPEN_FILES)) }
+        Self { exports, nfs_port, mount_port, export_host: None, open: Mutex::new(Vec::with_capacity(OPEN_FILES)) }
+    }
+
+    /// Sets the host group the exports are offered to (`<ip>/<netmask>`), which
+    /// a CDJ requires in the EXPORT reply before it will mount.
+    #[must_use]
+    pub fn with_export_host(mut self, host: impl Into<String>) -> Self {
+        self.export_host = Some(host.into());
+        self
     }
 
     /// Reads `len` bytes at `offset` of the file at `path`, through the
@@ -259,9 +271,18 @@ impl Server {
             mount_proc::DUMP | mount_proc::EXPORT => {
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
                 for name in self.exports.names() {
-                    // Each entry is an optional-list link: present, name, then
-                    // an empty group list.
-                    writer.some().utf16(name).none();
+                    // Each entry is an optional-list link: present, the export
+                    // name, then its group list. rekordbox 7.2.11 lists one
+                    // group, `<ip>/<netmask>` for its own subnet (measured on
+                    // the wire 2026-09-13), and a CDJ mounts nothing whose
+                    // group list is empty — so the host is emitted as one
+                    // group, in ASCII as rekordbox sends it.
+                    writer.some().utf16(name);
+                    if let Some(host) = &self.export_host {
+                        writer.some().string(host).none();
+                    } else {
+                        writer.none();
+                    }
                 }
                 writer.none();
                 writer.into_bytes()
