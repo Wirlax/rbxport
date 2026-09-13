@@ -3,10 +3,246 @@
 //!
 //! Three servers and a beacon, all measured against rekordbox 7.2.11 and a
 //! CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`): the
-//! keep-alive and status packets that put us on the network as `rekordbox`,
-//! the database server a player browses, and the NFS server it reads the
-//! audio file from. `catalog` answers the database server's questions out of
-//! the index; `blobs` builds the analysis replies out of the ANLZ files.
+//! keep-alive and status packets that put us on the network as `rekordbox`
+//! (`beacon`), the database server a player browses (`rbl-dbserver`, fed by
+//! `catalog`), and the NFS server it reads the audio file from (`rbl-nfs`,
+//! fed by `files`). `blobs` builds the analysis replies out of the ANLZ
+//! files. [`LinkExport::start`] binds all of it; dropping it unbinds.
+//!
+//! The player's side of the protocol comes from
+//! [alphatheta-connect](https://github.com/chrisle/alphatheta-connect-rs):
+//! interface discovery, and the status packet that says what a player has
+//! loaded. Its remote-database and NFS clients are what the integration
+//! tests browse this server with — an implementation that was written
+//! against real players, not against this crate.
 
+pub mod beacon;
 pub mod blobs;
 pub mod catalog;
+pub mod files;
+
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+
+use rbl_dbserver::session::CatalogHandler;
+use rbl_index::Library;
+
+pub use beacon::Player;
+pub use catalog::{IndexCatalog, Source};
+pub use rbl_prolink::DeviceType;
+
+/// The ports rekordbox uses, which a player expects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ports {
+    pub announce: u16,
+    pub status: u16,
+    /// The port-query service. Fixed: a player asks here first.
+    pub query: u16,
+    /// The database server. rekordbox picks an ephemeral one per session.
+    pub database: u16,
+    /// rekordbox's portmap: 50111, not the privileged 111.
+    pub portmap: u16,
+    /// mountd; ephemeral on rekordbox.
+    pub mount: u16,
+    pub nfs: u16,
+}
+
+impl Ports {
+    /// rekordbox's own.
+    pub const REKORDBOX: Self = Self {
+        announce: rbl_prolink::PORT_ANNOUNCE,
+        status: rbl_prolink::PORT_STATUS,
+        query: rbl_dbserver::PORT_QUERY,
+        database: 0,
+        portmap: rbl_nfs::REKORDBOX_PORTMAP_PORT,
+        mount: 0,
+        nfs: rbl_nfs::NFS_PORT,
+    };
+
+    /// Every port ephemeral, for tests on loopback.
+    pub const EPHEMERAL: Self = Self { announce: 0, status: 0, query: 0, database: 0, portmap: 0, mount: 0, nfs: 0 };
+}
+
+/// A network interface link export can run on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Interface {
+    /// The OS name: `en0`, `Ethernet 2`.
+    pub name: String,
+    pub address: Ipv4Addr,
+    pub netmask: Ipv4Addr,
+    pub mac: [u8; 6],
+}
+
+impl Interface {
+    /// The subnet's directed broadcast, which is where the beacons go.
+    pub fn broadcast(&self) -> Ipv4Addr {
+        Ipv4Addr::from(u32::from(self.address) | !u32::from(self.netmask))
+    }
+
+    /// Loopback, for tests: no MAC, no other hosts.
+    pub fn loopback() -> Self {
+        Self {
+            name: "lo0".to_owned(),
+            address: Ipv4Addr::LOCALHOST,
+            netmask: Ipv4Addr::new(255, 0, 0, 0),
+            mac: [0; 6],
+        }
+    }
+}
+
+/// The interfaces a link network could be on: every IPv4 one that is not
+/// loopback, in the order the OS lists them.
+pub fn interfaces() -> Vec<Interface> {
+    alphatheta_connect::utils::network_interfaces()
+        .into_iter()
+        .filter(|i| !i.internal)
+        .map(|i| Interface { name: i.name, address: i.address, netmask: i.netmask, mac: i.mac })
+        .collect()
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LinkError {
+    #[error("{0}")]
+    Bind(String),
+    #[error("the library has not loaded")]
+    NoLibrary,
+}
+
+/// What the app shows about a running link session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    pub interface: Interface,
+    pub database_port: u16,
+    pub players: Vec<Player>,
+}
+
+/// A running link export: the beacon and both servers, bound.
+pub struct LinkExport {
+    interface: Interface,
+    beacon: beacon::Beacon,
+    database: rbl_dbserver::net::Bound,
+    files: rbl_nfs::net::Bound,
+    catalog: Arc<IndexCatalog>,
+}
+
+struct Facts(Arc<dyn Source>);
+
+impl beacon::LibraryFacts for Facts {
+    fn track_count(&self) -> u16 {
+        self.0.library().map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
+    }
+    fn playlist_count(&self) -> u16 {
+        self.0.library().map_or(0, |l| u16::try_from(l.playlists().len()).unwrap_or(u16::MAX))
+    }
+}
+
+impl LinkExport {
+    /// Binds every port and starts serving `source`'s library on `interface`.
+    ///
+    /// The database and file servers listen on every address, as the beacon
+    /// must: which interface a player is on decides nothing about which
+    /// socket its connection arrives at.
+    pub fn start(source: Arc<dyn Source>, interface: Interface, ports: Ports) -> Result<Self, LinkError> {
+        let library = source.library().ok_or(LinkError::NoLibrary)?;
+        let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source)));
+        let handler: Arc<dyn rbl_dbserver::net::Handler> = Arc::new(CatalogHandler::new(catalog.clone()));
+
+        let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
+        let database = rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
+            .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
+        let files = rbl_nfs::net::Bound::start(files::exports(&library), listen_on, ports.portmap, ports.mount, ports.nfs)
+            .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
+        let beacon = beacon::Beacon::start(
+            beacon::BeaconConfig {
+                address: interface.address,
+                broadcast: interface.broadcast(),
+                mac: interface.mac,
+                announce_port: ports.announce,
+                status_port: ports.status,
+                player_port: rbl_prolink::PORT_STATUS,
+            },
+            Arc::new(Facts(source)),
+        )
+        .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.announce)))?;
+
+        tracing::info!(
+            interface = %interface.name,
+            address = %interface.address,
+            database = %database.database_address(),
+            nfs = %files.nfs_address(),
+            "link export started"
+        );
+        Ok(Self { interface, beacon, database, files, catalog })
+    }
+
+    /// The beacon's announce and status ports, as bound.
+    pub fn beacon_ports(&self) -> (u16, u16) {
+        (self.beacon.announce_port(), self.beacon.status_port())
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            interface: self.interface.clone(),
+            database_port: self.database.database_address().port(),
+            players: self.beacon.players(),
+        }
+    }
+
+    /// The port-query service, for a client.
+    pub fn query_address(&self) -> std::net::SocketAddr {
+        self.database.query_address()
+    }
+
+    /// The database server, for a client that skips the port query.
+    pub fn database_address(&self) -> std::net::SocketAddr {
+        self.database.database_address()
+    }
+
+    /// Portmap, for a client.
+    pub fn portmap_address(&self) -> std::net::SocketAddr {
+        self.files.portmap_address()
+    }
+
+    /// After the library's analysis files change: the next request reads
+    /// them again rather than serving what was parsed before.
+    pub fn analysis_changed(&self) {
+        self.catalog.forget_analysis();
+    }
+
+    /// Unbinds everything and waits for the threads.
+    pub fn stop(self) {
+        self.beacon.stop();
+        self.database.shutdown();
+        self.files.shutdown();
+        tracing::info!("link export stopped");
+    }
+}
+
+/// A fixed library, for tests and tools.
+pub struct StaticSource {
+    pub library: Arc<Library>,
+    pub share_root: std::path::PathBuf,
+}
+
+impl Source for StaticSource {
+    fn library(&self) -> Option<Arc<Library>> {
+        Some(Arc::clone(&self.library))
+    }
+    fn share_root(&self) -> std::path::PathBuf {
+        self.share_root.clone()
+    }
+    fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+        None
+    }
+}
+
+/// Why a port could not be bound, in words worth showing.
+fn explain(error: &std::io::Error, protocol: &str, port: u16) -> String {
+    match error.kind() {
+        std::io::ErrorKind::AddrInUse => {
+            format!("{protocol} port {port} is already in use — usually by rekordbox itself. Quit it to turn LINK on.")
+        }
+        std::io::ErrorKind::PermissionDenied => format!("Not allowed to bind {protocol} port {port}."),
+        _ => format!("Could not bind {protocol} port {port}: {error}"),
+    }
+}

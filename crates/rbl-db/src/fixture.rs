@@ -252,6 +252,18 @@ pub fn point_at_audio(location: &LibraryLocation, index: usize, path: &str, seco
     Ok(())
 }
 
+/// Points a fixture track's `AnalysisDataPath` at a file under the share
+/// root, as rekordbox does (`/PIONEER/USBANLZ/…/ANLZ0000.DAT`); the caller
+/// puts the analysis files there.
+pub fn set_analysis_path(location: &LibraryLocation, index: usize, relative: &str) -> Result<()> {
+    let conn = open_fixture(location)?;
+    conn.execute(
+        "UPDATE djmdContent SET AnalysisDataPath = ?1 WHERE ID = ?2",
+        params![relative, track_id(index)],
+    )?;
+    Ok(())
+}
+
 /// Writes the `options.json` rekordbox's agent would keep for this library,
 /// with `master_db_as` as the path it will have where it is read — the
 /// detector resolves `share/` beside it. What `RBXPORT_OPTIONS` points

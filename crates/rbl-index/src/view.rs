@@ -147,7 +147,10 @@ impl Library {
         })
     }
 
-    pub(crate) fn sort_rows(&self, rows: &mut [Row], column: SortColumn, descending: bool) {
+    /// Orders rows by a column's precomputed ranks. Public for the link
+    /// export, whose menus sort scopes the views do not have (an artist's
+    /// tracks, a key's) with the same ranks the browser uses.
+    pub fn sort_rows(&self, rows: &mut [Row], column: SortColumn, descending: bool) {
         let Some(rank) = self.ranks.get(column.rank_slot()) else { return };
         if descending {
             rows.sort_unstable_by_key(|&r| std::cmp::Reverse(rank.get(r as usize).copied().unwrap_or(0)));

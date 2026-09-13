@@ -10,7 +10,13 @@ description = "Link export: the library served to players over Pro DJ Link, as r
 workspace = true
 
 [dependencies]
+# The player's side of the protocol, as chrisle/alphatheta-connect knows it:
+# interface discovery with MAC addresses, and the CDJ status packet, which
+# is how we learn which player has loaded which of our tracks.
+alphatheta-connect = { git = "https://github.com/chrisle/alphatheta-connect-rs", rev = "b54d9e9c53059f11e04f4de9898f4abae3b46480", default-features = false }
+parking_lot = "0.12"
 rbl-anlz = { path = "../rbl-anlz" }
+rbl-db = { path = "../rbl-db" }
 rbl-dbserver = { path = "../rbl-dbserver" }
 rbl-index = { path = "../rbl-index" }
 rbl-nfs = { path = "../rbl-nfs" }
@@ -19,6 +25,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-rbl-db = { path = "../rbl-db" }
 rbl-fakecdj = { path = "../rbl-fakecdj" }
 tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
