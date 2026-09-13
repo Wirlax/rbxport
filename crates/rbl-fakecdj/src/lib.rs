@@ -21,8 +21,9 @@ use rbl_nfs::{
 
 /// How long a single request waits before it is retried or given up on.
 const TIMEOUT: Duration = Duration::from_secs(2);
-/// A datagram reply never legitimately exceeds this.
-const DATAGRAM: usize = 16 * 1024;
+/// A datagram reply never legitimately exceeds this: a 32 KB `READ` plus its
+/// attributes is the largest, and it arrives reassembled from IP fragments.
+const DATAGRAM: usize = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CdjError {
@@ -257,7 +258,7 @@ impl Mounted {
         }
     }
 
-    /// Fetches a whole file, 8 KB at a time, as a player loading a track does.
+    /// Fetches a whole file, 32 KB at a time, as a player loading a track does.
     pub fn read_file(&mut self, path: &str) -> Result<Vec<u8>> {
         let handle = self.resolve(path)?;
         let mut out = Vec::new();

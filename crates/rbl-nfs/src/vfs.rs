@@ -8,12 +8,16 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// A file handle is a fixed 32 opaque bytes in `NFSv2`.
 pub const HANDLE_LEN: usize = 32;
 
-/// The most a single `READ` may return. `NFSv2`'s own limit, and what a CDJ asks for.
-pub const MAX_READ: usize = 8192;
+/// The most a single `READ` may return. A CDJ-3000 asks rekordbox for 32 KB
+/// at a time (679 of 694 reads in the 2026-09-12 capture; the rest were the
+/// tail of the file), and the reply goes out as one UDP datagram in IP
+/// fragments. `NFSv2`'s nominal 8 KB ceiling is not what the players use.
+pub const MAX_READ: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
@@ -29,9 +33,26 @@ struct Node {
     children: Vec<usize>,
     /// Where a file's bytes actually live. Directories have none.
     source: Option<PathBuf>,
-    size: u64,
-    /// Seconds since the epoch, for all three timestamps.
-    modified: u32,
+    /// Size and modification time (seconds since the epoch, for all three
+    /// timestamps). Given at insertion, or — for a tree built from a
+    /// 38,681-track index, where a `stat` per file at start would cost
+    /// seconds — read from the file the first time a player asks.
+    stat: OnceLock<(u64, u32)>,
+}
+
+/// The file's size and modification time, or zeros for one that cannot be
+/// read: a missing file is listed with no size and fails on `READ`, which is
+/// what a player expects of a moved track.
+fn stat_file(path: &Path) -> (u64, u32) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return (0, 0);
+    };
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| u32::try_from(d.as_secs()).unwrap_or(u32::MAX));
+    (meta.len(), modified)
 }
 
 /// An exported filesystem and everything reachable inside it.
@@ -93,8 +114,7 @@ impl Vfs {
                 parent: 0,
                 children: Vec::new(),
                 source: None,
-                size: 0,
-                modified: 0,
+                stat: OnceLock::from((0, 0)),
             }],
             salt,
         }
@@ -133,16 +153,33 @@ impl Vfs {
             return at;
         };
         for part in directories {
-            at = self.child_or_insert(at, part, NodeKind::Directory, None, 0, modified);
+            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some((0, modified)));
         }
-        self.child_or_insert(at, last, NodeKind::File, Some(source.into()), size, modified)
+        self.child_or_insert(at, last, NodeKind::File, Some(source.into()), Some((size, modified)))
+    }
+
+    /// Adds a file whose size and modification time are read from `source`
+    /// the first time a player asks for its attributes, not now.
+    pub fn add_file_unsized(&mut self, path: &str, source: impl Into<PathBuf>) -> usize {
+        let mut at = self.root();
+        let parts: Vec<&str> = path
+            .split('/')
+            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
+            .collect();
+        let Some((last, directories)) = parts.split_last() else {
+            return at;
+        };
+        for part in directories {
+            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some((0, 0)));
+        }
+        self.child_or_insert(at, last, NodeKind::File, Some(source.into()), None)
     }
 
     /// Adds an empty directory, for a tree that must show a folder with no files.
     pub fn add_dir(&mut self, path: &str) -> usize {
         let mut at = self.root();
         for part in path.split('/').filter(|p| !p.is_empty() && *p != "." && *p != "..") {
-            at = self.child_or_insert(at, part, NodeKind::Directory, None, 0, 0);
+            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some((0, 0)));
         }
         at
     }
@@ -153,8 +190,7 @@ impl Vfs {
         name: &str,
         kind: NodeKind,
         source: Option<PathBuf>,
-        size: u64,
-        modified: u32,
+        stat: Option<(u64, u32)>,
     ) -> usize {
         if let Some(existing) = self.child(parent, name) {
             return existing;
@@ -166,8 +202,7 @@ impl Vfs {
             parent,
             children: Vec::new(),
             source,
-            size,
-            modified,
+            stat: stat.map_or_else(OnceLock::new, OnceLock::from),
         });
         if let Some(node) = self.nodes.get_mut(parent) {
             node.children.push(index);
@@ -221,13 +256,16 @@ impl Vfs {
 
     pub fn attributes(&self, index: usize) -> Option<Attributes> {
         let node = self.nodes.get(index)?;
+        let (size, modified) = *node
+            .stat
+            .get_or_init(|| node.source.as_deref().map_or((0, 0), stat_file));
         Some(Attributes {
             kind: node.kind,
-            size: node.size,
+            size,
             // NFSv2 file ids are 32-bit; the index is dense and starts at zero,
             // and a fileid of 0 confuses some clients, so it starts at one.
             fileid: u32::try_from(index + 1).unwrap_or(u32::MAX),
-            modified: node.modified,
+            modified,
         })
     }
 

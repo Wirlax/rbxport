@@ -13,9 +13,14 @@ use std::time::Duration;
 
 use crate::Server;
 
-/// The largest datagram we will read. `NFSv2` caps a read at 8 KB; the rest is
-/// headroom for the reply's attributes and a generous listing.
+/// The largest datagram we will read. A request is small — a `READ` asks for
+/// 32 KB but carries none — so this is headroom for a long `LOOKUP` name and
+/// a generous `READDIR` budget, not for data.
 const DATAGRAM: usize = 16 * 1024;
+
+/// Room for a `READ` reply — the data, its attributes and the RPC header —
+/// with headroom; see [`serve`].
+const SEND_BUFFER: usize = 64 * 1024;
 
 /// How long a socket blocks before checking whether it has been asked to stop.
 const POLL: Duration = Duration::from_millis(200);
@@ -26,6 +31,11 @@ const POLL: Duration = Duration::from_millis(200);
 /// datagram, or one from a peer that has gone away, is counted and skipped.
 pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -> io::Result<()> {
     socket.set_read_timeout(Some(POLL))?;
+    // A 32 KB `READ` reply is one datagram. macOS refuses a datagram larger
+    // than the socket's send buffer, which defaults to 9,216 bytes
+    // (`net.inet.udp.maxdgram`); raising the buffer is what lets it go out
+    // in IP fragments, as rekordbox's do.
+    socket2::SockRef::from(socket).set_send_buffer_size(SEND_BUFFER)?;
     let mut buffer = vec![0_u8; DATAGRAM];
     while !stop.load(Ordering::Relaxed) {
         let (len, from) = match socket.recv_from(&mut buffer) {

@@ -17,14 +17,14 @@ const MOUNT_PORT: u16 = 12005;
 /// Builds a server over a temp dir holding two real files, plus an empty dir.
 fn fixture() -> (tempfile::TempDir, Server) {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("track.mp3"), vec![7_u8; 20_000]).unwrap();
+    fs::write(dir.path().join("track.mp3"), vec![7_u8; 40_000]).unwrap();
     fs::write(dir.path().join("small.dat"), b"hello").unwrap();
 
     let mut vfs = Vfs::new("/");
     vfs.add_file(
         "Contents/ARTBAT/The Abyss.mp3",
         dir.path().join("track.mp3"),
-        20_000,
+        40_000,
         1_700_000_000,
     );
     vfs.add_file("PIONEER/rekordbox/export.pdb", dir.path().join("small.dat"), 5, 1_700_000_001);
@@ -370,7 +370,7 @@ fn attributes_describe_a_read_only_tree() {
     assert_eq!(reader.u32().unwrap(), 1, "nlink");
     assert_eq!(reader.u32().unwrap(), 0, "uid");
     assert_eq!(reader.u32().unwrap(), 0, "gid");
-    assert_eq!(reader.u32().unwrap(), 20_000, "size");
+    assert_eq!(reader.u32().unwrap(), 40_000, "size");
 
     // A directory reports the directory type and mode.
     let dir = lookup(&server, &root, "Contents").unwrap();
@@ -383,7 +383,7 @@ fn attributes_describe_a_read_only_tree() {
     assert_eq!(reader.u32().unwrap(), 0o040_555);
 }
 
-/// Reads a whole file the way a player does: 8 KB at a time until it is short.
+/// Reads a whole file the way a player does: 32 KB at a time until it is short.
 fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
@@ -412,7 +412,7 @@ fn a_file_reads_back_byte_for_byte() {
     let root = mount_root(&server);
     let file = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
     let data = read_whole(&server, &file);
-    assert_eq!(data.len(), 20_000);
+    assert_eq!(data.len(), 40_000);
     assert!(data.iter().all(|b| *b == 7));
 
     let small = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();

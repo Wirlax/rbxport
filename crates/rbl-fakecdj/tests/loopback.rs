@@ -55,7 +55,7 @@ fn a_player_mounts_browses_and_fetches_a_whole_track() {
     let pioneer = mounted.lookup(&root, "PIONEER").unwrap();
     assert_eq!(mounted.list(&pioneer).unwrap(), vec!["rekordbox", "USBANLZ"]);
 
-    // A whole track comes back byte for byte across many 8 KB reads.
+    // A whole track comes back byte for byte across several 32 KB reads.
     let fetched = mounted.read_file("Contents/ARTBAT/The Abyss.mp3").unwrap();
     assert_eq!(fetched.len(), track.len());
     assert_eq!(fetched, track);
