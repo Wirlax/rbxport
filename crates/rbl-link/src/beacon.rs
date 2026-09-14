@@ -53,6 +53,10 @@ const DATAGRAM: usize = 2048;
 /// Where the beacon runs and what it says about the library.
 #[derive(Debug, Clone)]
 pub struct BeaconConfig {
+    /// The OS name of the interface `address` belongs to (`en0`,
+    /// `Ethernet 2`), which the sockets are pinned to; `None` on loopback,
+    /// where a test has nothing to pin to.
+    pub interface: Option<String>,
     pub address: Ipv4Addr,
     pub broadcast: Ipv4Addr,
     pub mac: [u8; 6],
@@ -120,17 +124,20 @@ pub struct Beacon {
 impl Beacon {
     /// Binds both ports and starts announcing.
     pub fn start(config: BeaconConfig, facts: Arc<dyn LibraryFacts>) -> io::Result<Self> {
-        // Bound to every interface, not the chosen one: on macOS a socket
-        // bound to one address does not receive broadcasts. The chosen
-        // interface is what we *send* on, by way of its subnet broadcast.
+        // Pinned to the chosen interface, so everything leaves from the
+        // address the keep-alive announces. A player answers a command only
+        // from that address: with two interfaces on the players' subnet the
+        // OS otherwise routes our unicast out whichever it likes, and a
+        // CDJ-3000 told to load a track from the other one does nothing.
         //
         // Shared, unlike rekordbox's, which holds 50000 exclusively: a
         // listener beside us — the CDJ-3000 emulator's test harness hears
         // announcements on a socket of its own — costs nothing, and
         // rekordbox already running still refuses us, since its bind is
         // the exclusive one.
-        let announce = shared_udp(config.announce_port)?;
-        let status = shared_udp(config.status_port)?;
+        let pin = config.interface.as_deref().map(|name| (name, config.address));
+        let announce = shared_udp(config.announce_port, pin)?;
+        let status = shared_udp(config.status_port, pin)?;
         for socket in [&announce, &status] {
             socket.set_broadcast(true)?;
             socket.set_read_timeout(Some(POLL))?;
@@ -212,14 +219,54 @@ impl Drop for Beacon {
     }
 }
 
-/// A UDP socket on every interface that other listeners may share.
-fn shared_udp(port: u16) -> io::Result<UdpSocket> {
+/// A UDP socket other listeners may share, pinned to one interface when
+/// `pin` names it (with the address on it), or on every interface.
+///
+/// Pinning is by interface rather than by binding to the address, because
+/// on macOS and Linux a socket bound to one address hears no broadcasts,
+/// and the keep-alives are broadcasts. Windows delivers broadcasts to such
+/// a socket, and has no interface pin for them, so there the address is
+/// bound.
+fn shared_udp(port: u16, pin: Option<(&str, Ipv4Addr)>) -> io::Result<UdpSocket> {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
     socket.set_reuse_address(true)?;
     #[cfg(unix)]
     socket.set_reuse_port(true)?;
-    socket.bind(&SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).into())?;
+    let bind_to = match pin {
+        Some((_, address)) if cfg!(windows) => address,
+        _ => Ipv4Addr::UNSPECIFIED,
+    };
+    socket.bind(&SocketAddr::V4(SocketAddrV4::new(bind_to, port)).into())?;
+    if let Some((name, _)) = pin {
+        pin_to_interface(&socket, name)?;
+    }
     Ok(socket.into())
+}
+
+/// `IP_BOUND_IF`: sends leave by this interface, from its address, and only
+/// what arrives on it is received. It takes the interface's index, which
+/// the OS lists beside the name.
+#[cfg(target_vendor = "apple")]
+fn pin_to_interface(socket: &socket2::Socket, name: &str) -> io::Result<()> {
+    let index = if_addrs::get_if_addrs()?
+        .into_iter()
+        .find(|i| i.name == name)
+        .and_then(|i| i.index)
+        .and_then(std::num::NonZeroU32::new)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no network interface called {name}")))?;
+    socket.bind_device_by_index_v4(Some(index))
+}
+
+/// `SO_BINDTODEVICE`, the same by name.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn pin_to_interface(socket: &socket2::Socket, name: &str) -> io::Result<()> {
+    socket.bind_device(Some(name.as_bytes()))
+}
+
+/// Bound to the interface's address instead, above.
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+fn pin_to_interface(_socket: &socket2::Socket, _name: &str) -> io::Result<()> {
+    Ok(())
 }
 
 fn now_ms(since: Instant) -> u64 {

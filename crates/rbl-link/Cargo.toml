@@ -21,11 +21,18 @@ rbl-dbserver = { path = "../rbl-dbserver" }
 rbl-index = { path = "../rbl-index" }
 rbl-nfs = { path = "../rbl-nfs" }
 rbl-prolink = { path = "../rbl-prolink" }
-socket2 = "0.6"
+# `all` for the interface pins (`IP_BOUND_IF`, `SO_BINDTODEVICE`).
+socket2 = { version = "0.6", features = ["all"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+[target.'cfg(target_vendor = "apple")'.dependencies]
+# The interface index, which the pin takes; the same crate alphatheta-connect
+# lists interfaces with.
+if-addrs = "0.15"
+
 [dev-dependencies]
+if-addrs = "0.15"
 rbl-fakecdj = { path = "../rbl-fakecdj" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }

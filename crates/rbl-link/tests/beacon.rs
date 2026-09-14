@@ -34,10 +34,16 @@ impl LibraryFacts for Facts {
 
 /// A socket standing in for the player, and the beacon told to answer it there.
 fn start() -> (Beacon, UdpSocket) {
+    start_on(None)
+}
+
+/// The same, with the beacon's sockets pinned to `interface`.
+fn start_on(interface: Option<String>) -> (Beacon, UdpSocket) {
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     let beacon = Beacon::start(
         BeaconConfig {
+            interface,
             address: Ipv4Addr::LOCALHOST,
             broadcast: Ipv4Addr::LOCALHOST,
             mac: [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],
@@ -135,6 +141,36 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     let players = wait_for(&beacon, |p| p[0].loaded.is_none());
     assert_eq!(players[0].loaded, None);
     assert!(!players[0].playing);
+
+    beacon.stop();
+}
+
+/// Pinned to an interface, the beacon still hears the player and answers
+/// it: the pin is how a command leaves from the announced address on a
+/// machine with two interfaces on the players' subnet, and it must not cost
+/// the broadcasts. Loopback is the one interface every machine has.
+#[test]
+fn a_beacon_pinned_to_an_interface_still_hears_and_answers_a_player() {
+    let loopback = if_addrs::get_if_addrs()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.is_loopback() && i.ip().is_ipv4())
+        .map(|i| i.name)
+        .expect("a loopback interface");
+    let (beacon, player) = start_on(Some(loopback));
+    let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
+    let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
+
+    player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
+    let players = wait_for(&beacon, |p| !p.is_empty());
+    assert_eq!(players.len(), 1, "the keep-alive was heard through the pin");
+    let greeting = receive(&player, 0x16);
+    assert_eq!(&greeting[0x0b..0x14], b"rekordbox");
+
+    let mut query = hex(MEDIA_QUERY);
+    query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+    player.send_to(&query, status).unwrap();
+    assert_eq!(receive(&player, 0x06).len(), 0xc0);
 
     beacon.stop();
 }

@@ -161,6 +161,7 @@ impl LinkExport {
             .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
         let beacon = beacon::Beacon::start(
             beacon::BeaconConfig {
+                interface: (!interface.address.is_loopback()).then(|| interface.name.clone()),
                 address: interface.address,
                 broadcast: interface.broadcast(),
                 mac: interface.mac,
