@@ -428,8 +428,15 @@ pub struct MediaQuery {
 
 /// Byte length of a media query.
 pub const MEDIA_QUERY_LEN: usize = 0x30;
-/// The slot number a player uses for rekordbox's library.
-pub const SLOT_REKORDBOX: u8 = 0x03;
+/// The slot number for rekordbox's library: the `Rb` slot of a status packet,
+/// what a current CDJ-3000 asks about in its media query and what rekordbox
+/// 7.2 names as the source in its Load Track command (both measured on the
+/// wire, 2026-09-13).
+pub const SLOT_REKORDBOX: u8 = 0x04;
+/// The slot number an older CDJ-3000 (EP122 firmware, the emulator) asks
+/// about for rekordbox's library instead: the USB slot. rekordbox answers
+/// either question, naming back whichever slot was asked.
+pub const SLOT_REKORDBOX_LEGACY: u8 = 0x03;
 
 impl MediaQuery {
     pub fn decode(packet: &[u8]) -> Result<Self> {
@@ -458,6 +465,10 @@ impl MediaQuery {
 pub struct MediaResponse {
     pub name: String,
     pub device_number: u8,
+    /// The slot the player asked about, named back to it: `04` to a current
+    /// CDJ-3000, `03` to the EP122 emulator. A player ignores an answer
+    /// about a slot it did not ask about.
+    pub slot: u8,
     pub tracks: u16,
     pub playlists: u16,
 }
@@ -472,7 +483,7 @@ impl MediaResponse {
         out.extend_from_slice(&[0x01, 0x01, self.device_number]);
         out.extend_from_slice(&u16::try_from(MEDIA_RESPONSE_LEN - 0x24).unwrap_or(0).to_be_bytes());
         out.extend_from_slice(&u32::from(self.device_number).to_be_bytes());
-        out.extend_from_slice(&u32::from(SLOT_REKORDBOX).to_be_bytes());
+        out.extend_from_slice(&u32::from(self.slot).to_be_bytes());
         // The name as the player shows it, UTF-16BE in a 64-byte field.
         let mut utf16: Vec<u8> = self.name.encode_utf16().take(31).flat_map(u16::to_be_bytes).collect();
         utf16.resize(0x40, 0);
@@ -530,19 +541,23 @@ pub const TRACK_TYPE_REKORDBOX: u8 = 0x01;
 /// Tells a player to load a specific track from our library: `kind 19`,
 /// 88 bytes, unicast to the player on port 50002.
 ///
-/// Laid out as the djl-analysis "Loading Tracks" figure (status-packet header,
-/// subtype `00`, length `0034` for the bytes after it), with the two bytes
-/// rekordbox itself sets differently from that figure — `01` at `0x20` and
-/// `32` at `0x4b` — since a player treats a command from rekordbox differently
-/// from one sent by anyone else. There is no capture of rekordbox sending this
-/// in the project; the layout is pinned by test. A CDJ-3000 (EP122 firmware)
-/// acknowledged this exact packet with `1a` and loaded the track
-/// (verification/link/push-load-cdj3000-emu-20260913.pcap, .png).
+/// Byte for byte what rekordbox 7.2 sends a CDJ-3000 (captured 2026-09-13,
+/// pinned in the tests): the status-packet header, `01 01`, our number, the
+/// length `0034` of what follows, our number again, then the track named as
+/// coming from our own device's rekordbox slot as a rekordbox track. The
+/// djl-analysis "Loading Tracks" figure differs in the two bytes rekordbox
+/// sets (`01` at `0x20`, `32` at `0x4b`) and shows the USB slot, `03`, as
+/// its example source; a real CDJ-3000 answers `03` from rekordbox's address
+/// with a media query about slot `04` rather than a load, so the slot is not
+/// a free choice.
+///
+/// The player answers `1a` within a few milliseconds and mounts our export
+/// to fetch the track. It only does so for a command whose source address is
+/// the one our keep-alives announce: sent from another address of the same
+/// machine it does nothing at all (measured 2026-09-13 on a CDJ-3000).
 ///
 /// `from_device` is our device number (`0x11` as rekordbox), `to_device` the
-/// player number to load onto, `track_id` the library ID. The track is named
-/// as coming from our own device, the rekordbox slot, rekordbox track type,
-/// which is what the player then browses us for.
+/// player number to load onto, `track_id` the library ID.
 pub fn load_track_command(name: &str, from_device: u8, to_device: u8, track_id: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(LOAD_TRACK_LEN);
     write_status_header(&mut out, LOAD_TRACK_KIND, name);

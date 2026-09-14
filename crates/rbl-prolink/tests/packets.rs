@@ -29,7 +29,8 @@ const CAPTURED_REKORDBOX_STATUS: &str =
     "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000c00010000080001e80001000000009ff01";
 /// The player's question about rekordbox's library slot, and rekordbox's
 /// answer (38,681 tracks, 627 playlists), then the `46` packet and its
-/// `47` reply, all from the same capture.
+/// `47` reply, all from the same capture (the CDJ-3000 emulator, EP122
+/// firmware, which asks about slot `03`).
 const CAPTURED_MEDIA_QUERY: &str =
     "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801980000001100000003";
 const CAPTURED_MEDIA_RESPONSE: &str =
@@ -257,15 +258,45 @@ fn the_media_query_decodes_and_the_response_matches_the_capture() {
     assert_eq!(query.name, "CDJ-3000");
     assert_eq!(query.from, Ipv4Addr::new(192, 168, 1, 152));
     assert_eq!(query.device_number, REKORDBOX_DEVICE_NUMBER);
-    assert_eq!(query.slot, rbl_prolink::SLOT_REKORDBOX);
+    assert_eq!(query.slot, rbl_prolink::SLOT_REKORDBOX_LEGACY);
 
     let response = rbl_prolink::MediaResponse {
         name: REKORDBOX_NAME.to_owned(),
         device_number: REKORDBOX_DEVICE_NUMBER,
+        slot: query.slot,
         tracks: 38_681,
         playlists: 627,
     };
     assert_eq!(response.encode(), hex(CAPTURED_MEDIA_RESPONSE));
+}
+
+/// A real CDJ-3000 (player 1 at 192.168.1.170, current firmware) asks about
+/// slot `04`, not the emulator's `03`, and rekordbox 7.2 answers naming `04`
+/// back with its counts (54 tracks, 2 playlists on the capture machine);
+/// everything else in the answer is as it is for `03`. Captured 2026-09-13
+/// on chris-win11. An answer that names `03` to this player is ignored, and
+/// the player never lists the library.
+const CAPTURED_MEDIA_QUERY_SLOT_4: &str =
+    "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801aa0000001100000004";
+const CAPTURED_MEDIA_RESPONSE_SLOT_4: &str = "5173707431576d4a4f4c0672656b6f7264626f780000000000000000000000010111009c000000110000000400720065006b006f007200640062006f007800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000036000001010000000200000000000000000000000000000000";
+
+#[test]
+fn a_current_cdj_3000_asks_about_slot_4_and_the_answer_names_it_back() {
+    let query = rbl_prolink::MediaQuery::decode(&hex(CAPTURED_MEDIA_QUERY_SLOT_4)).unwrap();
+    assert_eq!(query.name, "CDJ-3000");
+    assert_eq!(query.from, Ipv4Addr::new(192, 168, 1, 170));
+    assert_eq!(query.device_number, REKORDBOX_DEVICE_NUMBER);
+    assert_eq!(query.slot, rbl_prolink::SLOT_REKORDBOX);
+    assert_ne!(query.slot, rbl_prolink::SLOT_REKORDBOX_LEGACY);
+
+    let response = rbl_prolink::MediaResponse {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+        slot: query.slot,
+        tracks: 54,
+        playlists: 2,
+    };
+    assert_eq!(response.encode(), hex(CAPTURED_MEDIA_RESPONSE_SLOT_4));
 }
 
 #[test]
@@ -312,52 +343,60 @@ fn the_idle_status_matches_the_capture() {
     assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS_IDLE));
 }
 
-/// The Load Track command's shape, as the djl-analysis figure lays it out with
-/// rekordbox's own two bytes (`01` at `0x20`, `32` at `0x4b`). There is no
-/// capture of rekordbox sending this in the project, so this pins the layout
-/// rather than a captured byte string; a CDJ-3000 accepted the packet as built
-/// here (see `a_cdj_3000_acknowledges_a_load_track_command`).
+/// rekordbox 7.2 telling player 1 (a real CDJ-3000 at 192.168.1.170) to load
+/// track 19,925,719 from its own collection, and the same to player 2 for
+/// track 73,561,055, verbatim from the wire (2026-09-13, rekordbox on
+/// chris-win11; the player answered `1a` two milliseconds later and mounted
+/// the export). Note the slot at `0x29`: `04`, where the djl-analysis figure
+/// shows `03`; and rekordbox's own `01` at `0x20` and `32` at `0x4b`.
+const CAPTURED_LOAD_TRACK_PLAYER_1: &str =
+    "5173707431576d4a4f4c1972656b6f7264626f7800000000000000000000000101110034110000001104010001300ad700000032000000000000000000000000000000000000000000000032000000000000000000000000";
+const CAPTURED_LOAD_TRACK_PLAYER_2: &str =
+    "5173707431576d4a4f4c1972656b6f7264626f78000000000000000000000001011100341100000011040100046273df00000032000000000000000000000000010000000000000000000032000000000000000000000000";
+
 #[test]
-fn the_load_track_command_is_laid_out_as_the_spec_figure() {
+fn the_load_track_command_is_rekordboxs_byte_for_byte() {
+    let to_player_1 = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 1, 19_925_719);
+    assert_eq!(to_player_1.len(), rbl_prolink::LOAD_TRACK_LEN);
+    assert_eq!(to_player_1, hex(CAPTURED_LOAD_TRACK_PLAYER_1));
+    let to_player_2 = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 2, 73_561_055);
+    assert_eq!(to_player_2, hex(CAPTURED_LOAD_TRACK_PLAYER_2));
+}
+
+/// The fields a caller varies, by offset, so a wrong id or player is named
+/// rather than shown as a byte-string diff.
+#[test]
+fn the_load_track_command_names_the_track_and_the_player() {
     let packet = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 0x02, 0x1234_5678);
-    assert_eq!(packet.len(), rbl_prolink::LOAD_TRACK_LEN);
-    assert_eq!(&packet[0..10], &MAGIC);
     assert_eq!(packet[0x0a], rbl_prolink::LOAD_TRACK_KIND);
     assert_eq!(rbl_prolink::status_device_name(&packet).unwrap(), REKORDBOX_NAME);
-    assert_eq!(packet[0x1f], 0x01);
-    assert_eq!(packet[0x20], 0x01, "rekordbox's subtype byte");
     assert_eq!(packet[0x21], REKORDBOX_DEVICE_NUMBER, "our device number");
-    assert_eq!(&packet[0x22..0x24], &[0x00, 0x34], "the length of what follows");
-    assert_eq!(packet[0x24], REKORDBOX_DEVICE_NUMBER, "our device number again");
-    assert_eq!(&packet[0x25..0x28], &[0, 0, 0]);
     assert_eq!(packet[0x28], REKORDBOX_DEVICE_NUMBER, "the track's source device");
     assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX, "the rekordbox slot");
     assert_eq!(packet[0x2a], rbl_prolink::TRACK_TYPE_REKORDBOX, "a rekordbox track");
-    assert_eq!(packet[0x2b], 0x00);
     assert_eq!(&packet[0x2c..0x30], &0x1234_5678_u32.to_be_bytes(), "the track id");
-    assert_eq!(packet[0x33], 0x32);
     assert_eq!(packet[0x40], 0x01, "the player to load onto, counted from zero");
-    assert_eq!(packet[0x4b], 0x32, "rekordbox's own byte");
-    // Everything else is zero.
-    let zeros: Vec<usize> = (0x30..0x58).filter(|&i| ![0x33, 0x40, 0x4b].contains(&i)).collect();
-    for i in zeros {
-        assert_eq!(packet[i], 0, "byte {i:#04x}");
-    }
 }
 
 /// What a CDJ-3000 (EP122, player 3) sent back to our status port within a
 /// millisecond of the load command, verbatim from the wire (2026-09-13,
 /// verification/link/push-load-cdj3000-emu-20260913.pcap): kind `1a`, its own
 /// name, and it then reported the track loaded from device 17 in its status.
+/// A real CDJ-3000 (player 1) answered rekordbox the same way, its own number
+/// in place of `03`.
 const CAPTURED_LOAD_TRACK_ACK: &str =
     "5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000";
+const CAPTURED_LOAD_TRACK_ACK_PLAYER_1: &str =
+    "5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010001000401010000";
 
 #[test]
 fn a_cdj_3000_acknowledges_a_load_track_command() {
-    let bytes = hex(CAPTURED_LOAD_TRACK_ACK);
-    assert_eq!(rbl_prolink::packet_kind(&bytes).unwrap(), rbl_prolink::LOAD_TRACK_ACK_KIND);
-    assert_eq!(rbl_prolink::status_device_name(&bytes).unwrap(), "CDJ-3000");
-    assert_eq!(bytes[0x21], 0x03, "the player that accepted it");
+    for (captured, player) in [(CAPTURED_LOAD_TRACK_ACK, 0x03), (CAPTURED_LOAD_TRACK_ACK_PLAYER_1, 0x01)] {
+        let bytes = hex(captured);
+        assert_eq!(rbl_prolink::packet_kind(&bytes).unwrap(), rbl_prolink::LOAD_TRACK_ACK_KIND);
+        assert_eq!(rbl_prolink::status_device_name(&bytes).unwrap(), "CDJ-3000");
+        assert_eq!(bytes[0x21], player, "the player that accepted it");
+    }
 }
 
 /// A DJM-V5's keep-alive, verbatim from the wire (2026-09-13, device 33 at

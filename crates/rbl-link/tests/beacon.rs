@@ -96,15 +96,21 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     assert_eq!(greeting.len(), 0x30);
     assert_eq!(&greeting[0x0b..0x14], b"rekordbox");
 
-    // The media query is answered with the library's counts. The captured
-    // query names 192.168.1.152 as the asker; ours has to name us.
-    let mut query = hex(MEDIA_QUERY);
-    query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
-    player.send_to(&query, status).unwrap();
-    let response = receive(&player, 0x06);
-    assert_eq!(response.len(), 0xc0);
-    assert_eq!(u16::from_be_bytes([response[0xa6], response[0xa7]]), 38_681);
-    assert_eq!(u16::from_be_bytes([response[0xae], response[0xaf]]), 627);
+    // The media query is answered with the library's counts, naming back
+    // the slot the player asked about: the emulator's `03` and a current
+    // CDJ-3000's `04` alike. The captured query names 192.168.1.152 as the
+    // asker; ours has to name us.
+    for slot in [rbl_prolink::SLOT_REKORDBOX_LEGACY, rbl_prolink::SLOT_REKORDBOX] {
+        let mut query = hex(MEDIA_QUERY);
+        query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+        query[0x2f] = slot;
+        player.send_to(&query, status).unwrap();
+        let response = receive(&player, 0x06);
+        assert_eq!(response.len(), 0xc0);
+        assert_eq!(response[0x2b], slot, "the slot named back");
+        assert_eq!(u16::from_be_bytes([response[0xa6], response[0xa7]]), 38_681);
+        assert_eq!(u16::from_be_bytes([response[0xae], response[0xaf]]), 627);
+    }
 
     player.send_to(&hex(HANDSHAKE), status).unwrap();
     let reply = receive(&player, 0x47);

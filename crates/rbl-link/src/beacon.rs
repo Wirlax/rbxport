@@ -26,7 +26,7 @@ use rbl_prolink::{
     connect_greeting, connect_identity, link_handshake_reply, packet_kind, DeviceTable, DeviceType, KeepAlive,
     MediaQuery, MediaResponse, Status, DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, LOAD_TRACK_ACK_KIND,
     PLAYER_STATUS_KIND,
-    REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME, SLOT_REKORDBOX,
+    REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME, SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY,
 };
 
 /// rekordbox's keep-alive interval, measured.
@@ -444,15 +444,18 @@ fn status_loop(
 }
 
 /// Answers a player asking what is in our rekordbox slot with the library's
-/// counts; a question about any other device or slot is not ours to answer.
+/// counts, naming back whichever slot number it used for us — `04` from a
+/// current CDJ-3000, `03` from the EP122 emulator — as rekordbox does. A
+/// question about any other device or slot is not ours to answer.
 fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, facts: &dyn LibraryFacts) {
     let Ok(query) = MediaQuery::decode(packet) else { return };
-    if query.device_number != REKORDBOX_DEVICE_NUMBER || query.slot != SLOT_REKORDBOX {
+    if query.device_number != REKORDBOX_DEVICE_NUMBER || ![SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY].contains(&query.slot) {
         return;
     }
     let response = MediaResponse {
         name: REKORDBOX_NAME.to_owned(),
         device_number: REKORDBOX_DEVICE_NUMBER,
+        slot: query.slot,
         tracks: facts.track_count(),
         playlists: facts.playlist_count(),
     }
