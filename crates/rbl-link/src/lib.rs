@@ -92,6 +92,20 @@ impl Interface {
     }
 }
 
+/// The interface the OS would send to `peer` from, out of `interfaces`:
+/// with two interfaces on the players' subnet, the one its routing table
+/// prefers for them. `None` when no route reaches `peer` or the address it
+/// picks is none of theirs.
+///
+/// Asked of a socket, which connecting tells the local address it would
+/// use; connecting a UDP socket sends nothing.
+pub fn interface_toward(interfaces: &[Interface], peer: Ipv4Addr) -> Option<Interface> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((peer, rbl_prolink::PORT_STATUS)).ok()?;
+    let IpAddr::V4(local) = socket.local_addr().ok()?.ip() else { return None };
+    interfaces.iter().find(|i| i.address == local).cloned()
+}
+
 /// The interfaces a link network could be on: every IPv4 one that is not
 /// loopback, in the order the OS lists them.
 pub fn interfaces() -> Vec<Interface> {

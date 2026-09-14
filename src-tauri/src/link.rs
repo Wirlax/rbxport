@@ -141,8 +141,10 @@ pub struct Session {
 }
 
 impl Session {
-    /// Turns LINK on for `interface`, or the first interface when none is
-    /// named, and reports the players to `report` as they change.
+    /// Turns LINK on for `interface`, or when none is named the interface
+    /// the OS reaches a player already heard through — the first interface
+    /// when no player has been heard yet — and reports the players to
+    /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
     pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, report: F) -> Result<Self, String>
@@ -152,7 +154,11 @@ impl Session {
         let available = rbl_link::interfaces();
         let chosen = match interface {
             Some(name) => available.iter().find(|i| i.name == name).cloned(),
-            None => available.first().cloned(),
+            None => state
+                .link_peers()
+                .iter()
+                .find_map(|peer| rbl_link::interface_toward(&available, peer.address))
+                .or_else(|| available.first().cloned()),
         }
         .ok_or_else(|| match interface {
             Some(name) => format!("No network interface called {name}."),
