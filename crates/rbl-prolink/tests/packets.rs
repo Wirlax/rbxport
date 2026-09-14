@@ -312,6 +312,54 @@ fn the_idle_status_matches_the_capture() {
     assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS_IDLE));
 }
 
+/// The Load Track command's shape, as the djl-analysis figure lays it out with
+/// rekordbox's own two bytes (`01` at `0x20`, `32` at `0x4b`). There is no
+/// capture of rekordbox sending this in the project, so this pins the layout
+/// rather than a captured byte string; a CDJ-3000 accepted the packet as built
+/// here (see `a_cdj_3000_acknowledges_a_load_track_command`).
+#[test]
+fn the_load_track_command_is_laid_out_as_the_spec_figure() {
+    let packet = rbl_prolink::load_track_command(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 0x02, 0x1234_5678);
+    assert_eq!(packet.len(), rbl_prolink::LOAD_TRACK_LEN);
+    assert_eq!(&packet[0..10], &MAGIC);
+    assert_eq!(packet[0x0a], rbl_prolink::LOAD_TRACK_KIND);
+    assert_eq!(rbl_prolink::status_device_name(&packet).unwrap(), REKORDBOX_NAME);
+    assert_eq!(packet[0x1f], 0x01);
+    assert_eq!(packet[0x20], 0x01, "rekordbox's subtype byte");
+    assert_eq!(packet[0x21], REKORDBOX_DEVICE_NUMBER, "our device number");
+    assert_eq!(&packet[0x22..0x24], &[0x00, 0x34], "the length of what follows");
+    assert_eq!(packet[0x24], REKORDBOX_DEVICE_NUMBER, "our device number again");
+    assert_eq!(&packet[0x25..0x28], &[0, 0, 0]);
+    assert_eq!(packet[0x28], REKORDBOX_DEVICE_NUMBER, "the track's source device");
+    assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX, "the rekordbox slot");
+    assert_eq!(packet[0x2a], rbl_prolink::TRACK_TYPE_REKORDBOX, "a rekordbox track");
+    assert_eq!(packet[0x2b], 0x00);
+    assert_eq!(&packet[0x2c..0x30], &0x1234_5678_u32.to_be_bytes(), "the track id");
+    assert_eq!(packet[0x33], 0x32);
+    assert_eq!(packet[0x40], 0x01, "the player to load onto, counted from zero");
+    assert_eq!(packet[0x4b], 0x32, "rekordbox's own byte");
+    // Everything else is zero.
+    let zeros: Vec<usize> = (0x30..0x58).filter(|&i| ![0x33, 0x40, 0x4b].contains(&i)).collect();
+    for i in zeros {
+        assert_eq!(packet[i], 0, "byte {i:#04x}");
+    }
+}
+
+/// What a CDJ-3000 (EP122, player 3) sent back to our status port within a
+/// millisecond of the load command, verbatim from the wire (2026-09-13,
+/// verification/link/push-load-cdj3000-emu-20260913.pcap): kind `1a`, its own
+/// name, and it then reported the track loaded from device 17 in its status.
+const CAPTURED_LOAD_TRACK_ACK: &str =
+    "5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000";
+
+#[test]
+fn a_cdj_3000_acknowledges_a_load_track_command() {
+    let bytes = hex(CAPTURED_LOAD_TRACK_ACK);
+    assert_eq!(rbl_prolink::packet_kind(&bytes).unwrap(), rbl_prolink::LOAD_TRACK_ACK_KIND);
+    assert_eq!(rbl_prolink::status_device_name(&bytes).unwrap(), "CDJ-3000");
+    assert_eq!(bytes[0x21], 0x03, "the player that accepted it");
+}
+
 /// A DJM-V5's keep-alive, verbatim from the wire (2026-09-13, device 33 at
 /// 192.168.1.66): it announces device type `03`, not the community-documented
 /// `02`, and must still be read as a mixer or it shows up as a nameless

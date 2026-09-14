@@ -5,6 +5,9 @@
 //! rekordbox must not be running: it holds the ports. Verify from another
 //! terminal with `tcpdump -i <interface> udp port 50000` (a keep-alive every
 //! 2 s), or with a player on the network.
+//!
+//! Typing `load <player> <track id>` on stdin tells that player to load the
+//! track from us, as dropping it onto the player's deck in the app does.
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 // perf-ok: a read-only tool run by hand, not shipped code; printing is its point.
 
@@ -45,6 +48,26 @@ fn main() {
         link.query_address(),
         link.portmap_address()
     );
+    let link = Arc::new(link);
+    {
+        let link = Arc::clone(&link);
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lines().map_while(Result::ok) {
+                let words: Vec<&str> = line.split_whitespace().collect();
+                match words.as_slice() {
+                    ["load", player, track] => match (player.parse::<u8>(), track.parse::<u32>()) {
+                        (Ok(player), Ok(track)) => match link.load_track(player, track) {
+                            Ok(()) => println!("told player {player} to load {track}"),
+                            Err(error) => println!("load refused: {error}"),
+                        },
+                        _ => println!("usage: load <player> <track id>"),
+                    },
+                    [] => {}
+                    _ => println!("usage: load <player> <track id>"),
+                }
+            }
+        });
+    }
     loop {
         std::thread::sleep(Duration::from_secs(2));
         let players = link.snapshot().players;

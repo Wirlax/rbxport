@@ -514,6 +514,54 @@ pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
 /// The kind of a player's status packet on port 50002.
 pub const PLAYER_STATUS_KIND: u8 = 0x0a;
 
+/// The kind of the Load Track command rekordbox sends to a CDJ.
+pub const LOAD_TRACK_KIND: u8 = 0x19;
+
+/// The kind of the reply a player sends once it accepts a Load Track command.
+pub const LOAD_TRACK_ACK_KIND: u8 = 0x1a;
+
+/// Byte length of a Load Track command.
+pub const LOAD_TRACK_LEN: usize = 0x58;
+
+/// The track type a player reports for a track in a rekordbox library, as in
+/// its status packet.
+pub const TRACK_TYPE_REKORDBOX: u8 = 0x01;
+
+/// Tells a player to load a specific track from our library: `kind 19`,
+/// 88 bytes, unicast to the player on port 50002.
+///
+/// Laid out as the djl-analysis "Loading Tracks" figure (status-packet header,
+/// subtype `00`, length `0034` for the bytes after it), with the two bytes
+/// rekordbox itself sets differently from that figure — `01` at `0x20` and
+/// `32` at `0x4b` — since a player treats a command from rekordbox differently
+/// from one sent by anyone else. There is no capture of rekordbox sending this
+/// in the project; the layout is pinned by test. A CDJ-3000 (EP122 firmware)
+/// acknowledged this exact packet with `1a` and loaded the track
+/// (verification/link/push-load-cdj3000-emu-20260913.pcap, .png).
+///
+/// `from_device` is our device number (`0x11` as rekordbox), `to_device` the
+/// player number to load onto, `track_id` the library ID. The track is named
+/// as coming from our own device, the rekordbox slot, rekordbox track type,
+/// which is what the player then browses us for.
+pub fn load_track_command(name: &str, from_device: u8, to_device: u8, track_id: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(LOAD_TRACK_LEN);
+    write_status_header(&mut out, LOAD_TRACK_KIND, name);
+    // 0x1f..0x24: 01, subtype, our number, then the length of what follows.
+    out.extend_from_slice(&[0x01, 0x01, from_device, 0x00, 0x34]);
+    // 0x24..0x2c: our number, padding, the source device, slot and track type.
+    out.extend_from_slice(&[from_device, 0x00, 0x00, 0x00, from_device, SLOT_REKORDBOX, TRACK_TYPE_REKORDBOX, 0x00]);
+    // 0x2c..0x30: the track.
+    out.extend_from_slice(&track_id.to_be_bytes());
+    out.resize(LOAD_TRACK_LEN, 0);
+    out[0x33] = 0x32;
+    // The player to load onto, counted from zero here; a player accepts the
+    // command by address regardless.
+    out[0x40] = to_device.saturating_sub(1);
+    out[0x4b] = 0x32;
+    debug_assert_eq!(out.len(), LOAD_TRACK_LEN);
+    out
+}
+
 /// A device-number claim, sent three times in each of three stages at startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claim {

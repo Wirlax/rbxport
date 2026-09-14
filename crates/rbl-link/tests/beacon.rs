@@ -150,3 +150,49 @@ fn the_status_beacon_runs_at_five_hertz_with_no_tempo_until_a_master_reports() {
     assert!(beacon.players().is_empty());
     beacon.stop();
 }
+
+/// Receives until a packet of `kind` arrives, reporting who sent it.
+fn receive_from(player: &UdpSocket, kind: u8) -> (Vec<u8>, std::net::SocketAddr) {
+    let mut buffer = [0_u8; 2048];
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if let Ok((len, from)) = player.recv_from(&mut buffer) {
+            let packet = &buffer[..len];
+            if packet_kind(packet) == Ok(kind) {
+                return (packet.to_vec(), from);
+            }
+        }
+    }
+    panic!("no packet of kind {kind:#04x} arrived");
+}
+
+/// A load command reaches the player it names, from the port the player has
+/// us at — not a fresh ephemeral one, which is not a source it answers to.
+#[test]
+fn a_load_command_reaches_the_player_from_our_status_port() {
+    let (beacon, player) = start();
+    let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
+
+    // The player has to be on the link before it can be told anything.
+    player.send_to(&hex(CDJ_KEEP_ALIVE), status).unwrap();
+    player.send_to(STATUS_PLAYING_OURS, status).unwrap();
+    wait_for(&beacon, |p| p.iter().any(|q| q.number == 1));
+
+    beacon.load_track(1, 17_181).unwrap();
+    let (packet, from) = receive_from(&player, 0x19);
+
+    // It came from our status port, as rekordbox's own replies do.
+    assert_eq!(from.port(), beacon.status_port(), "a command must leave from the port the player knows");
+    assert_eq!(packet.len(), rbl_prolink::LOAD_TRACK_LEN);
+    assert_eq!(rbl_prolink::status_device_name(&packet).unwrap(), rbl_prolink::REKORDBOX_NAME);
+    assert_eq!(packet[0x21], rbl_prolink::REKORDBOX_DEVICE_NUMBER, "sent as rekordbox");
+    assert_eq!(packet[0x28], rbl_prolink::REKORDBOX_DEVICE_NUMBER, "the track's source device");
+    assert_eq!(packet[0x29], rbl_prolink::SLOT_REKORDBOX);
+    assert_eq!(&packet[0x2c..0x30], &17_181_u32.to_be_bytes());
+    assert_eq!(packet[0x40], 0, "player 1, counted from zero");
+
+    // A player that is not there is refused rather than silently dropped.
+    assert!(beacon.load_track(9, 1).is_err());
+
+    beacon.stop();
+}

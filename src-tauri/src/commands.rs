@@ -603,6 +603,17 @@ pub async fn stop_link_export<R: tauri::Runtime>(
     Ok(status)
 }
 
+/// Tells a CDJ on the link to load a specific track from our library.
+#[tauri::command]
+pub async fn link_load_track(
+    state: State<'_, Arc<AppState>>,
+    player_number: u8,
+    track_id: String,
+) -> AppResult<()> {
+    let id: u32 = track_id.parse().map_err(|_| AppError::internal(format!("bad track id: {track_id}")))?;
+    state.link_load_track(player_number, id).map_err(AppError::internal)
+}
+
 /// Writes a playlist to a stick.
 ///
 /// Copies the audio, re-emits the analysis, and writes `export.pdb`,

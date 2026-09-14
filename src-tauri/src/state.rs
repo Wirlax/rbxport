@@ -245,6 +245,14 @@ impl AppState {
         self.inner.read().link.as_ref().map(|session| session.status(library.as_deref()))
     }
 
+    /// Tells a CDJ on the link to load a track from our library.
+    pub fn link_load_track(&self, player_number: u8, track_id: u32) -> Result<(), String> {
+        match self.inner.read().link.as_ref() {
+            Some(session) => session.load_track(player_number, track_id),
+            None => Err("LINK is off, so no player can be told to load a track.".to_owned()),
+        }
+    }
+
 
     pub fn library(&self) -> AppResult<Arc<Library>> {
         self.inner

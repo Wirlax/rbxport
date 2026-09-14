@@ -379,6 +379,7 @@ pub fn run() {
             commands::link_peers,
             commands::start_link_export,
             commands::stop_link_export,
+            commands::link_load_track,
             commands::export_playlist,
             commands::list_devices,
             commands::track_beats,

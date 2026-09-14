@@ -24,7 +24,8 @@ use alphatheta_connect::types::MediaSlot;
 use parking_lot::Mutex;
 use rbl_prolink::{
     connect_greeting, connect_identity, link_handshake_reply, packet_kind, DeviceTable, DeviceType, KeepAlive,
-    MediaQuery, MediaResponse, Status, DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, PLAYER_STATUS_KIND,
+    MediaQuery, MediaResponse, Status, DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, LOAD_TRACK_ACK_KIND,
+    PLAYER_STATUS_KIND,
     REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME, SLOT_REKORDBOX,
 };
 
@@ -108,6 +109,12 @@ pub struct Beacon {
     shared: Arc<Mutex<Shared>>,
     announce_port: u16,
     status_port: u16,
+    /// The status socket again, for commands sent from outside its loop.
+    /// A command must leave from the port the player has us at, not from a
+    /// fresh ephemeral one — that is the source it answers to.
+    commands: UdpSocket,
+    /// Where the players listen: 50002 on the link, a test's own port.
+    player_port: u16,
 }
 
 impl Beacon {
@@ -135,6 +142,11 @@ impl Beacon {
         config.status_port = status.local_addr()?.port();
         let (announce_port, status_port) = (config.announce_port, config.status_port);
 
+        // Kept before the loop takes ownership: a load command has to go out
+        // from this same port, so the player sees it from the device it knows.
+        let commands = status.try_clone()?;
+        let player_port = config.player_port;
+
         let stop = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(Mutex::new(Shared::default()));
         let mut threads = Vec::with_capacity(2);
@@ -146,7 +158,7 @@ impl Beacon {
             let (stop, shared) = (Arc::clone(&stop), Arc::clone(&shared));
             threads.push(std::thread::spawn(move || status_loop(&status, &config, &stop, &shared, &facts)));
         }
-        Ok(Self { stop, threads, shared, announce_port, status_port })
+        Ok(Self { stop, threads, shared, announce_port, status_port, commands, player_port })
     }
 
     pub const fn announce_port(&self) -> u16 {
@@ -162,6 +174,28 @@ impl Beacon {
         let mut players: Vec<Player> = self.shared.lock().players.values().cloned().collect();
         players.sort_by_key(|p| p.number);
         players
+    }
+
+    /// Tells player `player_number` to load `track_id` from our library.
+    /// Returns an error when the player is unknown or the packet cannot be sent.
+    pub fn load_track(&self, player_number: u8, track_id: u32) -> io::Result<()> {
+        let address = self.shared.lock().players.get(&player_number).map(|p| p.address);
+        let Some(address) = address else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("player {player_number} is not on the link"),
+            ));
+        };
+        let packet = rbl_prolink::load_track_command(
+            REKORDBOX_NAME,
+            REKORDBOX_DEVICE_NUMBER,
+            player_number,
+            track_id,
+        );
+        let to = SocketAddr::V4(SocketAddrV4::new(address, self.player_port));
+        let sent = self.commands.send_to(&packet, to)?;
+        tracing::info!(player_number, track_id, %address, sent, "load track sent");
+        Ok(())
     }
 
     pub fn stop(mut self) {
@@ -352,23 +386,15 @@ fn status_loop(
                 let identity = connect_identity(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, &config.computer_name);
                 send(socket, &identity, *from.ip(), config.player_port, "identity");
             }
-            0x05 => {
-                let Ok(query) = MediaQuery::decode(packet) else { continue };
-                if query.device_number != REKORDBOX_DEVICE_NUMBER || query.slot != SLOT_REKORDBOX {
-                    continue;
-                }
-                let response = MediaResponse {
-                    name: REKORDBOX_NAME.to_owned(),
-                    device_number: REKORDBOX_DEVICE_NUMBER,
-                    tracks: facts.track_count(),
-                    playlists: facts.playlist_count(),
-                }
-                .encode();
-                send(socket, &response, query.from, config.player_port, "media response");
-            }
+            0x05 => answer_media_query(socket, packet, config, facts.as_ref()),
             LINK_HANDSHAKE_KIND => {
                 let reply = link_handshake_reply(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER);
                 send(socket, &reply, *from.ip(), config.player_port, "handshake reply");
+            }
+            // A player that accepts a load command says so with `1a`; the
+            // load itself shows up in its next status packets.
+            LOAD_TRACK_ACK_KIND => {
+                tracing::info!(from = %from.ip(), "player accepted a load track command");
             }
             PLAYER_STATUS_KIND => {
                 let Ok(Some(state)) = status_from_packet(packet) else { continue };
@@ -415,6 +441,23 @@ fn status_loop(
             _ => {}
         }
     }
+}
+
+/// Answers a player asking what is in our rekordbox slot with the library's
+/// counts; a question about any other device or slot is not ours to answer.
+fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, facts: &dyn LibraryFacts) {
+    let Ok(query) = MediaQuery::decode(packet) else { return };
+    if query.device_number != REKORDBOX_DEVICE_NUMBER || query.slot != SLOT_REKORDBOX {
+        return;
+    }
+    let response = MediaResponse {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+        tracks: facts.track_count(),
+        playlists: facts.playlist_count(),
+    }
+    .encode();
+    send(socket, &response, query.from, config.player_port, "media response");
 }
 
 /// The device kind of the peer with `number`, from the keep-alive table, or a

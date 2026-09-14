@@ -205,6 +205,19 @@ impl Session {
             export.analysis_changed();
         }
     }
+
+    /// Tells a CDJ on the link to load a track from our library.
+    ///
+    /// The reason is carried back rather than logged: a drop that does nothing
+    /// and says nothing is worse than one that says why.
+    pub fn load_track(&self, player_number: u8, track_id: u32) -> Result<(), String> {
+        let Some(export) = &self.export else {
+            return Err("LINK is not running.".to_owned());
+        };
+        export
+            .load_track(player_number, track_id)
+            .map_err(|error| format!("The player could not be told to load that track: {error}"))
+    }
 }
 
 impl Drop for Session {

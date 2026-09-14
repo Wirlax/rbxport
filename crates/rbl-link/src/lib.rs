@@ -217,6 +217,11 @@ impl LinkExport {
         self.catalog.forget_analysis();
     }
 
+    /// Tells a CDJ to load a specific track from our library.
+    pub fn load_track(&self, player_number: u8, track_id: u32) -> std::io::Result<()> {
+        self.beacon.load_track(player_number, track_id)
+    }
+
     /// Unbinds everything and waits for the threads.
     pub fn stop(self) {
         self.beacon.stop();
