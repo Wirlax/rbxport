@@ -38,6 +38,8 @@ const off = (players: LinkStatus["players"] = []): LinkStatus => ({
   interface: null,
   players,
   interfaces: [],
+  master: false,
+  masterBpm: 120,
 });
 
 const on = (players: LinkStatus["players"] = []): LinkStatus => ({ ...off(players), on: true });

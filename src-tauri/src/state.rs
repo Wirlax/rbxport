@@ -253,6 +253,26 @@ impl AppState {
         }
     }
 
+    /// Becomes or resigns the network's tempo master.
+    pub fn link_set_master(&self, on: bool) {
+        if let Some(session) = self.inner.read().link.as_ref() {
+            session.set_master(on);
+        }
+    }
+
+    /// Nudges the master tempo by `delta_bpm`.
+    pub fn link_nudge_master(&self, delta_bpm: f64) {
+        if let Some(session) = self.inner.read().link.as_ref() {
+            session.nudge_master(delta_bpm);
+        }
+    }
+
+    /// Takes the current master player's tempo; `false` when none is master
+    /// or LINK is off.
+    pub fn link_take_master_tempo(&self) -> bool {
+        self.inner.read().link.as_ref().is_some_and(crate::link::Session::take_master_tempo)
+    }
+
 
     pub fn library(&self) -> AppResult<Arc<Library>> {
         self.inner

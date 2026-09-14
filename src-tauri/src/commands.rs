@@ -618,6 +618,30 @@ pub async fn link_load_track(
     state.link_load_track(player_number, id).map_err(AppError::internal)
 }
 
+/// Becomes the network's tempo master, or resigns, and returns LINK's fresh
+/// status.
+#[tauri::command]
+pub async fn link_set_master(state: State<'_, Arc<AppState>>, on: bool) -> AppResult<LinkStatusDto> {
+    state.link_set_master(on);
+    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+}
+
+/// Nudges the master tempo by `delta_bpm` (rekordbox's −/+ is ±1), and
+/// returns LINK's fresh status.
+#[tauri::command]
+pub async fn link_nudge_master(state: State<'_, Arc<AppState>>, delta_bpm: f64) -> AppResult<LinkStatusDto> {
+    state.link_nudge_master(delta_bpm);
+    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+}
+
+/// Takes the current master player's tempo as the master tempo (rekordbox's
+/// ⟳), and returns LINK's fresh status.
+#[tauri::command]
+pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatusDto> {
+    state.link_take_master_tempo();
+    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
+}
+
 /// Writes a playlist to a stick.
 ///
 /// Copies the audio, re-emits the analysis, and writes `export.pdb`,

@@ -298,6 +298,12 @@ export interface Backend {
   stopLinkExport(): Promise<LinkStatus>;
   /** Tells a CDJ on the link to load a specific track from our library. */
   loadTrackOnLink(playerNumber: number, trackId: string): Promise<void>;
+  /** Becomes the network's tempo master, or resigns; returns fresh status. */
+  setLinkMaster(on: boolean): Promise<LinkStatus>;
+  /** Nudges the master tempo by `deltaBpm` (rekordbox's −/+ is ±1). */
+  nudgeLinkMaster(deltaBpm: number): Promise<LinkStatus>;
+  /** Takes the current master player's tempo as the master tempo (⟳). */
+  takeLinkMasterTempo(): Promise<LinkStatus>;
   /** Called as LINK turns on or off and as the players change. */
   onLinkStatus(listener: (status: LinkStatus) => void): () => void;
 
@@ -762,6 +768,10 @@ export interface LinkStatus {
   players: LinkPlayer[];
   /** What it could run on, for the picker. */
   interfaces: LinkInterface[];
+  /** We are the network's tempo master, driving the tempo the players sync to. */
+  master: boolean;
+  /** The master tempo we would drive, in BPM; shown whether or not we are master. */
+  masterBpm: number;
 }
 
 /** What analysing one track found. */

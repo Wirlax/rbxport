@@ -823,7 +823,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
   /** LINK in a browser: off, with nothing to run it on. */
-  const linkOff = (): LinkStatus => ({ on: false, problem: null, interface: null, players: [], interfaces: [] });
+  // The mock's tempo-master state, mutable so the master controls do
+  // something in the browser.
+  const mockMaster = { on: false, bpm: 120 };
+  const linkOff = (): LinkStatus => ({
+    on: false,
+    problem: null,
+    interface: null,
+    players: [],
+    interfaces: [],
+    master: false,
+    masterBpm: mockMaster.bpm,
+  });
 
   /** A network to look at, from `?link=`; null in a plain browser. */
   const linkMode = readLinkFromUrl();
@@ -850,6 +861,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       { number: 2, name: "CDJ-3000", kind: "player", address: "192.168.1.153", loaded: null, playing: false, master: false },
       { number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155", loaded: null, playing: false, master: false },
     ],
+    master: mockMaster.on,
+    masterBpm: mockMaster.bpm,
   });
   const mockLinkStatus = (): LinkStatus => {
     if (linkMode === "on") return mockLinkOn();
@@ -1366,6 +1379,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       ),
     stopLinkExport: () => wait(linkOff()),
     loadTrackOnLink: () => wait(undefined),
+    setLinkMaster: (on) => {
+      mockMaster.on = on;
+      return wait(mockLinkStatus());
+    },
+    nudgeLinkMaster: (deltaBpm) => {
+      mockMaster.bpm = Math.min(300, Math.max(40, Math.round((mockMaster.bpm + deltaBpm) * 100) / 100));
+      return wait(mockLinkStatus());
+    },
+    takeLinkMasterTempo: () => {
+      // A mock master player runs at 128.00; take it.
+      mockMaster.bpm = 128;
+      return wait(mockLinkStatus());
+    },
     onLinkStatus: () => () => undefined,
 
     // Analysis is real work in the app; here it just answers, so the queue's

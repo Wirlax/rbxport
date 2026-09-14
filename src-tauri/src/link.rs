@@ -91,7 +91,8 @@ pub struct PlayerDto {
 }
 
 /// Whether LINK is on, on what, and who is listening.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+// Not `Eq`: `master_bpm` is an `f64`. Callers compare `players`, which is.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkStatusDto {
     pub on: bool,
@@ -101,11 +102,25 @@ pub struct LinkStatusDto {
     pub players: Vec<PlayerDto>,
     /// What LINK could run on, for the picker.
     pub interfaces: Vec<InterfaceDto>,
+    /// We are the network's tempo master, driving the tempo the players sync
+    /// to.
+    pub master: bool,
+    /// The master tempo we would drive, in BPM. Shown on the master control
+    /// whether or not we are master, as rekordbox shows the last value.
+    pub master_bpm: f64,
 }
 
 impl LinkStatusDto {
     pub fn off(problem: Option<String>) -> Self {
-        Self { on: false, problem, interface: None, players: Vec::new(), interfaces: interfaces() }
+        Self {
+            on: false,
+            problem,
+            interface: None,
+            players: Vec::new(),
+            interfaces: interfaces(),
+            master: false,
+            master_bpm: 120.0,
+        }
     }
 }
 
@@ -202,6 +217,8 @@ impl Session {
             interface: Some(InterfaceDto::from(&snapshot.interface)),
             players: players(library, &snapshot),
             interfaces: interfaces(),
+            master: snapshot.master.on,
+            master_bpm: f64::from(snapshot.master.bpm_x100) / 100.0,
         }
     }
 
@@ -223,6 +240,28 @@ impl Session {
         export
             .load_track(player_number, track_id)
             .map_err(|error| format!("The player could not be told to load that track: {error}"))
+    }
+
+    /// Become the network's tempo master, or resign.
+    pub fn set_master(&self, on: bool) {
+        if let Some(export) = &self.export {
+            export.set_master(on);
+        }
+    }
+
+    /// Nudge the master tempo (rekordbox's −/+ move it a whole BPM), in BPM.
+    pub fn nudge_master(&self, delta_bpm: f64) {
+        if let Some(export) = &self.export {
+            #[allow(clippy::cast_possible_truncation)]
+            let delta_x100 = (delta_bpm * 100.0).round() as i32;
+            export.nudge_master(delta_x100);
+        }
+    }
+
+    /// Take the current master player's tempo (rekordbox's ⟳); `false` when
+    /// no player is master.
+    pub fn take_master_tempo(&self) -> bool {
+        self.export.as_ref().is_some_and(rbl_link::LinkExport::take_master_tempo)
     }
 }
 

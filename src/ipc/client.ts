@@ -172,6 +172,9 @@ async function realBackend(): Promise<Backend> {
     startLinkExport: (iface) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null }),
     stopLinkExport: () => invoke<LinkStatus>("stop_link_export"),
     loadTrackOnLink: (playerNumber, trackId) => invoke<void>("link_load_track", { playerNumber, trackId }),
+    setLinkMaster: (on) => invoke<LinkStatus>("link_set_master", { on }),
+    nudgeLinkMaster: (deltaBpm) => invoke<LinkStatus>("link_nudge_master", { deltaBpm }),
+    takeLinkMasterTempo: () => invoke<LinkStatus>("link_take_master_tempo"),
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
     relocateTrack: async (trackId) => {
