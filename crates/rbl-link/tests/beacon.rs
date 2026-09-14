@@ -280,7 +280,7 @@ fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
     let beat = receive(&beats, rbl_prolink::BEAT_KIND);
     assert_eq!(beat.len(), rbl_prolink::BEAT_LEN);
     assert_eq!(rbl_prolink::status_device_name(&beat).unwrap(), rbl_prolink::REKORDBOX_NAME);
-    let bar_beat = beat[0x5b];
+    let bar_beat = beat[0x5c];
     assert!((1..=4).contains(&bar_beat), "beat within the bar");
     assert_eq!(
         beat,
