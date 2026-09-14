@@ -1,6 +1,4 @@
 import styles from "./StatusBar.module.css";
-import { LinkControl } from "./LinkControl";
-import type { LinkPeerSeen, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 
@@ -23,14 +21,6 @@ export interface StatusBarProps {
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
   analysisFailures?: number;
-  /** Devices heard on the network, for the LINK control. */
-  linkPeers?: LinkPeerSeen[];
-  /** The LINK session, for the LINK control. */
-  linkStatus?: LinkStatus | null;
-  /** Turn LINK on or off. */
-  onLinkToggle?: () => void;
-  /** True while a LINK start/stop is in flight. */
-  linkBusy?: boolean;
 }
 
 export function StatusBar({
@@ -41,17 +31,10 @@ export function StatusBar({
   protectedLibrary = false,
   onCancelAnalysis,
   analysisFailures = 0,
-  linkPeers = [],
-  linkStatus = null,
-  onLinkToggle,
-  linkBusy = false,
 }: StatusBarProps) {
   const tip = useTooltip();
   return (
     <footer className={styles.statusBar}>
-      {onLinkToggle ? (
-        <LinkControl peers={linkPeers} link={linkStatus} onToggle={onLinkToggle} busy={linkBusy} />
-      ) : null}
       <span className={styles.logo}>rbxport</span>
       {readOnly ? (
         <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>

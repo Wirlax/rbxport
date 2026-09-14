@@ -1,0 +1,204 @@
+/* The Pro DJ LINK strip, measured from docs/screenshots 2026-09-13 11.18.36
+   (off) and 11.16.28 (on): a black band the full width of the window, the
+   LINK button boxed at the left, and — once on — the decks and the mixer
+   centred in what is left of it. The band keeps its height whether or not
+   LINK is on; only what sits beside the button changes. */
+.strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--s-link-strip-h);
+  padding: 0 12px;
+  background: var(--c-black);
+}
+
+/* Boxed, glyph over label, as rekordbox draws it at the far left. */
+.linkButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: none;
+  width: var(--s-link-button-size);
+  height: var(--s-link-button-size);
+  padding: 0;
+  border: 1px solid var(--c-outline);
+  border-radius: 2px;
+  background: var(--c-black);
+  color: var(--c-icon-on);
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover { border-color: var(--c-accent); }
+.linkButton:disabled { opacity: 0.6; cursor: default; }
+.strip[data-on] .linkButton { color: var(--c-icon-on); border-color: var(--c-outline); }
+.strip[data-blocked] .linkButton { color: var(--c-error); border-color: var(--c-error); }
+.glyph { width: 22px; height: 22px; }
+.linkLabel { font-size: var(--f-size-xs); font-weight: 700; letter-spacing: 0.06em; }
+
+/* Off with a reason: said beside the button, explained on click. */
+.warning {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-error);
+  font: inherit;
+  font-size: var(--f-size-xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The decks, centred in the rest of the strip the way rekordbox centres them. */
+.decks {
+  display: flex;
+  /* Stretched, so the mixer is as tall as the decks it sits between. */
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--s-link-deck-gap);
+  flex: 1;
+  min-width: 0;
+  height: var(--s-link-deck-h);
+  overflow: hidden;
+}
+
+/* One player: the number, its master and sync lamps, and what it holds. */
+.deck {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 1 var(--s-link-deck-w);
+  min-width: 150px;
+  padding: 3px 2px 2px;
+  background: var(--c-raised);
+  border-radius: 2px;
+}
+.deck[data-drop-target] { outline: 2px solid var(--c-accent); outline-offset: -2px; cursor: copy; }
+
+.deckHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* White with nothing loaded, orange once a track is: rekordbox's tell. */
+.deckNo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 1px;
+  background: var(--c-icon-on);
+  color: var(--c-black);
+  font-size: var(--f-size-sm);
+  font-weight: 700;
+}
+.deck[data-loaded] .deckNo { background: var(--c-label-orange); }
+.lamp,
+.master,
+.sync {
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--c-text-dim);
+}
+.lamp { color: var(--c-label-orange); }
+.master[data-on] { color: var(--c-label-orange); }
+
+/* The track window: empty, a jog disc at its left; loaded, the sleeve and
+   the title. */
+.deckBody {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 2px;
+  background: var(--c-black);
+  border-radius: 1px;
+  overflow: hidden;
+}
+/* Decorative: the link reports no playhead, so it never turns. */
+.jog {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  border-radius: 50%;
+  border: 1px solid var(--c-outline);
+  background: var(--c-raised);
+}
+/* Holds the sleeve's place while it decodes, so the title does not jump. */
+.sleeveBox {
+  flex: none;
+  width: var(--s-link-artwork);
+  height: var(--s-link-artwork);
+  background: var(--c-raised);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.sleeve {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sleeve[data-state="pending"],
+.sleeve[data-state="failed"] { visibility: hidden; }
+.trackTitle {
+  color: var(--c-icon-on);
+  font-size: var(--f-size-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.empty {
+  color: var(--c-text-dim);
+  font-size: var(--f-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The mixer, between the decks: its name and whether it holds the tempo. */
+.mixer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 1 var(--s-link-mixer-w);
+  min-width: 90px;
+  padding: 4px 10px;
+  background: var(--c-raised);
+  border-radius: 2px;
+}
+.mixerLabel {
+  color: var(--c-text-dim);
+  font-size: var(--f-size-bars);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Why LINK is unavailable, above the button. */
+.explain {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 12px;
+  z-index: 50;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: var(--c-context-menu);
+  border: 1px solid var(--c-context-menu-border);
+  border-radius: 4px;
+  color: var(--c-context-menu-text);
+  font-size: var(--f-size-xs);
+  line-height: 1.4;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+}

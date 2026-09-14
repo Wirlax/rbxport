@@ -505,6 +505,13 @@
   --s-pref-key-badge-h: 21px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the badge y 322..364 */
   --s-traffic-master-w: 79px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box x 2894..3051 */
   --s-traffic-master-h: 16px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box y 1046..1077, the last point of it the blue underline */
+  --s-link-strip-h: 75px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the black band above the rekordbox logo row, y 2010..2159, 149px */
+  --s-link-deck-h: 63px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): a player's box, y 2019..2145, 126px */
+  --s-link-deck-w: 220px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): a player's box, x 1429..1870, 441px */
+  --s-link-mixer-w: 151px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the mixer's box, x 1958..2260, 302px */
+  --s-link-deck-gap: 42px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): player box to mixer box, 1870..1958, 88px */
+  --s-link-button-size: 60px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the LINK button's box, x 120..241 by y 2021..2143 */
+  --s-link-artwork: 32px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the sleeve in a loaded player's track window, 64px square */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

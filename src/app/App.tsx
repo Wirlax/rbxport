@@ -14,6 +14,7 @@ import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
 import { TopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
+import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch, menuAccelerator } from "@/lib/shortcuts";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
@@ -418,6 +419,14 @@ export function App() {
         setLink(status);
         setLinkPeers(peers);
       }
+      // Re-check why LINK is off when the window regains focus: quitting
+      // rekordbox frees the ports, and the "unavailable" warning should clear
+      // without a restart rather than lingering after the reason is gone.
+      const refresh = () => {
+        void backend.linkStatus().then((s) => live && setLink(s));
+      };
+      window.addEventListener("focus", refresh);
+      stops.push(() => window.removeEventListener("focus", refresh));
     })();
     return () => {
       live = false;
@@ -641,6 +650,25 @@ export function App() {
     };
     return { a: into(setPlayerTrack), b: into(setPlayerTrackB) };
   }, [draggedTracks]);
+
+  // Dropping a track onto a CDJ row in the LINK strip tells that player to
+  // load it from us over Pro DJ Link.
+  const loadDroppedOnLink = useCallback(
+    (playerNumber: number) => {
+      const id = draggedTracks?.row.id;
+      setDraggedTracks(null);
+      if (!id) return;
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          await backend.loadTrackOnLink(playerNumber, id);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "That track could not be sent to the player.");
+        }
+      })();
+    },
+    [draggedTracks, refuse],
+  );
 
   /** The same three decks, loaded from the track menu or from a click. */
   const loadInto = useMemo(
@@ -1309,6 +1337,20 @@ export function App() {
         />
       ) : null}
 
+      {/* The LINK strip: present from the moment a player or mixer is heard,
+          and the whole LINK interface from then on. It draws nothing at all
+          before that, so the row it sits in collapses. */}
+      <div className={styles.linkStrip}>
+        <LinkDeckStrip
+          peers={linkPeers}
+          link={link}
+          busy={linkBusy}
+          onToggle={toggleLink}
+          dragging={draggedTracks !== null}
+          onDropToPlayer={loadDroppedOnLink}
+        />
+      </div>
+
       <StatusBar
         activity={
           analysis.running
@@ -1327,10 +1369,6 @@ export function App() {
         selection={selectionText}
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}
-        linkPeers={linkPeers}
-        linkStatus={link}
-        onLinkToggle={toggleLink}
-        linkBusy={linkBusy}
       />
     </div>
     </PreferencesProvider>

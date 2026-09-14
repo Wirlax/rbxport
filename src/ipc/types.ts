@@ -296,6 +296,8 @@ export interface Backend {
    */
   startLinkExport(iface?: string): Promise<LinkStatus>;
   stopLinkExport(): Promise<LinkStatus>;
+  /** Tells a CDJ on the link to load a specific track from our library. */
+  loadTrackOnLink(playerNumber: number, trackId: string): Promise<void>;
   /** Called as LINK turns on or off and as the players change. */
   onLinkStatus(listener: (status: LinkStatus) => void): () => void;
 

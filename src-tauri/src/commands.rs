@@ -534,9 +534,13 @@ pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: A
 }
 
 /// LINK as it stands: on or off, on which interface, and who is listening.
+///
+/// When it is off, the status carries why it cannot come on right now (usually
+/// rekordbox holding the ports), so the shell can warn before the button is
+/// ever pressed.
 #[tauri::command]
 pub async fn link_status(state: State<'_, Arc<AppState>>) -> AppResult<LinkStatusDto> {
-    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(None)))
+    Ok(state.link_status().unwrap_or_else(|| LinkStatusDto::off(crate::link::refusal())))
 }
 
 /// The players and mixers heard on the network, whether or not LINK is on.

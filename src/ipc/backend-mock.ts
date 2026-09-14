@@ -11,7 +11,7 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, Limiter, LinkStatus, RowDto, SortKey, Tick, TrackDetails, TrackField,
+  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RowDto, SortKey, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -825,6 +825,40 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   /** LINK in a browser: off, with nothing to run it on. */
   const linkOff = (): LinkStatus => ({ on: false, problem: null, interface: null, players: [], interfaces: [] });
 
+  /** A network to look at, from `?link=`; null in a plain browser. */
+  const linkMode = readLinkFromUrl();
+  const mockPeers: LinkPeerSeen[] = [
+    { number: 1, name: "CDJ-3000", kind: "player", address: "192.168.1.152" },
+    { number: 2, name: "CDJ-3000", kind: "player", address: "192.168.1.153" },
+    { number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155" },
+  ];
+  const mockLinkOn = (): LinkStatus => ({
+    on: true,
+    problem: null,
+    interface: { name: "en0", address: "192.168.1.14" },
+    interfaces: [{ name: "en0", address: "192.168.1.14" }],
+    players: [
+      {
+        number: 1,
+        name: "CDJ-3000",
+        kind: "player",
+        address: "192.168.1.152",
+        loaded: { id: "1", title: "GIN AND TONIC (Extended Mix)", artist: "DONT BLINK" },
+        playing: true,
+        master: true,
+      },
+      { number: 2, name: "CDJ-3000", kind: "player", address: "192.168.1.153", loaded: null, playing: false, master: false },
+      { number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155", loaded: null, playing: false, master: false },
+    ],
+  });
+  const mockLinkStatus = (): LinkStatus => {
+    if (linkMode === "on") return mockLinkOn();
+    if (linkMode === "blocked") {
+      return { ...linkOff(), problem: "rekordbox is running and holds the link ports. Quit it to turn LINK on." };
+    }
+    return linkOff();
+  };
+
   return {
     librarySummary: () =>
       ready
@@ -1318,15 +1352,20 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No network in a browser, so LINK cannot turn on. Saying why is better
     // than a switch that silently does nothing.
-    linkStatus: () => wait(linkOff()),
-    linkPeers: () => wait([]),
+    linkStatus: () => wait(mockLinkStatus()),
+    linkPeers: () => wait(linkMode === null || linkMode === "blocked" ? [] : mockPeers),
     onLinkPeers: () => () => undefined,
     startLinkExport: () =>
-      wait({
-        ...linkOff(),
-        problem: "LINK needs the desktop application; a browser has no access to the network.",
-      }),
+      wait(
+        linkMode === null
+          ? {
+              ...linkOff(),
+              problem: "LINK needs the desktop application; a browser has no access to the network.",
+            }
+          : mockLinkOn(),
+      ),
     stopLinkExport: () => wait(linkOff()),
+    loadTrackOnLink: () => wait(undefined),
     onLinkStatus: () => () => undefined,
 
     // Analysis is real work in the app; here it just answers, so the queue's
@@ -1489,6 +1528,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 function readFlagFromUrl(name: string): boolean {
   if (typeof location === "undefined") return false;
   return new URLSearchParams(location.search).has(name);
+}
+
+/**
+ * `?link=detected|on|blocked` puts the mock on a Pro DJ LINK network, which a
+ * browser has no way to be on. `detected` hears two players and a mixer with
+ * LINK off, `on` serves them, `blocked` reports the ports held.
+ */
+function readLinkFromUrl(): "detected" | "on" | "blocked" | null {
+  if (typeof location === "undefined") return null;
+  const raw = new URLSearchParams(location.search).get("link");
+  return raw === "detected" || raw === "on" || raw === "blocked" ? raw : null;
 }
 
 /** `?tracks=40000` lets the perf spec load a full-size library into the mock. */

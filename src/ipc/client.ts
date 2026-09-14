@@ -171,6 +171,7 @@ async function realBackend(): Promise<Backend> {
     onLinkPeers: (listener) => subscribe<LinkPeerSeen[]>("link:peers", listener),
     startLinkExport: (iface) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null }),
     stopLinkExport: () => invoke<LinkStatus>("stop_link_export"),
+    loadTrackOnLink: (playerNumber, trackId) => invoke<void>("link_load_track", { playerNumber, trackId }),
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
     relocateTrack: async (trackId) => {

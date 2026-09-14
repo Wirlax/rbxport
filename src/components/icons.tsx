@@ -129,6 +129,12 @@ export const LayoutTwoIcon = (props: IconProps) => (
   </svg>
 );
 
+export const LinkOnIcon = (props: IconProps) => (
+  <svg viewBox="0 0 28 28" aria-hidden focusable="false" {...props}>
+    <circle cx="8" cy="20" r="2.4" fill="currentColor"/> <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" d="M8 13.6a6.4 6.4 0 0 1 6.4 6.4"/> <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" d="M8 7.2a12.8 12.8 0 0 1 12.8 12.8"/>
+  </svg>
+);
+
 export const LinkIcon = (props: IconProps) => (
   <svg viewBox="0 0 28 28" aria-hidden focusable="false" {...props}>
     <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" d="M6 10h13l-3.2-3.4M22 18H9l3.2 3.4"/>
