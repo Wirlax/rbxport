@@ -37,6 +37,12 @@ export interface LinkDeckStripProps {
   dragging?: boolean;
   /** Called when a track is dropped onto a player deck. */
   onDropToPlayer?: ((playerNumber: number) => void) | undefined;
+  /** Become the network's tempo master, or resign. */
+  onSetMaster?: ((on: boolean) => void) | undefined;
+  /** Nudge the master tempo by `deltaBpm` (rekordbox's −/+ is ±1). */
+  onNudgeMaster?: ((deltaBpm: number) => void) | undefined;
+  /** Take the current master player's tempo as the master tempo (⟳). */
+  onTakeMasterTempo?: (() => void) | undefined;
 }
 
 export function LinkDeckStrip({
@@ -46,6 +52,9 @@ export function LinkDeckStrip({
   busy = false,
   dragging = false,
   onDropToPlayer,
+  onSetMaster,
+  onNudgeMaster,
+  onTakeMasterTempo,
 }: LinkDeckStripProps) {
   const tip = useTooltip();
   const [explaining, setExplaining] = useState(false);
@@ -127,6 +136,17 @@ export function LinkDeckStrip({
         >
           unavailable
         </button>
+      ) : null}
+
+      {on && link ? (
+        <MasterClock
+          master={link.master}
+          bpm={link.masterBpm}
+          canTakeTempo={linked.some((p) => p.master)}
+          onSetMaster={onSetMaster}
+          onNudge={onNudgeMaster}
+          onTakeTempo={onTakeMasterTempo}
+        />
       ) : null}
 
       {on ? (
@@ -214,6 +234,98 @@ function PlayerDeck({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The tempo-master clock, as rekordbox draws it at the strip's left: the
+ * number over LINK, the master BPM in a box with −/+, the MASTER toggle and
+ * the ⟳ button that takes the current master player's tempo. Orange when we
+ * are master, grey when we are not — the box still shows the tempo we would
+ * drive, as rekordbox holds the last value.
+ */
+function MasterClock({
+  master,
+  bpm,
+  canTakeTempo,
+  onSetMaster,
+  onNudge,
+  onTakeTempo,
+}: {
+  master: boolean;
+  bpm: number;
+  canTakeTempo: boolean;
+  onSetMaster?: ((on: boolean) => void) | undefined;
+  onNudge?: ((deltaBpm: number) => void) | undefined;
+  onTakeTempo?: (() => void) | undefined;
+}) {
+  const tip = useTooltip();
+  return (
+    <div className={styles.masterClock} data-master={master || undefined}>
+      <div className={styles.mcTop}>
+        <span className={styles.mcNumber}>1</span>
+        <div className={styles.mcBpm}>
+          <span className={styles.mcBpmValue}>{bpm.toFixed(2)}</span>
+          <button
+            type="button"
+            className={styles.mcNudge}
+            onClick={() => onNudge?.(-1)}
+            title={tip("Nudge the master tempo down 1 BPM.")}
+            aria-label="Master tempo down"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className={styles.mcNudge}
+            onClick={() => onNudge?.(1)}
+            title={tip("Nudge the master tempo up 1 BPM.")}
+            aria-label="Master tempo up"
+          >
+            +
+          </button>
+        </div>
+      </div>
+      <div className={styles.mcBottom}>
+        <button
+          type="button"
+          className={styles.mcMaster}
+          aria-pressed={master}
+          onClick={() => onSetMaster?.(!master)}
+          title={tip(
+            master
+              ? "This computer is the tempo master. Click to resign."
+              : "Make this computer the tempo master; players set to SYNC follow this tempo.",
+          )}
+        >
+          MASTER
+        </button>
+        <button
+          type="button"
+          className={styles.mcRecycle}
+          disabled={!canTakeTempo}
+          onClick={() => onTakeTempo?.()}
+          title={tip(
+            canTakeTempo
+              ? "Take the current master player's tempo as the master tempo."
+              : "No player is master, so there is no tempo to take.",
+          )}
+          aria-label="Take the master player's tempo"
+        >
+          <RecycleIcon className={styles.mcIcon} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The two-curved-arrows glyph rekordbox uses for "take the master's tempo". */
+function RecycleIcon({ className }: { className?: string | undefined }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M3 6.5a5 5 0 0 1 8.5-2.3M13 9.5a5 5 0 0 1-8.5 2.3" strokeLinecap="round" />
+      <path d="M11.5 1.5v2.8h-2.8M4.5 14.5v-2.8h2.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

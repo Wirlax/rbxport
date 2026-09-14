@@ -449,6 +449,17 @@ export function App() {
     })();
   }, [link?.on, linkInterface]);
 
+  // The tempo-master controls: each returns LINK's fresh status.
+  const setLinkMaster = useCallback((on: boolean) => {
+    void (async () => setLink(await (await getBackend()).setLinkMaster(on)))();
+  }, []);
+  const nudgeLinkMaster = useCallback((deltaBpm: number) => {
+    void (async () => setLink(await (await getBackend()).nudgeLinkMaster(deltaBpm)))();
+  }, []);
+  const takeLinkMasterTempo = useCallback(() => {
+    void (async () => setLink(await (await getBackend()).takeLinkMasterTempo()))();
+  }, []);
+
   // The master player's BPM for the filter's `MASTER PLAYER ±` list: the
   // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not
   // the deck's tempo-adjusted one — the tempo lives in the player and the
@@ -1351,6 +1362,9 @@ export function App() {
           onToggle={toggleLink}
           dragging={draggedTracks !== null}
           onDropToPlayer={loadDroppedOnLink}
+          onSetMaster={setLinkMaster}
+          onNudgeMaster={nudgeLinkMaster}
+          onTakeMasterTempo={takeLinkMasterTempo}
         />
       </div>
 

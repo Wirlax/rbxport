@@ -173,4 +173,39 @@ describe("LinkDeckStrip", () => {
     act(() => button.click());
     expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
+
+  it("shows the master clock and drives its controls", () => {
+    const masterCalls: boolean[] = [];
+    const nudges: number[] = [];
+    let took = 0;
+    const link = { ...on([cdj({ number: 1, master: true })]), master: false, masterBpm: 130 };
+    render({
+      peers: [peer()],
+      link,
+      onToggle: () => {},
+      onSetMaster: (v) => masterCalls.push(v),
+      onNudgeMaster: (d) => nudges.push(d),
+      onTakeMasterTempo: () => took++,
+    });
+
+    // The BPM is shown to two places, and a MASTER toggle exists.
+    expect(host.textContent).toContain("130.00");
+    expect([...host.querySelectorAll("button")].some((b) => b.textContent === "MASTER")).toBe(true);
+
+    // −/+ nudge by ∓1, MASTER toggles on, ⟳ takes the tempo.
+    act(() => (host.querySelector('[aria-label="Master tempo down"]') as HTMLButtonElement).click());
+    act(() => (host.querySelector('[aria-label="Master tempo up"]') as HTMLButtonElement).click());
+    expect(nudges).toEqual([-1, 1]);
+    act(() => (host.querySelector('button[aria-pressed="false"]') as HTMLButtonElement).click());
+    expect(masterCalls).toEqual([true]);
+    act(() => (host.querySelector('[aria-label="Take the master player\'s tempo"]') as HTMLButtonElement).click());
+    expect(took).toBe(1);
+  });
+
+  it("disables ⟳ when no player is master", () => {
+    const link = { ...on([cdj({ number: 1, master: false })]), master: false, masterBpm: 120 };
+    render({ peers: [peer()], link, onToggle: () => {}, onTakeMasterTempo: () => {} });
+    const recycle = host.querySelector('[aria-label="Take the master player\'s tempo"]') as HTMLButtonElement;
+    expect(recycle.disabled).toBe(true);
+  });
 });

@@ -537,6 +537,14 @@
   --s-link-glyph-off-w: 28.5px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the off glyph's ink (the two arrows), x 154..209 by y 2043..2087, 57px wide */
   --s-link-glyph-off-h: 22.5px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the off glyph's ink, 45px tall; each arrow's shaft 7.5px, its head 19px, 14px between them */
   --s-link-button-radius: 3px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the button's rounded line, 3px outer and 5px inner at 2x */
+  --s-link-mc-box-h: 20px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the BPM and MASTER boxes are 41px tall at 2x */
+  --s-link-mc-bpm-w: 116px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the BPM box (130.00 with − and +), x 138..371 at 2x, 233px */
+  --s-link-mc-master-w: 74px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the MASTER box, x 138..287 at 2x, 149px */
+  --s-link-mc-nudge-w: 18px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — each − / + button inside the right of the BPM box */
+  --s-link-mc-recycle-w: 30px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the recycle (take-the-master's-tempo) button, its two-arrows icon 16px wide */
+  --s-link-mc-icon: 16px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the recycle two-arrows and the MASTER gear, ~33px at 2x */
+  --s-link-mc-number-w: 30px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the number column over LINK, the digit centred at ~34px css */
+  --s-link-mc-gap: 4px; /* measured from a live 2x capture of rekordbox 7.2 in EXPORT as tempo master (2026-09-14): the master-clock cluster at the strip's left — the gap between the boxes and rows */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

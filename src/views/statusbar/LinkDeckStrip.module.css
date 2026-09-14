@@ -272,3 +272,113 @@
   line-height: 1.4;
   box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
 }
+
+/* The tempo-master clock at the strip's left, beside the LINK button: a
+   number over two rows — the master BPM with −/+ on top, MASTER and the
+   take-the-tempo ⟳ below. Orange (link-loaded) when we are master, grey
+   when not; the box still shows the tempo we would drive. Measured from a
+   live 2x capture of rekordbox 7.2 as master (2026-09-14). */
+.masterClock {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: none;
+  gap: var(--s-link-mc-gap);
+  color: var(--c-link-ink);
+}
+.mcTop,
+.mcBottom {
+  display: flex;
+  align-items: center;
+  gap: var(--s-link-mc-gap);
+}
+.mcNumber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s-link-mc-number-w);
+  font-size: var(--f-size-link-label);
+  line-height: 1;
+}
+/* The BPM box: the tempo, then − and +. Orange outline as master, grey when
+   not; the tempo takes the same colour. */
+.mcBpm {
+  display: flex;
+  align-items: stretch;
+  height: var(--s-link-mc-box-h);
+  width: var(--s-link-mc-bpm-w);
+  box-sizing: border-box;
+  border: 1px solid var(--c-link-dim);
+  border-radius: 2px;
+  background: var(--c-link-button);
+}
+.masterClock[data-master] .mcBpm { border-color: var(--c-link-loaded); }
+.mcBpmValue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  font-size: var(--f-size-link-label);
+  color: var(--c-link-ink-off);
+}
+.masterClock[data-master] .mcBpmValue { color: var(--c-link-loaded); }
+.mcNudge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--s-link-mc-nudge-w);
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--c-link-strip);
+  background: var(--c-link-strip);
+  color: var(--c-link-ink);
+  font: inherit;
+  font-size: var(--f-size-link-label);
+  line-height: 1;
+  cursor: pointer;
+}
+.mcNudge:hover { color: var(--c-accent); }
+/* MASTER: a boxed toggle, orange as master, grey when not. */
+.mcMaster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--s-link-mc-master-w);
+  height: var(--s-link-mc-box-h);
+  box-sizing: border-box;
+  border: 1px solid var(--c-link-dim);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--c-link-dim);
+  font-size: var(--f-size-link-lamp);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.mcMaster:hover { border-color: var(--c-accent); }
+.masterClock[data-master] .mcMaster {
+  border-color: var(--c-link-loaded);
+  color: var(--c-link-loaded);
+}
+/* ⟳ take-the-tempo: a dark square button with the two-arrows glyph. */
+.mcRecycle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--s-link-mc-recycle-w);
+  height: var(--s-link-mc-box-h);
+  box-sizing: border-box;
+  border: 1px solid var(--c-link-number-edge);
+  border-radius: 2px;
+  background: var(--c-link-button);
+  color: var(--c-link-ink-off);
+  cursor: pointer;
+}
+.mcRecycle:hover:not(:disabled) { border-color: var(--c-accent); color: var(--c-link-ink); }
+.mcRecycle:disabled { opacity: 0.4; cursor: default; }
+.mcIcon {
+  width: var(--s-link-mc-icon);
+  height: var(--s-link-mc-icon);
+}
