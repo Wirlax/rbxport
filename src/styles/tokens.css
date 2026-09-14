@@ -138,6 +138,8 @@
   --c-pref-key-badge: #222222; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge beside a shortcut on the Keyboard pane, (34,34,34) */
   --c-traffic-master: #282828; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER menu's box above the track list, (40,40,40); its 1pt underline is padActive */
   --c-traffic-light: #64FF00; /* UNMEASURED - the lit key cell in a capture pasted into chat on 2026-09-10 that is not on disk: a bright green with black text; re-sample when the capture lands in docs/screenshots */
+  --c-link-strip: #282828; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on): the band behind the LINK button and the decks, (40,40,40) across y 2010..2159; the deck and mixer boxes are the same grey, cut from it by a 1pt black line */
+  --c-link-button: #191919; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on): the LINK button's fill, (25,25,25) at x 124..239 */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
