@@ -131,13 +131,13 @@ export const LayoutTwoIcon = (props: IconProps) => (
 
 export const LinkOnIcon = (props: IconProps) => (
   <svg viewBox="0 0 28 28" aria-hidden focusable="false" {...props}>
-    <circle cx="8" cy="20" r="2.4" fill="currentColor"/> <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" d="M8 13.6a6.4 6.4 0 0 1 6.4 6.4"/> <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" d="M8 7.2a12.8 12.8 0 0 1 12.8 12.8"/>
+    <circle cx="6.5" cy="21.5" r="3.4" fill="currentColor"/> <path fill="none" stroke="currentColor" strokeWidth="4.2" strokeLinecap="butt" d="M6.5 11.5a10 10 0 0 1 10 10"/> <path fill="none" stroke="currentColor" strokeWidth="4.2" strokeLinecap="butt" d="M6.5 3.5a18 18 0 0 1 18 18"/>
   </svg>
 );
 
 export const LinkIcon = (props: IconProps) => (
   <svg viewBox="0 0 28 28" aria-hidden focusable="false" {...props}>
-    <path fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" d="M6 10h13l-3.2-3.4M22 18H9l3.2 3.4"/>
+    <path fill="currentColor" d="M2 8.5h15V4.5l9 6-9 6v-4H2zM26 19.5H11v4l-9-6 9-6v4h15z"/>
   </svg>
 );
 

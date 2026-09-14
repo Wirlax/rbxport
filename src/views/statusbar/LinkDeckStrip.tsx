@@ -189,8 +189,10 @@ function PlayerDeck({
       <div className={styles.deckHead}>
         <span className={styles.deckNo}>{player.number}</span>
         {/* rekordbox lights CUE beside a loaded deck's number; a playing
-            deck says so instead, since that is what a drop would interrupt. */}
-        {loaded ? <span className={styles.lamp}>{player.playing ? "PLAY" : "CUE"}</span> : null}
+            deck says so instead, since that is what a drop would interrupt.
+            The slot stays, so MASTER and SYNC do not move as tracks come
+            and go. */}
+        <span className={styles.lamp}>{loaded ? (player.playing ? "PLAY" : "CUE") : ""}</span>
         <span className={styles.master} data-on={player.master || undefined}>
           MASTER
         </span>
@@ -219,7 +221,9 @@ function MixerCell({ device }: { device: LinkPlayer }) {
   return (
     <div className={styles.mixer} aria-label={`Mixer ${device.number}`}>
       <span className={styles.mixerLabel}>{device.kind === "mixer" ? "MIXER" : device.name}</span>
-      <span className={styles.master} data-on={device.master || undefined}>MASTER</span>
+      <span className={styles.mixerMaster} data-on={device.master || undefined}>
+        MASTER
+      </span>
     </div>
   );
 }

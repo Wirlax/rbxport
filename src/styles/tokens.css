@@ -138,8 +138,16 @@
   --c-pref-key-badge: #222222; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge beside a shortcut on the Keyboard pane, (34,34,34) */
   --c-traffic-master: #282828; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER menu's box above the track list, (40,40,40); its 1pt underline is padActive */
   --c-traffic-light: #64FF00; /* UNMEASURED - the lit key cell in a capture pasted into chat on 2026-09-10 that is not on disk: a bright green with black text; re-sample when the capture lands in docs/screenshots */
-  --c-link-strip: #282828; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on): the band behind the LINK button and the decks, (40,40,40) across y 2010..2159; the deck and mixer boxes are the same grey, cut from it by a 1pt black line */
-  --c-link-button: #191919; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on): the LINK button's fill, (25,25,25) at x 124..239 */
+  --c-link-strip: #282828; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the band behind the LINK button and the decks, (40,40,40); the deck and mixer boxes are the same grey, cut from it by a 1pt black line */
+  --c-link-button: #191919; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK button's fill, (25,25,25); with LINK off it is the 1pt rounded border on a band-grey button */
+  --c-link-strip-off: #323232; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the band with LINK off, (50,50,50), the LINK button the same */
+  --c-link-ink: #FFFFFF; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK glyph and label, (255,255,255) */
+  --c-link-ink-off: #C8C8C8; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the LINK glyph and label, (200,200,200) */
+  --c-link-dim: #646464; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): MASTER and SYNC on a player, MASTER on the mixer, (100,100,100) */
+  --c-link-loaded: #DD8C35; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, tracks loaded): the player-number box and CUE once a track is loaded, (221,140,53) */
+  --c-link-number-edge: #969696; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the 1pt border of an empty player's number box, (150,150,150), on a (30,30,30) fill */
+  --c-link-mixer-edge: #363636; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the 1pt border of the MIXER box, (54,54,54), on a (30,30,30) fill */
+  --c-link-mixer-text: #4B4B4B; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): MIXER, (75,75,75) */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */
@@ -507,13 +515,25 @@
   --s-pref-key-badge-h: 21px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the badge y 322..364 */
   --s-traffic-master-w: 79px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box x 2894..3051 */
   --s-traffic-master-h: 16px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): the MASTER box y 1046..1077, the last point of it the blue underline */
-  --s-link-strip-h: 75px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the black band above the rekordbox logo row, y 2010..2159, 149px */
-  --s-link-deck-h: 63px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): a player's box, y 2019..2145, 126px */
-  --s-link-deck-w: 220px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): a player's box, x 1429..1870, 441px */
-  --s-link-mixer-w: 151px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the mixer's box, x 1958..2260, 302px */
-  --s-link-deck-gap: 42px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): player box to mixer box, 1870..1958, 88px */
-  --s-link-button-size: 60px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the LINK button's box, x 120..241 by y 2021..2143 */
-  --s-link-artwork: 32px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on with two CDJ-3000s and a DJM-V5): the sleeve in a loaded player's track window, 64px square */
+  --s-link-strip-margin: 12px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): black between the browser and the band, y 1996..2019, 24px */
+  --s-link-strip-h: 68px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the band, y 2020..2155, 136px; the same in the off capture */
+  --s-link-button-w: 58px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK button, x 124..239, 116px */
+  --s-link-button-h: 56px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK button, y 2032..2143, 112px, centred in the band */
+  --s-link-button-inset: 5px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the band's left edge at x 114 to the button at 124 */
+  --s-link-button-label-h: 24px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK label's box, y 2092..2139, 48px, 2pt in from the button's sides and bottom */
+  --s-link-glyph: 22px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the glyph's ink, x 160..203 by y 2043..2087, 44px square, 5.5pt below the button's top */
+  --s-link-deck-w: 228px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): a player's box inside its black line, x 1424..1879, 456px; 230 with the line */
+  --s-link-mixer-w: 147px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the mixer's box inside its black line, x 1964..2257, 294px */
+  --s-link-deck-gap: 40px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): a player's black line to the mixer's, x 1882..1961, 80px */
+  --s-link-number: 22px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the player-number box, x 1424..1467 by y 2022..2065, 44px square, flush with the box's corner */
+  --s-link-deck-head-h: 26px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the box's top to the track window, y 2022..2073, 52px */
+  --s-link-track-h: 35px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the track window, y 2074..2143, 70px, 6pt in from the box's sides, 5pt above its bottom */
+  --s-link-jog: 35px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the jog well at the window's left, x 1436..1505, 70px square; its disc 58px, its hole 16px */
+  --s-link-artwork: 32px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, tracks loaded): the sleeve in the well, 64px square */
+  --s-link-lamp-at: 30px; /* docs/screenshots 2026-09-13 11.16.49 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, tracks loaded): CUE's ink starts at x 1483, 59px from the box's left */
+  --s-link-lamp-w: 33px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): MASTER's ink starts at x 1551, 63pt from the box's left, whether or not CUE is lit before it */
+  --s-link-mixer-label-w: 62px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the MIXER box, x 1966..2089, 124px, 1pt in from the mixer box's left; 22pt tall like the player number */
+  --s-link-mixer-master-at: 39px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the mixer's MASTER, cap top at y 2100, 78px below the box's top, ink 10.5pt in from its left */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */
@@ -547,6 +567,8 @@
   --f-size-pref-tab: 12.5px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): a tab (Display Type): cap top to descender 23 capture px */
   --f-size-pref-badge: 11px; /* measured from the Preferences captures docs/screenshots (rekordbox 7.2.11, 2x, 9.46.53 to 9.49.51 PM): the key badge's text (spacebar): an 18 capture px x-height-to-ascender span */
   --f-size-traffic-master: 10px; /* measured from the 2-player capture docs/screenshots (Screenshot 2026-09-08 at 3.00.12 PM, rekordbox 7.2.11, 2x): 'MASTER' in the box, a 14 capture px cap; bold */
+  --f-size-link-label: 16px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): LINK, the player number, MIXER and a loaded title: a 23 capture px cap (11.5pt), Arial at 16px; LINK 68px wide at 2x, Arial 16 gives 72 */
+  --f-size-link-lamp: 12.5px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): MASTER SYNC: an 18 capture px cap (9pt), Arial at 12.5px; 'MASTER SYNC' 184px wide at 2x */
 }
 
 /* rekordbox export mode is a single dark design; we commit to it rather than
