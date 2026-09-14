@@ -390,17 +390,22 @@ fn status_loop(
                     && matches!(state.track_slot, MediaSlot::Rb | MediaSlot::Usb)
                     && state.track_id != 0;
                 let playing = matches!(state.play_state, PlayState::Playing | PlayState::Looping);
+                // The status packet does not name the device kind; the
+                // keep-alive does. Read it from the peer table by number so a
+                // mixer is shown as a mixer, not a player.
+                let kind = peer_kind(&shared, state.device_id);
                 let player = shared.players.entry(state.device_id).or_insert_with(|| Player {
                     number: state.device_id,
                     name: rbl_prolink::status_device_name(packet).unwrap_or_default(),
                     address: *from.ip(),
-                    kind: DeviceType::Cdj,
+                    kind,
                     loaded: None,
                     playing: false,
                     master: false,
                     bpm_x100: 0,
                     last_seen: Instant::now(),
                 });
+                player.kind = kind;
                 player.loaded = from_us.then_some(state.track_id);
                 player.playing = playing;
                 player.master = state.is_master;
@@ -410,6 +415,12 @@ fn status_loop(
             _ => {}
         }
     }
+}
+
+/// The device kind of the peer with `number`, from the keep-alive table, or a
+/// player until its keep-alive has been heard.
+fn peer_kind(shared: &Shared, number: u8) -> DeviceType {
+    shared.peers.peers().iter().find(|p| p.device_number == number).map_or(DeviceType::Cdj, |p| p.device_type)
 }
 
 /// The tempo a player is playing at, ×100: its track's BPM at its pitch,

@@ -112,7 +112,10 @@ impl DeviceType {
     pub fn from_u8(v: u8) -> Self {
         match v {
             0x01 => Self::Cdj,
-            0x02 => Self::Mixer,
+            // `02` is the community-documented mixer; a DJM-V5 announces `03`
+            // (measured on the wire 2026-09-13, device 33 at 192.168.1.66).
+            // Both are mixers, so both decode as one — `to_u8` still says `02`.
+            0x02 | 0x03 => Self::Mixer,
             0x04 => Self::Rekordbox,
             other => Self::Other(other),
         }

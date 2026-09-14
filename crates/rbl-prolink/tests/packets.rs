@@ -311,3 +311,21 @@ fn the_idle_status_matches_the_capture() {
     };
     assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS_IDLE));
 }
+
+/// A DJM-V5's keep-alive, verbatim from the wire (2026-09-13, device 33 at
+/// 192.168.1.66): it announces device type `03`, not the community-documented
+/// `02`, and must still be read as a mixer or it shows up as a nameless
+/// "device" instead of the MIXER the link strip draws.
+const CAPTURED_DJM_V5_KEEP_ALIVE: &str =
+    "5173707431576d4a4f4c0600444a4d2d56350000000000000000000000000000010200362102c83dfc1dfea2c0a80142040000000331";
+
+#[test]
+fn a_djm_v5_is_read_as_a_mixer() {
+    let bytes = hex(CAPTURED_DJM_V5_KEEP_ALIVE);
+    let mixer = KeepAlive::decode(&bytes).unwrap();
+    assert_eq!(mixer.name, "DJM-V5");
+    assert_eq!(mixer.device_number, 33);
+    assert_eq!(mixer.device_type, DeviceType::Mixer);
+    // The documented value still decodes the same way.
+    assert_eq!(DeviceType::from_u8(0x02), DeviceType::Mixer);
+}
