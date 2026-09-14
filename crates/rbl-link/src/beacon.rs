@@ -258,9 +258,11 @@ impl Beacon {
     /// whatever BPM is set; the beat clock starts driving beats at once and
     /// the status packets say we are master.
     ///
-    /// It does not wrest master from a player that currently holds it by the
-    /// handoff protocol — it simply asserts master. When a CDJ is the current
-    /// master, take master on the CDJ or set it to SYNC to hand it over.
+    /// Asserting master is enough — no handoff protocol is needed. Verified
+    /// live (2026-09-14) on a real CDJ-3000: a deck that was itself master
+    /// yields the moment it sees our master status and follows our tempo,
+    /// sending no `0x26`/`0x27` handoff of its own, and when we resign a
+    /// synced, playing deck takes master over on its own.
     pub fn set_master(&self, on: bool) {
         let mut shared = self.shared.lock();
         shared.master.on = on;
