@@ -71,6 +71,7 @@ fn the_status_beacon_and_the_connect_greeting_match_the_capture() {
         device_number: REKORDBOX_DEVICE_NUMBER,
         bpm_x100: 0x1e80,
         beat: 1,
+        master: false,
     };
     assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS));
     assert_eq!(
@@ -339,8 +340,53 @@ fn the_idle_status_matches_the_capture() {
         device_number: REKORDBOX_DEVICE_NUMBER,
         bpm_x100: 0,
         beat: 0,
+        master: false,
     };
     assert_eq!(status.encode(), hex(CAPTURED_REKORDBOX_STATUS_IDLE));
+}
+
+/// rekordbox 7.2 as the network's tempo master at 130.00 BPM, verbatim from
+/// the wire (2026-09-14, rekordbox on this Mac): the status flag is `0xe0`
+/// (the master bit set, where a non-master sends `0xc0`) and `Mm` at `0x34`
+/// is `0x01`. Everything else matches the mirror status.
+const CAPTURED_MASTER_STATUS_BEAT_1: &str =
+    "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000e000100000800032c8001000000109ff01";
+
+#[test]
+fn the_master_status_matches_the_capture() {
+    let status = rbl_prolink::Status {
+        name: REKORDBOX_NAME.to_owned(),
+        device_number: REKORDBOX_DEVICE_NUMBER,
+        bpm_x100: 13_000,
+        beat: 1,
+        master: true,
+    };
+    assert_eq!(status.encode(), hex(CAPTURED_MASTER_STATUS_BEAT_1));
+    // The master bit and Mm are the only difference from a mirror status.
+    let mirror = rbl_prolink::Status { master: false, ..status.clone() }.encode();
+    let master = status.encode();
+    let differing: Vec<usize> = (0..master.len()).filter(|&i| master[i] != mirror[i]).collect();
+    assert_eq!(differing, vec![0x27, 0x34]);
+}
+
+/// rekordbox 7.2 broadcasting beat packets as master at 130.00 BPM, one per
+/// beat across a whole bar, verbatim from the wire (2026-09-14). The six
+/// timing fields track the beat within the bar; everything else is fixed.
+const CAPTURED_BEATS: [(&str, u8); 4] = [
+    ("5173707431576d4a4f4c2872656b6f7264626f7800000000000000000000010111003c000001cd0000039b000007360000073600000e6c00000e6cffffffffffffffffffffffffffffffffffffffffffffffff00100000000032c801000011", 1),
+    ("5173707431576d4a4f4c2872656b6f7264626f7800000000000000000000010111003c000001cd0000039b000005680000073600000c9e00000e6cffffffffffffffffffffffffffffffffffffffffffffffff00100000000032c802000011", 2),
+    ("5173707431576d4a4f4c2872656b6f7264626f7800000000000000000000010111003c000001cd0000039b0000039b0000073600000ad100000e6cffffffffffffffffffffffffffffffffffffffffffffffff00100000000032c803000011", 3),
+    ("5173707431576d4a4f4c2872656b6f7264626f7800000000000000000000010111003c000001cd0000039b000001cd000007360000090300000e6cffffffffffffffffffffffffffffffffffffffffffffffff00100000000032c804000011", 4),
+];
+
+#[test]
+fn the_beat_packet_is_rekordboxs_byte_for_byte_across_a_bar() {
+    for (captured, beat) in CAPTURED_BEATS {
+        let packet = rbl_prolink::beat_packet(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, 13_000, beat);
+        assert_eq!(packet.len(), rbl_prolink::BEAT_LEN);
+        assert_eq!(packet, hex(captured), "beat {beat}");
+        assert_eq!(rbl_prolink::packet_kind(&packet).unwrap(), rbl_prolink::BEAT_KIND);
+    }
 }
 
 /// rekordbox 7.2 telling player 1 (a real CDJ-3000 at 192.168.1.170) to load

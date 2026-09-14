@@ -288,6 +288,11 @@ pub struct Status {
     /// 1 to 4, advancing with the beat; what the value means when nothing
     /// plays is `[UNKNOWN]` — rekordbox kept sending 1.
     pub beat: u8,
+    /// We are the network's tempo master, driving the tempo the other
+    /// players sync to. Sets two bytes rekordbox sets only as master (the
+    /// status flag's master bit and the `Mm` master flag, measured
+    /// 2026-09-14 from rekordbox 7.2 acting as master at 130.00 BPM).
+    pub master: bool,
 }
 
 /// Byte length of a status packet.
@@ -310,14 +315,20 @@ impl Status {
         let mut out = Vec::with_capacity(STATUS_LEN);
         write_status_header(&mut out, 0x29, &self.name);
         out.extend_from_slice(&[0x01, 0x01, self.device_number, 0x00, 0x38, self.device_number]);
-        // The byte before the tempo is 0x80 when a master tempo is being
-        // broadcast and 0x00 when idle (measured: idle rekordbox sends 0x00
-        // with beat 0, playing rekordbox 0x80 with the beat). We broadcast a
-        // tempo only when a player on the link is master.
-        let master = if self.bpm_x100 != 0 { 0x80 } else { 0x00 };
-        out.extend_from_slice(&[0x00, 0x00, 0xc0, 0x00, 0x10, 0x00, 0x00, master, 0x00]);
+        // The status flag (byte `0x27`): `0xc0` playing but not master,
+        // `0xe0` as tempo master — the master bit (`0x20`). The byte before
+        // the tempo (`0x2c`) is `0x80` when a master tempo is being broadcast
+        // and `0x00` when idle (measured: idle rekordbox sends `0x00` with
+        // beat 0, playing rekordbox `0x80` with the beat). We broadcast a
+        // tempo when a player on the link is master, or when we are.
+        let flag = if self.master { 0xe0 } else { 0xc0 };
+        let tempo_valid = if self.master || self.bpm_x100 != 0 { 0x80 } else { 0x00 };
+        out.extend_from_slice(&[0x00, 0x00, flag, 0x00, 0x10, 0x00, 0x00, tempo_valid, 0x00]);
         out.extend_from_slice(&self.bpm_x100.to_be_bytes());
-        out.extend_from_slice(&[0x00, 0x10, 0x00, 0x00, 0x00, 0x09, 0xff, self.beat]);
+        // `Mm` (byte `0x34`) is `0x01` when this device is the tempo master
+        // playing a rekordbox track, `0x00` otherwise.
+        let mm = u8::from(self.master);
+        out.extend_from_slice(&[0x00, 0x10, 0x00, 0x00, mm, 0x09, 0xff, self.beat]);
         debug_assert_eq!(out.len(), STATUS_LEN);
         out
     }
@@ -524,6 +535,58 @@ pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
 
 /// The kind of a player's status packet on port 50002.
 pub const PLAYER_STATUS_KIND: u8 = 0x0a;
+
+/// The kind of a beat packet, broadcast to port 50001 on each beat by the
+/// tempo master.
+pub const BEAT_KIND: u8 = 0x28;
+
+/// The kind of a master-handoff request, sent to the current tempo master on
+/// port 50001 to ask it to yield.
+pub const MASTER_HANDOFF_REQUEST_KIND: u8 = 0x26;
+
+/// Byte length of a beat packet.
+pub const BEAT_LEN: usize = 0x5f;
+
+/// The beat packet the tempo master broadcasts to port 50001 on every beat:
+/// `kind 28`, 95 bytes, saying when the next several beats and bars fall so
+/// a synced player can lock to the master's tempo and downbeat.
+///
+/// Byte for byte what rekordbox 7.2 broadcasts as master (captured
+/// 2026-09-14 at 130.00 BPM across a whole bar; pinned in the tests). The
+/// name field here is 19 bytes, one shorter than a status packet's — the
+/// beat packet's own header variant — so the fields land one byte below the
+/// djl-analysis diagram's offsets.
+///
+/// `bar_beat` is the beat within the bar, 1 to 4 (the downbeat is 1). The
+/// six timing fields are `floor(k · 6_000_000 / bpm_x100)` milliseconds
+/// until the k-th upcoming beat, for k of 1, 2, 5−beat (the next bar), 4,
+/// 9−beat (the bar after) and 8.
+pub fn beat_packet(name: &str, device_number: u8, bpm_x100: u16, bar_beat: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(BEAT_LEN);
+    out.extend_from_slice(&MAGIC);
+    out.push(BEAT_KIND);
+    // A 19-byte name field, not the status packet's 20.
+    let mut padded = [0_u8; NAME_LEN - 1];
+    for (slot, byte) in padded.iter_mut().zip(name.as_bytes()) {
+        *slot = *byte;
+    }
+    out.extend_from_slice(&padded);
+    out.extend_from_slice(&[0x01, 0x01, device_number, 0x00, 0x3c]);
+    let beat = bar_beat.clamp(1, 4);
+    let bpm = u32::from(bpm_x100.max(1));
+    let offset = |k: u32| ((k * 6_000_000) / bpm).to_be_bytes();
+    for k in [1, 2, u32::from(5 - beat), 4, u32::from(9 - beat), 8] {
+        out.extend_from_slice(&offset(k));
+    }
+    out.extend_from_slice(&[0xff; 24]);
+    // Pitch fixed at +0% (`0x00100000`); the tempo is carried by `bpm_x100`.
+    out.extend_from_slice(&0x0010_0000_u32.to_be_bytes());
+    out.extend_from_slice(&[0x00, 0x00]);
+    out.extend_from_slice(&bpm_x100.to_be_bytes());
+    out.extend_from_slice(&[beat, 0x00, 0x00, device_number]);
+    debug_assert_eq!(out.len(), BEAT_LEN);
+    out
+}
 
 /// The kind of the Load Track command rekordbox sends to a CDJ.
 pub const LOAD_TRACK_KIND: u8 = 0x19;
