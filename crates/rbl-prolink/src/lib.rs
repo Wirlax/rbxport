@@ -545,17 +545,15 @@ pub const BEAT_KIND: u8 = 0x28;
 pub const MASTER_HANDOFF_REQUEST_KIND: u8 = 0x26;
 
 /// Byte length of a beat packet.
-pub const BEAT_LEN: usize = 0x5f;
+pub const BEAT_LEN: usize = 0x60;
 
 /// The beat packet the tempo master broadcasts to port 50001 on every beat:
-/// `kind 28`, 95 bytes, saying when the next several beats and bars fall so
+/// `kind 28`, 96 bytes, saying when the next several beats and bars fall so
 /// a synced player can lock to the master's tempo and downbeat.
 ///
 /// Byte for byte what rekordbox 7.2 broadcasts as master (captured
-/// 2026-09-14 at 130.00 BPM across a whole bar; pinned in the tests). The
-/// name field here is 19 bytes, one shorter than a status packet's — the
-/// beat packet's own header variant — so the fields land one byte below the
-/// djl-analysis diagram's offsets.
+/// 2026-09-14 at 130.00 BPM across a whole bar and verified live against
+/// the packets rbxport itself puts on the wire; pinned in the tests).
 ///
 /// `bar_beat` is the beat within the bar, 1 to 4 (the downbeat is 1). The
 /// six timing fields are `floor(k · 6_000_000 / bpm_x100)` milliseconds
@@ -563,14 +561,7 @@ pub const BEAT_LEN: usize = 0x5f;
 /// 9−beat (the bar after) and 8.
 pub fn beat_packet(name: &str, device_number: u8, bpm_x100: u16, bar_beat: u8) -> Vec<u8> {
     let mut out = Vec::with_capacity(BEAT_LEN);
-    out.extend_from_slice(&MAGIC);
-    out.push(BEAT_KIND);
-    // A 19-byte name field, not the status packet's 20.
-    let mut padded = [0_u8; NAME_LEN - 1];
-    for (slot, byte) in padded.iter_mut().zip(name.as_bytes()) {
-        *slot = *byte;
-    }
-    out.extend_from_slice(&padded);
+    write_status_header(&mut out, BEAT_KIND, name);
     out.extend_from_slice(&[0x01, 0x01, device_number, 0x00, 0x3c]);
     let beat = bar_beat.clamp(1, 4);
     let bpm = u32::from(bpm_x100.max(1));
