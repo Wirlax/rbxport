@@ -145,6 +145,11 @@ export interface DjSystemPreferences {
   sorts: MenuSlot[] | null;
   /** `menuItem` of the sort option shown beside the track name; null for none. */
   subColumn: number | null;
+  /**
+   * The OS name of the network interface PRO DJ LINK runs on (`en0`,
+   * `Ethernet 2`), or null to take the one the players are reached through.
+   */
+  linkInterface: string | null;
 }
 
 export interface AdvancedPreferences {
@@ -218,6 +223,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     categories: null,
     sorts: null,
     subColumn: null,
+    linkInterface: null,
   },
   advanced: {
     relocateFolders: [],
@@ -342,6 +348,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       subColumn: typeof dj.subColumn === "number" && Number.isInteger(dj.subColumn)
         ? dj.subColumn
         : null,
+      linkInterface: typeof dj.linkInterface === "string" && dj.linkInterface !== "" ? dj.linkInterface : null,
     },
     advanced: {
       relocateFolders: strings(advanced.relocateFolders),

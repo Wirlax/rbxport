@@ -28,7 +28,7 @@ describe("sanitisePreferences", () => {
         explorer: "yes",
       },
       analysis: { auto: false },
-      djSystem: { waveformColor: "rgb", subColumn: 5.5, categories: [{ id: 1 }] },
+      djSystem: { waveformColor: "rgb", subColumn: 5.5, categories: [{ id: 1 }], linkInterface: "" },
       advanced: {
         relocateFolders: ["/a", "", 3, "/b"],
         syncType: "bpm",
@@ -49,6 +49,9 @@ describe("sanitisePreferences", () => {
     expect(out.djSystem.subColumn).toBeNull();
     // A row that is not a row means the reference rows, not a broken list.
     expect(out.djSystem.categories).toBeNull();
+    // An empty interface name is no choice: LINK picks for itself.
+    expect(out.djSystem.linkInterface).toBeNull();
+    expect(sanitisePreferences({ djSystem: { linkInterface: "en11" } }).djSystem.linkInterface).toBe("en11");
     expect(out.advanced.relocateFolders).toEqual(["/a", "/b"]);
     expect(out.advanced.syncType).toBe("bpm");
     expect(out.advanced.quantizeBeat).toBe("1/1");

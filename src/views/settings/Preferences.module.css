@@ -406,6 +406,8 @@
   margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
 }
 .actions .select { flex: 1; width: auto; min-width: 0; }
+/* The button keeps its words on one line; the dropdown gives way. */
+.actions .button { flex: none; }
 
 /* Facts: the library's counts. */
 .facts {

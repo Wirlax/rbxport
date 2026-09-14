@@ -434,17 +434,20 @@ export function App() {
     };
   }, []);
 
+  // On the interface chosen under DJ System, or the one the players are
+  // reached through when none is.
+  const linkInterface = stickDefaults.linkInterface;
   const toggleLink = useCallback(() => {
     setLinkBusy(true);
     void (async () => {
       const backend = await getBackend();
       try {
-        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport());
+        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined));
       } finally {
         setLinkBusy(false);
       }
     })();
-  }, [link?.on]);
+  }, [link?.on, linkInterface]);
 
   // The master player's BPM for the filter's `MASTER PLAYER ±` list: the
   // track on whichever deck is MASTER. `[ASSUME]` the track's own BPM, not

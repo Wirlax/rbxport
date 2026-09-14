@@ -10,8 +10,8 @@
  * Not here: the account nickname (no account), the background colour (its
  * choices have not been seen), the jog image (not written), My Settings
  * (`MYSETTING.DAT` is not written), and the Device tab (history import is
- * not built). Others holds the PRO DJ LINK switch in place of rekordbox's
- * mixer settings.
+ * not built). PRO DJ LINK, in place of rekordbox's Others tab, holds the
+ * LINK switch and the network interface it runs on.
  */
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,14 +23,14 @@ import { ListPairTab } from "@/views/devices/ListPairTab";
 import styles from "./Preferences.module.css";
 import { Button, Note, Radios, Section, Select, Sub } from "./controls";
 
-export type DjSystemTab = "general" | "category" | "sort" | "column" | "others";
+export type DjSystemTab = "general" | "category" | "sort" | "column" | "link";
 
 export const DJ_SYSTEM_TABS: readonly { id: DjSystemTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "category", label: "Category" },
   { id: "sort", label: "Sort" },
   { id: "column", label: "Column" },
-  { id: "others", label: "Others" },
+  { id: "link", label: "PRO DJ LINK" },
 ];
 
 /** The reference rows, read once: they are what a stored null stands for. */
@@ -85,8 +85,8 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
     return <ColumnSection sorts={sorts} subColumn={dj.subColumn} onChange={(subColumn) => set({ subColumn })} />;
   }
 
-  if (tab === "others") {
-    return <LinkSection />;
+  if (tab === "link") {
+    return <LinkSection linkInterface={dj.linkInterface} onChoose={(linkInterface) => set({ linkInterface })} />;
   }
 
   return (
@@ -183,17 +183,27 @@ function ColumnSection({ sorts, subColumn, onChange }: {
   );
 }
 
+/** The dropdown's value for "no interface chosen". */
+const AUTOMATIC = "";
+
 /**
  * PRO DJ LINK: the LINK switch, the interface it runs on, and the players
  * on the network with what each has loaded from us.
+ *
+ * The interface is a preference, so the strip's LINK button honours it too;
+ * "Automatic" leaves the choice to the app, which takes the interface the
+ * players are reached through. It is changed with LINK off: a session is
+ * bound to its interface for as long as it runs.
  *
  * Status arrives by event as it changes and is read once on open; the
  * session itself outlives the pane, as LINK does — a source that vanished
  * when Preferences closed would be no source at all.
  */
-function LinkSection() {
+function LinkSection({ linkInterface, onChoose }: {
+  linkInterface: string | null;
+  onChoose: (name: string | null) => void;
+}) {
   const [link, setLink] = useState<LinkStatus | null>(null);
-  const [iface, setIface] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -215,16 +225,22 @@ function LinkSection() {
   }, []);
 
   const interfaces = link?.interfaces ?? [];
-  const chosen = iface !== "" && interfaces.some((i) => i.name === iface)
-    ? iface
-    : (interfaces[0]?.name ?? "");
+  // A chosen interface that is not there right now (unplugged, renamed) is
+  // kept in the store and shown as such, not silently swapped for another.
+  const choices = [
+    { value: AUTOMATIC, label: "Automatic" },
+    ...interfaces.map((i) => ({ value: i.name, label: `${i.name} — ${i.address}` })),
+  ];
+  if (linkInterface !== null && !interfaces.some((i) => i.name === linkInterface)) {
+    choices.push({ value: linkInterface, label: `${linkInterface} — not present` });
+  }
 
   const toggle = () => {
     setBusy(true);
     void (async () => {
       const backend = await getBackend();
       try {
-        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(chosen || undefined));
+        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined));
       } finally {
         setBusy(false);
       }
@@ -237,16 +253,14 @@ function LinkSection() {
         <Button onClick={toggle} disabled={busy || link === null}>
           {link?.on ? "Turn LINK off" : "Turn LINK on"}
         </Button>
-        {link?.on ? null : (
-          <Select
-            label="Network interface"
-            plain
-            value={chosen}
-            disabled={interfaces.length === 0}
-            choices={interfaces.map((i) => ({ value: i.name, label: `${i.name} — ${i.address}` }))}
-            onChange={setIface}
-          />
-        )}
+        <Select
+          label="Network interface"
+          plain
+          value={linkInterface ?? AUTOMATIC}
+          disabled={link === null || link.on}
+          choices={choices}
+          onChange={(value) => onChoose(value === AUTOMATIC ? null : value)}
+        />
       </div>
       {link === null ? null : link.on ? (
         <>
@@ -282,7 +296,8 @@ function LinkSection() {
         <Note>
           Off. On, the library is served to every player on the chosen
           network the way rekordbox serves it — browsing, waveforms, cues and
-          the audio itself. Nothing is written to the library.
+          the audio itself. Nothing is written to the library. Automatic
+          takes the interface the players are reached through.
         </Note>
       )}
     </Section>
