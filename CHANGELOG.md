@@ -5,6 +5,31 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-09-14
+
+### Added
+- Pro DJ Link (EXPORT). Turn LINK on and the app appears to the CDJs and
+  mixer on the network as a rekordbox source: players browse the library
+  and load tracks — artwork, waveforms, cues, key and BPM — and play the
+  audio itself, exactly as they do from rekordbox. Nothing is written to the
+  library.
+- The LINK strip along the bottom shows every player and the mixer on the
+  network, what each has loaded from the app, and its CUE / PLAY / MASTER /
+  SYNC state. Drag a track from the library onto a player to load it there.
+- Tempo master. The app can be the network's tempo master: set the BPM with
+  the −/+ buttons or take it from whichever player is master, then press
+  MASTER, and every player set to SYNC follows the app's tempo and downbeat.
+- DJ System › PRO DJ LINK settings. Turn LINK on and off, see the players on
+  the network, and choose which network interface LINK runs on — Automatic
+  (the one the players are reached through) or a specific one by name.
+- The arrow keys move the highlighted track up and down the list; Enter loads
+  the highlighted track onto Player 1, and Left / Right beat-jump it.
+
+### Fixed
+- No stray blue border appears around the Preferences or Update window.
+- The LINK button says why it cannot turn on — usually rekordbox already
+  running and holding the network ports — instead of doing nothing.
+
 ## [0.6.0] — 2026-09-11
 
 ### Fixed
