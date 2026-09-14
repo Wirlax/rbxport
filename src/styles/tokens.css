@@ -520,8 +520,8 @@
   --s-link-button-w: 58px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK button, x 124..239, 116px */
   --s-link-button-h: 56px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK button, y 2032..2143, 112px, centred in the band */
   --s-link-button-inset: 5px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the band's left edge at x 114 to the button at 124 */
-  --s-link-button-label-h: 24px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK label's box, y 2092..2139, 48px, 2pt in from the button's sides and bottom */
-  --s-link-glyph: 22px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the glyph's ink, x 160..203 by y 2043..2087, 44px square, 5.5pt below the button's top */
+  --s-link-button-label-h: 23.5px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the LINK label's box, y 2092..2139, 47px, 2pt in from the button's sides and 1.5pt above its bottom line; LINK's baseline sits 47.5pt below the button's top in both captures */
+  --s-link-glyph: 22px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the on glyph's ink, x 160..203 by y 2043..2087, 44px square, 5.5pt below the button's top */
   --s-link-deck-w: 228px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): a player's box inside its black line, x 1424..1879, 456px; 230 with the line */
   --s-link-mixer-w: 147px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the mixer's box inside its black line, x 1964..2257, 294px */
   --s-link-deck-gap: 40px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): a player's black line to the mixer's, x 1882..1961, 80px */
@@ -534,6 +534,9 @@
   --s-link-lamp-w: 33px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): MASTER's ink starts at x 1551, 63pt from the box's left, whether or not CUE is lit before it */
   --s-link-mixer-label-w: 62px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the MIXER box, x 1966..2089, 124px, 1pt in from the mixer box's left; 22pt tall like the player number */
   --s-link-mixer-master-at: 39px; /* docs/screenshots 2026-09-13 11.16.28 AM (rekordbox 7.2.11 EXPORT, 2x, LINK on, both decks empty): the mixer's MASTER, cap top at y 2100, 78px below the box's top, ink 10.5pt in from its left */
+  --s-link-glyph-off-w: 28.5px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the off glyph's ink (the two arrows), x 154..209 by y 2043..2087, 57px wide */
+  --s-link-glyph-off-h: 22.5px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the off glyph's ink, 45px tall; each arrow's shaft 7.5px, its head 19px, 14px between them */
+  --s-link-button-radius: 3px; /* docs/screenshots 2026-09-13 11.18.36 AM (rekordbox 7.2.11 EXPORT, 2x, LINK off): the button's rounded line, 3px outer and 5px inner at 2x */
 
   --f-ui: Arial, "Helvetica Neue", Helvetica, sans-serif; /* identified by ink-extent fit (0.70% RMS error) and corroborated by rekordbox3.settings MenuFontName=Arial; see design/measure/font-report.json */
   --f-size-ui: 16.5px; /* best aggregate fit over four measured strings */

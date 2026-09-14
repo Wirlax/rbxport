@@ -29,9 +29,9 @@
   box-sizing: border-box;
   width: var(--s-link-button-w);
   height: var(--s-link-button-h);
-  padding: 5px 2px 2px;
+  padding: 4.5px 2px 1.5px;
   border: 1px solid var(--c-link-button);
-  border-radius: 2px;
+  border-radius: var(--s-link-button-radius);
   background: var(--c-link-strip-off);
   color: var(--c-link-ink-off);
   font: inherit;
@@ -46,8 +46,13 @@
 }
 .strip[data-on] .linkButton:hover { border-color: var(--c-accent); }
 .strip[data-blocked] .linkButton { color: var(--c-error); border-color: var(--c-error); }
+/* Off, the two arrows, wider than tall; on, the square wave glyph. */
 .glyph {
   flex: none;
+  width: var(--s-link-glyph-off-w);
+  height: var(--s-link-glyph-off-h);
+}
+.strip[data-on] .glyph {
   width: var(--s-link-glyph);
   height: var(--s-link-glyph);
 }
@@ -58,6 +63,9 @@
   align-self: stretch;
   height: var(--s-link-button-label-h);
   margin-top: auto;
+  /* The face's line box sits a shade high of its cap; this puts LINK's
+     baseline 47.5pt below the button's top, where rekordbox has it. */
+  padding-top: 2px;
   border-radius: 1px;
   font-size: var(--f-size-link-label);
   line-height: 1;
