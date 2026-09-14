@@ -54,16 +54,43 @@ fn main() {
         std::thread::spawn(move || {
             for line in std::io::stdin().lines().map_while(Result::ok) {
                 let words: Vec<&str> = line.split_whitespace().collect();
+                // perf-ok: a hand tool; printing what each command did is the point.
                 match words.as_slice() {
+                    // perf-ok: a hand tool; the prints below are its output.
                     ["load", player, track] => match (player.parse::<u8>(), track.parse::<u32>()) {
                         (Ok(player), Ok(track)) => match link.load_track(player, track) {
-                            Ok(()) => println!("told player {player} to load {track}"),
-                            Err(error) => println!("load refused: {error}"),
+                            Ok(()) => println!("told player {player} to load {track}"), // perf-ok: tool output
+                            Err(error) => println!("load refused: {error}"), // perf-ok: tool output
                         },
-                        _ => println!("usage: load <player> <track id>"),
+                        _ => println!("usage: load <player> <track id>"), // perf-ok: tool output
                     },
+                    ["master", "on"] => {
+                        link.set_master(true);
+                        println!("master on at {:.2} BPM", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                    }
+                    ["master", "off"] => {
+                        link.set_master(false);
+                        println!("master off"); // perf-ok: tool output
+                    }
+                    ["bpm", value] => match value.parse::<f64>() {
+                        Ok(bpm) => {
+                            let now = link.snapshot().master.bpm_x100;
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            let target = (bpm * 100.0).round() as i32;
+                            link.nudge_master(target - i32::from(now));
+                            println!("bpm {:.2}", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                        }
+                        Err(_) => println!("usage: bpm <value>"), // perf-ok: tool output
+                    },
+                    ["recycle"] => {
+                        if link.take_master_tempo() {
+                            println!("took the master's tempo: {:.2}", f64::from(link.snapshot().master.bpm_x100) / 100.0); // perf-ok: tool output
+                        } else {
+                            println!("no player is master"); // perf-ok: tool output
+                        }
+                    }
                     [] => {}
-                    _ => println!("usage: load <player> <track id>"),
+                    _ => println!("usage: load <player> <track id> | master on|off | bpm <value> | recycle"), // perf-ok: tool output
                 }
             }
         });
@@ -71,10 +98,12 @@ fn main() {
     loop {
         std::thread::sleep(Duration::from_secs(2));
         let players = link.snapshot().players;
+        // perf-ok: a hand tool; the periodic print of the players is its point.
         if players.is_empty() {
             println!("no players");
         }
         for p in players {
+            // perf-ok: tool output.
             println!(
                 "{:?} {} #{} at {}: loaded {:?} playing={} master={} bpm={}",
                 p.kind, p.name, p.number, p.address, p.loaded, p.playing, p.master, p.bpm_x100

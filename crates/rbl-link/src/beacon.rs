@@ -67,9 +67,38 @@ pub struct BeaconConfig {
     /// The port players listen on for status, replies and the greeting:
     /// 50002 on the link. A test's player binds its own.
     pub player_port: u16,
+    /// The port players listen on for beat packets: 50001 on the link. A
+    /// test binds its own.
+    pub beat_port: u16,
     /// This computer's name, as rekordbox puts it in the identity reply.
     pub computer_name: String,
 }
+
+/// The tempo-master state the app drives and the beat clock reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MasterState {
+    /// We are the network's tempo master, broadcasting beats the others sync
+    /// to.
+    pub on: bool,
+    /// The tempo we drive, × 100. Persists across turning master off and on.
+    pub bpm_x100: u16,
+    /// The beat within the bar, 1 to 4; the beat clock advances it.
+    pub bar_beat: u8,
+}
+
+impl Default for MasterState {
+    fn default() -> Self {
+        // 120.00 BPM until the DJ nudges it or takes a player's tempo, as a
+        // resting default; rekordbox shows the last value it held.
+        Self { on: false, bpm_x100: 12_000, bar_beat: 1 }
+    }
+}
+
+/// The slowest and fastest master tempo the nudge will reach, × 100
+/// (40.00 to 300.00 BPM), so a runaway nudge cannot send a meaningless
+/// tempo onto the link.
+const MASTER_BPM_MIN: u16 = 4_000;
+const MASTER_BPM_MAX: u16 = 30_000;
 
 /// What the media response tells a player about the library. Read on every
 /// query rather than fixed at start, so a reload behind us is reflected.
@@ -104,6 +133,8 @@ struct Shared {
     /// Players heard on the announce port and not yet greeted; the status
     /// loop sends the greeting, from the port rekordbox sends it from.
     to_greet: Vec<Ipv4Addr>,
+    /// Our tempo-master state; the beat clock and the status loop share it.
+    master: MasterState,
 }
 
 /// The running beacon.
@@ -156,14 +187,27 @@ impl Beacon {
 
         let stop = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(Mutex::new(Shared::default()));
-        let mut threads = Vec::with_capacity(2);
+        let mut threads = Vec::with_capacity(3);
         {
             let (stop, shared, config) = (Arc::clone(&stop), Arc::clone(&shared), config.clone());
             threads.push(std::thread::spawn(move || announce_loop(&announce, &config, &stop, &shared)));
         }
         {
             let (stop, shared) = (Arc::clone(&stop), Arc::clone(&shared));
+            let config = config.clone();
             threads.push(std::thread::spawn(move || status_loop(&status, &config, &stop, &shared, &facts)));
+        }
+        // The beat clock broadcasts a beat on its own socket, tempo-locked,
+        // only while we are master; a bind failure loses only the beats, not
+        // the rest of LINK, so it falls back to nothing rather than aborting.
+        if let Ok(beats) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).and_then(|s| {
+            s.set_broadcast(true)?;
+            Ok(s)
+        }) {
+            let (stop, shared, config) = (Arc::clone(&stop), Arc::clone(&shared), config.clone());
+            threads.push(std::thread::spawn(move || beat_clock(&beats, &config, &stop, &shared)));
+        } else {
+            tracing::warn!("beat clock socket could not bind; LINK master will not drive tempo");
         }
         Ok(Self { stop, threads, shared, announce_port, status_port, commands, player_port })
     }
@@ -203,6 +247,56 @@ impl Beacon {
         let sent = self.commands.send_to(&packet, to)?;
         tracing::info!(player_number, track_id, %address, sent, "load track sent");
         Ok(())
+    }
+
+    /// Our tempo-master state, for the app to show.
+    pub fn master_state(&self) -> MasterState {
+        self.shared.lock().master
+    }
+
+    /// Become the network's tempo master, or resign. Becoming master keeps
+    /// whatever BPM is set; the beat clock starts driving beats at once and
+    /// the status packets say we are master.
+    ///
+    /// It does not wrest master from a player that currently holds it by the
+    /// handoff protocol — it simply asserts master. When a CDJ is the current
+    /// master, take master on the CDJ or set it to SYNC to hand it over.
+    pub fn set_master(&self, on: bool) {
+        let mut shared = self.shared.lock();
+        shared.master.on = on;
+        if on {
+            // Start each master run on the downbeat.
+            shared.master.bar_beat = 1;
+        }
+        tracing::info!(on, bpm_x100 = shared.master.bpm_x100, "link master");
+    }
+
+    /// Set the master tempo (× 100), clamped to a sane range. Used by the
+    /// "take the current master's tempo" button and any direct set.
+    pub fn set_master_bpm(&self, bpm_x100: u16) {
+        let mut shared = self.shared.lock();
+        shared.master.bpm_x100 = bpm_x100.clamp(MASTER_BPM_MIN, MASTER_BPM_MAX);
+    }
+
+    /// Nudge the master tempo by `delta_x100` (rekordbox's −/+ move it a whole
+    /// BPM), clamped to the same range.
+    pub fn nudge_master(&self, delta_x100: i32) {
+        let mut shared = self.shared.lock();
+        let next = i32::from(shared.master.bpm_x100) + delta_x100;
+        let clamped = next.clamp(i32::from(MASTER_BPM_MIN), i32::from(MASTER_BPM_MAX));
+        shared.master.bpm_x100 = u16::try_from(clamped).unwrap_or(MASTER_BPM_MIN);
+    }
+
+    /// The tempo a player on the link currently reports as master, × 100, or
+    /// `None` when no player is master. What the "take the master's tempo"
+    /// button reads.
+    pub fn current_player_tempo(&self) -> Option<u16> {
+        self.shared
+            .lock()
+            .players
+            .values()
+            .find(|p| p.master && p.bpm_x100 != 0)
+            .map(|p| u16::try_from(p.bpm_x100).unwrap_or(u16::MAX))
     }
 
     pub fn stop(mut self) {
@@ -387,15 +481,7 @@ fn status_loop(
     while !stop.load(Ordering::Relaxed) {
         if Instant::now() >= next_send {
             next_send += STATUS_EVERY;
-            // rekordbox echoes the master player's tempo and beat. With no
-            // master on the link it is `[UNKNOWN]` what rekordbox sends; the
-            // capture began with a master already playing. Zero here.
-            let master = shared.lock().players.values().find(|p| p.master).cloned();
-            let bpm_x100 = master.as_ref().map_or(0, |p| u16::try_from(p.bpm_x100).unwrap_or(u16::MAX));
-            // Idle, rekordbox sends beat 0; with a master it advances 1..4.
-            let sent_beat = if bpm_x100 == 0 { 0 } else { beat };
-            let packet = Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat: sent_beat }
-                .encode();
+            let packet = status_packet(&shared.lock(), beat);
             beat = if beat >= 4 { 1 } else { beat + 1 };
             if let Err(error) = out.send_to(&packet, broadcast) {
                 tracing::debug!(%error, "status not sent");
@@ -486,6 +572,68 @@ fn status_loop(
                 player.last_seen = Instant::now();
             }
             _ => {}
+        }
+    }
+}
+
+/// The status packet to broadcast now. When we are master we say so, at our
+/// own tempo and the beat clock's beat. Otherwise we echo the master player's
+/// tempo with a beat that free-runs at the status rate (rekordbox echoes the
+/// master's; with no master on the link it is `[UNKNOWN]`, so zero). The
+/// status flag and Mm say which of the two this is.
+fn status_packet(shared: &Shared, free_beat: u8) -> Vec<u8> {
+    let master = shared.master;
+    let (bpm_x100, beat, we_master) = if master.on {
+        (master.bpm_x100, master.bar_beat, true)
+    } else {
+        let mirror = shared
+            .players
+            .values()
+            .find(|p| p.master)
+            .map_or(0, |p| u16::try_from(p.bpm_x100).unwrap_or(u16::MAX));
+        (mirror, if mirror == 0 { 0 } else { free_beat }, false)
+    };
+    Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat, master: we_master }
+        .encode()
+}
+
+/// Broadcasts a beat packet on each beat while we are master, and advances
+/// the shared bar beat 1 → 2 → 3 → 4. Idle, it waits.
+///
+/// The next beat is scheduled from the last rather than from a fresh sleep,
+/// so the tempo does not drift with the OS's sleep granularity; a nudge is
+/// picked up on the next beat because the interval is read each time.
+fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shared: &Mutex<Shared>) {
+    let to = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.beat_port));
+    let mut next_beat = Instant::now();
+    while !stop.load(Ordering::Relaxed) {
+        let (on, bpm_x100, bar_beat) = {
+            let s = shared.lock();
+            (s.master.on, s.master.bpm_x100, s.master.bar_beat)
+        };
+        let now = Instant::now();
+        if !on {
+            // The first beat on becoming master falls at once.
+            next_beat = now;
+            std::thread::sleep(POLL);
+            continue;
+        }
+        if now < next_beat {
+            std::thread::sleep((next_beat - now).min(POLL));
+            continue;
+        }
+        let packet = rbl_prolink::beat_packet(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, bpm_x100, bar_beat);
+        if let Err(error) = socket.send_to(&packet, to) {
+            tracing::debug!(%error, "beat not sent");
+        }
+        shared.lock().master.bar_beat = if bar_beat >= 4 { 1 } else { bar_beat + 1 };
+        // 60000/bpm ms a beat; bpm is × 100, so 6_000_000 / bpm_x100 ms.
+        let interval = Duration::from_millis(6_000_000 / u64::from(bpm_x100.max(1)));
+        next_beat += interval;
+        // Behind by more than a beat (a tempo jump, or the thread was
+        // starved): resync rather than fire a burst to catch up.
+        if next_beat < now {
+            next_beat = now + interval;
         }
     }
 }

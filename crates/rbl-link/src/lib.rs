@@ -130,6 +130,8 @@ pub struct Snapshot {
     pub interface: Interface,
     pub database_port: u16,
     pub players: Vec<Player>,
+    /// Our tempo-master state: whether we are master and at what BPM.
+    pub master: beacon::MasterState,
 }
 
 /// A running link export: the beacon and both servers, bound.
@@ -182,6 +184,7 @@ impl LinkExport {
                 announce_port: ports.announce,
                 status_port: ports.status,
                 player_port: rbl_prolink::PORT_STATUS,
+                beat_port: rbl_prolink::PORT_BEAT,
                 computer_name: computer_name(),
             },
             Arc::new(Facts(source)),
@@ -208,6 +211,30 @@ impl LinkExport {
             interface: self.interface.clone(),
             database_port: self.database.database_address().port(),
             players: self.beacon.players(),
+            master: self.beacon.master_state(),
+        }
+    }
+
+    /// Become the network's tempo master, or resign.
+    pub fn set_master(&self, on: bool) {
+        self.beacon.set_master(on);
+    }
+
+    /// Nudge the master tempo by `delta_x100` (rekordbox's −/+ is ±100).
+    pub fn nudge_master(&self, delta_x100: i32) {
+        self.beacon.nudge_master(delta_x100);
+    }
+
+    /// Take the tempo of whichever player is currently master as our master
+    /// tempo (rekordbox's ⟳ "take the master's tempo" button); does nothing
+    /// when no player is master.
+    pub fn take_master_tempo(&self) -> bool {
+        match self.beacon.current_player_tempo() {
+            Some(bpm) => {
+                self.beacon.set_master_bpm(bpm);
+                true
+            }
+            None => false,
         }
     }
 

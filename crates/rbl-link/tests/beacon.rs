@@ -50,6 +50,7 @@ fn start_on(interface: Option<String>) -> (Beacon, UdpSocket) {
             announce_port: 0,
             status_port: 0,
             player_port: player.local_addr().unwrap().port(),
+            beat_port: player.local_addr().unwrap().port(),
             computer_name: "test-mac".to_owned(),
         },
         Arc::new(Facts),
@@ -235,6 +236,74 @@ fn a_load_command_reaches_the_player_from_our_status_port() {
 
     // A player that is not there is refused rather than silently dropped.
     assert!(beacon.load_track(9, 1).is_err());
+
+    beacon.stop();
+}
+
+/// A beacon with its beat clock pointed at a socket the test owns, so the
+/// beats it broadcasts as master can be read.
+fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
+    let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let beats = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    beats.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let beacon = Beacon::start(
+        BeaconConfig {
+            interface: None,
+            address: Ipv4Addr::LOCALHOST,
+            broadcast: Ipv4Addr::LOCALHOST,
+            mac: [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],
+            announce_port: 0,
+            status_port: 0,
+            player_port: player.local_addr().unwrap().port(),
+            beat_port: beats.local_addr().unwrap().port(),
+            computer_name: "test-mac".to_owned(),
+        },
+        Arc::new(Facts),
+    )
+    .unwrap();
+    (beacon, player, beats)
+}
+
+#[test]
+fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
+    let (beacon, player, beats) = start_master();
+
+    // Off, no beats are broadcast, and the status is not master.
+    assert!(!beacon.master_state().on);
+    beacon.set_master_bpm(12_800);
+    beacon.set_master(true);
+    assert!(beacon.master_state().on);
+
+    // A beat packet arrives, byte-for-byte a master beat at 128.00 BPM with a
+    // beat within the bar of 1..4.
+    let beat = receive(&beats, rbl_prolink::BEAT_KIND);
+    assert_eq!(beat.len(), rbl_prolink::BEAT_LEN);
+    assert_eq!(rbl_prolink::status_device_name(&beat).unwrap(), rbl_prolink::REKORDBOX_NAME);
+    let bar_beat = beat[0x5b];
+    assert!((1..=4).contains(&bar_beat), "beat within the bar");
+    assert_eq!(
+        beat,
+        rbl_prolink::beat_packet(rbl_prolink::REKORDBOX_NAME, rbl_prolink::REKORDBOX_DEVICE_NUMBER, 12_800, bar_beat)
+    );
+
+    // The status now says we are master, at our tempo. Read one addressed to
+    // the player's port on 50002.
+    let s = receive(&player, 0x29);
+    assert_eq!(s[0x27], 0xe0, "the master status flag");
+    assert_eq!(s[0x34], 0x01, "Mm master");
+    assert_eq!(u16::from_be_bytes([s[0x2e], s[0x2f]]), 12_800);
+
+    // Resigning stops the beats and clears the master flag.
+    beacon.set_master(false);
+    std::thread::sleep(Duration::from_millis(150));
+    // Drain, then confirm no fresh beat arrives within a beat's time.
+    beats.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+    let mut buffer = [0_u8; 2048];
+    while beats.recv_from(&mut buffer).is_ok() {}
+    assert!(beats.recv_from(&mut buffer).is_err(), "no beats once master is off");
+    let s = receive(&player, 0x29);
+    assert_eq!(s[0x27], 0xc0, "not master again");
 
     beacon.stop();
 }
