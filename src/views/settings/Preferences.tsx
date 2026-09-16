@@ -21,6 +21,7 @@ import {
 import type { LibrarySummary, Limiter } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
+import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AboutPane } from "./AboutPane";
 import { AdvancedPane, ADVANCED_TABS, type AdvancedTab } from "./AdvancedPane";
 import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
@@ -170,14 +171,20 @@ export function Preferences({
         aria-label="Preferences"
         tabIndex={-1}
       >
-        {windowed ? null : (
-          <header className={styles.titlebar}>
+        {/* Drawn here rather than left to the platform, so the name sits in
+            the middle of the app's own title bar grey on every OS. */}
+        <header
+          className={styles.titlebar}
+          onMouseDown={windowed ? startWindowDrag : undefined}
+          onDoubleClick={windowed ? toggleWindowMaximise : undefined}
+        >
+          {windowed ? null : (
             <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
               ✕
             </button>
-            Preferences
-          </header>
-        )}
+          )}
+          Preferences
+        </header>
         <div className={styles.body}>
           <nav className={styles.sidebar} aria-label="Preference panes">
             <div className={styles.search}>

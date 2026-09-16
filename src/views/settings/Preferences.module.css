@@ -45,6 +45,8 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-pref-window-title);
   font-weight: 700;
+  /* The strip drags the window, so a press on it must not take the name. */
+  user-select: none;
 }
 .close {
   position: absolute;
@@ -176,6 +178,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-pref-section-gap);
+  min-height: 100%;
+}
+.sectionFill {
+  flex: 1;
 }
 .section {
   padding: var(--s-pref-section-pad-top) var(--s-pref-section-pad-x) var(--s-pref-section-pad-bottom);

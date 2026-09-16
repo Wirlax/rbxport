@@ -58,6 +58,13 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
         Some(args) => builder.additional_browser_args(&args),
         None => builder,
     };
+    // The window draws its own title bar, as the main window does, so the
+    // name sits in the middle of the app's grey rather than in the one macOS
+    // paints. Both calls are macOS-only in Tauri.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
     builder
         // Said in the log, because a window that opens blank says nothing
         // itself: which URL the webview was sent to and whether the page

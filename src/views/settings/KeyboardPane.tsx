@@ -50,11 +50,10 @@ export function rowsFor(group: KeymapGroup, mac: boolean): Row[] {
 
 export function KeyboardPane() {
   const platform = useMemo(detectPlatform, []);
-  // The capture opens with Browse closed and Player A open.
-  const [open, setOpen] = useState<Set<KeymapGroup>>(() => new Set(["Player A"]));
+  const [open, setOpen] = useState<Set<KeymapGroup>>(() => new Set());
 
   return (
-    <section className={styles.section} aria-label="Keyboard">
+    <section className={`${styles.section} ${styles.sectionFill}`} aria-label="Keyboard">
       <div className={styles.keys}>
         {KEYMAP_GROUPS.map((group) => {
           const shown = open.has(group);

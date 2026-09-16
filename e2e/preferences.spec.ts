@@ -170,7 +170,10 @@ test("Keyboard lists rekordbox's ten groups, with the unbuilt rows greyed", asyn
   await expect(groups).toHaveText([
     "Browse", "Player A", "Player B", "General", "File", "View", "Track", "Playlist", "Help", "Link Export",
   ]);
-  // Player A opens: Play/Pause works here, Loop In is rekordbox's alone.
+  // Every group opens closed; Player A opened: Play/Pause works here, Loop In
+  // is rekordbox's alone.
+  await expect(dialog.locator('[class*="keyRow"]')).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Player A" }).click();
   const playPause = dialog.locator('[class*="keyRow"]', { hasText: "Play/Pause" }).first();
   await expect(playPause).toContainText("spacebar");
   await expect(playPause).not.toHaveAttribute("data-dim");
