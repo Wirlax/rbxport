@@ -1847,11 +1847,10 @@ test("the title bar reads out what the app is costing", async ({ page }) => {
   // zero — a zero would claim the app is resident in no memory at all.
   await page.goto("/");
   const cost = page.getByTestId("app-cost");
-  for (const label of ["MEM", "THR", "FD", "FPS"]) {
+  for (const label of ["CPU", "MEM", "FPS"]) {
     await expect(cost).toContainText(label);
   }
-  // Processor has its own meter in the top bar, and GPU was always a dash.
-  await expect(cost).not.toContainText("CPU");
+  // GPU was always a dash: macOS accounts it per process only to root.
   await expect(cost).not.toContainText("GPU");
   await expect(cost).toContainText("MEM —");
   // FPS is measured in the window itself, so it arrives even here.

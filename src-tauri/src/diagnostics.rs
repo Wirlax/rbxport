@@ -33,6 +33,13 @@ pub struct Diagnostics {
 ///
 /// CPU is the difference between two readings, so a fresh `System` each time
 /// would report zero for ever.
+///
+/// Built with `new_all`, which is not the tidy `new` it looks like it could
+/// be: a `System` that has never enumerated the machine's CPUs reports every
+/// process at 0.0% for ever, whatever is refreshed afterwards. That was the
+/// title bar's CPU readout and the top bar's processor meter both sitting at
+/// zero under any load. The full enumeration happens once, here; the
+/// per-sample refresh below stays narrowed to this one process.
 static SAMPLER: std::sync::Mutex<Option<System>> = std::sync::Mutex::new(None);
 
 /// Samples this process. Cheap enough to call once a second.
@@ -42,7 +49,7 @@ pub fn sample_shared() -> Diagnostics {
         // worth propagating that into the window.
         return Diagnostics { cpu: 0.0, memory_mb: 0.0, threads: None, open_files: None, gpu: None };
     };
-    sample(held.get_or_insert_with(System::new))
+    sample(held.get_or_insert_with(System::new_all))
 }
 
 /// Samples this process into a caller's sampler, which the tests use.
@@ -126,10 +133,46 @@ mod tests {
 
     #[test]
     fn a_sample_describes_this_process() {
-        let mut system = System::new();
+        let mut system = sampler();
         let first = sample(&mut system);
         assert!(first.memory_mb > 0.0, "a running process has resident memory");
         assert!(first.gpu.is_none(), "macOS will not account GPU per process");
+    }
+
+    /// A `System` built the way `sample_shared` builds it.
+    fn sampler() -> System {
+        System::new_all()
+    }
+
+    /// Busy-waits, so the process has CPU time to account for.
+    fn burn(ms: u64) {
+        let start = std::time::Instant::now();
+        let mut spin: u64 = 0;
+        while start.elapsed() < std::time::Duration::from_millis(ms) {
+            spin = spin.wrapping_add(u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
+        }
+        std::hint::black_box(spin);
+    }
+
+    /// A `System::new()` sampler reports 0.0% for ever, whatever it refreshes;
+    /// only one that has enumerated the CPUs accounts a process at all. Both
+    /// halves are asserted, because the difference is the whole reason
+    /// `sample_shared` cannot use the tidier constructor.
+    #[test]
+    fn a_busy_process_is_accounted_for() {
+        let mut system = sampler();
+        sample(&mut system);
+        burn(600);
+        let busy = sample(&mut system);
+        assert!(busy.cpu > 1.0, "a process that just burned a core reads as {}%", busy.cpu);
+
+        let mut never_enumerated = System::new();
+        sample(&mut never_enumerated);
+        burn(600);
+        assert!(
+            (sample(&mut never_enumerated).cpu - 0.0).abs() < f32::EPSILON,
+            "System::new cannot account CPU, which is what this guards",
+        );
     }
 
     #[test]

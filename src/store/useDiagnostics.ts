@@ -142,7 +142,15 @@ export function formatCount(value: number | null): string {
   return value === null || !Number.isFinite(value) ? "—" : String(Math.round(value));
 }
 
-/** `12%`, or a dash. */
+/**
+ * `12%`, or a dash.
+ *
+ * A tenth is kept below 10%, where rounding to a whole number reports a quiet
+ * app as `0%` — a reading indistinguishable from a broken one, which is how
+ * an idle 0.15% used to read.
+ */
 export function formatPercent(value: number | null): string {
-  return value === null || !Number.isFinite(value) ? "—" : `${Math.round(value)}%`;
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value > 0 && value < 10) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
 }

@@ -30,4 +30,10 @@ describe("formatPercent", () => {
     expect(formatPercent(0)).toBe("0%");
     expect(formatPercent(null)).toBe("—");
   });
+
+  it("keeps a tenth below 10%, so a quiet app does not read as a broken one", () => {
+    expect(formatPercent(0.15)).toBe("0.1%");
+    expect(formatPercent(3.42)).toBe("3.4%");
+    expect(formatPercent(9.96)).toBe("10.0%");
+  });
 });
