@@ -236,3 +236,94 @@ test("a rating set after a playlist edit stays set once the reload lands", async
   await expect(stars.getByRole("radio", { name: `${pick} of 5` })).toHaveAttribute("aria-checked", "true");
   await expect(stars).toHaveText(`${"★".repeat(pick)}${"☆".repeat(5 - pick)}`);
 });
+
+test("a playlist is renamed in the row, and Escape puts the old name back", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Rename Playlist");
+
+  // The name becomes a field with the whole of it selected, so typing
+  // replaces it rather than appending to it.
+  const field = page.getByRole("textbox", { name: "Rename Melodic Vox" });
+  await expect(field).toBeVisible();
+  await expect(field).toHaveValue("Melodic Vox");
+
+  await field.fill("Melodic Vox 2026");
+  await field.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Renamed to Melodic Vox 2026.");
+  await expect(item(page, "Melodic Vox 2026")).toBeVisible();
+  await expect(field).toHaveCount(0);
+
+  // Escape is a cancel: the typing goes, the name stays.
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox 2026"), "Rename Playlist");
+  const again = page.getByRole("textbox", { name: "Rename Melodic Vox 2026" });
+  await again.fill("Something else entirely");
+  await again.press("Escape");
+  await expect(again).toHaveCount(0);
+  await expect(item(page, "Melodic Vox 2026")).toBeVisible();
+  await expect(page.getByRole("treeitem").filter({ hasText: "Something else entirely" })).toHaveCount(0);
+});
+
+test("renaming is refused while rekordbox holds the library", async ({ page }) => {
+  // Every write is greyed rather than raced, which is the rule the rest of
+  // the menu follows.
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await item(page, "Melodic Vox").click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Playlist" });
+  await expect(menu.getByRole("menuitem", { name: "Rename Playlist" })).toBeDisabled();
+});
+
+/** The tree's node names, without the track counts. */
+const treeNames = async (page: Page) =>
+  (await page.getByRole("treeitem").allTextContents()).map((s) =>
+    s.replace(/\(\d+\)$/, "").trim(),
+  );
+
+test("a playlist dragged down the tree takes the place it was dropped at", async ({ page }) => {
+  await open(page);
+  const before = await treeNames(page);
+  const from = before.indexOf("Melodic Vox");
+  expect(from).toBeGreaterThan(0);
+  // Two rows down, which is a sibling at the same level.
+  const target = before[from + 2]!;
+
+  const dst = item(page, target);
+  const box = await dst.boundingBox();
+  if (!box) throw new Error("the target row is not on screen");
+  await item(page, "Melodic Vox").dragTo(dst, {
+    targetPosition: { x: 40, y: box.height - 2 },
+  });
+
+  await expect(page.getByRole("contentinfo")).toContainText("Moved Melodic Vox.");
+  await expect
+    .poll(async () => (await treeNames(page)).indexOf("Melodic Vox"))
+    .toBe(before.indexOf(target));
+  // Nothing was lost: the same nodes, in a different order.
+  expect([...(await treeNames(page))].sort()).toEqual([...before].sort());
+});
+
+test("a playlist dropped into a folder goes inside it", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Melodic Vox"), "Create New Folder");
+  await expect(page.getByRole("contentinfo")).toContainText("Created New folder.");
+
+  const folder = item(page, "New folder");
+  const depthBefore = await depthOf(item(page, "Melodic Vox"));
+  const box = await folder.boundingBox();
+  if (!box) throw new Error("the folder is not on screen");
+  // The middle of a folder means inside it; its edges mean beside it.
+  await item(page, "Melodic Vox").dragTo(folder, {
+    targetPosition: { x: 40, y: box.height / 2 },
+  });
+
+  await expect(page.getByRole("contentinfo")).toContainText("Moved Melodic Vox.");
+  await expect.poll(async () => depthOf(item(page, "Melodic Vox"))).toBe(depthBefore + 1);
+});
+
+test("the tree will not be rearranged while rekordbox holds the library", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  // Undraggable rather than refused on the drop: a write that cannot happen
+  // should not be offered in the first place.
+  await expect(item(page, "Melodic Vox")).not.toHaveAttribute("draggable", "true");
+});

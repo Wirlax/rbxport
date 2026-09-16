@@ -12,16 +12,79 @@ import { DeviceIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon } from "@/compo
 import { ContextMenu } from "@/components/ContextMenu";
 import { treeMenu } from "@/lib/contextMenus";
 import {
-  branchIds, emptySources, newlyClosed, nodesForSource, sourceOf, toggle, visibleNodes,
-  type Source,
+  branchIds, childrenOf, containerOf, emptySources, newlyClosed, nodesForSource, sourceOf,
+  subtreeIds, toggle, visibleNodes, type Source,
 } from "@/lib/tree";
 import { SourceRail } from "./SourceRail";
 
+/**
+ * The name, while it is being typed over.
+ *
+ * Opens with the whole name selected, as renaming in a file manager does, so
+ * typing replaces it and a click puts the caret somewhere instead. Enter and
+ * a click elsewhere commit; Escape puts the old name back.
+ */
+function RenameField({ name, onCommit, onCancel }: {
+  name: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(name);
+  // Committed once: Enter moves the focus away, and the blur that follows
+  // would otherwise write the same name a second time.
+  const done = useRef(false);
+  const finish = (commit: boolean) => {
+    if (done.current) return;
+    done.current = true;
+    if (commit) onCommit(text.trim());
+    else onCancel();
+  };
+  return (
+    <input
+      className={styles.rename}
+      aria-label={`Rename ${name}`}
+      value={text}
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setText(e.target.value)}
+      // The row beneath would otherwise select, drag or open its menu.
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onDragStart={(e) => e.preventDefault()}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true);
+        else if (e.key === "Escape") finish(false);
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    />
+  );
+}
+
 const Row = memo(function Row({
   node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu, count,
+  renaming, onRename, onRenameEnd,
+  movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
 }: {
   node: TreeNode;
   selected: boolean;
+  /** This row is being renamed, so its name is an input rather than a label. */
+  renaming: boolean;
+  onRename: ((node: TreeNode, name: string) => void) | undefined;
+  onRenameEnd: (() => void) | undefined;
+  /** This node can be picked up and moved somewhere else in the tree. */
+  movable: boolean;
+  /**
+   * How this row would take the drop: a line above or below it for a place
+   * among its siblings, `into` for a folder that would swallow it.
+   */
+  moveEdge: "above" | "below" | "into" | null;
+  onMoveStart: ((node: TreeNode) => void) | undefined;
+  onMoveOver: ((node: TreeNode, edge: "above" | "below" | "into") => void) | undefined;
+  onMoveDrop: (() => void) | undefined;
+  onMoveEnd: (() => void) | undefined;
   /** The playlist's track count, when Preferences asks for it on the tree. */
   count: number | undefined;
   /** Whether a track drag could land here. */
@@ -64,7 +127,34 @@ const Row = memo(function Row({
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       // A note is information, not a place: nothing to select.
       onMouseDown={() => node.kind !== "note" && onSelect(node)}
+      draggable={movable}
+      onDragStart={(e) => {
+        if (!movable) return;
+        // Stops the drag being read as a track drag by the rows' own handlers.
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", node.id);
+        onMoveStart?.(node);
+      }}
+      onDragEnd={() => onMoveEnd?.()}
       onDragOver={(e) => {
+        // A node being moved takes precedence: the same row is both a place to
+        // put tracks and a place in the tree, and only one of those is in hand.
+        if (onMoveOver) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const box = e.currentTarget.getBoundingClientRect();
+          const third = box.height / 3;
+          // A folder's middle swallows the node; its edges place it alongside.
+          const edge =
+            node.kind === "folder" && e.clientY > box.top + third && e.clientY < box.bottom - third
+              ? "into"
+              : e.clientY > box.top + box.height / 2
+                ? "below"
+                : "above";
+          onMoveOver(node, edge);
+          return;
+        }
         // Only a playlist takes tracks: a folder holds playlists, and dropping
         // into one would have to invent which.
         if (!droppable) return;
@@ -79,10 +169,16 @@ const Row = memo(function Row({
       }}
       onDrop={(e) => {
         setOver(false);
+        if (onMoveDrop) {
+          e.preventDefault();
+          onMoveDrop();
+          return;
+        }
         if (!droppable) return;
         e.preventDefault();
         onDropTracks?.(node.id);
       }}
+      data-move={moveEdge ?? undefined}
       onContextMenu={(e) => {
         // Only the two kinds that have a menu: the fixed roots and the device
         // nodes are not playlists and have nothing to offer.
@@ -116,8 +212,21 @@ const Row = memo(function Row({
       node.kind === "note" ? null : (
         <Icon className={styles.icon} />
       )}
-      <span className={styles.label}>{node.name}</span>
-      {count !== undefined ? (
+      {renaming ? (
+        <RenameField
+          name={node.name}
+          onCommit={(name) => {
+            // An unchanged or emptied name is a cancel: a playlist with no
+            // name at all cannot be picked out of the tree again.
+            if (name !== "" && name !== node.name) onRename?.(node, name);
+            onRenameEnd?.();
+          }}
+          onCancel={() => onRenameEnd?.()}
+        />
+      ) : (
+        <span className={styles.label}>{node.name}</span>
+      )}
+      {count !== undefined && !renaming ? (
         <span className={styles.count} aria-label={`${count} tracks`}>({count})</span>
       ) : null}
     </div>
@@ -134,6 +243,14 @@ export interface TreeViewProps {
   onCreatePlaylist?: (parent: TreeNode) => void;
   onCreateFolder?: (parent: TreeNode) => void;
   onDeleteNode?: (node: TreeNode) => void;
+  onRenameNode?: (node: TreeNode, name: string) => void;
+  /**
+   * Put `node` under `parent` at `index` among that parent's children.
+   *
+   * `parent` is `TREE_ROOT` for the top of the playlists. Absent where the
+   * tree cannot be rearranged, which is what makes the rows undraggable.
+   */
+  onMoveNode?: ((node: TreeNode, parent: string, index: number) => void) | undefined;
   /** rekordbox is running, so every write is greyed rather than raced. */
   readOnly?: boolean;
   /** Preferences: the number of tracks after each playlist's name. */
@@ -151,10 +268,59 @@ export interface TreeViewProps {
 
 export function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport,
-  onCreatePlaylist, onCreateFolder, onDeleteNode, readOnly = false, onExpand, showCounts = false,
+  onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
+  onExpand, showCounts = false,
 }: TreeViewProps) {
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+  /** The row whose name is being typed over, if any. */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const endRename = useCallback(() => setRenamingId(null), []);
+
+  /** The node in hand while it is being dragged somewhere else in the tree. */
+  const [moving, setMoving] = useState<TreeNode | null>(null);
+  const [moveTo, setMoveTo] = useState<
+    { node: TreeNode; edge: "above" | "below" | "into" } | null
+  >(null);
+  const endMove = useCallback(() => {
+    setMoving(null);
+    setMoveTo(null);
+  }, []);
+
+  /** Everything the node in hand would take with it, which it cannot land in. */
+  const carriedIds = useMemo(
+    () => (moving ? subtreeIds(nodes, moving) : null),
+    [moving, nodes],
+  );
+
+  const onMoveOver = useCallback(
+    (node: TreeNode, edge: "above" | "below" | "into") => {
+      // Its own subtree is not a destination, and neither is anything that is
+      // not part of the playlists.
+      if (carriedIds?.has(node.id) === true) return;
+      if (node.kind !== "playlist" && node.kind !== "folder") return;
+      setMoveTo((at) => (at?.node.id === node.id && at.edge === edge ? at : { node, edge }));
+    },
+    [carriedIds],
+  );
+
+  const onMoveDrop = useCallback(() => {
+    const node = moving;
+    const target = moveTo;
+    endMove();
+    if (!onMoveNode || !node || !target) return;
+    if (target.edge === "into") {
+      // A folder's middle says "in here", not where in here, so it appends.
+      onMoveNode(node, target.node.id, childrenOf(nodes, target.node.id).length);
+      return;
+    }
+    const parent = containerOf(nodes, target.node);
+    // Counted with the node lifted out, which is how the backend reads it.
+    const siblings = childrenOf(nodes, parent).filter((n) => n.id !== node.id);
+    const at = siblings.findIndex((n) => n.id === target.node.id);
+    if (at < 0) return;
+    onMoveNode(node, parent, target.edge === "below" ? at + 1 : at);
+  }, [moving, moveTo, endMove, onMoveNode, nodes]);
   // Which nodes are closed. Seeded from the tree the backend sent — it marks
   // what should open, and 187 history sessions filed by year and month would
   // otherwise arrive on top of the playlists — and the user's own toggles take
@@ -237,6 +403,17 @@ export function TreeView({
             onDropTracks={onDropTracks}
             onMenu={(node, at) => setMenu({ ...at, node })}
             count={showCounts && node.kind === "playlist" ? node.childCount : undefined}
+            renaming={node.id === renamingId}
+            onRename={onRenameNode}
+            onRenameEnd={endRename}
+            movable={
+              Boolean(onMoveNode) && (node.kind === "playlist" || node.kind === "folder")
+            }
+            moveEdge={moveTo?.node.id === node.id ? moveTo.edge : null}
+            onMoveStart={onMoveNode ? setMoving : undefined}
+            onMoveOver={moving ? onMoveOver : undefined}
+            onMoveDrop={moving ? onMoveDrop : undefined}
+            onMoveEnd={endMove}
           />
         ))}
         {visible.length === 0 ? (
@@ -264,6 +441,9 @@ export function TreeView({
                 break;
               case "createFolder":
                 onCreateFolder?.(menu.node);
+                break;
+              case "rename":
+                setRenamingId(menu.node.id);
                 break;
               case "delete":
                 onDeleteNode?.(menu.node);

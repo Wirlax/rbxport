@@ -288,8 +288,17 @@ impl Writer {
         self.touch_playlist(id, "Name", &Value::Text(name.to_owned()))
     }
 
-    /// Moves a playlist or folder under a new parent, appended at the end.
-    pub fn move_to(&mut self, id: &str, parent: &str) -> Result<Changed> {
+    /// Moves a playlist or folder under a new parent.
+    ///
+    /// `index` is the place to take among the parent's children, counted once
+    /// the node has been lifted out of wherever it was; `None` appends, which
+    /// is where a node with no say in the matter goes.
+    ///
+    /// The whole sibling run has its `Seq` rewritten rather than the moved
+    /// node alone: `Seq` is the order rekordbox reads the tree in, and
+    /// inserting between two neighbours has no number to use unless the rest
+    /// are renumbered around it.
+    pub fn move_to(&mut self, id: &str, parent: &str, index: Option<usize>) -> Result<Changed> {
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
@@ -304,18 +313,33 @@ impl Writer {
                 "that would put a folder inside itself".to_owned(),
             ));
         }
-        let seq: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(Seq), -1) + 1 FROM djmdPlaylist
-             WHERE ParentID = ?1 AND rb_local_deleted = 0",
-            params![parent],
-            |r| r.get(0),
+        // The parent's children as they stand, without the one being moved —
+        // which may already be one of them, when this is a reorder rather
+        // than a reparenting.
+        let mut stmt = tx.prepare(
+            "SELECT ID FROM djmdPlaylist
+             WHERE ParentID = ?1 AND rb_local_deleted = 0 AND ID <> ?2
+             ORDER BY Seq, ID",
         )?;
-        let usn = next_usn(&tx);
-        let rows = tx.execute(
-            "UPDATE djmdPlaylist SET ParentID = ?1, Seq = ?2, rb_local_usn = ?3, updated_at = ?4
-             WHERE ID = ?5 AND rb_local_deleted = 0",
-            params![parent, seq, usn, stamp, id],
-        )?;
+        let mut order: Vec<String> = stmt
+            .query_map(params![parent, id], |r| r.get::<_, String>(0))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        drop(stmt);
+        let at = index.unwrap_or(order.len()).min(order.len());
+        order.insert(at, id.to_owned());
+
+        let mut rows = 0;
+        let mut usn = 0;
+        for (seq, node) in order.iter().enumerate() {
+            usn = next_usn(&tx);
+            let seq = i64::try_from(seq).unwrap_or(i64::MAX);
+            rows += tx.execute(
+                "UPDATE djmdPlaylist SET ParentID = ?1, Seq = ?2, rb_local_usn = ?3, updated_at = ?4
+                 WHERE ID = ?5 AND rb_local_deleted = 0",
+                params![parent, seq, usn, stamp, node],
+            )?;
+        }
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })

@@ -818,7 +818,13 @@ export interface Edits {
   createPlaylist(name: string, parent: string): Promise<number>;
   createFolder(name: string, parent: string): Promise<number>;
   renamePlaylist(id: string, name: string): Promise<number>;
-  movePlaylist(id: string, parent: string): Promise<number>;
+  /**
+   * Moves a playlist or folder under `parent`.
+   *
+   * `index` is the place to take among that parent's children, counted once
+   * the node has been lifted out of wherever it was. Omitted, it is appended.
+   */
+  movePlaylist(id: string, parent: string, index?: number): Promise<number>;
   deletePlaylist(id: string): Promise<number>;
   addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
   removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;

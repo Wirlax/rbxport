@@ -95,7 +95,8 @@ describe("treeMenu", () => {
   it("is rekordbox's own list over a playlist, in its own order, less the cloud", () => {
     // docs/screenshots context-menu-tree@2x: thirteen entries in eight groups.
     // The three cloud rows shared the first group with Export Playlist, so
-    // leaving them out takes it to ten, in the same eight groups.
+    // leaving them out takes it to ten; Rename, which the capture has no row
+    // for, joins Delete's group and makes eleven in the same eight groups.
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
       "Export Playlist",
       "Create New Playlist",
@@ -103,6 +104,7 @@ describe("treeMenu", () => {
       "Create New Folder",
       "Playlist display setting",
       "Add Artwork",
+      "Rename Playlist",
       "Delete Playlist",
       "Export a playlist to a file",
       "Collaborative playlist",
@@ -130,6 +132,8 @@ describe("treeMenu", () => {
   it("takes the node's own word for what is being deleted", () => {
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toContain("Delete Folder");
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toContain("Delete Playlist");
+    expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toContain("Rename Folder");
+    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toContain("Rename Playlist");
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toContain("Export Folder");
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toContain("Export Playlist");
   });

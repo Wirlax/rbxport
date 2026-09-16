@@ -21,6 +21,7 @@ export type TreeAction =
   | "export"
   | "createPlaylist"
   | "createFolder"
+  | "rename"
   | "delete";
 
 /** The deck's ≡ menu: the choices it changes, and the one thing it does. */
@@ -137,6 +138,10 @@ export function treeMenu(kind: "playlist" | "folder"): readonly MenuRow<TreeActi
     SEPARATOR,
     { label: "Add Artwork", action: null },
     SEPARATOR,
+    // Rename is not in the capture [ASSUME]: rekordbox renames from a double
+    // click on the row. It sits with Delete because the two are the same kind
+    // of thing — the node itself rather than what is in it.
+    { label: folder ? "Rename Folder" : "Rename Playlist", action: "rename" },
     { label: folder ? "Delete Folder" : "Delete Playlist", action: "delete" },
     SEPARATOR,
     { label: "Export a playlist to a file", action: null, submenu: true },
@@ -232,6 +237,7 @@ const WRITES: ReadonlySet<string> = new Set([
   "removeFromPlaylist",
   "createPlaylist",
   "createFolder",
+  "rename",
   "delete",
 ]);
 

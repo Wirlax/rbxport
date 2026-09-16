@@ -32,6 +32,8 @@
 .tail { height: calc(100% - var(--s-row-height)); flex: none; }
 
 .node {
+  /* So the drop line can be placed against the row's own edges. */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -69,6 +71,37 @@
 .node[data-kind="note"] { color: var(--c-text-dim); }
 .node[data-kind="note"]:hover { background: none; }
 .label { overflow: hidden; text-overflow: ellipsis; }
+
+/* Where a dragged node would land: a line for a place among its siblings, a
+   ring for a folder that would take it inside. */
+.node[data-move="above"]::after,
+.node[data-move="below"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--c-accent);
+  pointer-events: none;
+}
+.node[data-move="above"]::after { top: 0; }
+.node[data-move="below"]::after { bottom: 0; }
+.node[data-move="into"] { box-shadow: inset 0 0 0 1px var(--c-accent); }
+/* The name while it is being typed over: the row's own type and colour, on a
+   field just dark enough to show where the text can be edited. */
+.rename {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 18px;
+  border: 1px solid var(--c-accent);
+  border-radius: 2px;
+  padding: 0 3px;
+  background: var(--c-field);
+  color: var(--c-text);
+  font: inherit;
+}
+.rename:focus { outline: none; }
 /* The track count after a playlist's name, when Preferences asks for it. */
 .count { flex: none; margin-left: 4px; color: var(--c-text-dim); }
 

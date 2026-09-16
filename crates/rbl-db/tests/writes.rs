@@ -54,6 +54,36 @@ impl Fixture {
             .collect()
     }
 
+    /// A parent's children, in the order the tree reads them.
+    fn children(&self, parent: &str) -> Vec<String> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT ID FROM djmdPlaylist
+                 WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+            )
+            .unwrap();
+        stmt.query_map(params![parent], |r| r.get(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect()
+    }
+
+    /// The `Seq` run under a parent, to show it has no gaps or repeats.
+    fn seqs(&self, parent: &str) -> Vec<i64> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT Seq FROM djmdPlaylist
+                 WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+            )
+            .unwrap();
+        stmt.query_map(params![parent], |r| r.get(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect()
+    }
+
     /// The content ids of a playlist, in playing order.
     fn order(&self, playlist: &str) -> Vec<String> {
         let mut stmt = self
@@ -186,11 +216,57 @@ fn a_folder_cannot_be_moved_inside_itself() {
     let inner = f.writer.create_folder("Inner", &outer).unwrap();
     let deep = f.writer.create_folder("Deep", &inner).unwrap();
 
-    assert!(matches!(f.writer.move_to(&outer, &outer), Err(DbError::WriteRefused(_))));
-    assert!(matches!(f.writer.move_to(&outer, &inner), Err(DbError::WriteRefused(_))));
-    assert!(matches!(f.writer.move_to(&outer, &deep), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.move_to(&outer, &outer, None), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.move_to(&outer, &inner, None), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.move_to(&outer, &deep, None), Err(DbError::WriteRefused(_))));
     // Moving the other way is fine.
-    assert!(f.writer.move_to(&deep, ROOT).is_ok());
+    assert!(f.writer.move_to(&deep, ROOT, None).is_ok());
+}
+
+#[test]
+fn a_node_takes_the_place_it_is_moved_to_among_its_siblings() {
+    // Inside a folder of its own: the fixture's root already holds playlists,
+    // and what is being pinned here is a whole sibling run.
+    let mut f = fixture();
+    let home = f.writer.create_folder("Home", ROOT).unwrap();
+    let a = f.writer.create_playlist("A", &home).unwrap();
+    let b = f.writer.create_playlist("B", &home).unwrap();
+    let c = f.writer.create_playlist("C", &home).unwrap();
+    assert_eq!(f.children(&home), vec![a.clone(), b.clone(), c.clone()]);
+
+    // Last to first, which is the drag a tree makes most often.
+    f.writer.move_to(&c, &home, Some(0)).unwrap();
+    assert_eq!(f.children(&home), vec![c.clone(), a.clone(), b.clone()]);
+
+    // Into the middle, counted after the node is lifted out: with C removed
+    // the run is [A, B], so 1 puts it between them.
+    f.writer.move_to(&c, &home, Some(1)).unwrap();
+    assert_eq!(f.children(&home), vec![a.clone(), c.clone(), b.clone()]);
+
+    // Past the end is the end, not a gap.
+    f.writer.move_to(&a, &home, Some(99)).unwrap();
+    assert_eq!(f.children(&home), vec![c.clone(), b.clone(), a.clone()]);
+
+    // No index means appended, which is what it meant before there was one.
+    f.writer.move_to(&c, &home, None).unwrap();
+    assert_eq!(f.children(&home), vec![b, a, c]);
+
+    // Seq is left contiguous from zero: rekordbox reads the order from it.
+    assert_eq!(f.seqs(&home), vec![0, 1, 2]);
+}
+
+#[test]
+fn a_node_moved_into_a_folder_takes_a_place_there() {
+    let mut f = fixture();
+    let folder = f.writer.create_folder("Folder", ROOT).unwrap();
+    let first = f.writer.create_playlist("First", &folder).unwrap();
+    let second = f.writer.create_playlist("Second", &folder).unwrap();
+    let outside = f.writer.create_playlist("Outside", ROOT).unwrap();
+
+    f.writer.move_to(&outside, &folder, Some(1)).unwrap();
+    assert_eq!(f.children(&folder), vec![first, outside.clone(), second]);
+    assert!(!f.children(ROOT).contains(&outside), "it left the root it was in");
+    assert_eq!(f.seqs(&folder), vec![0, 1, 2]);
 }
 
 #[test]

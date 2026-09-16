@@ -1569,8 +1569,12 @@ pub async fn move_playlist<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     id: String,
     parent: String,
+    index: Option<usize>,
 ) -> AppResult<u32> {
-    edit(app, state, "move_playlist", Touched::Playlists, move |w| w.move_to(&id, &parent).map(|_| ())).await
+    edit(app, state, "move_playlist", Touched::Playlists, move |w| {
+        w.move_to(&id, &parent, index).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]

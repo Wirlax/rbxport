@@ -239,7 +239,7 @@ async function realBackend(): Promise<Backend> {
       createPlaylist: (name, parent) => invoke<number>("create_playlist", { name, parent }),
       createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),
       renamePlaylist: (id, name) => invoke<number>("rename_playlist", { id, name }),
-      movePlaylist: (id, parent) => invoke<number>("move_playlist", { id, parent }),
+      movePlaylist: (id, parent, index) => invoke<number>("move_playlist", { id, parent, index }),
       deletePlaylist: (id) => invoke<number>("delete_playlist", { id }),
       addTracksToPlaylist: (playlist, tracks) =>
         invoke<number>("add_tracks_to_playlist", { playlist, tracks }),

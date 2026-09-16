@@ -348,7 +348,15 @@ fn a_playlist_is_made_filled_reordered_renamed_moved_and_deleted() {
     run(commands::rename_playlist(s.handle(), s.state(), friday.id.clone(), "Saturday".into())).unwrap();
     assert!(!s.has_node("Friday"));
     assert_eq!(s.node("Saturday").id, friday.id, "the same list under a new name");
-    run(commands::move_playlist(s.handle(), s.state(), friday.id.clone(), ROOT.into())).unwrap();
+    // No index: appended among the root's children, as it was before there
+    // was a place to ask for.
+    run(commands::move_playlist(s.handle(), s.state(), friday.id.clone(), ROOT.into(), None))
+        .unwrap();
+    assert_eq!(s.node("Saturday").depth, 1);
+
+    // And with one, it takes that place: first among them.
+    run(commands::move_playlist(s.handle(), s.state(), friday.id.clone(), ROOT.into(), Some(0)))
+        .unwrap();
     assert_eq!(s.node("Saturday").depth, 1);
 
     // Deleted, both of them, and the tree is as it was.

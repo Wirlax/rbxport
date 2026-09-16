@@ -417,6 +417,35 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   /**
+   * A parent's children, as the flat tree encodes them.
+   *
+   * There is no parent field here: depth and array order are the structure, so
+   * a child is a node one level down before the run returns to the parent's
+   * own level.
+   */
+  const childrenOf = (parent: string): TreeNode[] => {
+    const start = parent === TREE_ROOT ? -1 : tree.findIndex((n) => n.id === parent);
+    if (parent !== TREE_ROOT && start < 0) return [];
+    const depth = parent === TREE_ROOT ? 0 : (tree[start]?.depth ?? 0);
+    const out: TreeNode[] = [];
+    for (let i = start + 1; i < tree.length; i += 1) {
+      const node = tree[i];
+      if (!node) continue;
+      if (parent !== TREE_ROOT && node.depth <= depth) break;
+      if (node.depth === depth + 1) out.push(node);
+    }
+    return out;
+  };
+
+  /** How many nodes a node spans: itself and everything under it. */
+  const subtreeLength = (at: number): number => {
+    const depth = tree[at]?.depth ?? 0;
+    let end = at + 1;
+    while (end < tree.length && (tree[end]?.depth ?? 0) > depth) end += 1;
+    return end - at;
+  };
+
+  /**
    * Whether the library has "finished loading".
    *
    * The mock answers instantly, which is exactly why the real app could sit on
@@ -505,9 +534,41 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (node) node.name = name;
       return bump();
     },
-    movePlaylist: (id, parent) => {
-      const node = findNode(id);
-      if (node) node.depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+    movePlaylist: (id, parent, index) => {
+      const from = tree.findIndex((n) => n.id === id);
+      if (from < 0) return bump();
+      // A folder cannot be put inside itself: the subtree would be detached
+      // from the tree and never seen again. The backend refuses it, so does this.
+      const span = subtreeLength(from);
+      const moving = tree.slice(from, from + span);
+      if (moving.some((n) => n.id === parent)) {
+        return Promise.reject(new Error("that would put a folder inside itself"));
+      }
+
+      // Where it is going, decided before the tree is disturbed.
+      const siblings = childrenOf(parent).filter((n) => n.id !== id);
+      const at = Math.min(index ?? siblings.length, siblings.length);
+      const after = siblings[at];
+
+      tree.splice(from, span);
+      // Its new level, carried down through everything under it.
+      const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+      const shift = depth - (moving[0]?.depth ?? depth);
+      for (const node of moving) node.depth += shift;
+
+      let to: number;
+      if (after) {
+        to = tree.findIndex((n) => n.id === after.id);
+      } else if (parent === TREE_ROOT) {
+        const histories = tree.findIndex(
+          (n) => n.depth === 0 && n.id !== "all" && n.id !== "playlists",
+        );
+        to = histories < 0 ? tree.length : histories;
+      } else {
+        const start = tree.findIndex((n) => n.id === parent);
+        to = start < 0 ? tree.length : start + subtreeLength(start);
+      }
+      tree.splice(to < 0 ? tree.length : to, 0, ...moving);
       return bump();
     },
     deletePlaylist: (id) => {

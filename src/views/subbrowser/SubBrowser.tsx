@@ -40,7 +40,7 @@ import styles from "./SubBrowser.module.css";
 export type SubTreeProps = Pick<
   TreeViewProps,
   "dragging" | "onDropTracks" | "onExport" | "onCreatePlaylist" | "onCreateFolder"
-  | "onDeleteNode" | "readOnly"
+  | "onDeleteNode" | "onRenameNode" | "readOnly"
 >;
 
 /** Likewise for its list: dragging out, loading decks, the writes. */

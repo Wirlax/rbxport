@@ -786,6 +786,26 @@ export function App() {
     [write, selectedNode],
   );
 
+  const renameNode = useCallback(
+    (node: TreeNode, name: string) => {
+      write(async (backend) => {
+        await backend.edits.renamePlaylist(node.id, name);
+        return `Renamed to ${name}.`;
+      });
+    },
+    [write],
+  );
+
+  const moveNode = useCallback(
+    (node: TreeNode, parent: string, index: number) => {
+      write(async (backend) => {
+        await backend.edits.movePlaylist(node.id, parent, index);
+        return `Moved ${node.name}.`;
+      });
+    },
+    [write],
+  );
+
   const removeFromPlaylist = useCallback(
     (ids: readonly string[]) => {
       const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
@@ -1217,6 +1237,8 @@ export function App() {
           onCreatePlaylist={createPlaylistIn}
           onCreateFolder={createFolderIn}
           onDeleteNode={deleteNode}
+          onRenameNode={renameNode}
+          onMoveNode={readOnly ? undefined : moveNode}
           readOnly={readOnly}
           onExpand={explorer.expand}
           showCounts={viewPrefs.playlistCounts}
@@ -1308,6 +1330,7 @@ export function App() {
               onCreatePlaylist: createPlaylistIn,
               onCreateFolder: createFolderIn,
               onDeleteNode: deleteNode,
+              onRenameNode: renameNode,
               readOnly: readOnly,
             }}
             list={{

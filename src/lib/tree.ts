@@ -29,6 +29,72 @@ export function parentFor(nodes: readonly TreeNode[], node: TreeNode): string {
   return TREE_ROOT;
 }
 
+/**
+ * The node a node actually sits under, `TREE_ROOT` for the top level.
+ *
+ * Not `parentFor`, which answers a different question: that one takes a
+ * folder to mean "inside this folder", because it is asked where a new
+ * playlist should go. This one is asked where a node already is.
+ */
+export function containerOf(nodes: readonly TreeNode[], node: TreeNode): string {
+  const at = nodes.findIndex((n) => n.id === node.id);
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const above = nodes[i];
+    if (above === undefined || above.depth >= node.depth) continue;
+    return above.kind === "folder" ? above.id : TREE_ROOT;
+  }
+  return TREE_ROOT;
+}
+
+/**
+ * The nodes sitting directly under `parent`, in tree order.
+ *
+ * One pass over the flat array rather than a `containerOf` per node, which
+ * would walk back up the tree for every playlist in the library.
+ */
+export function childrenOf(nodes: readonly TreeNode[], parent: string): TreeNode[] {
+  const out: TreeNode[] = [];
+  if (parent === TREE_ROOT) {
+    // The playlists at the top level: the run under the Playlists heading,
+    // which ends where the tree comes back up for the next source.
+    const start = nodes.findIndex((n) => n.kind === "collection");
+    if (start < 0) return out;
+    for (let i = start + 1; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      if (node === undefined || node.depth === 0) break;
+      if (node.depth === 1) out.push(node);
+    }
+    return out;
+  }
+  const start = nodes.findIndex((n) => n.id === parent);
+  if (start < 0) return out;
+  const depth = nodes[start]?.depth ?? 0;
+  for (let i = start + 1; i < nodes.length; i += 1) {
+    const node = nodes[i];
+    if (node === undefined || node.depth <= depth) break;
+    if (node.depth === depth + 1) out.push(node);
+  }
+  return out;
+}
+
+/**
+ * `node` and everything filed under it.
+ *
+ * What a move has to refuse to land inside: a folder put into its own subtree
+ * is detached from the tree and never seen again.
+ */
+export function subtreeIds(nodes: readonly TreeNode[], node: TreeNode): Set<string> {
+  const ids = new Set<string>([node.id]);
+  const start = nodes.findIndex((n) => n.id === node.id);
+  if (start < 0) return ids;
+  for (let i = start + 1; i < nodes.length; i += 1) {
+    const below = nodes[i];
+    if (below === undefined || below.depth <= node.depth) break;
+    ids.add(below.id);
+  }
+  return ids;
+}
+
 /** A node can be collapsed only if something sits under it. */
 export function hasChildren(nodes: readonly TreeNode[], index: number): boolean {
   const node = nodes[index];

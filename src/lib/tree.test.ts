@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import {
-  branchIds, emptySources, hasChildren, newlyClosed, nodesForSource, parentFor, sourceOf, toggle, visibleNodes,
+  branchIds, childrenOf, containerOf, emptySources, hasChildren, newlyClosed, nodesForSource,
+  parentFor, sourceOf, subtreeIds, toggle, visibleNodes,
 } from "./tree";
 
 /** `"a"` at depth 0, `"  b"` at depth 1, and so on. */
@@ -295,5 +296,63 @@ describe("parentFor", () => {
     // writer knows, and was what the tree used to send.
     expect(parentFor(nodes, by("top"))).toBe(TREE_ROOT);
     expect(parentFor(nodes, { id: "gone", name: "Gone", kind: "playlist", depth: 1 })).toBe(TREE_ROOT);
+  });
+});
+
+/** A tree shaped like the real one: the headings, then folders and lists. */
+const nested: TreeNode[] = [
+  { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
+  { id: "pl", name: "Playlists", kind: "collection", depth: 0 },
+  { id: "one", name: "One", kind: "playlist", depth: 1 },
+  { id: "gigs", name: "Gigs", kind: "folder", depth: 1 },
+  { id: "fri", name: "Friday", kind: "playlist", depth: 2 },
+  { id: "inner", name: "Inner", kind: "folder", depth: 2 },
+  { id: "deep", name: "Deep", kind: "playlist", depth: 3 },
+  { id: "sat", name: "Saturday", kind: "playlist", depth: 2 },
+  { id: "two", name: "Two", kind: "playlist", depth: 1 },
+  { id: "hist", name: "Histories", kind: "histories", depth: 0 },
+  { id: "sesh", name: "2026-09-07", kind: "history", depth: 1 },
+];
+
+describe("containerOf", () => {
+  it("gives the folder a node is in, and the root for the top level", () => {
+    expect(containerOf(nested, nested[2]!)).toBe(TREE_ROOT);
+    expect(containerOf(nested, nested[3]!)).toBe(TREE_ROOT);
+    expect(containerOf(nested, nested[4]!)).toBe("gigs");
+    expect(containerOf(nested, nested[6]!)).toBe("inner");
+    expect(containerOf(nested, nested[7]!)).toBe("gigs");
+  });
+
+  it("is not parentFor, which reads a folder as a destination", () => {
+    // The same node: where it is, against where a new playlist would go.
+    expect(containerOf(nested, nested[3]!)).toBe(TREE_ROOT);
+    expect(parentFor(nested, nested[3]!)).toBe("gigs");
+  });
+});
+
+describe("childrenOf", () => {
+  it("gives the top-level playlists for the root, not the other sources", () => {
+    expect(childrenOf(nested, TREE_ROOT).map((n) => n.id)).toEqual(["one", "gigs", "two"]);
+  });
+
+  it("gives a folder's own children, not its grandchildren", () => {
+    expect(childrenOf(nested, "gigs").map((n) => n.id)).toEqual(["fri", "inner", "sat"]);
+    expect(childrenOf(nested, "inner").map((n) => n.id)).toEqual(["deep"]);
+  });
+
+  it("is empty for a leaf and for a node that is not there", () => {
+    expect(childrenOf(nested, "one")).toEqual([]);
+    expect(childrenOf(nested, "nope")).toEqual([]);
+  });
+});
+
+describe("subtreeIds", () => {
+  it("is the node and everything filed under it", () => {
+    expect([...subtreeIds(nested, nested[3]!)]).toEqual(["gigs", "fri", "inner", "deep", "sat"]);
+    expect([...subtreeIds(nested, nested[5]!)]).toEqual(["inner", "deep"]);
+  });
+
+  it("is just the node itself for a leaf", () => {
+    expect([...subtreeIds(nested, nested[2]!)]).toEqual(["one"]);
   });
 });
