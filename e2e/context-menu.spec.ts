@@ -43,7 +43,8 @@ function rows(menu: Locator) {
 test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page }) => {
   const menu = await openTreeMenu(page);
   const items = await rows(menu);
-  expect(items).toHaveLength(13);
+  // Thirteen in the capture, less three cloud rows.
+  expect(items).toHaveLength(10);
   for (const item of items) {
     expect(item.height, item.label).toBe(25);
     expect(item.fontSize, item.label).toBe("12.5px");
@@ -55,8 +56,8 @@ test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page 
   // Two entries in one group are a row apart; across a separator they are a
   // row and the 11pt separator block apart (1pt rule, 5pt above and below).
   const at = (label: string) => items.find((i) => i.label === label)!.top;
-  expect(at("Auto Upload") - at("Cloud Library Sync")).toBe(25);
-  expect(at("Create New Playlist") - at("Batch Auto Upload setting")).toBe(36);
+  expect(at("Create New Intelligent Playlist") - at("Create New Playlist")).toBe(25);
+  expect(at("Create New Playlist") - at("Export Playlist")).toBe(36);
   expect(at("Add To Shortcut") - at("Collaborative playlist")).toBe(36);
 });
 
@@ -76,9 +77,9 @@ test("the panel is a point of padding inside a one-point hairline", async ({ pag
   expect(panel.paddingBottom).toBe("1px");
   expect(panel.paddingLeft).toBe("0px");
   expect(panel.border).toBe("1px");
-  // Thirteen rows, seven separators, the padding and the hairline: the
-  // capture's panel is 812px tall at 2x.
-  expect(panel.height).toBe(13 * 25 + 7 * 11 + 2 + 2);
+  // Ten rows, seven separators, the padding and the hairline. The capture's
+  // panel is 812px tall at 2x: three cloud rows shorter.
+  expect(panel.height).toBe(10 * 25 + 7 * 11 + 2 + 2);
 
   const separators = await menu.evaluate((m) => {
     const box = m.getBoundingClientRect();
@@ -111,8 +112,6 @@ test("entries that open a submenu carry the arrow, 17pt in from the right", asyn
   });
   const withArrow = arrows.filter((a) => a.arrow).map((a) => a.label);
   expect(withArrow).toEqual([
-    "Cloud Library Sync",
-    "Auto Upload",
     "Export Playlist",
     "Export a playlist to a file",
     "Collaborative playlist",
@@ -130,7 +129,12 @@ test("entries that open a submenu carry the arrow, 17pt in from the right", asyn
 test("the greyed entries are said to be disabled, and the live ones are not", async ({ page }) => {
   const menu = await openTreeMenu(page);
   // rekordbox has these and this does not: drawn, greyed, and announced so.
-  const greyed = ["Cloud Library Sync", "Batch Auto Upload setting", "Add Artwork", "Add To Shortcut"];
+  const greyed = [
+    "Create New Intelligent Playlist",
+    "Playlist display setting",
+    "Add Artwork",
+    "Add To Shortcut",
+  ];
   for (const label of greyed) {
     const item = menu.getByRole("menuitem", { name: label });
     await expect(item).toHaveAttribute("aria-disabled", "true");
@@ -147,7 +151,7 @@ test("the greyed entries are said to be disabled, and the live ones are not", as
   expect(await colour("Export Playlist")).toBe("rgb(255, 255, 255)");
 });
 
-test("the track menu is the same panel, with rekordbox's twenty-one entries", async ({ page }) => {
+test("the track menu is the same panel, with rekordbox's entries less the cloud", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="title"]').nth(2).click({ button: "right" });
@@ -155,15 +159,18 @@ test("the track menu is the same panel, with rekordbox's twenty-one entries", as
   await expect(menu).toBeVisible();
 
   const items = await rows(menu);
-  expect(items).toHaveLength(21);
+  // Twenty-one in the capture, less Cloud Library Sync.
+  expect(items).toHaveLength(20);
   expect(items.map((i) => i.label)).toContain("Convert Memory Cues to Hot Cues");
+  expect(items.map((i) => i.label)).not.toContain("Cloud Library Sync");
   for (const item of items) {
     expect(item.height, item.label).toBe(25);
     expect(item.textLeft, item.label).toBe(26);
   }
-  // Twenty-one rows and seven separators: 1212px tall at 2x in the capture.
+  // Twenty rows and seven separators; 1212px at 2x in the capture, one row less
+  // here. The groups are unchanged: the cloud row shared one with Export Track.
   const height = await menu.evaluate((m) => m.getBoundingClientRect().height);
-  expect(height).toBe(21 * 25 + 7 * 11 + 2 + 2);
+  expect(height).toBe(20 * 25 + 7 * 11 + 2 + 2);
   await expect(menu.getByRole("menuitem", { name: "Track information" })).toHaveAttribute(
     "aria-disabled",
     "true",

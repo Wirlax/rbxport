@@ -1855,7 +1855,6 @@ export const Player = memo(function Player({
               waveformColor: viewPrefs.waveformColor,
               beatCount: viewPrefs.beatCount,
               waveformClick: viewPrefs.waveformClick,
-              loaded: Boolean(track),
             })}
             label="Player menu"
             context={{ inPlaylist: false, hasFile: true, readOnly: false }}

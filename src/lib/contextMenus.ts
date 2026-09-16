@@ -64,17 +64,22 @@ export type MenuRow<A> = MenuEntry<A> | typeof SEPARATOR;
 /**
  * Right-clicking a track, top to bottom as the capture has it.
  *
- * The greyed entries are not oversights: the tag list, iTunes, the cloud and
- * the play count are features this does not have, and `Remove from
- * Collection` is a write to the shared library that no recording has pinned
- * down yet. `Load` is greyed here and filled in by `trackMenu` below, which
- * knows how many players the layout is drawing.
+ * The greyed entries are not oversights: the tag list, iTunes and the play
+ * count are features this does not have, and `Remove from Collection` is a
+ * write to the shared library that no recording has pinned down yet. `Load`
+ * is greyed here and filled in by `trackMenu` below, which knows how many
+ * players the layout is drawing.
+ *
+ * The cloud entries are gone rather than greyed: there is no cloud library
+ * behind this app to sync with, so drawing the row promises a feature that is
+ * not coming. `Analyze Track` is greyed deliberately — the engine is still
+ * there, but analysis is not trustworthy enough to offer yet.
  */
 export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Load", action: null, submenu: true },
   SEPARATOR,
   { label: "Import To Collection", action: null },
-  { label: "Analyze Track", action: "analyse" },
+  { label: "Analyze Track", action: null },
   { label: "Analysis Lock", action: null, submenu: true },
   SEPARATOR,
   // Its submenu is the playlist tree, and there is no submenu here yet, so it
@@ -85,7 +90,6 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Get Info from iTunes", action: null },
   { label: "Track Type", action: null, submenu: true },
   SEPARATOR,
-  { label: "Cloud Library Sync", action: null, submenu: true },
   { label: "Export Track", action: null, submenu: true },
   SEPARATOR,
   { label: "Auto Load Hot Cue", action: null, submenu: true },
@@ -112,18 +116,18 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * too. Only the playlist menu is captured; the folder's is assumed to be the
  * same list with those two words changed [ASSUME].
  *
- * The greyed entries are the cloud, artwork, the intelligent playlist, the
- * file export, sharing and the shortcut list: rekordbox has them, this does
- * not. "Cloud Library Sync" and "Auto Upload" are product names that
- * `german.lang` never translates, so they have no key of their own there.
+ * The greyed entries are artwork, the intelligent playlist, the file export,
+ * sharing and the shortcut list: rekordbox has them, this does not.
+ *
+ * The cloud rows rekordbox draws first — "Cloud Library Sync", "Auto Upload"
+ * and "Batch Auto Upload setting" — are left out rather than greyed. There is
+ * no cloud library behind this app, so the rows would promise a feature that
+ * is not coming, which is a different thing from one not built yet.
  */
 export function treeMenu(kind: "playlist" | "folder"): readonly MenuRow<TreeAction>[] {
   const folder = kind === "folder";
   return [
-    { label: "Cloud Library Sync", action: null, submenu: true },
-    { label: "Auto Upload", action: null, submenu: true },
     { label: folder ? "Export Folder" : "Export Playlist", action: "export", submenu: true },
-    { label: "Batch Auto Upload setting", action: null },
     SEPARATOR,
     { label: "Create New Playlist", action: "createPlaylist" },
     { label: "Create New Intelligent Playlist", action: null },
@@ -158,8 +162,6 @@ export interface DeckMenuState {
   waveformColor: "blue" | "rgb" | "3band";
   beatCount: "position" | "toMemoryBars" | "toMemoryBeats";
   waveformClick: boolean;
-  /** A track is loaded, so it can be analysed. */
-  loaded: boolean;
 }
 
 /**
@@ -170,7 +172,9 @@ export interface DeckMenuState {
  * single track added to a stick, which the export cannot yet do without
  * rewriting the stick; Export Loop As WAV and Active Loop Playback need
  * loops, which are not built. All three are drawn greyed, as rekordbox
- * greys Export Loop As WAV with nothing to export.
+ * greys Export Loop As WAV with nothing to export. Analyze Track is greyed
+ * for the reason `TRACK_MENU` gives: the engine is there, the result is not
+ * trustworthy enough to offer.
  */
 export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
   const tick = (on: boolean) => ({ checked: on });
@@ -184,7 +188,7 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
         { label: "3Band", action: "waveform3band", ...tick(state.waveformColor === "3band") },
       ],
     },
-    { label: "Analyze Track", action: state.loaded ? "analyse" : null },
+    { label: "Analyze Track", action: null },
     SEPARATOR,
     {
       label: "Beat Count Display",

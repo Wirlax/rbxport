@@ -500,23 +500,6 @@ export function TrackTable({
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
-  // Analysis is reachable from the keyboard rather than only a menu, since a
-  // row context menu does not exist yet.
-  useEffect(() => {
-    if (!onAnalyse) return;
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      // Plain letter, no modifier: the table has focus and a selection.
-      if (event.key.toLowerCase() === "a" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        onAnalyse();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onAnalyse]);
   const view = useTrackView(spec, libraryGeneration, pendingEdits, seed);
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;

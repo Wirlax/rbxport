@@ -215,7 +215,7 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
     "Change waveform color", "Analyze Track", "Beat Count Display", "Export Track", "Export Loop As WAV",
     "Active Loop Playback", "Click on the waveform for PLAY and CUE",
   ]);
-  for (const greyed of ["Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
+  for (const greyed of ["Analyze Track", "Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
     await expect(menu.getByRole("menuitem", { name: greyed })).toBeDisabled();
   }
 
@@ -229,12 +229,6 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
   await dialog.getByRole("tab", { name: "Color" }).click();
   await expect(dialog.getByRole("radiogroup", { name: "Waveform color" }).getByRole("radio", { name: "BLUE" })).toBeChecked();
   await page.keyboard.press("Escape");
-
-  // Analyze Track queues the loaded track: the status bar reports the run,
-  // or its outcome when the mock's analysis has already finished.
-  await player(page).getByRole("button", { name: "Player menu" }).click();
-  await menu.getByRole("menuitem", { name: "Analyze Track" }).click();
-  await expect(page.getByRole("contentinfo")).toContainText(/Analyzing: \d+ of \d+|\d+ failed|analy[sz]ed/i);
 });
 
 test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", async ({ page }) => {

@@ -14,9 +14,10 @@ import {
 const OPEN: MenuContext = { inPlaylist: true, hasFile: true, readOnly: false };
 
 describe("TRACK_MENU", () => {
-  it("is rekordbox's own list, in its own order", () => {
+  it("is rekordbox's own list, in its own order, less the cloud", () => {
     // Transcribed from a capture of the menu open. If this drifts, the app has
-    // stopped matching the thing it is a clone of.
+    // stopped matching the thing it is a clone of — with the deliberate
+    // exception of Cloud Library Sync, which is left out rather than greyed.
     expect(entriesOf(TRACK_MENU).map((e) => e.label)).toEqual([
       "Load",
       "Import To Collection",
@@ -27,7 +28,6 @@ describe("TRACK_MENU", () => {
       "Reload Tag",
       "Get Info from iTunes",
       "Track Type",
-      "Cloud Library Sync",
       "Export Track",
       "Auto Load Hot Cue",
       "Reset DJ Play Count",
@@ -53,7 +53,6 @@ describe("TRACK_MENU", () => {
       "Analysis Lock",
       "Add To Playlist",
       "Track Type",
-      "Cloud Library Sync",
       "Export Track",
       "Auto Load Hot Cue",
       "Track information",
@@ -93,13 +92,12 @@ describe("trackMenuFor", () => {
 });
 
 describe("treeMenu", () => {
-  it("is rekordbox's own list over a playlist, in its own order", () => {
+  it("is rekordbox's own list over a playlist, in its own order, less the cloud", () => {
     // docs/screenshots context-menu-tree@2x: thirteen entries in eight groups.
+    // The three cloud rows shared the first group with Export Playlist, so
+    // leaving them out takes it to ten, in the same eight groups.
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
-      "Cloud Library Sync",
-      "Auto Upload",
       "Export Playlist",
-      "Batch Auto Upload setting",
       "Create New Playlist",
       "Create New Intelligent Playlist",
       "Create New Folder",
@@ -113,11 +111,16 @@ describe("treeMenu", () => {
     expect(treeMenu("playlist").filter((row) => row === SEPARATOR)).toHaveLength(7);
   });
 
+  it("draws no cloud entry at all, rather than a greyed one", () => {
+    const labels = entriesOf(treeMenu("playlist")).map((e) => e.label);
+    expect(labels).not.toContain("Cloud Library Sync");
+    expect(labels).not.toContain("Auto Upload");
+    expect(labels).not.toContain("Batch Auto Upload setting");
+  });
+
   it("marks the entries that open a submenu", () => {
     const arrows = entriesOf(treeMenu("playlist")).filter((e) => e.submenu).map((e) => e.label);
     expect(arrows).toEqual([
-      "Cloud Library Sync",
-      "Auto Upload",
       "Export Playlist",
       "Export a playlist to a file",
       "Collaborative playlist",
@@ -139,7 +142,14 @@ describe("enabled", () => {
   it("greys what rekordbox has and this does not", () => {
     expect(enabled(entry("Load"), OPEN)).toBe(false);
     expect(enabled(entry("Get Info from iTunes"), OPEN)).toBe(false);
-    expect(enabled(entry("Analyze Track"), OPEN)).toBe(true);
+  });
+
+  it("greys Analyze Track: the engine is there, the result is not offered", () => {
+    expect(enabled(entry("Analyze Track"), OPEN)).toBe(false);
+  });
+
+  it("draws no cloud entry in the track menu either", () => {
+    expect(entriesOf(TRACK_MENU).map((e) => e.label)).not.toContain("Cloud Library Sync");
   });
 
   it("greys removing from a playlist when the view is not one", () => {
@@ -157,12 +167,11 @@ describe("enabled", () => {
     expect(enabled(entry("Remove from Playlist"), locked)).toBe(false);
     // Reading is still fine.
     expect(enabled(entry("Show information"), locked)).toBe(true);
-    expect(enabled(entry("Analyze Track"), locked)).toBe(true);
   });
 });
 
 describe("deckMenu", () => {
-  const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true, loaded: true };
+  const state = { waveformColor: "3band" as const, beatCount: "position" as const, waveformClick: true };
 
   it("is rekordbox's player menu, top to bottom, with its greyed entries", () => {
     const labels = entriesOf(deckMenu(state)).map((e) => e.label);
@@ -172,7 +181,7 @@ describe("deckMenu", () => {
     ]);
     const context = { inPlaylist: false, hasFile: true, readOnly: false };
     const live = entriesOf(deckMenu(state)).filter((e) => enabled(e, context)).map((e) => e.label);
-    expect(live).toEqual(["Change waveform color", "Analyze Track", "Beat Count Display", "Click on the waveform for PLAY and CUE"]);
+    expect(live).toEqual(["Change waveform color", "Beat Count Display", "Click on the waveform for PLAY and CUE"]);
   });
 
   it("ticks the choice in force in each submenu", () => {
@@ -186,8 +195,8 @@ describe("deckMenu", () => {
       .toEqual(["Disable"]);
   });
 
-  it("greys Analyze Track with nothing loaded", () => {
-    const entry = entriesOf(deckMenu({ ...state, loaded: false })).find((e) => e.label === "Analyze Track");
+  it("greys Analyze Track, loaded or not: the engine is there, the result is not offered", () => {
+    const entry = entriesOf(deckMenu(state)).find((e) => e.label === "Analyze Track");
     expect(entry?.action).toBeNull();
   });
 });

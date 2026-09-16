@@ -1147,7 +1147,11 @@ test("each kind of table remembers its own columns", async ({ page }) => {
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
 });
 
-test("analysing a selection reports progress and can be stopped", async ({ page }) => {
+// Analysis is disabled in the UI — greyed in both menus, and the bare-`a`
+// shortcut that predated the row menu is gone — so there is no longer a
+// gesture to start a run with. The engine and its progress readout are still
+// there; restore these two when analysis is offered again.
+test.skip("analysing a selection reports progress and can be stopped", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 
@@ -1166,8 +1170,9 @@ test("analysing a selection reports progress and can be stopped", async ({ page 
   await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0);
 });
 
-test("a track that cannot be analysed does not stop the run", async ({ page }) => {
-  // The mock fails every seventh track, so a long enough run hits one.
+test.skip("a track that cannot be analysed does not stop the run", async ({ page }) => {
+  // Skipped with the run test above: analysis has no UI trigger while it is
+  // disabled. The mock fails every seventh track, so a long enough run hits one.
   await page.goto("/");
   const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
   await rows.nth(0).click();
@@ -2342,8 +2347,12 @@ test("right-clicking a track opens rekordbox's own menu", async ({ page }) => {
   await expect(menu).toBeVisible();
   // Its own list, in its own order — greyed entries and all, because a menu
   // half the length of the real one is a menu people have to relearn later.
-  await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeEnabled();
+  // Analysis is greyed on purpose: the engine is there, the result is not
+  // trustworthy enough to offer yet.
+  await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "Get Info from iTunes" })).toBeDisabled();
+  // No cloud library behind this app, so the row is absent rather than greyed.
+  await expect(menu.getByRole("menuitem", { name: "Cloud Library Sync" })).toHaveCount(0);
   // Live, because the default layout draws a player to load into. With none
   // — Full Browser — it is the greyed arrow rekordbox draws.
   await expect(menu.getByRole("menuitem", { name: "Load", exact: true })).toBeEnabled();
