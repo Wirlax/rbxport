@@ -101,6 +101,7 @@ export function App() {
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   // One piece of state, not two: updating `descending` from inside a `setSort`
   // updater made the toggle a side effect, and StrictMode's double invocation
@@ -303,6 +304,21 @@ export function App() {
       }
     })();
   }, [audioPrefs]);
+  useEffect(() => {
+    let live = true;
+    void getBackend()
+      .then((backend) => backend.appVersion())
+      .then((found) => {
+        if (live) setVersion(found);
+      })
+      .catch(() => {
+        // A build with no shell behind it has no version; the strip just
+        // shows the name.
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   // An analysed track's waveform and key change, so its row is stale.
   const analysis = useAnalysis(
     useCallback((id: string) => {
@@ -1369,13 +1385,14 @@ export function App() {
       </div>
 
       <StatusBar
+        version={version}
         activity={
           analysis.running
             ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
               (analysis.state.current ? ` — ${analysis.state.current.title}` : "")
             : (note !== null && !note.failed
                 ? note.text
-                : (summary ? `${summary.trackCount} Tracks` : "Loading the library…"))
+                : (summary ? "" : "Loading the library…"))
         }
         // Everything that went wrong, in one place and in red: the deck's
         // refusals, a library that would not open, and a write the library

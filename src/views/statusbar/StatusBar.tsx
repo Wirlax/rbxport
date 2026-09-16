@@ -3,6 +3,8 @@ import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 
 export interface StatusBarProps {
+  /** The build's version, shown beside the name; null until it is read. */
+  version?: string | null;
   /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
   activity?: string;
   /**
@@ -24,6 +26,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
+  version = null,
   activity = "",
   error = null,
   selection = "",
@@ -35,7 +38,10 @@ export function StatusBar({
   const tip = useTooltip();
   return (
     <footer className={styles.statusBar}>
-      <span className={styles.logo}>rbxport</span>
+      <span className={styles.logo}>
+        rbxport
+        {version === null ? null : <> <span className={styles.version}>{version}</span></>}
+      </span>
       {readOnly ? (
         <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
           Read-only

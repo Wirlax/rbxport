@@ -187,21 +187,22 @@ test("Keyboard lists rekordbox's ten groups, with the unbuilt rows greyed", asyn
   await expect(dialog.getByText("Nothing is bound here in the Export preset.")).toBeVisible();
 });
 
-test("About shows the version and the update check switch, which Advanced shares", async ({ page }) => {
+test("About shows the version and who it is by, and leaves updates to Advanced", async ({ page }) => {
   await open(page);
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "About" }).click();
   await expect(dialog.getByRole("heading", { name: "rbxport" })).toBeVisible();
   await expect(dialog.getByTestId("about-version")).toHaveText("0.4.0");
-  const auto = dialog.getByRole("switch", { name: "Automatically check for updates" });
+  await expect(dialog).toContainText("@TRIODEOfficial");
+  // The update check is said once, under Advanced › Others, not in two places.
+  await expect(dialog.getByRole("switch", { name: "Automatically check for updates" })).toHaveCount(0);
+
+  await dialog.getByRole("tab", { name: "Advanced" }).click();
+  await dialog.getByRole("tab", { name: "Others" }).click();
+  const auto = dialog.getByRole("switch", { name: /Check for a new version/ });
   await expect(auto).toBeChecked();
   await auto.click();
   await expect(auto).not.toBeChecked();
-
-  // The same choice, under Advanced › Others.
-  await dialog.getByRole("tab", { name: "Advanced" }).click();
-  await dialog.getByRole("tab", { name: "Others" }).click();
-  await expect(dialog.getByRole("switch", { name: /Check for a new version/ })).not.toBeChecked();
 });
 
 test("the player's ≡ opens rekordbox's own menu, and its choices are the View preferences", async ({ page }) => {

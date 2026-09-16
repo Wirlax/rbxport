@@ -13,7 +13,13 @@
   font-weight: 700;
   color: var(--c-status-text);
 }
-.logo { color: var(--c-text); }
+.logo { flex: none; color: var(--c-text); white-space: nowrap; }
+.version {
+  margin-left: 3px;
+  color: var(--c-status-text);
+  font-size: var(--f-size-xs);
+  font-weight: 400;
+}
 .readOnly {
   padding: 2px 6px;
   border-radius: 2px;

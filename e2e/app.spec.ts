@@ -1400,7 +1400,7 @@ test("the last screen is drawn while the library is still being read", async ({ 
   // And the real data replaces it.
   await page.waitForFunction(() => "__libraryReady" in window);
   await page.evaluate(() => (window as unknown as { __libraryReady: () => void }).__libraryReady());
-  await expect(page.getByRole("contentinfo")).toContainText("Tracks");
+  await expect(page.getByRole("contentinfo")).not.toContainText("Loading the library…");
 });
 
 test("a library that is still loading arrives when it is ready", async ({ page }) => {
@@ -1419,7 +1419,7 @@ test("a library that is still loading arrives when it is ready", async ({ page }
 
   // Without a retry on the ready event this stays on "Loading…" forever, which
   // is what a 38,681-track collection in a debug build actually did.
-  await expect(status).toContainText("Tracks");
+  await expect(status).not.toContainText("Loading the library…");
   await expect(page.locator('[role="row"]').first()).toBeVisible();
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 });
