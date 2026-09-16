@@ -5,7 +5,7 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
-## [0.7.0] — 2026-09-14
+## [0.7.0] — 2026-09-16
 
 ### Added
 - Pro DJ Link (EXPORT). Turn LINK on and the app appears to the CDJs and
@@ -24,11 +24,41 @@ the version numbers [Semantic Versioning](https://semver.org/).
   (the one the players are reached through) or a specific one by name.
 - The arrow keys move the highlighted track up and down the list; Enter loads
   the highlighted track onto Player 1, and Left / Right beat-jump it.
+- Drag a playlist or folder to a new place in the tree — between two others,
+  or into a folder — and it stays there in rekordbox too. Rename Playlist and
+  Rename Folder in the tree's right-click menu type the name over in place.
+- Drag tracks within a playlist to reorder it. The drag is offered only while
+  the playlist is shown in its own order — not sorted by a column, searched
+  or filtered.
+- Artist, Album, Genre and Label are edited in the list: double-click the
+  cell (or click it on a selected row, with Edit Library › Double-click to
+  edit off), type, and press Enter; Escape abandons.
+- The status bar shows the version beside the app's name, and Preferences ›
+  About says who the app is by.
+- The device panel warns that USB export is still in development before any
+  tab is opened.
+
+### Changed
+- The Preferences window has the app's own title bar on every OS, and its
+  Keyboard pane opens with every group closed.
+- DJ System › PRO DJ LINK reads "Connect to PRO DJ LINK" / "Disconnect", with
+  the network interface on its own row.
+- Cloud Library Sync and Auto Upload are gone from the right-click menus
+  rather than greyed — there is no cloud library behind the app. Analyze
+  Track is greyed everywhere until analysis is worth offering.
+- Scrolling the list quickly no longer shows blank rows: the rows either side
+  of the screen are fetched ahead, a row still loading draws a placeholder,
+  and waveforms start loading before their row scrolls into view.
 
 ### Fixed
 - No stray blue border appears around the Preferences or Update window.
 - The LINK button says why it cannot turn on — usually rekordbox already
   running and holding the network ports — instead of doing nothing.
+- The CPU figure in the title bar shows the app's real load. It read 0%
+  whatever the app was doing, and now keeps a decimal below 10% so an idle
+  app reads as 0.1% rather than 0%.
+- The window reopens where it was left — on a second display, say — even
+  after a crash or a force-quit. Its position was saved only on a clean quit.
 
 ## [0.6.0] — 2026-09-11
 
