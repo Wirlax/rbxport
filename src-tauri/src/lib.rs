@@ -167,7 +167,7 @@ const SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 /// `skip_initial_state` so that the restore happens here instead — the check
 /// has to follow it, and it cannot follow something this does not control.
 fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_window_state::{StateFlags, WindowExt};
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 
     tauri::plugin::Builder::<tauri::Wry>::new("windowfit")
         .on_window_ready(|window| {
@@ -196,12 +196,29 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             // than one that hangs off an edge.
             let opened = std::time::Instant::now();
             let subject = window.clone();
+            // After the settle window, a move or resize is the user placing the
+            // window, so save it then rather than only on exit. The plugin's own
+            // save runs on a graceful quit; a kill or a crash runs nothing, which
+            // is how a window dragged to a second display kept coming back to the
+            // first — the drag was never written. Throttled so a drag does not
+            // rewrite the file every frame.
+            let last_save = std::sync::Arc::new(std::sync::Mutex::new(opened));
             window.on_window_event(move |event| {
                 if !matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                     return;
                 }
                 if opened.elapsed() < SETTLE_WINDOW {
                     fit_window(&subject);
+                    return;
+                }
+                let Ok(mut last) = last_save.lock() else { return };
+                if last.elapsed() < std::time::Duration::from_millis(300) {
+                    return;
+                }
+                *last = std::time::Instant::now();
+                drop(last);
+                if let Err(e) = subject.app_handle().save_window_state(StateFlags::all()) {
+                    tracing::warn!(error = %e, "could not save the window's geometry");
                 }
             });
         })
