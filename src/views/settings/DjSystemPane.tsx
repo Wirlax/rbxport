@@ -251,17 +251,18 @@ function LinkSection({ linkInterface, onChoose }: {
     <Section title="PRO DJ LINK" label="Link">
       <div className={styles.actions}>
         <Button onClick={toggle} disabled={busy || link === null}>
-          {link?.on ? "Turn LINK off" : "Turn LINK on"}
+          {link?.on ? "Disconnect" : "Connect to PRO DJ LINK"}
         </Button>
-        <Select
-          label="Network interface"
-          plain
-          value={linkInterface ?? AUTOMATIC}
-          disabled={link === null || link.on}
-          choices={choices}
-          onChange={(value) => onChoose(value === AUTOMATIC ? null : value)}
-        />
       </div>
+      <Select
+        label="Network interface"
+        caption="Network interface"
+        plain
+        value={linkInterface ?? AUTOMATIC}
+        disabled={link === null || link.on}
+        choices={choices}
+        onChange={(value) => onChoose(value === AUTOMATIC ? null : value)}
+      />
       {link === null ? null : link.on ? (
         <>
           <Note>
@@ -292,14 +293,7 @@ function LinkSection({ linkInterface, onChoose }: {
         </>
       ) : link.problem ? (
         <Note failed>{link.problem}</Note>
-      ) : (
-        <Note>
-          Off. On, the library is served to every player on the chosen
-          network the way rekordbox serves it — browsing, waveforms, cues and
-          the audio itself. Nothing is written to the library. Automatic
-          takes the interface the players are reached through.
-        </Note>
-      )}
+      ) : null}
     </Section>
   );
 }

@@ -197,11 +197,6 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
         disabled={!limiter.enabled}
         onChange={(releaseMs) => onLimiterChange({ releaseMs })}
       />
-      <Note>
-        Two decks at full level add up to more than the output can carry. The
-        limiter turns the sum down for the moment a peak lasts rather than
-        letting it clip; off, anything over full scale is flat-topped.
-      </Note>
     </Section>
     </>
   );

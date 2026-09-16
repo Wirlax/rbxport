@@ -1248,16 +1248,14 @@ test("settings has the LINK switch, and says why a browser cannot turn it on", a
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Preferences" });
   await dialog.getByRole("tab", { name: "DJ System" }).click();
-  await dialog.getByRole("tab", { name: "Others" }).click();
+  await dialog.getByRole("tab", { name: "PRO DJ LINK" }).click();
 
   const section = page.getByRole("region", { name: "Link" });
-  // Off, and honest about what on would do.
-  await expect(section).toContainText("Off.");
   await expect(page.getByTestId("link-on")).toHaveCount(0);
 
-  await section.getByRole("button", { name: "Turn LINK on" }).click();
+  await section.getByRole("button", { name: "Connect to PRO DJ LINK" }).click();
   await expect(section).toContainText("browser has no access to the network");
-  await expect(section.getByRole("button", { name: "Turn LINK on" })).toBeVisible();
+  await expect(section.getByRole("button", { name: "Connect to PRO DJ LINK" })).toBeVisible();
 });
 
 test("the detail waveform shows a window, not the whole track again", async ({ page }) => {
