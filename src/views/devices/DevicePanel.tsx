@@ -93,6 +93,11 @@ export function DevicePanel({
 
   return (
     <section className={styles.panel} aria-label={`Device ${device.name}`}>
+      {/* Above the strip, not inside a tab: what is at stake here is the
+          stick's own files, whichever tab is open. */}
+      <p className={styles.warning}>
+        Still in development: USB export may not work correctly, and data loss may occur.
+      </p>
       <div className={styles.strip} role="tablist" aria-label="Device settings">
         {TABS.map((t) => (
           <button

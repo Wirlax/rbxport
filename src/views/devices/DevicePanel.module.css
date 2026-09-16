@@ -10,6 +10,18 @@
   font-size: var(--f-size-device);
 }
 
+/* The app's one alarm colour, as a filled band above the tabs: an export
+   writes to the stick itself, so the risk is said before a tab is reached. */
+.warning {
+  flex: none;
+  margin: 0;
+  padding: 5px 14px;
+  box-sizing: border-box;
+  background: var(--c-error);
+  color: var(--c-on-error);
+  font-weight: 700;
+}
+
 /* The strip: a band the colour of the tree, six tabs 5pt below its top. */
 .strip {
   display: flex;
@@ -386,4 +398,3 @@
 /* ---- My Settings ---- */
 .mySettings { padding-top: 20px; }
 .mySettingsNote { margin: 0; color: var(--c-icon-on); }
-.mySettingsWhy { margin: 6px 0 0; color: var(--c-device-label); font-size: var(--f-size-sm); }
