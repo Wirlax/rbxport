@@ -10,6 +10,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DeckId, RowDto, SortColumn, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
+import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
 import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
 import {
@@ -36,6 +37,16 @@ import { detectPlatform, dispatch } from "@/lib/shortcuts";
 const ROW_H = 25; // --s-row-height
 /** One frozen empty list, so a row without cues does not re-render for a new one. */
 const NO_CUES: RowDto["hotCues"] = [];
+/**
+ * Rows to fetch beyond the rendered window in each direction, so a fast scroll
+ * lands on pages that are already cached instead of on blank rows. Two pages
+ * each way: the cache holds ~100 pages and `planFetches` caps how many requests
+ * go out per tick, so this cannot flood on a flick, and `missingPages` skips the
+ * pages behind that are still cached — the fetches skew to the way of travel.
+ */
+const PREFETCH_MARGIN = PAGE_SIZE * 2;
+/** A few bar widths, picked per cell so loading rows do not read as a rigid grid. */
+const SKELETON_WIDTHS = ["42%", "66%", "54%"];
 /// --s-col-header-h. The column header sits inside the scroller so it moves
 /// with the rows horizontally, which costs it this much of the vertical scroll.
 const COL_HEADER_H = 24;
@@ -247,8 +258,38 @@ const TrackRow = memo(function TrackRow({
   onDragEnd: () => void;
 }) {
   if (!row) {
-    // Placeholder keeps the row box the exact height so nothing shifts on arrival.
-    return <div className={styles.row} style={{ transform: `translate3d(0, ${top}px, 0)` }} aria-hidden />;
+    // A skeleton, not a blank: while the page is in flight a dim bar stands in
+    // for each text cell, so a fast scroll reads as content loading rather than
+    // torn, empty rows. The box keeps the exact height and the column dividers,
+    // so nothing shifts sideways on arrival; the row carries no row/gridcell
+    // roles, so it stays invisible to anything selecting real rows. Static, not
+    // pulsing: hundreds of these can be on screen mid-flick, where extra
+    // animated layers would fight the scroll we are trying to smooth.
+    return (
+      <div
+        className={styles.row}
+        data-even={index % 2 === 1 || undefined}
+        style={{ transform: `translate3d(0, ${top}px, 0)` }}
+        aria-hidden
+      >
+        {columns.map((col, at) => {
+          if (col.key === "artwork") return <div key={col.key} className={styles.artwork} />;
+          if (col.key === "preview") return <div key={col.key} className={styles.preview} />;
+          if (col.key === "attr") return <div key={col.key} className={styles.attr} />;
+          const cls = col.align === "right" ? `${styles.cell} ${styles.right}` : styles.cell;
+          return (
+            <div key={col.key} className={cls}>
+              {col.key === "rating" ? null : (
+                <span
+                  className={styles.skeleton}
+                  style={{ width: SKELETON_WIDTHS[(index + at) % SKELETON_WIDTHS.length] }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
   return (
     <div
@@ -596,7 +637,10 @@ export function TrackTable({
     count: view.count,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowH,
-    overscan: 8,
+    // Mount a half-screen of rows past the viewport each way. Beyond drawing
+    // them ready, it starts their waveforms loading before they scroll into
+    // view, so a steady scroll meets rows that already have one.
+    overscan: 16,
     // The sticky column header is in the scroller's flow, so the list starts
     // this far down it. Without this the virtualizer's idea of which rows are
     // visible is a header's worth out.
@@ -625,13 +669,15 @@ export function TrackTable({
   const firstIndex = items.length > 0 ? (items[0]?.index ?? 0) : -1;
   const lastIndex = items.length > 0 ? (items[items.length - 1]?.index ?? 0) : -1;
 
-  // Ask for the pages covering what is on screen. Cheap and idempotent.
+  // Ask for the pages covering what is on screen, plus a margin either side so a
+  // fast scroll lands on cached rows. Cheap and idempotent.
   useEffect(() => {
     if (firstIndex < 0) return;
     // The virtualizer's own window, overscan included, rather than the same
     // arithmetic done twice: it already accounts for `scrollMargin`, so this
-    // cannot drift a header's worth out of step with what is rendered.
-    view.ensureRange(firstIndex, lastIndex + 1);
+    // cannot drift a header's worth out of step with what is rendered. The
+    // margin runs past both ends; `ensureRange` clamps it to [0, count].
+    view.ensureRange(firstIndex - PREFETCH_MARGIN, lastIndex + 1 + PREFETCH_MARGIN);
   }, [firstIndex, lastIndex, view, view.count, view.token]);
 
   // Up/Down move a single highlight through the list, and PageUp/PageDown and

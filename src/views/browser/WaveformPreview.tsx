@@ -34,19 +34,25 @@ const inFlight = new Map<string, Promise<RenderedWaveform | null>>();
  * analysis file off disk — for a row nobody saw. Those run on the same
  * blocking pool as `fetch_rows`, so the rows being scrolled *to* queued behind
  * the waveforms of rows already gone, and the list came up blank until it
- * drained. Six frames is under what anyone can read; a row that goes past
- * faster than this now costs nothing at all.
+ * drained. About two frames: enough to still skip a hard flick (which turns a
+ * page faster than this), short enough that a steady scroll starts loading a
+ * row's waveform almost as soon as it appears.
  */
-const SETTLE_MS = 100;
+const SETTLE_MS = 35;
 
 /**
  * How many waveform requests may be on the command channel at once.
  *
- * A screenful is about twenty rows and they all settle together. Letting all
- * twenty go at once puts twenty file reads in front of the next `fetch_rows`,
- * which is the call that actually has to land for the list to draw.
+ * A screenful is about twenty rows and they all settle together. The cap keeps
+ * them from putting twenty file reads in front of the next `fetch_rows`, which
+ * is the call that has to land for the list to draw. It can afford to be wider
+ * than it was: the row data is now fetched a window ahead (`PREFETCH_MARGIN`),
+ * so a scroll rarely waits on `fetch_rows` at all, and the per-row scan that
+ * made each waveform expensive is gone (`row_of_id`, a map lookup). Sixteen
+ * fills a screen fast without the list text falling behind — measured on a
+ * fresh scroll of the reference library, the text kept up.
  */
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 16;
 
 let active = 0;
 const waiting: Array<() => void> = [];

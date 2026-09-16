@@ -106,9 +106,11 @@ describe("WaveformPreview", () => {
     });
     void act(() => vi.advanceTimersByTime(200));
     await settle();
-    // Some go, so this is a gate and not a mistake; not all twenty, which is
-    // the point.
+    // Some go, so this is a gate and not a mistake; not all twenty at once,
+    // which is the point. Asserted against the screenful rather than the exact
+    // cap so tuning the cap does not rewrite the test — what matters is that a
+    // bound below a screen's worth still holds.
     expect(asked.length).toBeGreaterThan(0);
-    expect(asked.length).toBeLessThanOrEqual(4);
+    expect(asked.length).toBeLessThan(20);
   });
 });

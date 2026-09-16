@@ -2132,7 +2132,20 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   const scroller = page.getByTestId("track-scroll");
   await scroller.evaluate((el) => { el.scrollTop = 600; });
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(600);
-  const row = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  // A row inside the viewport, not the nth rendered one: the rows mounted
+  // above the fold (the overscan) are rendered too, and double-clicking one
+  // of those scrolls it into view — to the top, when the list is short
+  // enough — which would undo the scroll being checked below.
+  const frame = await scroller.boundingBox();
+  const titles = page.locator('[role="gridcell"][data-col="title"]');
+  let row = titles.nth(0);
+  for (let i = 0, n = await titles.count(); i < n; i += 1) {
+    const box = await titles.nth(i).boundingBox();
+    if (frame && box && box.y > frame.y + 30 && box.y + box.height < frame.y + frame.height) {
+      row = titles.nth(i);
+      break;
+    }
+  }
   const loaded = await row.innerText();
   await row.dblclick();
   await expect(page.getByTestId("player-title")).toHaveText(loaded);
@@ -2147,9 +2160,8 @@ test("the layout switch draws one deck, two, a short one, or none", async ({ pag
   const before = await remaining();
   await expect.poll(remaining).toBeLessThan(before);
   const left = await remaining();
-  // Read back rather than assumed: the double-click brought its row into
-  // view, which is a scroll of its own. What matters is that the switch adds
-  // none.
+  // Read back rather than assumed, so a scroll the double-click made of its
+  // own is accounted for. What matters is that the switch adds none.
   const scrolled = await scroller.evaluate((el) => el.scrollTop);
   expect(scrolled).toBeGreaterThan(0);
 

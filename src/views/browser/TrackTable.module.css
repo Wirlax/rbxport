@@ -375,6 +375,17 @@
   align-items: flex-start;
 }
 
+/* Stands in for a cell's text while its page loads: a dim bar on the row's
+   ground, so a fast scroll reads as content arriving rather than blank rows. */
+.skeleton {
+  display: inline-block;
+  vertical-align: middle;
+  width: 60%;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--c-raised);
+}
+
 .stars { letter-spacing: 1px; color: var(--c-text); display: flex; }
 .star {
   border: 0;
