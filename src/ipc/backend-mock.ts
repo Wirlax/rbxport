@@ -987,13 +987,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
       const order = Uint32Array.from(candidates);
       const rows = all;
-      const sorted = Array.from(order).sort((x, y) => {
-        const rx = rows[x];
-        const ry = rows[y];
-        if (!rx || !ry) return 0;
-        const c = compare(rx, ry, spec.sort);
-        return spec.descending ? -c : c;
-      });
+      // `trackNo` is not a column to rank by: it means "leave them in the
+      // order this view produced them", which for a playlist is its
+      // membership — the order somebody dragged them into. Ranking by the
+      // row's own stored number put the collection's order back instead, so
+      // a reordered playlist came out looking untouched.
+      const sorted =
+        spec.sort === "trackNo"
+          ? (spec.descending ? Array.from(order).reverse() : Array.from(order))
+          : Array.from(order).sort((x, y) => {
+              const rx = rows[x];
+              const ry = rows[y];
+              if (!rx || !ry) return 0;
+              const c = compare(rx, ry, spec.sort);
+              return spec.descending ? -c : c;
+            });
 
       const viewId = nextViewId++;
       views.set(viewId, { order: Uint32Array.from(sorted), gen: 1 });

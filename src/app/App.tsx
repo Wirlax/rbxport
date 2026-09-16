@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type {
-  Backend, DeckId, Device, LibrarySummary, RowDto, SortColumn, TreeNode, ViewSpec,
+  Backend, DeckId, Device, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
@@ -33,7 +33,7 @@ import { useUpdater } from "@/store/useUpdater";
 import { UpdateManager } from "@/views/update/UpdateManager";
 import { useMaster } from "@/store/useMaster";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
-import { InfoPanel } from "@/views/info/InfoPanel";
+import { FIELD_LABEL, InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
 import { RightRail } from "@/views/browser/RightRail";
 import { DevicePanel } from "@/views/devices/DevicePanel";
@@ -54,6 +54,15 @@ import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { FilterValues, LinkPeerSeen, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
+
+/**
+ * The metadata fields a row already carries, so an edit to one can be shown
+ * before the backend has answered. The others live only in the information
+ * panel's record, which is re-read anyway.
+ */
+const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
+  "title", "artist", "album", "genre", "label",
+]);
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -637,6 +646,19 @@ export function App() {
     [runEdit, showPending, refuseLoose],
   );
 
+  const editTrackField = useCallback(
+    (id: string, field: TrackField, value: string) => {
+      if (refuseLoose(id)) return;
+      // Shown before the round trip for the fields a row carries; the rest
+      // belong to the information panel and arrive with the re-read.
+      if (ROW_FIELDS.has(field)) showPending(id, { [field]: value });
+      void runEdit(`${FIELD_LABEL[field]} saved.`, (b) =>
+        b.edits.setTrackField(id, field, value),
+      );
+    },
+    [runEdit, showPending, refuseLoose],
+  );
+
   const addDraggedTo = useCallback(
     (playlistId: string) => {
       const ids = draggedTracks?.ids;
@@ -805,6 +827,33 @@ export function App() {
     },
     [write],
   );
+
+  const reorderPlaylistTracks = useCallback(
+    (order: readonly string[]) => {
+      const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
+      if (playlist === null || order.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.reorderPlaylist(playlist, [...order]);
+        return "Playlist reordered.";
+      });
+    },
+    [write, spec],
+  );
+
+  /**
+   * Whether the rows can be dragged into a new order.
+   *
+   * Only a playlist has an order of its own to change. It also has to be the
+   * order on screen: sorted by a column, or narrowed by the search or the
+   * filter, the rows are a rearrangement or a subset of the playlist, and
+   * writing what is visible as the whole order would scramble the rest.
+   */
+  const canReorder =
+    spec.source.kind === "playlist" &&
+    !readOnly &&
+    sortState.column === "trackNo" &&
+    query === "" &&
+    spec.filter === undefined;
 
   const removeFromPlaylist = useCallback(
     (ids: readonly string[]) => {
@@ -1286,6 +1335,10 @@ export function App() {
           onLoadTrack={loadTrack}
           onRate={rateTrack}
           onComment={commentTrack}
+          // The sub-browser's list is left out on purpose: it has a source and
+          // a sort of its own, which this gate does not describe.
+          onReorder={canReorder ? reorderPlaylistTracks : undefined}
+          onEditField={readOnly ? undefined : editTrackField}
           libraryGeneration={libraryGeneration}
           pendingEdits={pendingEdits}
           title={selectedNode?.name ?? "Collection"}

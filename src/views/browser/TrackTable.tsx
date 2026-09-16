@@ -8,7 +8,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DeckId, RowDto, SortColumn, ViewSpec } from "@/ipc/types";
+import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
@@ -102,6 +102,28 @@ function cellText(row: RowDto, key: Column["key"]): string {
   }
 }
 
+/**
+ * The columns that can be typed over in the list, and the field each writes.
+ *
+ * Plain text that the writer takes as given, and only columns whose cells are
+ * not the gesture for something else.
+ *
+ * `title` is left out although the writer takes it: the title cell is what
+ * people double-click to load a track, and a cell that both loads and opens
+ * an editor cannot do either reliably. The information panel edits it.
+ *
+ * `key` is left out too — it is checked against the keys the library already
+ * holds, so a free-typed one would be refused after the fact, and the
+ * information panel offers the list instead. `bpm` and the dates are
+ * formatted on the way out and would have to be parsed back on the way in.
+ */
+const EDITABLE_FIELDS: Partial<Record<ColumnKey, TrackField>> = {
+  artist: "artist",
+  album: "album",
+  genre: "genre",
+  label: "label",
+};
+
 const Stars = memo(function Stars({
   rating, onRate,
 }: {
@@ -153,10 +175,12 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, onCommit, onClick, tip,
+  value, label, col, onCommit, onClick, tip,
 }: {
   value: string;
   label: string;
+  /** The column this cell belongs to, which its width and alignment key off. */
+  col: string;
   onCommit: (next: string) => void;
   /**
    * Edit Library › Double-click to edit is off: a click on this cell of a
@@ -177,14 +201,17 @@ const EditableCell = memo(function EditableCell({
     return (
       <div
         className={styles.cell}
-        data-col="comment"
+        data-col={col}
         role="gridcell"
         onClick={onClick ? begin : undefined}
         onDoubleClick={(e) => {
-          // Editing a comment is not asking to play the track: without this
-          // the row's own double-click loads it into the player as well.
+          // Swallowed only when the double click is the gesture that opens
+          // the editor. Otherwise it belongs to the row, where it loads the
+          // track into the deck — taking it unconditionally stopped a
+          // double-click on a cell loading anything at all.
+          if (onClick) return;
           e.stopPropagation();
-          if (!onClick) begin();
+          begin();
         }}
         title={tip}
       >
@@ -195,7 +222,7 @@ const EditableCell = memo(function EditableCell({
   return (
     <div
       className={styles.cell}
-      data-col="comment"
+      data-col={col}
       role="gridcell"
       // A second click on a cell that has just opened is not a request to
       // play the track either.
@@ -229,7 +256,8 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  reorderable, dropEdge, onReorderOver, onReorderDrop,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -254,8 +282,16 @@ const TrackRow = memo(function TrackRow({
   onRate: ((id: string, stars: number) => void) | undefined;
   /** Set the track's comment. */
   onComment: ((id: string, comment: string) => void) | undefined;
+  /** Write a metadata field typed over in the row. */
+  onEditField: ((id: string, field: TrackField, value: string) => void) | undefined;
   onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
   onDragEnd: () => void;
+  /** The list can be reordered by hand, so a drop here means something. */
+  reorderable: boolean;
+  /** Which edge the line is drawn on, or null for a row that is not the target. */
+  dropEdge: "above" | "below" | null;
+  onReorderOver: (index: number, below: boolean) => void;
+  onReorderDrop: () => void;
 }) {
   if (!row) {
     // A skeleton, not a blank: while the page is in flight a dim bar stands in
@@ -313,7 +349,11 @@ const TrackRow = memo(function TrackRow({
       draggable
       onDragStart={(e) => {
         onDragStart(row);
-        e.dataTransfer.effectAllowed = "copy";
+        // Both, because the same drag has two meanings: copied into a playlist
+        // or a deck, moved within the list it came from. A `dropEffect` the
+        // `effectAllowed` does not cover is an invalid pair, and the browser
+        // silently refuses the drop — which is what swallowed the reorder.
+        e.dataTransfer.effectAllowed = "copyMove";
         // Firefox will not start a drag without payload.
         e.dataTransfer.setData("text/plain", row.id);
         // A faded copy of the row travels with the hand, every time: the
@@ -324,6 +364,21 @@ const TrackRow = memo(function TrackRow({
       // A drag that is let go over nothing still ends. Without this the tree
       // kept offering its playlists as targets afterwards.
       onDragEnd={() => onDragEnd()}
+      onDragOver={(e) => {
+        if (!reorderable) return;
+        // Taking the event is what lets the drop happen at all; the browser
+        // refuses one over an element that did not ask for it.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const box = e.currentTarget.getBoundingClientRect();
+        onReorderOver(index, e.clientY > box.top + box.height / 2);
+      }}
+      onDrop={(e) => {
+        if (!reorderable) return;
+        e.preventDefault();
+        onReorderDrop();
+      }}
+      data-drop={dropEdge ?? undefined}
       role="row"
       aria-selected={selected}
     >
@@ -361,6 +416,7 @@ const TrackRow = memo(function TrackRow({
               key={col.key}
               value={row.comment}
               label="Comment"
+              col={col.key}
               onCommit={(next) => onComment(row.id, next)}
               // A click edits only a selected row's comment; on any other
               // row the click is a selection, as it has to be.
@@ -374,6 +430,26 @@ const TrackRow = memo(function TrackRow({
               }
             />
           );
+        }
+        if (onEditField) {
+          const field = EDITABLE_FIELDS[col.key];
+          if (field) {
+            return (
+              <EditableCell
+                key={col.key}
+                value={cellText(row, col.key)}
+                label={col.label}
+                col={col.key}
+                onCommit={(next) => onEditField(row.id, field, next)}
+                onClick={clickToEdit && selected}
+                tip={
+                  tooltips
+                    ? `${col.label} — ${clickToEdit ? "click" : "double-click"} to edit`
+                    : undefined
+                }
+              />
+            );
+          }
         }
         if (col.key === "preview") {
           return (
@@ -475,6 +551,21 @@ export interface TrackTableProps {
   /** Edit a track's rating or comment. Absent where writes are impossible. */
   onRate?: (id: string, stars: number) => void;
   onComment?: (id: string, comment: string) => void;
+  /**
+   * Write the playlist's new order, dragged by hand.
+   *
+   * Absent unless the rows can be reordered at all: only a playlist has an
+   * order of its own to change, and only while it is being shown in that
+   * order rather than sorted by a column.
+   */
+  onReorder?: ((order: readonly string[]) => void) | undefined;
+  /**
+   * Write a metadata field typed over in the list.
+   *
+   * Absent where the library cannot be written, which is what leaves the
+   * cells as plain text rather than offering an edit that would be refused.
+   */
+  onEditField?: ((id: string, field: TrackField, value: string) => void) | undefined;
   /** Bumped when the library changes, so cached pages are dropped. */
   libraryGeneration?: number;
   /** Edits shown before the backend has caught up. */
@@ -535,7 +626,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, readOnly = false,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
@@ -755,7 +846,7 @@ export function TrackTable({
     };
   }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor]);
 
-  const startDraggingTracks = useCallback(
+  const startDragOut = useCallback(
     (row: RowDto) => {
       // Whatever is selected, plus the row grabbed if it was not part of it —
       // dragging an unselected row should move that row, not the selection
@@ -782,7 +873,62 @@ export function TrackTable({
     [selection.ids, onDragTracks, view],
   );
 
-  const endDraggingTracks = useCallback(() => onDragTracks?.(null), [onDragTracks]);
+  // The ids travelling with the hand, and where they would land. Held here
+  // rather than read back from the drag event: `dataTransfer` will not give
+  // its payload up during `dragover`, only on the drop.
+  const carrying = useRef<readonly string[] | null>(null);
+  const [dropAt, setDropAt] = useState<{ index: number; below: boolean } | null>(null);
+
+  const startDraggingTracks = useCallback(
+    (row: RowDto) => {
+      carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
+      startDragOut(row);
+    },
+    [selection.ids, startDragOut],
+  );
+
+  const endDraggingTracks = useCallback(() => {
+    carrying.current = null;
+    setDropAt(null);
+    onDragTracks?.(null);
+  }, [onDragTracks]);
+
+  /** Where the carried rows would go, as the pointer moves over a row. */
+  const reorderOver = useCallback(
+    (index: number, below: boolean) => {
+      if (!onReorder || carrying.current === null) return;
+      setDropAt((at) => (at?.index === index && at.below === below ? at : { index, below }));
+    },
+    [onReorder],
+  );
+
+  /**
+   * Lands the carried rows at the line drawn, as the whole playlist's order.
+   *
+   * `reorderPlaylist` is given every id, not the moved ones: the backend
+   * rewrites `TrackNo` from what it is handed, and a partial list would leave
+   * the rest of the playlist to be appended in its old order.
+   */
+  const reorderDrop = useCallback(() => {
+    const moved = carrying.current;
+    const at = dropAt;
+    setDropAt(null);
+    if (!onReorder || moved === null || at === null || moved.length === 0) return;
+    void (async () => {
+      const all = await view.idsInRange(0, view.count);
+      const moving = new Set(moved);
+      // The boundary the line was drawn at, counted in ids that are staying:
+      // the carried rows are lifted out first, so the rows above the line are
+      // what the insertion point is measured against.
+      const boundary = at.index + (at.below ? 1 : 0);
+      const insertAt = all.slice(0, boundary).filter((id) => !moving.has(id)).length;
+      const staying = all.filter((id) => !moving.has(id));
+      // In list order, not selection order, so a multi-row drag keeps its shape.
+      const lifted = all.filter((id) => moving.has(id));
+      if (lifted.length === 0) return;
+      onReorder([...staying.slice(0, insertAt), ...lifted, ...staying.slice(insertAt)]);
+    })();
+  }, [dropAt, onReorder, view]);
 
   const handleSelect = useCallback(
     (index: number, id: string, e: React.MouseEvent) => {
@@ -1079,6 +1225,7 @@ export function TrackTable({
                 onDragEnd={endDraggingTracks}
                 onRate={onRate}
                 onComment={onComment}
+                onEditField={onEditField}
                 keyDisplay={keyDisplay}
                 previewCues={previewCueMarkers}
                 clickToEdit={clickToEdit}
@@ -1090,6 +1237,12 @@ export function TrackTable({
                 onSelect={handleSelect}
                 onOpen={handleOpen}
                 onMenu={openTrackMenu}
+                reorderable={Boolean(onReorder)}
+                dropEdge={
+                  dropAt?.index === item.index ? (dropAt.below ? "below" : "above") : null
+                }
+                onReorderOver={reorderOver}
+                onReorderDrop={reorderDrop}
               />
             );
           })}

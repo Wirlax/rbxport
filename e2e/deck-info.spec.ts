@@ -41,13 +41,14 @@ test("INFO shows the loaded track's record, and MEMORY is as it was on the way b
   await expect(tab(page, "INFO")).toHaveAttribute("aria-selected", "true");
   const info = page.getByTestId("deck-info");
   await expect(info).toBeVisible();
-  // The manual's four file lines, in its order, with the values the mock
-  // makes up for the fourth track: a 320 kbps MP3 at 44.1 kHz.
+  // The manual's four file lines, in its order, each in its own units. Which
+  // track is fourth is the mock's business — it makes up an MP3 or a WAV — so
+  // what is pinned here is the shape of the record, not one track's codec.
   await expect(fileLines(page)).toHaveCount(4);
-  await expect(fileLines(page).nth(0)).toHaveText("MP3 File");
+  await expect(fileLines(page).nth(0)).toHaveText(/^(MP3|WAV) File$/);
   await expect(fileLines(page).nth(1)).toHaveText(/^\d+\.\d MB$/);
   await expect(fileLines(page).nth(2)).toHaveText("44100 Hz");
-  await expect(fileLines(page).nth(3)).toHaveText("320 kbps");
+  await expect(fileLines(page).nth(3)).toHaveText(/^\d+ kbps$/);
   // The rating and comment come from the row itself: the Comments column
   // is on by default.
   const comment = await page.locator('[role="gridcell"][data-col="comment"]').nth(3).innerText();
@@ -92,7 +93,8 @@ test("the record is not fetched for a tab nobody opened", async ({ page }) => {
 test("a colour picked in the information panel shows on the deck", async ({ page }) => {
   await load(page, "?writable=1");
   await tab(page, "INFO").click();
-  await expect(fileLines(page).nth(0)).toHaveText("MP3 File");
+  // Just that the record arrived; this test is about the colour.
+  await expect(fileLines(page).nth(0)).toHaveText(/^(MP3|WAV) File$/);
 
   // The information panel opens on the same row the deck holds.
   await page.waitForFunction(() => "__menu" in window);

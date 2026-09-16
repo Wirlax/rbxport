@@ -296,6 +296,20 @@
 .row[data-selected] { background: var(--c-select); }
 .row:hover:not([data-selected]) { background: var(--c-button); }
 
+/* Where a dragged row would land: a line on the edge it would go in at,
+   drawn inside the row so it cannot widen the scroller. */
+.row[data-drop]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--c-accent);
+  pointer-events: none;
+}
+.row[data-drop="above"]::after { top: 0; }
+.row[data-drop="below"]::after { bottom: 0; }
+
 .cell,
 .attr,
 .artwork,

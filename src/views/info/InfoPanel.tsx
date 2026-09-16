@@ -242,7 +242,8 @@ interface InfoFormProps {
 }
 
 /** The Info tab's labels, from `german.lang`. */
-const FIELD_LABEL: Record<TrackField, string> = {
+/** What each field is called, for the line the status bar says after a save. */
+export const FIELD_LABEL: Record<TrackField, string> = {
   title: "Track Title",
   artist: "Artist",
   album: "Album",

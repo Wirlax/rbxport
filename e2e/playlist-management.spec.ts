@@ -273,6 +273,97 @@ test("renaming is refused while rekordbox holds the library", async ({ page }) =
   await expect(menu.getByRole("menuitem", { name: "Rename Playlist" })).toBeDisabled();
 });
 
+const titles = (page: Page) =>
+  page.locator('[role="gridcell"][data-col="title"]').allTextContents();
+
+/**
+ * Drags row `from` onto the lower half of row `to`, which lands it after it.
+ *
+ * `dragTo` rather than the mouse by hand: it drives the drag through the
+ * browser's own protocol, which is the only form WebKit takes.
+ */
+async function dragRow(page: Page, from: number, to: number) {
+  const list = rows(page);
+  const box = await list.nth(to).boundingBox();
+  if (!box) throw new Error("the target row is not on screen");
+  await list.nth(from).dragTo(list.nth(to), {
+    targetPosition: { x: 120, y: box.height - 3 },
+  });
+}
+
+/** Opens a playlist, which is the only thing with an order of its own. */
+async function openPlaylist(page: Page) {
+  await item(page, "Melodic Vox").click();
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+}
+
+test("a track dragged down a playlist lands where it was dropped", async ({ page }) => {
+  await open(page);
+  await openPlaylist(page);
+  const before = await titles(page);
+
+  await dragRow(page, 0, 3);
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+
+  // The first row took the fourth place and the three above it moved up.
+  await expect.poll(async () => (await titles(page))[3]).toBe(before[0]);
+  const after = await titles(page);
+  expect(after.slice(0, 4)).toEqual([before[1], before[2], before[3], before[0]]);
+  // Nothing was lost or duplicated: the whole order is written, not a patch.
+  expect([...after].sort()).toEqual([...before].sort());
+});
+
+test("the line shows where the rows would land before they are let go", async ({
+  page,
+  browserName,
+}) => {
+  // Driven by hand, so the drag can be inspected halfway. Chromium alone
+  // synthesises HTML5 drag events from raw mouse moves.
+  test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
+  await open(page);
+  await openPlaylist(page);
+
+  const list = rows(page);
+  const a = await list.nth(0).boundingBox();
+  const b = await list.nth(3).boundingBox();
+  if (!a || !b) throw new Error("the rows are not on screen");
+  await page.mouse.move(a.x + 120, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 120, b.y + b.height - 3, { steps: 12 });
+
+  // One line, on the edge the rows would go in at.
+  await expect(page.locator('[role="row"][data-drop]')).toHaveCount(1);
+  await expect(page.locator('[role="row"][data-drop="below"]')).toHaveCount(1);
+
+  // And it goes when the drag does.
+  await page.mouse.up();
+  await expect(page.locator('[role="row"][data-drop]')).toHaveCount(0);
+});
+
+test("the order cannot be dragged where the rows are not the playlist's own", async ({ page }) => {
+  await open(page);
+  await openPlaylist(page);
+  // Sorted by a column, the rows are a rearrangement of the playlist, so
+  // writing what is on screen as the whole order would scramble the rest.
+  await page.getByRole("columnheader", { name: /BPM/ }).click();
+  const before = await titles(page);
+
+  await dragRow(page, 0, 3);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Playlist reordered.");
+  expect(await titles(page)).toEqual(before);
+});
+
+test("the collection has no order of its own to drag", async ({ page }) => {
+  await open(page);
+  await page.getByRole("treeitem", { name: /All Tracks/ }).click();
+  await expect(page.getByTestId("browser-title")).not.toContainText("Melodic Vox");
+  const before = await titles(page);
+
+  await dragRow(page, 0, 3);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Playlist reordered.");
+  expect(await titles(page)).toEqual(before);
+});
+
 /** The tree's node names, without the track counts. */
 const treeNames = async (page: Page) =>
   (await page.getByRole("treeitem").allTextContents()).map((s) =>

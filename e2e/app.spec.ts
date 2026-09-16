@@ -1056,6 +1056,64 @@ test("a comment commits on Enter", async ({ page }) => {
   await expect(page.getByRole("contentinfo")).toContainText("Comment saved");
 });
 
+test("the metadata columns are typed over in the list, and Escape abandons", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+
+  // Artist commits on Enter and the row shows it without a reload.
+  const artist = page.locator('[role="gridcell"][data-col="artist"]').nth(3);
+  await artist.dblclick();
+  const field = page.getByRole("textbox", { name: "Artist" });
+  await expect(field).toBeVisible();
+  await field.fill("Edited Artist Name");
+  await field.press("Enter");
+  await expect(page.getByRole("contentinfo")).toContainText("Artist saved.");
+  await expect(page.locator('[role="gridcell"][data-col="artist"]').nth(3))
+    .toHaveText("Edited Artist Name");
+
+  // Label abandons on Escape, and nothing is written. Album and Genre edit
+  // the same way but are not columns the list shows by default.
+  const label = page.locator('[role="gridcell"][data-col="label"]').nth(2);
+  const was = await label.innerText();
+  await label.dblclick();
+  const labelField = page.getByRole("textbox", { name: "Label" });
+  await labelField.fill("Should Not Stick");
+  await labelField.press("Escape");
+  await expect(page.locator('[role="gridcell"][data-col="label"]').nth(2)).toHaveText(was);
+  await expect(page.getByRole("contentinfo")).not.toContainText("Label saved.");
+});
+
+test("the title cell stays the gesture that loads a track, not one that edits it", async ({
+  page,
+}) => {
+  // A cell that both loads and opens an editor can do neither reliably, so
+  // the title is the information panel's to edit.
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  await expect(page.locator('[role="gridcell"][data-col="title"] input')).toHaveCount(0);
+  // And it loaded, which is what the double click was for.
+  await expect(page.getByTestId("player-title")).not.toHaveText("");
+});
+
+test("the key column is not typed over: it is checked against the library's own", async ({
+  page,
+}) => {
+  // A free-typed key would be refused after the fact, so it is the
+  // information panel's list rather than a cell to type in.
+  await page.goto("/?writable=1");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="key"]').nth(3).dblclick();
+  await expect(page.locator('[role="gridcell"][data-col="key"] input')).toHaveCount(0);
+});
+
+test("with the library held by rekordbox the cells are not editable at all", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="artist"]').nth(3).dblclick();
+  await expect(page.locator('[role="gridcell"][data-col="artist"] input')).toHaveCount(0);
+});
+
 test("settings can check for missing files", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
@@ -1954,6 +2012,9 @@ test("BEAT SYNC stays lit and follows the master's tempo until RST or MASTER end
   const sync = b.getByRole("button", { name: "Beat sync" });
   const bpmA = a.getByTestId("player-bpm");
   const bpmB = b.getByTestId("player-bpm");
+  // What deck B's own file runs at, read rather than written down: which
+  // track sits second is the mock's business, not this test's.
+  const bpmBAtRest = await bpmB.innerText();
 
   // Lit once pressed, and the follower's own tempo steps are not its to take.
   await sync.click();
@@ -1976,7 +2037,7 @@ test("BEAT SYNC stays lit and follows the master's tempo until RST or MASTER end
   // RST puts the follower back at its file's speed and takes it off sync.
   await b.getByRole("button", { name: "Reset tempo" }).click();
   await expect(sync).toHaveAttribute("aria-pressed", "false");
-  await expect(bpmB).toHaveText("129.00");
+  await expect(bpmB).toHaveText(bpmBAtRest);
   await expect(b.getByRole("button", { name: "Faster" })).toBeEnabled();
 
   // Synced again, then made master: a master follows nobody, so its light goes out.

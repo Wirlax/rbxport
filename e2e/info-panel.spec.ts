@@ -39,15 +39,16 @@ test("Summary shows the record the row does not carry", async ({ page }) => {
   const title = await page.locator('[role="gridcell"][data-col="title"]').nth(3).innerText();
   await expect(panel).toContainText(title);
 
-  // Every row of the table, in the captured order, and the values the mock
-  // makes up for the fourth track: a 320 kbps MP3 at 44.1 kHz.
+  // Every row of the table, in the captured order. The values are the mock's
+  // own — an MP3 or a WAV, depending which track is fourth — so each is
+  // pinned by its units rather than by one track's numbers.
   const labels = panel.locator("dl").last().locator("dt");
   await expect(labels).toHaveText([
     "Time", "File Type", "Size", "Date Created", "Sample Rate", "Bitrate", "DJ Play Count", "Location",
   ]);
-  await expect(panel.getByText("MP3 File")).toBeVisible();
+  await expect(panel.getByText(/^(MP3|WAV) File$/)).toBeVisible();
   await expect(panel.getByText("44100 Hz")).toBeVisible();
-  await expect(panel.getByText("320 kbps")).toBeVisible();
+  await expect(panel.getByText(/^\d+ kbps$/)).toBeVisible();
   await expect(panel.getByText(/^\/Volumes\/MUSIC\//)).toBeVisible();
 });
 
