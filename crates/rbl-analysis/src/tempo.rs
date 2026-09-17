@@ -468,14 +468,29 @@ fn fit(reader: Reader<'_>, bpm: f64, from: usize, to: usize, options: TempoOptio
     let coarse = reader.rate * 60.0 / bpm;
     let period = refine_period(slice, coarse, options.refine_phases);
     let phase = best_phase(slice, period, 64);
-    let mut fit = Fit { phase: phase + from as f64, period };
-    // Snap and refit, three times: each pass moves the line a little closer
-    // to the onsets and the next pass then snaps a few more of them.
-    for _ in 0..3 {
-        let Some(next) = snap_and_fit(reader, from, to, fit) else { break };
-        fit = next;
+    // The comb's phase may be on the off-beat: hats and an off-beat bass
+    // carry as much flux as the kick. With the kick attacks to read, the
+    // line is fitted from both halves of the beat and the one that collects
+    // more kick is the grid. Measured on the golden playlist, the kick
+    // detector tells the beat from the midpoint on 150 of 155 rekordbox
+    // grids.
+    let starts: &[f64] = if reader.attacks.is_some() { &[0.0, 0.5] } else { &[0.0] };
+    let mut best: Option<(Fit, f64)> = None;
+    for &half in starts {
+        let mut fit = Fit { phase: phase + half * period + from as f64, period };
+        let mut support = 0.0;
+        // Snap and refit, three times: each pass moves the line a little
+        // closer to the onsets and the next pass then snaps a few more.
+        for _ in 0..3 {
+            let Some((next, kept)) = snap_and_fit(reader, from, to, fit) else { break };
+            fit = next;
+            support = kept;
+        }
+        if best.is_none_or(|(_, s)| support > s) {
+            best = Some((fit, support));
+        }
     }
-    Some(fit)
+    best.map(|(fit, _)| fit)
 }
 
 /// Comb-filter score of a grid: onset energy summed at every beat of the
@@ -564,7 +579,10 @@ fn best_phase(values: &[f64], period: f64, phases: usize) -> f64 {
 /// kick's attack when there is an attack map, else the envelope's peak —
 /// and fits a line through the snapped ones, weighted by the hit's
 /// strength.
-fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit) -> Option<Fit> {
+///
+/// Also returns the total strength of the hits the line was fitted
+/// through, so two candidate lines can be compared.
+fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit) -> Option<(Fit, f64)> {
     let period = current.period;
     if period < 2.0 {
         return None;
@@ -644,7 +662,8 @@ fn snap_and_fit(reader: Reader<'_>, from: usize, to: usize, current: Fit) -> Opt
     if (slope - period).abs() > period * 0.02 {
         return None;
     }
-    Some(Fit { phase: intercept, period: slope })
+    let support = kept.iter().map(|&(_, _, w)| w).sum::<f64>();
+    Some((Fit { phase: intercept, period: slope }, support))
 }
 
 /// The highest envelope sample within `reach` of `around`, with its
@@ -690,23 +709,31 @@ pub fn local_tempos(onsets: &OnsetEnvelope, bpm: f64, options: TempoOptions) -> 
     out
 }
 
-/// How the fit stage arrives at a segment's tempo, for measurement: the BPM
-/// from the comb alone, then after each snap-and-refit pass.
-pub fn fit_report(onsets: &OnsetEnvelope, attacks: Option<&AttackMap>, bpm: f64, options: TempoOptions) -> Vec<f64> {
+/// How the fit stage arrives at a segment's tempo, for measurement: for
+/// each starting half of the beat, the BPM after each snap-and-refit pass
+/// and the support the final line collected.
+pub fn fit_report(onsets: &OnsetEnvelope, attacks: Option<&AttackMap>, bpm: f64, options: TempoOptions) -> Vec<(Vec<f64>, f64)> {
     let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
     let n = values.len();
     let reader = Reader { values: &values, rate: onsets.rate, origin_secs: onsets.origin_secs, attacks };
     let coarse = onsets.rate * 60.0 / bpm;
     let period = refine_period(&values, coarse, options.refine_phases);
     let phase = best_phase(&values, period, 64);
-    let mut out = vec![onsets.rate * 60.0 / period];
-    let mut fit = Fit { phase, period };
-    for _ in 0..3 {
-        let Some(next) = snap_and_fit(reader, 0, n, fit) else { break };
-        fit = next;
-        out.push(onsets.rate * 60.0 / fit.period);
-    }
-    out
+    [0.0, 0.5]
+        .iter()
+        .map(|&half| {
+            let mut passes = vec![onsets.rate * 60.0 / period];
+            let mut fit = Fit { phase: phase + half * period, period };
+            let mut support = 0.0;
+            for _ in 0..3 {
+                let Some((next, kept)) = snap_and_fit(reader, 0, n, fit) else { break };
+                fit = next;
+                support = kept;
+                passes.push(onsets.rate * 60.0 / fit.period);
+            }
+            (passes, support)
+        })
+        .collect()
 }
 
 /// The walk between two tempos, for measurement: every beat it placed

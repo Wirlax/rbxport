@@ -22,13 +22,13 @@ pub struct AttackOptions {
     /// How far either side of a predicted beat an attack is looked for.
     /// The grid that asks is already within a few milliseconds of the hit;
     /// 50 ms reached the clap after the kick on one golden track and the
-    /// fit chased it.
+    /// fit chased it, and 15 ms scores one grid better than 20 or 30.
     pub reach_secs: f64,
 }
 
 impl Default for AttackOptions {
     fn default() -> Self {
-        Self { low_hz: 900.0, high_hz: 9000.0, step_secs: 0.001, reach_secs: 0.03 }
+        Self { low_hz: 900.0, high_hz: 9000.0, step_secs: 0.001, reach_secs: 0.015 }
     }
 }
 
@@ -86,7 +86,12 @@ impl AttackMap {
         if hi <= lo {
             return None;
         }
-        // The steepest rise in the window is the spike's front.
+        // The steepest rise in the window is a spike's front — but the
+        // spike wanted is the one nearest the asked-for time, so among the
+        // rises at least half as steep as the steepest, the nearest wins.
+        // Taking the steepest outright let a grid drift: once a beat's
+        // prediction slips late, the window reaches a sharper hit further
+        // on, the line follows it, and the next prediction slips further.
         let rise = |i: usize| f64::from(self.rms[i]) - f64::from(self.rms[i - 1]);
         let mut steepest = (0.0_f64, lo);
         for i in lo..=hi {
@@ -106,6 +111,15 @@ impl AttackMap {
         if steepest.0 < ordinary * MIN_SPIKE_OVER_WOBBLE {
             return None;
         }
+        let strong = steepest.0 * NEAREST_STRONG_FRACTION;
+        let mut chosen = steepest;
+        for i in lo..=hi {
+            let r = rise(i);
+            if r >= strong && i.abs_diff(centre) < chosen.1.abs_diff(centre) {
+                chosen = (r, i);
+            }
+        }
+        let steepest = chosen;
         // Walk back from the steepest step to where the spike starts: the
         // first step of the run of rises leading into it.
         let mut start = steepest.1;
@@ -127,6 +141,9 @@ const MIN_SPIKE_OVER_WOBBLE: f64 = 4.0;
 /// A step still belongs to the spike's run while its rise is at least this
 /// share of the steepest one.
 const RUN_FRACTION: f64 = 0.1;
+/// A rise at least this share of the window's steepest is a spike in its
+/// own right, and the one nearest the asked-for time is taken.
+const NEAREST_STRONG_FRACTION: f64 = 0.5;
 
 /// Second-order high-pass then low-pass (Butterworth Q), direct form I.
 fn band_pass(samples: &[f32], sample_rate: u32, low_hz: f32, high_hz: f32) -> Vec<f32> {

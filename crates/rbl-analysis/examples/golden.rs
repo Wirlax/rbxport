@@ -68,6 +68,7 @@ fn main() {
         "cache" => cache(),
         "eval" => eval(),
         "downbeat" => downbeat_experiment(),
+        "kick" => kick_experiment(),
         "key" => key_experiment(),
         "bassroot" => bassroot_experiment(),
         other => println!("unknown mode {other:?}; use `cache` or `eval`"),
@@ -256,6 +257,9 @@ impl Score {
 /// `RB_LITE_PLACEMENT` (`envelope`, `attack`).
 fn options_under_test() -> rbl_analysis::AnalysisOptions {
     let mut options = rbl_analysis::AnalysisOptions::default();
+    if let Some(r) = std::env::var("RB_LITE_ATTACK_REACH").ok().and_then(|v| v.parse::<f64>().ok()) {
+        options.attacks.reach_secs = r;
+    }
     match std::env::var("RB_LITE_PLACEMENT").as_deref() {
         Ok("envelope") => options.tempo.placement = rbl_analysis::tempo::Placement::Envelope,
         Ok("attack") => options.tempo.placement = rbl_analysis::tempo::Placement::Attack,
@@ -318,7 +322,9 @@ fn score(track: &Track) -> Score {
         let attacks = rbl_analysis::attack::AttackMap::new(&track.samples, track.sample_rate, rbl_analysis::attack::AttackOptions::default());
         for (name, map) in [("envelope", None), ("attacks", Some(&attacks))] {
             let report = rbl_analysis::tempo::fit_report(&onsets, map, table.first().map_or(120.0, |c| c.bpm), rbl_analysis::tempo::TempoOptions::default());
-            println!("  fit on {name}: comb {:.4} then {}", report[0], report[1..].iter().map(|b| format!("{b:.4}")).collect::<Vec<_>>().join(" -> "));
+            for (half, (passes, support)) in report.iter().enumerate() {
+                println!("  fit on {name} from {}: comb {:.4} then {} (support {support:.1})", if half == 0 { "the beat" } else { "the half beat" }, passes[0], passes[1..].iter().map(|b| format!("{b:.4}")).collect::<Vec<_>>().join(" -> "));
+            }
         }
         if analysis.tempo.segments.len() > 1 {
             let attacks = rbl_analysis::attack::AttackMap::new(&track.samples, track.sample_rate, rbl_analysis::attack::AttackOptions::default());
@@ -873,4 +879,56 @@ fn bassroot_experiment() {
         for (hit, top2) in row { print!(" {hit:>7} / {top2:<6}"); }
         println!();
     }
+}
+
+/// Does the kick-attack detector put more attack on rekordbox's beats than
+/// on the midpoints between them? One line per track that says no, and
+/// the count.
+fn kick_experiment() {
+    use rbl_analysis::attack::{AttackMap, AttackOptions};
+    let dir = cache_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
+        .unwrap_or_default();
+    paths.sort();
+    let (mut n, mut wrong) = (0usize, 0usize);
+    for path in &paths {
+        let Some(track) = read_track(path) else { continue };
+        let map = AttackMap::new(&track.samples, track.sample_rate, AttackOptions::default());
+        let period = 60.0 / track.bpm;
+        let strength = |offset: f64| -> (f64, usize) {
+            let mut total = 0.0;
+            let mut hits = 0usize;
+            for b in &track.grid {
+                if let Some(a) = map.attack_within(f64::from(b.time_ms) / 1000.0 + offset, 0.03) {
+                    total += a.height;
+                    hits += 1;
+                }
+            }
+            (total, hits)
+        };
+        let (on, on_hits) = strength(0.0);
+        let (off, off_hits) = strength(period / 2.0);
+        n += 1;
+        let ratio = on / off.max(1e-9);
+        let watched = std::env::var("RB_LITE_KICK_SHOW").map(|w| track.title.to_lowercase().contains(&w.to_lowercase())).unwrap_or(false);
+        if ratio < 1.0 || watched {
+            if ratio < 1.0 { wrong += 1; }
+            println!("  {:<46} on {on:.2} ({on_hits}) off {off:.2} ({off_hits}) ratio {ratio:.2}", truncate(&track.title, 46));
+        }
+        if watched {
+            // The same on our own grid.
+            let analysis = rbl_analysis::analyse_with(&track.samples, track.sample_rate, options_under_test());
+            let ours: Vec<f64> = analysis.tempo.beats.iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+            let strength_ours = |offset: f64| -> (f64, usize) {
+                let mut total = 0.0; let mut hits = 0usize;
+                for &t in &ours { if let Some(a) = map.attack_within(t + offset, 0.03) { total += a.height; hits += 1; } }
+                (total, hits)
+            };
+            let (o, oh) = strength_ours(0.0);
+            let (f, fh) = strength_ours(period / 2.0);
+            println!("    on our grid: beats {o:.2} ({oh}) midpoints {f:.2} ({fh}) ratio {:.2}", o / f.max(1e-9));
+        }
+    }
+    println!("midpoints have more kick than rekordbox's beats on {wrong} / {n}");
 }

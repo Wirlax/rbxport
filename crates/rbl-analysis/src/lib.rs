@@ -85,6 +85,12 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
     // both; the grid is moved if it has to be and renumbered so that 1 is
     // the downbeat.
     let beat_secs: Vec<f64> = tempo.beats.iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+    // The downbeat stage decides both which half of the beat the kicks
+    // are on and which beat is 1. The fit on the kick's attacks has a view
+    // on the first question too, but the phrase structure is the better
+    // judge: on the golden playlist it tells the beat from the midpoint on
+    // 153 of 155 rekordbox grids, the kick detector on 150 — the misses
+    // being off-beat claps with a sharper transient than the kick.
     let grid = downbeat::grid_phase(samples, sample_rate, &beat_secs);
     if grid.half_beat_off {
         for segment in &mut tempo.segments {
