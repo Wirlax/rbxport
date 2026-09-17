@@ -9,19 +9,28 @@ Input: mono `f32` samples at the file's sample rate (from `rbl-audio`).
 Output: an `Analysis` — the tempo and every beat with its number in the bar,
 the key, a three-band waveform, and the track's peak and RMS.
 
+What happens, in order (the track is assumed to be in 4/4):
+
 ```mermaid
-flowchart LR
-    A[decoded audio] --> B[Beat grid]
-    B --> C[First downbeat]
-    C --> D[Phrase starts]
-    A --> E[Key]
-    D --> E
-    C --> E
-    A --> F[Waveform]
-    B & C & E & F --> G[Analysis]
+flowchart TD
+    S([decoded track]) --> A[1. Detect the BPM from the first 120 s]
+    A --> B[2. Lay the grid on the kicks:<br/>find each kick's attack, fit a line through them,<br/>extend it over the whole track]
+    B --> Q1{3. Does the tempo change?}
+    Q1 -- yes --> C[4. Cut where the new beat is settled;<br/>redo 1–2 after the cut]
+    C --> Q1
+    Q1 -- no --> D[5. Find beat 1: where the music changes]
+    D --> Q2{6. Do the changes land between the grid's beats?}
+    Q2 -- yes --> E[7. The grid is on the off-beat: move it onto the kick]
+    Q2 -- no --> F
+    E --> F[8. Number the beats 1–4 from beat 1; mark the phrase starts]
+    F --> G[9. Detect the key: Faraldo's edmkey, then the rules<br/>a toss-up goes to the minor; when unsure, the bass names the root]
+    G --> H[10. Draw the waveform]
+    H --> T([BPM, grid, beat 1, phrases, key, waveform])
 ```
 
-Each stage is a module and has its own document:
+[docs/pipeline.md](docs/pipeline.md) has the full procedure, twenty steps
+with each marked as built, changing or new. Each stage is a module and has
+its own document:
 
 | stage | module | doc |
 |---|---|---|
@@ -31,10 +40,7 @@ Each stage is a module and has its own document:
 | Key — the chromagram, the profile match, and the rule pipeline | `key.rs` | [docs/key.md](docs/key.md) |
 | Waveform — the three-band strip rekordbox draws | `waveform.rs` | (below) |
 
-Two more documents cover the whole crate, and one the plan:
-
-- [docs/pipeline.md](docs/pipeline.md) — the target pipeline as a flowchart,
-  with each box marked built, changing or new.
+Two more documents cover the whole crate:
 
 - [docs/rules.md](docs/rules.md) — the rules Chris has set for how this
   library's music is to be read, and what the code does with each.
