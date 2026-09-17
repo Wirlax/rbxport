@@ -241,6 +241,85 @@ fn a_rhythm_at_a_simple_ratio_is_not_a_tempo_change() {
 }
 
 #[test]
+fn the_attack_map_places_a_click_to_the_millisecond() {
+    use rbl_analysis::attack::{AttackMap, AttackOptions};
+    // Clicks at 120 BPM from 0.25 s: each a burst of 3 kHz.
+    let mut audio = vec![0.0_f32; SR as usize * 6];
+    let period = SR as usize / 2;
+    let mut at = SR as usize / 4;
+    while at + 400 < audio.len() {
+        for i in 0..400 {
+            let decay = (-(i as f32) / 80.0).exp();
+            audio[at + i] += (i as f32 * 3000.0 * std::f32::consts::TAU / SR as f32).sin() * decay * 0.8;
+        }
+        at += period;
+    }
+    let map = AttackMap::new(&audio, SR, AttackOptions::default());
+    // Asked near each click, the attack comes back within 2 ms of it.
+    for k in 0..8 {
+        let click = 0.25 + k as f64 * 0.5;
+        let attack = map.attack_near(click + 0.012).expect("an attack");
+        assert!((attack.secs - click).abs() < 0.002, "click at {click:.3}, attack at {:.4}", attack.secs);
+        assert!(attack.height > 0.0);
+    }
+    // Between clicks there is nothing to find within a short reach.
+    assert!(map.attack_within(0.5, 0.02).is_none());
+}
+
+#[test]
+fn a_gradual_tempo_change_is_gridded_bar_by_bar() {
+    // 32 bars at 128, then the period shrinks by 0.3 % per beat for 64
+    // beats (to ~155), then 32 bars settled at that tempo.
+    let mut clicks: Vec<f64> = Vec::new();
+    let mut t = 0.2;
+    let mut period = 60.0 / 128.0;
+    for _ in 0..128 { clicks.push(t); t += period; }
+    for _ in 0..64 { period *= 0.997; clicks.push(t); t += period; }
+    let settled = period;
+    for _ in 0..128 { clicks.push(t); t += settled; }
+    let total = (t + 1.0) * f64::from(SR);
+    let mut audio = vec![0.0_f32; total as usize];
+    for &c in &clicks {
+        let at = (c * f64::from(SR)) as usize;
+        for i in 0..(SR as usize / 200) {
+            if let Some(slot) = audio.get_mut(at + i) {
+                let decay = 1.0 - i as f32 / (SR as f32 / 200.0);
+                *slot += ((i as f32) * 0.7).sin() * decay * 0.8;
+            }
+        }
+    }
+    let analysis = analyse(&audio, SR);
+    let segments = &analysis.tempo.segments;
+    let onsets = onset_envelope(&audio, SR);
+    let attacks = rbl_analysis::attack::AttackMap::new(&audio, SR, rbl_analysis::attack::AttackOptions::default());
+    let (walk, why) = rbl_analysis::tempo::walk_report(&onsets, Some(&attacks), 128.0, 60.0 / settled, 55.0, 100.0);
+    let walked: Vec<String> = walk.iter().map(|(t, b)| format!("{t:.2}:{b:.1}")).collect();
+    assert!(
+        segments.len() >= 3,
+        "expected a first tempo, walked bars and a last tempo, got {} segments: {:?}\nwalk ({why}): {}",
+        segments.len(),
+        segments.iter().map(|s| format!("{:.1}-{:.1}s {:.2}", s.from_secs, s.to_secs, s.bpm())).collect::<Vec<_>>(),
+        walked.join(" ")
+    );
+    let first = segments[0];
+    let last = segments[segments.len() - 1];
+    assert!((first.bpm() - 128.0).abs() < 0.05, "first {}", first.bpm());
+    assert!((last.bpm() - 60.0 / settled).abs() < 0.5, "last {} vs {}", last.bpm(), 60.0 / settled);
+    // The walked bars in between rise monotonically, four beats each.
+    let walked = &segments[1..segments.len() - 1];
+    assert!(walked.len() >= 8, "walked {} bars", walked.len());
+    for pair in walked.windows(2) {
+        assert!(pair[1].bpm() >= pair[0].bpm() - 0.5, "bars fall back: {} then {}", pair[0].bpm(), pair[1].bpm());
+        assert_eq!(pair[0].beats(), 4);
+    }
+    // Every click is on a beat of the final grid.
+    for &c in &clicks {
+        let nearest = analysis.tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0 - c).abs()).fold(f64::INFINITY, f64::min);
+        assert!(nearest < 0.012, "click at {c:.3} is {:.1} ms from a beat", nearest * 1000.0);
+    }
+}
+
+#[test]
 fn segments_generate_beats_and_shift_by_half_a_beat() {
     let segment = Segment { from_secs: 0.0, to_secs: 10.0, period_secs: 0.5, phase_secs: 1.3 };
     // The grid is phase plus whole periods; the first at or after zero.

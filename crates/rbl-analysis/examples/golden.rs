@@ -252,9 +252,21 @@ impl Score {
     }
 }
 
+/// The options the gate scores: the defaults, or a placement named by
+/// `RB_LITE_PLACEMENT` (`envelope`, `attack`).
+fn options_under_test() -> rbl_analysis::AnalysisOptions {
+    let mut options = rbl_analysis::AnalysisOptions::default();
+    match std::env::var("RB_LITE_PLACEMENT").as_deref() {
+        Ok("envelope") => options.tempo.placement = rbl_analysis::tempo::Placement::Envelope,
+        Ok("attack") => options.tempo.placement = rbl_analysis::tempo::Placement::Attack,
+        _ => {}
+    }
+    options
+}
+
 fn score(track: &Track) -> Score {
     let started = Instant::now();
-    let analysis = rbl_analysis::analyse(&track.samples, track.sample_rate);
+    let analysis = rbl_analysis::analyse_with(&track.samples, track.sample_rate, options_under_test());
     if std::env::var("RB_LITE_CANDIDATES").is_ok() {
         let onsets = rbl_analysis::onset::onset_envelope(&track.samples, track.sample_rate);
         let table = rbl_analysis::tempo::tempo_candidates(&onsets, rbl_analysis::tempo::TempoOptions::default());
@@ -303,8 +315,18 @@ fn score(track: &Track) -> Score {
                 println!("   {line}");
             }
         }
-        let report = rbl_analysis::tempo::fit_report(&onsets, table.first().map_or(120.0, |c| c.bpm), rbl_analysis::tempo::TempoOptions::default());
-        println!("  fit: comb {:.4} then {}", report[0], report[1..].iter().map(|b| format!("{b:.4}")).collect::<Vec<_>>().join(" -> "));
+        let attacks = rbl_analysis::attack::AttackMap::new(&track.samples, track.sample_rate, rbl_analysis::attack::AttackOptions::default());
+        for (name, map) in [("envelope", None), ("attacks", Some(&attacks))] {
+            let report = rbl_analysis::tempo::fit_report(&onsets, map, table.first().map_or(120.0, |c| c.bpm), rbl_analysis::tempo::TempoOptions::default());
+            println!("  fit on {name}: comb {:.4} then {}", report[0], report[1..].iter().map(|b| format!("{b:.4}")).collect::<Vec<_>>().join(" -> "));
+        }
+        if analysis.tempo.segments.len() > 1 {
+            let attacks = rbl_analysis::attack::AttackMap::new(&track.samples, track.sample_rate, rbl_analysis::attack::AttackOptions::default());
+            let (a, b) = (analysis.tempo.segments[0], analysis.tempo.segments[analysis.tempo.segments.len() - 1]);
+            let (walk, why) = rbl_analysis::tempo::walk_report(&onsets, Some(&attacks), a.bpm(), b.bpm(), (b.from_secs - 45.0).max(0.0), b.from_secs + 30.0);
+            let line: Vec<String> = walk.iter().map(|(t, bpm)| format!("{t:.2}:{bpm:.1}")).collect();
+            println!("  walk from {:.1}s ({why}): {}", (b.from_secs - 45.0).max(0.0), line.join(" "));
+        }
         let windows = rbl_analysis::tempo::local_tempos(&onsets, table.first().map_or(120.0, |c| c.bpm), rbl_analysis::tempo::TempoOptions::default());
         let line: Vec<String> = windows.iter().map(|(t, r)| format!("{:.0}s:{}", t, r.map_or("-".to_owned(), |r| format!("{r:.3}")))).collect();
         println!("  windows: {}", line.join(" "));
@@ -554,7 +576,7 @@ fn downbeat_experiment() {
 /// alone, then each rule set, with what every rule fired on, fixed and
 /// broke; and a search over the `BassRoot` knobs.
 fn key_experiment() {
-    use rbl_analysis::key::{gather_evidence, judge, BassSource, KeyEvidence, KeyOptions, Rule, DEFAULT_RULES};
+    use rbl_analysis::key::{gather_evidence, judge, BassSource, FrontEnd, KeyEvidence, KeyOptions, Profile, Rule, DEFAULT_RULES};
     let dir = cache_dir();
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
@@ -562,10 +584,25 @@ fn key_experiment() {
     paths.sort();
     let options = KeyOptions::default();
     let edges = [30.0, 45.0, 90.0];
+    use rbl_analysis::key::EdmkeyOptions;
+    let e = EdmkeyOptions::DEFAULT;
+    let fronts = [
+        FrontEnd::Chroma,
+        FrontEnd::Edmkey(e),
+        FrontEnd::Edmkey(EdmkeyOptions { min_hz: 55.0, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { min_hz: 80.0, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { tilt: false, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { min_hz: 55.0, tilt: false, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { whitening: false, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { min_hz: 55.0, whitening: false, ..e }),
+        FrontEnd::Edmkey(EdmkeyOptions { min_hz: 55.0, gate: 0.0, ..e }),
+    ];
+    let front_names = ["chroma", "edmkey", "edmkey 55Hz", "edmkey 80Hz", "edmkey no tilt", "edmkey 55Hz no tilt", "edmkey no whitening", "edmkey 55Hz no whitening", "edmkey 55Hz no gate"];
 
-    // Per track: rekordbox's key and the evidence for each edge length,
-    // with the bass read against the grid our own analysis finds.
-    struct Row { rb: String, title: String, evidence: Vec<KeyEvidence> }
+    // Per track: rekordbox's key and, per front end, the evidence for each
+    // edge length, with the bass read against the grid our own analysis
+    // finds.
+    struct Row { rb: String, title: String, evidence: Vec<Vec<KeyEvidence>> }
     let started = Instant::now();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -578,11 +615,13 @@ fn key_experiment() {
                 let Some(track) = read_track(path) else { continue };
                 let analysis = rbl_analysis::analyse(&track.samples, track.sample_rate);
                 let grid = key_grid_of(&track, &analysis);
-                let evidence: Vec<KeyEvidence> = edges.iter().filter_map(|&secs| {
-                    let rules = [Rule::BassRoot { margin: 1.0, source: BassSource::Edges { secs } }];
-                    gather_evidence(&track.samples, track.sample_rate, options, &rules, &grid)
+                let evidence: Vec<Vec<KeyEvidence>> = fronts.iter().map(|&front_end| {
+                    edges.iter().filter_map(|&secs| {
+                        let rules = [Rule::BassRoot { margin: 1.0, source: BassSource::Edges { secs } }];
+                        gather_evidence(&track.samples, track.sample_rate, KeyOptions { front_end, ..options }, &rules, &grid)
+                    }).collect()
                 }).collect();
-                if evidence.len() == edges.len() {
+                if evidence.iter().all(|e| e.len() == edges.len()) {
                     rows.lock().unwrap().push(Row { rb: track.key.clone(), title: track.title.clone(), evidence });
                 }
             });
@@ -592,12 +631,14 @@ fn key_experiment() {
     let n = rows.len();
     println!("evidence for {n} tracks in {:.1}s", started.elapsed().as_secs_f64());
 
-    // A rule set's score, and what each rule did.
-    let score = |rules: &[Rule], edge_index: usize, verbose: bool| -> usize {
+    // A rule set's score with one front end and profile, and what each
+    // rule did.
+    let score_with = |front: usize, profile: Profile, rules: &[Rule], edge_index: usize, verbose: bool| -> usize {
+        let options = KeyOptions { front_end: fronts[front], profile, ..options };
         let mut exact = 0usize;
         let mut per_rule: Vec<(usize, usize, usize)> = vec![(0, 0, 0); rules.len()]; // fired, fixed, broke
         for row in &rows {
-            let Some(report) = judge(&row.evidence[edge_index], options, rules) else { continue };
+            let Some(report) = judge(&row.evidence[front][edge_index], options, rules) else { continue };
             if report.key.name == row.rb { exact += 1; }
             let name_of = |v: rbl_analysis::key::Verdict| if v.minor { MINORS[v.tonic] } else { MAJORS[v.tonic] };
             for applied in &report.applied {
@@ -619,6 +660,33 @@ fn key_experiment() {
         }
         exact
     };
+    let shipped_front = fronts.iter().position(|f| *f == options.front_end).unwrap_or(0);
+    let score = |rules: &[Rule], edge_index: usize, verbose: bool| score_with(shipped_front, options.profile, rules, edge_index, verbose);
+
+    // Front end × profile × PreferMinor bias.
+    println!("front end × profile × PreferMinor (exact of {n}):");
+    let profiles = [("edma", Profile::EDMA), ("bgate", Profile::BGATE), ("braw", Profile::BRAW), ("edmm", Profile::EDMM), ("shaath", Profile::SHAATH), ("krumhansl", Profile::KRUMHANSL)];
+    let mut table: Vec<(usize, String)> = Vec::new();
+    for (fi, fname) in front_names.iter().enumerate() {
+        for (pname, profile) in profiles {
+            for bias in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5] {
+                let rules: Vec<Rule> = if bias > 0.0 { vec![Rule::PreferMinor { bias }] } else { Vec::new() };
+                table.push((score_with(fi, profile, &rules, 1, false), format!("{fname:<26} {pname:<9} bias {bias:.1}")));
+            }
+        }
+    }
+    table.sort_by_key(|r| std::cmp::Reverse(r.0));
+    for (exact, name) in table.iter().take(24) {
+        println!("  {exact:>3}  {name}");
+    }
+    // The best per front end, so a front end that never tops the table is
+    // still seen.
+    println!("best per front end:");
+    for name in front_names {
+        let prefix = format!("{name:<26} ");
+        let best = table.iter().filter(|(_, n)| n.starts_with(&prefix)).max_by_key(|r| r.0);
+        if let Some((exact, n)) = best { println!("  {exact:>3}  {n}"); }
+    }
 
     println!("profile match alone: {} / {n}", score(&[], 1, false));
     println!("PreferMinor 0.3 alone: {} / {n}", score(&[Rule::PreferMinor { bias: 0.3 }], 1, false));
@@ -658,7 +726,7 @@ fn key_experiment() {
     println!("failures of the shipped rules:");
     let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for row in &rows {
-        let Some(report) = judge(&row.evidence[1], options, DEFAULT_RULES) else { continue };
+        let Some(report) = judge(&row.evidence[shipped_front][1], options, DEFAULT_RULES) else { continue };
         let ours = report.key.name;
         if ours == row.rb { continue; }
         let kind = if relative(&ours) == row.rb { "relative" } else if a_fifth_away(&ours, &row.rb) { "fifth" } else if parallel(&ours) == row.rb { "parallel" } else { "other" };

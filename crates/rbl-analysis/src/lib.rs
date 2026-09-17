@@ -16,6 +16,7 @@
     reason = "DSP converts freely between sample counts and float time; every such cast is bounded by the buffer length"
 )]
 
+pub mod attack;
 pub mod downbeat;
 pub mod key;
 pub mod onset;
@@ -56,10 +57,29 @@ fn phase_for(segments: &[tempo::Segment], downbeat_secs: f64) -> usize {
     (4 - index % 4) % 4
 }
 
+/// Everything the stages are tuned by.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AnalysisOptions {
+    pub tempo: tempo::TempoOptions,
+    pub attacks: attack::AttackOptions,
+    pub key: key::KeyOptions,
+}
+
 /// Runs the full analysis over mono audio.
 pub fn analyse(samples: &[f32], sample_rate: u32) -> Analysis {
+    analyse_with(samples, sample_rate, AnalysisOptions::default())
+}
+
+/// Runs the full analysis with every stage under the caller's control.
+#[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
+pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions) -> Analysis {
     let onsets = onset::onset_envelope(samples, sample_rate);
-    let mut tempo = tempo::detect_tempo(&onsets);
+    // The kick attacks, when the fit is to place beats on them.
+    let attacks = match options.tempo.placement {
+        tempo::Placement::Attack => Some(attack::AttackMap::new(samples, sample_rate, options.attacks)),
+        tempo::Placement::Envelope => None,
+    };
+    let mut tempo = tempo::detect_tempo_with(&onsets, attacks.as_ref(), options.tempo);
     // The grid comes back numbered from its first beat, and possibly on the
     // off-beat. The downbeat stage looks at the music's structure and says
     // both; the grid is moved if it has to be and renumbered so that 1 is
@@ -105,7 +125,7 @@ pub fn analyse(samples: &[f32], sample_rate: u32) -> Analysis {
         beats: tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0, b.beat_number)).collect(),
         phrase_starts: grid.phrase_starts.clone(),
     };
-    let key = key::detect_key_with(samples, sample_rate, key::KeyOptions::default(), key::DEFAULT_RULES, &key_grid)
+    let key = key::detect_key_with(samples, sample_rate, options.key, key::DEFAULT_RULES, &key_grid)
         .map(|report| report.key);
     let waveform = waveform::compute(samples, sample_rate);
 

@@ -71,16 +71,32 @@ impl Profile {
         major: [6.6, 2.0, 3.5, 2.3, 4.6, 4.0, 2.5, 5.2, 2.4, 3.7, 2.3, 3.4],
         minor: [6.5, 2.7, 3.5, 5.4, 2.6, 3.5, 2.5, 5.2, 4.0, 2.7, 4.3, 3.2],
     };
-    /// Faraldo's, fitted to electronic dance music.
+    /// Faraldo's, fitted to electronic dance music. Values as Essentia
+    /// ships them (`key.cpp`, profile `edma`); the correlation is
+    /// scale-free, so only the shape matters.
     pub const EDMA: Self = Self {
-        major: [
-            0.165_195_51, 0.047_490_26, 0.084_738_18, 0.060_529_32, 0.092_413_94, 0.104_866_93,
-            0.053_340_33, 0.124_411_28, 0.061_519_13, 0.077_734_83, 0.048_344_89, 0.079_415_44,
-        ],
+        major: [1.00, 0.29, 0.50, 0.40, 0.60, 0.56, 0.32, 0.80, 0.31, 0.45, 0.42, 0.39],
+        minor: [1.00, 0.31, 0.44, 0.58, 0.33, 0.49, 0.29, 0.78, 0.43, 0.29, 0.53, 0.32],
+    };
+    /// Faraldo's "assume minor" variant: a flat major profile, so a track
+    /// reads as major only when nothing fits, and an `edma`-like minor.
+    pub const EDMM: Self = Self {
+        major: [0.083; 12],
         minor: [
-            0.172_353_48, 0.053_364_89, 0.076_285_6, 0.100_341_43, 0.056_336_06, 0.088_297_44,
-            0.050_648_11, 0.117_429_37, 0.076_787_74, 0.056_318_83, 0.058_750_83, 0.053_086_24,
+            0.172_353_48, 0.04, 0.076_100_9, 0.12, 0.056_214_98, 0.085_278_53, 0.049_791_5,
+            0.134_510_01, 0.074_589_16, 0.050_030_23, 0.091_878_79, 0.055_451_06,
         ],
+    };
+    /// Faraldo's, fitted on Beatport's catalogue and gated: scale degrees
+    /// outside the key are zero. Essentia's default for his method.
+    pub const BGATE: Self = Self {
+        major: [1.00, 0.00, 0.42, 0.00, 0.53, 0.37, 0.00, 0.77, 0.00, 0.38, 0.21, 0.30],
+        minor: [1.00, 0.00, 0.36, 0.39, 0.00, 0.38, 0.00, 0.74, 0.27, 0.00, 0.42, 0.23],
+    };
+    /// The same Beatport fit before gating.
+    pub const BRAW: Self = Self {
+        major: [1.0000, 0.1573, 0.4200, 0.1570, 0.5296, 0.3669, 0.1632, 0.7711, 0.1676, 0.3827, 0.2113, 0.2965],
+        minor: [1.0000, 0.2330, 0.3615, 0.3905, 0.2925, 0.3777, 0.1961, 0.7425, 0.2701, 0.2161, 0.4228, 0.2272],
     };
     /// The notes of the key and nothing else: tonic and fifth carry it, the
     /// rest of the scale supports.
@@ -90,9 +106,22 @@ impl Profile {
     };
 }
 
+/// Which front end turns audio into a pitch-class profile.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FrontEnd {
+    /// Every spectrum bin credits its pitch and its subharmonics'
+    /// ([`chroma_frames`]); the front end this crate started with.
+    Chroma,
+    /// Ángel Faraldo's edmkey method as Essentia's `KeyExtractor` runs it:
+    /// spectral peaks, whitening, an HPCP with harmonic folding, the
+    /// average gated at 0.2 of its peak ([`edmkey_profile`]).
+    Edmkey(EdmkeyOptions),
+}
+
 /// Everything the front end and the matcher are tuned by.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeyOptions {
+    pub front_end: FrontEnd,
     pub profile: Profile,
     /// Lowest and highest frequency a bin may have to count.
     pub low_hz: f64,
@@ -130,6 +159,10 @@ pub const BINS: usize = 12 * SUBBINS;
 impl Default for KeyOptions {
     fn default() -> Self {
         Self {
+            front_end: FrontEnd::Edmkey(EdmkeyOptions::DEFAULT),
+            // Faraldo's own profile. On the golden playlist edma at a bias
+            // of 0.1 and Shaath at 0.2 tie at 140 of 155; Krumhansl gives
+            // 139 and bgate, Essentia's default, 138.
             profile: Profile::EDMA,
             low_hz: 55.0,
             // Above 2 kHz there is little but hats and the upper partials of
@@ -203,7 +236,7 @@ pub struct KeyGrid {
 }
 
 /// The rules that ship, in order.
-pub const DEFAULT_RULES: &[Rule] = &[Rule::PreferMinor { bias: 0.3 }];
+pub const DEFAULT_RULES: &[Rule] = &[Rule::PreferMinor { bias: 0.1 }];
 
 /// What the rules are allowed to look at.
 #[derive(Debug, Clone, PartialEq)]
@@ -295,9 +328,14 @@ pub fn gather_evidence(
     rules: &[Rule],
     grid: &KeyGrid,
 ) -> Option<KeyEvidence> {
-    let frames = chroma_frames(samples, sample_rate, options)?;
-    let offset = if options.tuning { tuning_offset(&frames) } else { 0 };
-    let chroma = fold_frames(&frames, options.frame_norm, offset);
+    let (chroma, offset) = match options.front_end {
+        FrontEnd::Chroma => {
+            let frames = chroma_frames(samples, sample_rate, options)?;
+            let offset = if options.tuning { tuning_offset(&frames) } else { 0 };
+            (fold_frames(&frames, options.frame_norm, offset), offset)
+        }
+        FrontEnd::Edmkey(edmkey) => (edmkey_profile(samples, sample_rate, edmkey)?, 0),
+    };
     let wants_bass = rules.iter().find_map(|r| match r {
         Rule::BassRoot { source, .. } | Rule::BassVote { source, .. } => Some(*source),
         Rule::PreferMinor { .. } => None,
@@ -638,4 +676,256 @@ pub fn chroma_frames(samples: &[f32], sample_rate: u32, options: KeyOptions) -> 
         start += KEY_HOP;
     }
     Some(frames)
+}
+
+// ---------------------------------------------------------------- edmkey
+
+/// Faraldo's front end, with Essentia's `KeyExtractor` defaults.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdmkeyOptions {
+    /// Frame and hop, in samples: 4096 and 4096, no overlap.
+    pub frame: usize,
+    pub hop: usize,
+    /// Peaks are taken between these frequencies.
+    pub min_hz: f64,
+    pub max_hz: f64,
+    /// The strongest this many peaks per frame count.
+    pub max_peaks: usize,
+    /// A peak below this magnitude is ignored.
+    pub peak_threshold: f64,
+    /// Whether peaks are whitened against the spectral envelope.
+    pub whitening: bool,
+    /// Subharmonics folded into each peak's contribution: 4 in Essentia,
+    /// which with its weighting table makes the fifth below and the major
+    /// third below count as well as the peak's own class.
+    pub harmonics: usize,
+    /// Bins under this share of the averaged profile's peak are zeroed.
+    pub gate: f64,
+    /// Whether whitening also tilts peaks down by 5 dB per kHz, as
+    /// Essentia's does.
+    pub tilt: bool,
+}
+
+impl EdmkeyOptions {
+    /// Essentia's `KeyExtractor` defaults.
+    pub const DEFAULT: Self = Self {
+        frame: 4096,
+        hop: 4096,
+        min_hz: 25.0,
+        max_hz: 3500.0,
+        max_peaks: 60,
+        peak_threshold: 0.0001,
+        whitening: true,
+        harmonics: 4,
+        gate: 0.2,
+        tilt: true,
+    };
+}
+
+impl Default for EdmkeyOptions {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// The twelve-class profile of a track by Faraldo's method: spectral
+/// peaks, whitened, folded into an HPCP per frame, averaged over the
+/// track, scaled to a peak of 1 and gated. `None` when the audio is too
+/// short.
+pub fn edmkey_profile(samples: &[f32], sample_rate: u32, options: EdmkeyOptions) -> Option<[f64; 12]> {
+    let frame = options.frame.max(64);
+    let hop = options.hop.max(1);
+    if samples.len() < frame * 2 || sample_rate == 0 {
+        return None;
+    }
+    let mut planner = RealFftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(frame);
+    let mut input = fft.make_input_vec();
+    let mut output = fft.make_output_vec();
+    let window: Vec<f32> = (0..frame)
+        .map(|i| 0.5 - 0.5 * (std::f32::consts::PI * 2.0 * i as f32 / frame as f32).cos())
+        .collect();
+    let hz_per_bin = f64::from(sample_rate) / frame as f64;
+    let harmonic_table = harmonic_table(options.harmonics);
+
+    let mut total = [0.0_f64; 12];
+    let mut frames = 0usize;
+    let mut spectrum = vec![0.0_f64; output.len()];
+    let mut start = 0;
+    while start + frame <= samples.len() {
+        let Some(chunk) = samples.get(start..start + frame) else { break };
+        for (i, slot) in input.iter_mut().enumerate() {
+            *slot = chunk.get(i).copied().unwrap_or(0.0) * window.get(i).copied().unwrap_or(0.0);
+        }
+        if fft.process(&mut input, &mut output).is_err() {
+            break;
+        }
+        for (slot, value) in spectrum.iter_mut().zip(output.iter()) {
+            *slot = f64::from(value.norm());
+        }
+        let mut peaks = spectral_peaks(&spectrum, hz_per_bin, options);
+        if options.whitening {
+            whiten(&spectrum, hz_per_bin, options.max_hz, options.tilt, &mut peaks);
+        }
+        let mut hpcp = [0.0_f64; 12];
+        for &(hz, magnitude) in &peaks {
+            if hz < options.min_hz || hz > options.max_hz {
+                continue;
+            }
+            for &(semitones, strength) in &harmonic_table {
+                // The hypothesised fundamental this peak may be a harmonic of.
+                let f = hz * 2.0_f64.powf(-semitones / 12.0);
+                // In semitones from C, so the classes line up with the
+                // profiles: A4 is MIDI 69, and 69 is 9 past a C.
+                let bin = (f / 440.0).log2() * 12.0 + 69.0;
+                // Cosine weighting one semitone wide: the nearest bin, and
+                // the one beyond it only when exactly between two.
+                let left = (bin - 0.5).ceil() as i64;
+                let right = (bin + 0.5).floor() as i64;
+                for i in left..=right {
+                    let distance = (bin - i as f64).abs();
+                    let weight = (std::f64::consts::PI * distance).cos();
+                    let class = i.rem_euclid(12) as usize;
+                    hpcp[class] += weight * magnitude * magnitude * strength * strength;
+                }
+            }
+        }
+        for (slot, value) in total.iter_mut().zip(hpcp.iter()) {
+            *slot += value;
+        }
+        frames += 1;
+        start += hop;
+    }
+    if frames == 0 {
+        return None;
+    }
+    // The average, scaled to a peak of 1 and gated.
+    let peak = total.iter().fold(0.0_f64, |a, &b| a.max(b));
+    if peak <= 0.0 {
+        return None;
+    }
+    for slot in &mut total {
+        *slot /= peak;
+        if *slot < options.gate {
+            *slot = 0.0;
+        }
+    }
+    Some(total)
+}
+
+/// Essentia's HPCP harmonic table: for harmonic `i` (1-based, up to
+/// `harmonics + 1`), the semitone offset of its fundamental below the
+/// peak, folded into one octave, and its strength. Offsets that fold onto
+/// each other add their strengths, so with four harmonics the peak's own
+/// class counts 3, the fifth below 1 and the major third below 0.86.
+fn harmonic_table(harmonics: usize) -> Vec<(f64, f64)> {
+    let mut table: Vec<(f64, f64)> = Vec::new();
+    for i in 0..=harmonics {
+        let raw = 12.0 * ((i + 1) as f64).log2();
+        let octave_weight = (raw / 12.0 * 0.5).max(1.0);
+        let mut semitone = raw;
+        while semitone >= 12.0 - 1e-5 {
+            semitone -= 12.0;
+        }
+        match table.iter_mut().find(|(s, _)| (*s - semitone).abs() < 1e-5) {
+            Some((_, strength)) => *strength += 1.0 / octave_weight,
+            None => table.push((semitone, 1.0 / octave_weight)),
+        }
+    }
+    table
+}
+
+/// Local maxima of the magnitude spectrum between the option's
+/// frequencies, the strongest `max_peaks` of them, each placed between
+/// bins by a parabola through its neighbours. `(hz, magnitude)`.
+pub fn spectral_peaks(spectrum: &[f64], hz_per_bin: f64, options: EdmkeyOptions) -> Vec<(f64, f64)> {
+    let mut peaks: Vec<(f64, f64)> = Vec::new();
+    for i in 1..spectrum.len().saturating_sub(1) {
+        let (a, b, c) = (spectrum[i - 1], spectrum[i], spectrum[i + 1]);
+        if !(b > a && b >= c) || b < options.peak_threshold {
+            continue;
+        }
+        let denom = a - 2.0 * b + c;
+        let offset = if denom.abs() > f64::EPSILON { 0.5 * (a - c) / denom } else { 0.0 };
+        let hz = (i as f64 + offset.clamp(-0.5, 0.5)) * hz_per_bin;
+        let magnitude = b - 0.25 * (a - c) * offset;
+        if hz >= options.min_hz && hz <= options.max_hz {
+            peaks.push((hz, magnitude));
+        }
+    }
+    peaks.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+    peaks.truncate(options.max_peaks);
+    peaks
+}
+
+/// The grid the whitening envelope is sampled on, in hertz.
+const RESOLUTION: f64 = 100.0;
+
+/// Essentia's spectral whitening: each peak is measured against the
+/// spectrum's energy envelope around it (a band from 0.66× to 1.58× its
+/// frequency, or ±50 Hz at the bottom) and comes out as its level
+/// relative to that envelope, capped at 1, with a tilt of −5 dB per kHz.
+/// A loud region and a quiet one then count alike.
+pub fn whiten(spectrum: &[f64], hz_per_bin: f64, max_hz: f64, tilt: bool, peaks: &mut [(f64, f64)]) {
+    let bins = spectrum.len();
+    if bins < 2 {
+        return;
+    }
+    let spectral_range = (bins - 1) as f64 * hz_per_bin;
+    // The envelope, in dB, on a 100 Hz grid.
+    let mut envelope: Vec<(f64, f64)> = Vec::new();
+    let mut freq = 0.0;
+    while freq <= max_hz && freq <= spectral_range {
+        let bf = freq - (freq * 0.34).max(50.0);
+        let ef = freq + (freq * 0.58).max(50.0);
+        let first = ((bf / spectral_range * (bins as f64 - 1.0) + 0.5) as i64).clamp(0, bins as i64 - 1) as usize;
+        let last = ((ef / spectral_range * (bins as f64 - 1.0) + 0.5) as i64).max(first as i64 + 1).min(bins as i64) as usize;
+        let centre = first as f64 / 2.0 + last as f64 / 2.0;
+        let half = last as f64 - centre;
+        let (mut weighted, mut weights) = (0.0, 0.0);
+        for (i, &value) in spectrum.iter().enumerate().take(last).skip(first) {
+            let mut w = 1.0 - (i as f64 - centre).abs() / half;
+            w *= w;
+            w *= w;
+            let energy = value * value;
+            w *= energy;
+            weighted += energy * w;
+            weights += w;
+        }
+        let mean = if weights > 0.0 { weighted / weights } else { 0.0 };
+        envelope.push((freq, 20.0 * mean.sqrt().max(1e-12).log10()));
+        freq += RESOLUTION;
+    }
+    if envelope.len() >= 2 {
+        let last = envelope.len() - 1;
+        envelope[last].1 = envelope[last - 1].1;
+    }
+    let envelope_at = |hz: f64| -> f64 {
+        let i = envelope.partition_point(|(f, _)| *f <= hz);
+        match (envelope.get(i.wrapping_sub(1)), envelope.get(i)) {
+            (Some(&(f0, v0)), Some(&(f1, v1))) if f1 > f0 => v0 + (v1 - v0) * (hz - f0) / (f1 - f0),
+            (Some(&(_, v0)), _) => v0,
+            (None, Some(&(_, v1))) => v1,
+            _ => 0.0,
+        }
+    };
+    for (hz, magnitude) in peaks.iter_mut() {
+        let db = 20.0 * magnitude.max(1e-12).log10();
+        // Essentia passes a peak within one grid step of the top through
+        // unwhitened; on a spectrum that is not scaled to 1 that peak would
+        // outweigh every whitened one, so here it is whitened against the
+        // envelope's last value like the rest.
+        let env = envelope_at(hz.min(max_hz - RESOLUTION));
+        let mut white = if db > env {
+            0.0
+        } else if db > env - 30.0 {
+            db - env
+        } else {
+            -200.0
+        };
+        if tilt {
+            white -= 20.0 * *hz / 4000.0;
+        }
+        *magnitude = 10.0_f64.powf(white / 20.0);
+    }
 }
