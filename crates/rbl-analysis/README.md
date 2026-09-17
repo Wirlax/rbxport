@@ -46,6 +46,9 @@ Two more documents cover the whole crate:
   library's music is to be read, and what the code does with each.
 - [docs/golden-gate.md](docs/golden-gate.md) — the test playlist, how to run
   the comparison, the current numbers, and exactly which tracks miss and why.
+- [docs/multibpm.md](docs/multibpm.md) — the multi-tempo test: copies of the
+  DJ-edit playlist analysed by us and registered in rekordbox's own library,
+  scored against the hand grids.
 
 ## Current numbers
 
