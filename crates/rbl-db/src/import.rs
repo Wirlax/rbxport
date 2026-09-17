@@ -34,6 +34,24 @@ pub struct TrackTags {
     pub year: u16,
     pub track_no: u16,
     pub file_size: u64,
+    /// Bits per sample; 16 when the format does not say (an MP3), which is
+    /// what rekordbox records for one.
+    pub bit_depth: u8,
+}
+
+/// `djmdContent.FileType` for a file, by extension: what rekordbox writes on
+/// 38,681 reference rows [OBS] — 1 on every `.mp3`, 4 on `.m4a`, 5 on `.flac`,
+/// 11 on `.wav`, 12 on `.aiff`/`.aif`. Anything else is unseen and left unset.
+#[must_use]
+pub fn file_type(path: &Path) -> Option<i64> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "mp3" => Some(1),
+        "m4a" => Some(4),
+        "flac" => Some(5),
+        "wav" => Some(11),
+        "aiff" | "aif" => Some(12),
+        _ => None,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,6 +111,7 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
         bitrate: properties.audio_bitrate().unwrap_or(0),
         sample_rate: properties.sample_rate().unwrap_or(0),
         file_size: std::fs::metadata(path).map_or(0, |m| m.len()),
+        bit_depth: properties.bit_depth().unwrap_or(16),
         ..TrackTags::default()
     };
 

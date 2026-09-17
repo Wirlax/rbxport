@@ -601,6 +601,11 @@ impl Writer {
     /// rather than asserting something unverified. rekordbox sets it when it
     /// analyses the track.
     pub fn import_file(&mut self, path: &Path) -> Result<String> {
+        // Lexically clean: rekordbox marks a row whose path holds `..` as
+        // missing, and a caller building a path from a manifest directory
+        // hands one in.
+        let path = normalized(path);
+        let path = path.as_path();
         let tags = crate::import::read_tags(path)
             .map_err(|e| DbError::WriteRefused(e.to_string()))?;
         self.prepare()?;
@@ -608,7 +613,15 @@ impl Writer {
         let id = self.unused_id_below("djmdContent", MAX_CONTENT_ID)?;
         let uuid = self.rng.uuid4();
         let stamp = time::now();
+        let today = stamp.get(..10).unwrap_or_default().to_owned();
         let folder = path.to_string_lossy().into_owned();
+        // The library's own device: `djmdProperty` names it, and every one of
+        // the 645 rows rekordbox 7 imported on this machine carries the pair.
+        let (master_db, device): (Option<String>, Option<String>) = self
+            .library
+            .connection()
+            .query_row("SELECT DBID, DeviceID FROM djmdProperty LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap_or((None, None));
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -637,16 +650,30 @@ impl Writer {
         let label = intern(&tx, "djmdLabel", "Name", &tags.label, &mut self.rng, &stamp)?;
 
         let usn = next_usn(&tx);
+        // Every column rekordbox 7 fills on a file it imports itself, as on
+        // the 645 rows it made on this machine [OBS] — the empty strings are
+        // empty strings there, not NULLs. Left unset because their values are
+        // [UNKNOWN]: `rb_file_id` (a counter of unknown ownership),
+        // `ContentLink` (one constant on 643 of 645 rows), and the three
+        // `*Updated` counters, which rekordbox sets as it goes.
         tx.execute(
             "INSERT INTO djmdContent
-                (ID, FolderPath, FileNameL, Title, ArtistID, AlbumID, GenreID, LabelID,
-                 Length, BitRate, SampleRate, FileSize, ReleaseYear, TrackNo, Commnt,
-                 Rating, DJPlayCount, Analysed, UUID,
+                (ID, FolderPath, FileNameL, FileNameS, Title, Subtitle, ArtistID, AlbumID, GenreID, LabelID,
+                 Length, BitRate, BitDepth, SampleRate, FileSize, FileType, ReleaseYear, TrackNo, DiscNo,
+                 Commnt, Rating, ColorID, DJPlayCount, Analysed, UUID,
+                 StockDate, DateCreated, MasterDBID, MasterSongID, DeviceID, HotCueAutoLoad,
+                 OrgFolderPath, ModifiedByRBM, DeliveryControl, DeliveryComment, Lyricist, Reserved1, ExtInfo,
+                 SamplerTrackInfo, SamplerPlayOffset, SamplerGain, VideoAssociate, LyricStatus, ServiceID,
                  rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
                  usn, rb_local_usn, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                     ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                     0, 0, NULL, ?16, 0, 0, 0, 0, NULL, ?17, ?18, ?18)",
+             VALUES (?1, ?2, ?3, '', ?4, '', ?5, ?6, ?7, ?8,
+                     ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0,
+                     ?17, 0, 0, 0, NULL, ?18,
+                     ?19, ?19, ?20, ?1, ?21, 'on',
+                     '', '', '', '', '', '', 'null',
+                     0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0,
+                     NULL, ?22, ?23, ?23)",
             params![
                 id,
                 folder,
@@ -658,12 +685,17 @@ impl Writer {
                 label,
                 i64::from(tags.duration_sec),
                 i64::from(tags.bitrate),
+                i64::from(tags.bit_depth),
                 i64::from(tags.sample_rate),
                 i64::try_from(tags.file_size).unwrap_or(0),
+                crate::import::file_type(path),
                 i64::from(tags.year),
                 i64::from(tags.track_no),
                 tags.comment,
                 uuid,
+                today,
+                master_db,
+                device,
                 usn,
                 stamp
             ],
@@ -1654,6 +1686,25 @@ fn is_descendant(conn: &Connection, candidate: &str, ancestor: &str) -> bool {
 /// `max(the registry counter, the largest USN in use) + 1`. Taking the larger
 /// of the two matters: the counter has been observed lagging the table maximum,
 /// and reusing a USN makes rekordbox's sync skip the row.
+/// The path with `.` and `..` components resolved lexically — no symlink is
+/// followed, so what the person chose is what is stored.
+fn normalized(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// The `djmdKey` row for a key name: where two rows share a name, the one
 /// rekordbox's own analyses point at, which is the one on the most tracks.
 fn key_id_for(conn: &Connection, name: &str) -> Result<String> {

@@ -1158,6 +1158,41 @@ fn a_file_is_imported_in_the_shape_a_local_row_has() {
 }
 
 #[test]
+fn an_import_carries_what_rekordbox_needs_to_open_the_file() {
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Some Track.wav");
+    write_wav(&path, 2);
+
+    let mut f = fixture();
+    f.conn()
+        .execute("UPDATE djmdProperty SET DeviceID = 'dev-1'", [])
+        .unwrap();
+    let db_id: String = f.one("SELECT DBID FROM djmdProperty", &[]);
+    // A path with `..` in it is stored clean: rekordbox marks the raw form missing.
+    let dotted = audio.path().join("sub").join("..").join("Some Track.wav");
+    let id = f.writer.import_file(&dotted).unwrap();
+
+    let (folder, file_type, depth, stock, created, master, song, device, hot, org, ext): (
+        String, i64, i64, String, String, String, String, String, String, String, String,
+    ) = f
+        .conn()
+        .query_row(
+            "SELECT FolderPath, FileType, BitDepth, StockDate, DateCreated, MasterDBID, MasterSongID,
+                    DeviceID, HotCueAutoLoad, OrgFolderPath, ExtInfo
+             FROM djmdContent WHERE ID = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?)),
+        )
+        .unwrap();
+    assert_eq!(folder, path.to_string_lossy());
+    assert_eq!((file_type, depth), (11, 16), "a 16-bit wav");
+    assert_eq!(stock.len(), 10, "{stock}");
+    assert_eq!(stock, created);
+    assert_eq!((master, song, device), (db_id, id.clone(), "dev-1".to_owned()));
+    assert_eq!((hot.as_str(), org.as_str(), ext.as_str()), ("on", "", "null"));
+}
+
+#[test]
 fn an_imported_track_leaves_analysed_unset() {
     // Every track in the reference library has been analysed, so it cannot
     // show what the field holds before analysis. NULL asserts nothing.
