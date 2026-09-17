@@ -54,6 +54,13 @@
 //! the individual bits of `Analysed` are still unexplained and are left
 //! alone.
 //!
+//! Recorded on 2026-09-17, rekordbox 7.2.11 loading such a row on a deck for
+//! the first time [OBS]: it kept the `.DAT` (our grid), `BPM`, `KeyID` and
+//! `Analysed`; rewrote the `.EXT`'s waveform bytes in place (same sections,
+//! same sizes, `PQT2` still empty, no `PSSI`); added a `.2EX` (`PWV6`,
+//! `PWV7`, `PWVC`) and a `.3EX`; and set `AnalysisUpdated` and
+//! `TrackInfoUpdated` from NULL to 1.
+//!
 //! # What this deliberately will not do
 //!
 //! Custom cue colours and `contentCue`/`contentFile` are **not implemented**.

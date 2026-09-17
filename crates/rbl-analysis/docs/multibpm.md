@@ -78,6 +78,24 @@ where the tempo change is placed, and that is where the misses are.
 | Castles In The Sky (EDCLV23 Closer) [138-160] | 60 % | a spurious 162.6 stretch from 27.9 s to 149.8 s where the hand grid holds 138; the real change at 233.26 s is placed exactly |
 | BATTERY OPERATED | 0 % | half a beat off, as on the golden gate (the ambiguous track) |
 
-rekordbox relaunched afterwards without touching any of the nine rows or
-files (`check`: 0 of 9). The recording proper is the first time a copy is
-loaded on a deck; run `check` after that.
+### What rekordbox did with the copies
+
+The first import showed every copy with the missing-file mark and none
+would load. Our importer had left empty the columns rekordbox fills on its
+own imports — `FileType`, `DeviceID`, `MasterDBID`, `BitDepth`,
+`StockDate`, `DateCreated` and a handful of constants (all 645 rows
+rekordbox 7 imported on this machine carry them [OBS]) — and stored a path
+with `../..` in it. `Writer::import_file` now writes all of them and a
+lexically clean path; the copies then load.
+
+Loading a copy on a deck, rekordbox 7.2.11 (recorded 2026-09-17):
+
+- kept the `.DAT`, so the grid on the deck is ours, and kept `BPM`, `KeyID`
+  and `Analysed`;
+- rewrote the `.EXT` in place — same sections, same sizes, its own
+  waveform bytes, `PQT2` still empty, no `PSSI`;
+- added a `.2EX` (`PWV6`, `PWV7`, `PWVC`, no `PVDI`) and a `.3EX`;
+- set `AnalysisUpdated` and `TrackInfoUpdated` from NULL to 1.
+
+Relaunching rekordbox alone touches nothing. `check` reports all of this
+per copy and says whether the grid survived.

@@ -487,8 +487,18 @@ fn check(filter: Option<&str>) -> Result<(), String> {
                     Ok(_) => notes.push("the .EXT was rewritten".to_owned()),
                     Err(_) => notes.push("the .EXT is gone".to_owned()),
                 }
-                if rbl_anlz::sibling(&dat, "2EX").exists() {
-                    notes.push("a .2EX appeared (rekordbox re-analysed it)".to_owned());
+                for ext in ["2EX", "3EX"] {
+                    if rbl_anlz::sibling(&dat, ext).exists() {
+                        notes.push(format!("a .{ext} appeared"));
+                    }
+                }
+                // What matters is whether the grid we wrote is still the one
+                // rekordbox shows. On first load rekordbox rewrites the .EXT
+                // waveforms and adds the .2EX/.3EX but keeps the .DAT [OBS].
+                if notes.iter().any(|n| n.contains(".DAT")) {
+                    notes.push("THE GRID WAS REPLACED".to_owned());
+                } else if !notes.is_empty() {
+                    notes.push("grid, BPM and key kept".to_owned());
                 }
                 if notes.is_empty() {
                     println!("  unchanged  {}  (updated_at {})", reg.title, row.updated_at);
