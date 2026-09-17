@@ -53,16 +53,17 @@ Against the `RBX-BPM-GRID-TEST` playlist (155 tracks):
 
 | metric | before this work | now |
 |---|---|---|
-| BPM within 0.05 | 146 | **154 / 155** |
-| first downbeat within 25 ms | 27 | **143 / 155** |
-| whole grid (98 % of beats within 25 ms, same number) | 26 | **140 / 155** |
-| key, same name | 27 | **140 / 155** |
+| BPM within 0.05 | 146 | **155 / 155** |
+| first downbeat within 25 ms | 27 | **142 / 155** |
+| whole grid (98 % of beats within 25 ms, same number) | 26 | **141 / 155** |
+| key, same name | 27 | **141 / 155** |
 
 The target is 99 % on each. Eleven of the playlist's grids come from
 rekordbox 6 and sit 25 ms after the kick; with beats on the kick's attack
-(a median 0.0 ms from rekordbox 7's), those eleven are most of the
-downbeat and grid misses. [docs/golden-gate.md](docs/golden-gate.md)
-lists every miss.
+(0.0 ms from rekordbox 7's at the median and the 90th percentile) those
+eleven are all but two of the downbeat and grid misses. On the 142 tracks
+rekordbox 7 analysed itself the grid agrees on 141.
+[docs/golden-gate.md](docs/golden-gate.md) lists every miss.
 
 ## Waveform
 

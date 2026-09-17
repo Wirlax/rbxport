@@ -102,17 +102,17 @@ Rekordbox's names: `Dbm`, `F#m`, `Abm`, `Bbm` for the minors, `Db`, `F#`,
 
 ## Result
 
-**140 of 155** (90 %). The profile match alone gets 92; `PreferMinor`
+**141 of 155** (91 %). The profile match alone gets 92; `PreferMinor`
 at 0.1 fires on 61 tracks, fixes 54 and breaks 6. `edma` at 0.1 and
-Shaath at 0.2 tie at 140; Krumhansl gives 139 and `bgate`, Essentia's
-default, 138.
+Shaath at 0.2 tie; Krumhansl is one behind and `bgate`, Essentia's
+default, two.
 
-The 15 misses: nine are the same tonic in the other mode (eight tracks
-rekordbox calls major — `Acid Jump`, `Dolce (Extended Mix)`, `Around`,
-`Airplane Mode`, `Guilty Pleasures` ×2, `Final Call`, `GIN AND TONIC` —
-and `Renegade Master` the other way), three are a fifth away (`Goddess`,
-`Big Jet Plane`, `Da Ga Dam`), three are elsewhere (`XTC Nation`,
-`Tiamat`, `Ride The Train`).
+The 14 misses: nine are the same tonic in the other mode (eight tracks
+rekordbox calls major — `Acid Jump`, `Around`, `Airplane Mode`, `Guilty
+Pleasures` ×2, `Final Call`, `GIN AND TONIC`, `XTC Nation`'s neighbour
+`Dolce` is now fixed in rekordbox — and `Renegade Master` the other way),
+three are a fifth away (`Goddess`, `Big Jet Plane`, `Da Ga Dam`), two are
+elsewhere (`XTC Nation`, `Tiamat`, `Ride The Train` among them).
 
 ## Before this front end
 

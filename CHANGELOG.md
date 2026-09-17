@@ -17,12 +17,12 @@ the version numbers [Semantic Versioning](https://semver.org/).
   track (was 146), the downbeat on 151 (was 27) and the whole grid on 146
   (was 26). The result is still reported, not written to the library.
 - Beats sit on the kick's attack: the start of the click in the 900–9000 Hz
-  band, to the millisecond, a median 0.0 ms from where rekordbox 7 puts
-  them.
+  band, to the millisecond: 0.0 ms from where rekordbox 7 puts them, at
+  the median and the 90th percentile.
 - A gradual tempo change between two settled tempos is followed bar by
   bar, each bar with its own tempo, rather than held to one cut.
 - Key detection uses Ángel Faraldo's edmkey method (as in Essentia) and
-  agrees with rekordbox on 140 of those 155 tracks, up from 27. A toss-up
+  agrees with rekordbox on 141 of those 155 tracks, up from 27. A toss-up
   between a major key and its parallel minor goes to the minor, as it does
   in this library.
 - Analyze Track writes its result to the library: the beat grid and every

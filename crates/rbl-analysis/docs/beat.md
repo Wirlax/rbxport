@@ -62,13 +62,22 @@ bass line do not have.
 
 For each beat of the first grid:
 
-- band-pass the audio around the beat to 900–9000 Hz;
-- take the RMS in 1 ms steps over a window of a few tens of ms either side;
-- the spike is the biggest rise nearest the beat; the attack is the step
-  where it starts.
+- band-pass the audio to 900–9000 Hz (done once for the whole track);
+- take the RMS in 1 ms steps, 15 ms either side of the beat;
+- the spike is the strong rise nearest the beat — at least half as steep
+  as the steepest in the window; the attack is the step where it starts.
 
-A beat with no spike near it (a breakdown, a beatless intro) is left
-unplaced and does not pull the line in step 4.
+Nearest, not steepest: taking the steepest let a grid drift, because once
+a beat's prediction slipped late the window reached a sharper hit further
+on and the line followed it. A beat with no spike near it (a breakdown, a
+beatless intro) is left unplaced and does not pull the line in step 4.
+
+The line is fitted twice, from the comb's phase and from half a beat
+later, and the one that collects more kick is kept. The phrase-structure
+stage ([downbeat.md](downbeat.md)) still has the last word on which half
+of the beat the kicks are on: it is right on 153 of 155 rekordbox grids
+against the kick's 150, the kick's misses being off-beat claps with a
+sharper transient than the kick.
 
 ## 4. Fit and extend
 

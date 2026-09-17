@@ -48,19 +48,18 @@ placed at the right beat for the numbering after it to match.
 
 | metric | start | now |
 |---|---|---|
-| bpm | 146 | **154 / 155** |
-| downbeat | 27 | **143 / 155** |
-| grid | 26 | **140 / 155** |
-| key | 27 | **140 / 155** |
+| bpm | 146 | **155 / 155** |
+| downbeat | 27 | **142 / 155** |
+| grid | 26 | **141 / 155** |
+| key | 27 | **141 / 155** |
 
-The target is 99 %, at most one miss per metric. Every downbeat and grid
-miss but four is one of the eleven rekordbox 6 grids below, whose beats
-sit 25 ms after the kick: with beats placed on the kick's attack our
-offset from rekordbox 7 grids is a median 0.0 ms, and from those eleven
-−24 to −27 ms, on the tolerance edge. With the envelope peak instead of
-the attack (`RB_LITE_PLACEMENT=envelope`) the beats sit 1 ms later, six of
-the eleven scrape in, and the gate reads 155 / 151 / 146 / 140 — a better
-number from a worse placement.
+The target is 99 %, at most one miss per metric. Beats are placed on the
+kick's attack: the offset from rekordbox 7's grids is 0.0 ms at the median
+and at the 90th percentile. Every downbeat and grid miss but two is one
+of the eleven rekordbox 6 grids below, whose beats sit 25 ms after the
+kick, −25 to −27 ms from ours, just past the tolerance. On the 142 tracks
+rekordbox 7 analysed itself: BPM 142 / 142, downbeat 141 / 142, grid
+141 / 142.
 
 ## The misses
 
@@ -70,10 +69,10 @@ Goddess, Drift Around Me, Angels, Force of Gravity.* Their rekordbox grids
 sit exactly 1105 samples (25 ms) after the kick; the other 140 MP3s sit on
 it. Chris confirmed the playlist was analysed at different times, some by
 rekordbox 6 and some by 7. Our beats are on the kick, so all eleven fail
-the grid metric and eight the downbeat metric, at −24 to −27 ms.
-Re-analysing them in rekordbox 7 would settle it. Before that was known, the cause was chased
-through the file and the decoder: it is not the Xing/Info frame, the LAME
-tag's CRC, the encoder version, the ID3 version, or anything in
+both the downbeat and the grid metric, at −25 to −27 ms. Re-analysing
+them in rekordbox 7 would settle it. Before that was known, the cause was
+chased through the file and the decoder: it is not the Xing/Info frame,
+the LAME tag's CRC, the encoder version, the ID3 version, or anything in
 `djmdContent`; and rekordbox's own bundled `libmpg123`, driven from Python,
 gives exactly our timeline (gapless off) or exactly 1105 samples earlier
 (gapless on), never later.
@@ -89,15 +88,16 @@ our beat 1 is one beat before the hand grid's. `Bring Me Back to Life
 holds 138 until 105 s; the 150 beat is audible, quietly, from 64 s and our
 switch goes there.
 
-**BATTERY OPERATED.** Rekordbox's beats sit where every band of the
-spectrum and the phrase structure say the off-beat is; the grid is half a
-beat from ours.
+**BATTERY OPERATED.** Half a beat off. Chris re-gridded it in rekordbox
+(its first beat moved 19 ms), and our grid sits on the midpoints of the
+corrected one. Neither judge is sure here: the phrase-structure novelty
+prefers our half by 9 %, and a line fitted through the kick attacks on the
+other half collects 8 % more kick. The novelty decides, because on
+rekordbox's own grids it is right on 153 of 155 and the kick on 150 —
+locking the grid to the kick fixed this track and broke five others where
+an off-beat clap has the sharper transient.
 
-**They Want Your Soul.** The comb says 133.003 BPM; the snap-and-refit
-pulls it to 132.99, which drifts 20 ms by the end; 90 % of beats match.
-The refit stays because it is right more often than the comb alone.
-
-**Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 3 others.
+**Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 2 others.
 
 ## Rekordbox facts learned on the way
 

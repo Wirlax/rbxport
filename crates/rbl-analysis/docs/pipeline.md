@@ -60,13 +60,13 @@ flowchart TD
 |---|---|---|
 | 1. detect the BPM | built | onset envelope → autocorrelation × √fourier × prior, over the whole track |
 | 2. first grid, phase from the hits | built | comb over the onset envelope |
-| 3. kick attack, 900–9000 Hz RMS spike | built | `attack.rs`; the fit snaps to it within 30 ms of the predicted beat. Beats land at a median 0.0 ms from rekordbox's (p90 +1.8 ms), against +1.0 / +3.0 from the envelope peak |
+| 3. kick attack, 900–9000 Hz RMS spike | built | `attack.rs`: the strong rise nearest the predicted beat, within 15 ms. The line is fitted from both halves of the beat and the one that collects more kick is kept; the novelty stage still has the last word on the half beat. Beats land at 0.0 ms from rekordbox's at the median and the 90th percentile, against +1.0 / +3.0 from the envelope peak |
 | 4. fit through the attacks, extend over the track | built | |
 | 5. tempo change anywhere | built | 16 s windows over the whole track |
 | 6–6d. gradual change gridded bar by bar | built | the walk tracks beat by beat from the old tempo's last settled window, the period drifting up to 5 % per beat, and cuts every four beats until a bar comes out at the new tempo; a jump, or no kick to follow, is a cut placed where the new beat is at full strength. Proven on a synthetic ramp (128 → 155 over 64 beats); on the playlist's one ramp (Go Back) the rise starts in a breakdown with no kick to follow, so the cut goes where the hand grid has it |
 | 7–10. beat 1 from where the music changes; half-beat move; numbering | built | novelty peaks over half-beat profiles at 1, 2, 4 and 8 bars |
 | 11. phrase starts | built | the four-bar novelty peaks on downbeats |
-| 12–13. Faraldo's edmkey | built | as Essentia runs it; `edma` profiles. 140 of 155 against 132 for the old chroma front end |
+| 12–13. Faraldo's edmkey | built | as Essentia runs it; `edma` profiles. 141 of 155 against 132 for the old chroma front end |
 | 14–15. minor on a toss-up | built | `PreferMinor` at 0.1: fires on 61, fixes 54, breaks 6 |
 | 16–17. bass root when unsure | built, off | measured: fixes none on this playlist; stays in the pipeline |
 | 18. name | built | |
