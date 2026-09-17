@@ -25,6 +25,14 @@ pub struct OnsetEnvelope {
     pub values: Vec<f32>,
     /// Envelope samples per second.
     pub rate: f64,
+    /// Seconds into the file of envelope sample 0.
+    ///
+    /// A frame's flux is timestamped at the frame's centre, not its start:
+    /// an onset raises the spectrum most as the window's peak passes over
+    /// it, so the flux peaks when the centre reaches the onset. Timestamping
+    /// at the start put every beat half a frame (12 ms) early, which is
+    /// half the tolerance a grid has to match another one within.
+    pub origin_secs: f64,
 }
 
 impl OnsetEnvelope {
@@ -34,9 +42,25 @@ impl OnsetEnvelope {
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
+    /// Seconds into the file of envelope sample `x`, which may be
+    /// fractional.
+    pub fn time_of(&self, x: f64) -> f64 {
+        if self.rate <= 0.0 { 0.0 } else { self.origin_secs + x / self.rate }
+    }
     /// Seconds represented by `n` envelope samples.
     pub fn seconds(&self, n: usize) -> f64 {
         if self.rate <= 0.0 { 0.0 } else { n as f64 / self.rate }
+    }
+    /// The envelope between samples, by linear interpolation; zero outside.
+    pub fn sample_at(&self, x: f64) -> f32 {
+        if x < 0.0 {
+            return 0.0;
+        }
+        let i = x.floor() as usize;
+        let frac = (x - i as f64) as f32;
+        let a = self.values.get(i).copied().unwrap_or(0.0);
+        let b = self.values.get(i + 1).copied().unwrap_or(0.0);
+        a + (b - a) * frac
     }
 }
 
@@ -97,8 +121,9 @@ pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
 pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> OnsetEnvelope {
     let rate = f64::from(sample_rate) / HOP as f64;
     let frame = band.frame.max(HOP);
+    let origin_secs = if sample_rate == 0 { 0.0 } else { frame as f64 / 2.0 / f64::from(sample_rate) };
     if samples.len() < frame || sample_rate == 0 {
-        return OnsetEnvelope { values: Vec::new(), rate };
+        return OnsetEnvelope { values: Vec::new(), rate, origin_secs };
     }
 
     let mut planner = RealFftPlanner::<f32>::new();
@@ -129,8 +154,8 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
     let mut values = Vec::with_capacity(frames);
     let mut previous = vec![0.0_f32; output.len()];
 
-    for frame in 0..frames {
-        let start = frame * HOP;
+    for index in 0..frames {
+        let start = index * HOP;
         let Some(chunk) = samples.get(start..start + frame) else { break };
         for (i, slot) in input.iter_mut().enumerate() {
             *slot = chunk.get(i).copied().unwrap_or(0.0) * window.get(i).copied().unwrap_or(0.0);
@@ -158,7 +183,7 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
     }
 
     normalise(&mut values);
-    OnsetEnvelope { values, rate }
+    OnsetEnvelope { values, rate, origin_secs }
 }
 
 /// Subtracts a local mean and clips at zero, which removes slow loudness drift
@@ -186,3 +211,4 @@ fn normalise(values: &mut [f32]) {
         }
     }
 }
+

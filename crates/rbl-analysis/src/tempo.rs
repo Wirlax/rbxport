@@ -1,9 +1,29 @@
 //! Tempo and beat grid.
 //!
-//! Autocorrelation of the onset envelope gives the beat period; the phase is
-//! then fitted by testing every offset within one beat and keeping the one that
-//! lands on the most onset energy. Both steps work on the envelope rather than
-//! the audio, so the cost is independent of track length in any way that matters.
+//! Three stages, each reading the onset envelope rather than the audio:
+//!
+//! 1. **Candidates.** The autocorrelation of the envelope peaks at the beat
+//!    period and at every multiple of it; the Fourier transform of the
+//!    envelope peaks at the beat rate and every multiple of *that*. A wrong
+//!    period at three halves of the beat correlates (it lands on kick, hat,
+//!    kick, hat) but has no spectral line, so scoring a candidate by both
+//!    leaves the octave as the only ambiguity, and a tempo prior settles it.
+//! 2. **Fit.** The chosen period is refined to a fraction of an envelope
+//!    sample by a comb, the phase is found the same way, and then every beat
+//!    is snapped to the nearest onset peak and a line is fitted through the
+//!    snapped beats. Six hundred beats average a five-millisecond hop down to
+//!    a fraction of a millisecond, which is what a grid needs to stay on the
+//!    beat for a whole track: 0.05 BPM of error is a beat and a half of drift
+//!    by the end of a five-minute track.
+//! 3. **Segments.** A tempo is measured in windows along the track, and a
+//!    stretch that sustains a different one becomes its own segment with its
+//!    own fit, the boundary placed at the beat where the onsets change sides.
+//!    DJ edits jump tempo mid-track; a single line through such a track is
+//!    wrong on both sides of the jump.
+//!
+//! The downbeat is not chosen here: every beat comes back numbered from the
+//! first, and [`crate::downbeat`] renumbers the grid once it has looked at
+//! the music.
 
 use crate::onset::OnsetEnvelope;
 
@@ -11,7 +31,6 @@ use crate::onset::OnsetEnvelope;
 /// mostly adds octave errors.
 pub const MIN_BPM: f64 = 70.0;
 pub const MAX_BPM: f64 = 200.0;
-
 
 /// One beat of the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,339 +42,874 @@ pub struct Beat {
     pub time_ms: u32,
 }
 
+/// A stretch of the track at one tempo: every `phase_secs + k × period_secs`
+/// that falls in `from_secs..to_secs` is a beat.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Segment {
+    /// Where the stretch begins, in seconds from the start of the file: 0
+    /// for the first segment, the tempo change for the others.
+    pub from_secs: f64,
+    /// Where it ends: the next change, or the end of the track.
+    pub to_secs: f64,
+    /// Seconds between beats.
+    pub period_secs: f64,
+    /// Any beat's time; the grid is this plus whole periods either way.
+    pub phase_secs: f64,
+}
+
+impl Segment {
+    pub fn bpm(&self) -> f64 {
+        if self.period_secs > 0.0 { 60.0 / self.period_secs } else { 0.0 }
+    }
+    /// The first beat, in seconds from the start of the file.
+    pub fn start_secs(&self) -> f64 {
+        if self.period_secs <= 0.0 {
+            return self.from_secs;
+        }
+        let k = ((self.from_secs - self.phase_secs) / self.period_secs).ceil();
+        self.phase_secs + k * self.period_secs
+    }
+    /// Beats in the segment.
+    pub fn beats(&self) -> usize {
+        if self.period_secs <= 0.0 || self.to_secs <= self.from_secs {
+            return 0;
+        }
+        let first = self.start_secs();
+        if first >= self.to_secs {
+            return 0;
+        }
+        ((self.to_secs - first) / self.period_secs).ceil() as usize
+    }
+    /// The same grid moved half a beat, which is where the beats are when
+    /// the grid was built on the off-beat.
+    #[must_use]
+    pub fn shifted_half_beat(&self) -> Self {
+        Self { phase_secs: self.phase_secs + self.period_secs / 2.0, ..*self }
+    }
+}
+
+/// Every beat of every segment, in order, numbered so that beat `i` is a
+/// downbeat when `(i + phase) % 4 == 0`.
+pub fn beats_of(segments: &[Segment], phase: usize) -> Vec<Beat> {
+    let mut beats = Vec::new();
+    for segment in segments {
+        let tempo_x100 = u16::try_from((segment.bpm() * 100.0).round() as i64).unwrap_or(0);
+        let start = segment.start_secs();
+        for i in 0..segment.beats().min(100_000) {
+            let time = start + i as f64 * segment.period_secs;
+            beats.push(Beat {
+                beat_number: u16::try_from((beats.len() + phase) % 4 + 1).unwrap_or(1),
+                tempo_x100,
+                time_ms: u32::try_from((time * 1000.0).round() as i64).unwrap_or(0),
+            });
+        }
+    }
+    beats
+}
+
 #[derive(Debug, Clone)]
 pub struct TempoResult {
+    /// The tempo at the start of the track, which is what a library shows.
     pub bpm: f64,
-    /// Confidence in 0..=1: the autocorrelation peak relative to its neighbours.
+    /// Confidence in 0..=1: how far the chosen candidate stands out from the
+    /// next best that is not a multiple of it.
     pub confidence: f64,
     /// Seconds from the start to the first beat.
     pub first_beat_secs: f64,
+    /// One entry per tempo, in order. A track at one tempo has one.
+    pub segments: Vec<Segment>,
+    /// Every beat, numbered 1..=4 cyclically from the first.
     pub beats: Vec<Beat>,
 }
 
 impl TempoResult {
     pub fn empty() -> Self {
-        Self { bpm: 0.0, confidence: 0.0, first_beat_secs: 0.0, beats: Vec::new() }
+        Self { bpm: 0.0, confidence: 0.0, first_beat_secs: 0.0, segments: Vec::new(), beats: Vec::new() }
     }
 }
 
-/// The knobs the octave choice turns on.
+/// What the candidate stage is tuned by.
 ///
-/// Held in a struct so the tuning rig can search them against real audio
-/// rather than against an argument. The defaults are what ships; anything
-/// else has to beat them on a test split before it becomes a default.
+/// Held in a struct so a measurement rig can search them against real audio.
+/// The defaults are what ships; anything else has to beat them on the golden
+/// playlist before it becomes a default.
 #[derive(Debug, Clone, Copy)]
 pub struct TempoOptions {
+    pub min_bpm: f64,
+    pub max_bpm: f64,
     /// Where the tempo prior is centred, in BPM.
     pub prior_centre: f64,
     /// The prior's spread, in natural logs of tempo ratio.
     pub prior_width: f64,
-    /// A second lobe for the prior, in BPM, or 0 for none.
-    ///
-    /// Dance music is not one hump. House and techno sit around 125 and drum
-    /// and bass, hardstyle and their neighbours sit around 170, and a single
-    /// lobe centred between them either covers neither or covers everything.
-    /// The tracks this was built for are the ones where a 174 BPM reading is
-    /// punished by the prior until its own two-thirds relative at 116 — right
-    /// in the middle of the first lobe — outscores it.
-    ///
-    /// **Measured, and it changed nothing at all.** Twelve combinations of
-    /// centre (155 to 180), width (0.08 to 0.25) and weight (0.5 to 1.0) over
-    /// 150 tracks: every one scored 87% train and 95% test, identical to no
-    /// second lobe, **fixing 0 tracks and breaking 0**. A lobe at 172 raises
-    /// the prior at 174 BPM by about 30% over the shipped one, so the boost is
-    /// real and the answer does not move — which says the 3:2 error is not the
-    /// prior thumbing the scale towards the slower reading. It is in the score.
-    ///
-    /// Kept because `tempotune`'s pass 1f is what measured that, and a knob
-    /// that has been ruled out is worth more than one nobody tried. It is off
-    /// by default and the shipped prior is exactly what it was.
-    pub prior_second_centre: f64,
-    /// The second lobe's spread, on the same scale as `prior_width`.
-    pub prior_second_width: f64,
-    /// How tall the second lobe is against the first.
-    pub prior_second_weight: f64,
-    /// How many multiples of a candidate period to add into its score.
-    ///
-    /// 1 is plain autocorrelation. Higher values reward a period whose own
-    /// multiples also correlate, which is true of the beat and not of a
-    /// subdivision of it — every other multiple of a subdivision falls
-    /// between beats.
-    pub harmonics: usize,
-    /// How much each further multiple counts, relative to the one before.
-    pub harmonic_decay: f64,
-    /// Phases tried when ranking one candidate period against another.
-    ///
-    /// Too few and a candidate is scored at a phase that does not fit it,
-    /// which moves the peak off the true period by a fraction of a BPM — small
-    /// enough to pass every octave check and still miss rekordbox's value.
-    /// Measured on 150 tracks of the reference library, held-out half:
-    ///
-    /// | phases | exact within 0.05 BPM |
-    /// |---|---|
-    /// | 8 | 73% |
-    /// | 16 | 87% |
-    /// | **32** | **95%** |
-    /// | 64 | 95% |
-    /// | 128 | 95% |
-    ///
-    /// It saturates at 32, so that is what ships: 64 costs twice as much for
-    /// the same answer.
+    /// Phases tried when the comb refines a period.
     pub refine_phases: usize,
+    /// Seconds per window when looking for a tempo change.
+    pub segment_window_secs: f64,
+    /// A window whose own tempo differs from the track's by more than this
+    /// fraction, and which is followed by another that agrees with it, starts
+    /// a new segment.
+    pub segment_threshold: f64,
 }
 
 impl Default for TempoOptions {
     fn default() -> Self {
         Self {
-            prior_centre: 126.0,
-            prior_width: 0.85,
-            prior_second_centre: 0.0,
-            prior_second_width: 0.25,
-            prior_second_weight: 0.0,
-            harmonics: 1,
-            harmonic_decay: 1.0,
+            min_bpm: MIN_BPM,
+            max_bpm: MAX_BPM,
+            prior_centre: 132.0,
+            prior_width: 0.5,
             refine_phases: 32,
+            segment_window_secs: 16.0,
+            segment_threshold: 0.02,
         }
     }
+}
+
+/// One tempo the candidate stage considered, with everything it was scored
+/// on. Exposed so a measurement rig can print the table for a track that
+/// chose wrongly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Candidate {
+    pub bpm: f64,
+    /// Normalised autocorrelation at the beat period.
+    pub acf: f64,
+    /// Fourier magnitude at the beat rate, relative to the strongest in range.
+    pub fourier: f64,
+    /// The tempo prior at this BPM.
+    pub prior: f64,
+    /// What it was ranked by.
+    pub score: f64,
 }
 
 /// Estimates tempo and builds the beat grid.
-pub fn detect_tempo(onsets: &OnsetEnvelope, sample_rate: u32) -> TempoResult {
-    detect_tempo_with(onsets, sample_rate, TempoOptions::default())
+pub fn detect_tempo(onsets: &OnsetEnvelope) -> TempoResult {
+    detect_tempo_with(onsets, TempoOptions::default())
 }
 
-/// Estimates tempo with the octave choice under the caller's control.
+/// Estimates tempo with the candidate stage under the caller's control.
 #[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
-pub fn detect_tempo_with(
-    onsets: &OnsetEnvelope,
-    _sample_rate: u32,
-    options: TempoOptions,
-) -> TempoResult {
+pub fn detect_tempo_with(onsets: &OnsetEnvelope, options: TempoOptions) -> TempoResult {
     if onsets.len() < 64 || onsets.rate <= 0.0 {
         return TempoResult::empty();
     }
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
 
-    // Lag range in envelope samples for the BPM range.
-    let lag_for_bpm = |bpm: f64| (onsets.rate * 60.0 / bpm).round() as usize;
-    let min_lag = lag_for_bpm(MAX_BPM).max(2);
-    let max_lag = lag_for_bpm(MIN_BPM).min(onsets.len() / 2);
-    if max_lag <= min_lag {
+    let candidates = candidates(&values, onsets.rate, options);
+    let Some(best) = candidates.first() else {
         return TempoResult::empty();
-    }
-
-    let values = &onsets.values;
-    // Scored past the tempo range, far enough to reach every multiple the
-    // harmonic term below asks for. Stopping at `max_lag` would make those
-    // reads return zero — silently, and exactly the way the dead half-time
-    // term did.
-    let score_to = (max_lag * options.harmonics.max(1)).min(values.len().saturating_sub(1));
-    let mut scores = vec![0.0_f64; score_to + 1];
-
-    // Every lag is scored before any is chosen, so that the choice below can
-    // read any lag it likes. Merging the two passes is a trap worth naming: a
-    // term that compares a candidate against a *longer* lag reads zero in a
-    // single ascending pass and silently does nothing, which is exactly the
-    // bug that hid here.
-    for lag in min_lag..=score_to {
-        let mut sum = 0.0_f64;
-        let mut count = 0_usize;
-        for i in 0..values.len().saturating_sub(lag) {
-            let a = f64::from(values.get(i).copied().unwrap_or(0.0));
-            let b = f64::from(values.get(i + lag).copied().unwrap_or(0.0));
-            sum += a * b;
-            count += 1;
-        }
-        if let Some(slot) = scores.get_mut(lag) {
-            *slot = if count == 0 { 0.0 } else { sum / count as f64 };
-        }
-    }
-
-    let mut best = (0.0_f64, min_lag);
-    for lag in min_lag..=max_lag {
-        let score = scores.get(lag).copied().unwrap_or(0.0);
-        // Autocorrelation cannot tell 64 from 128 from 256 BPM: every multiple
-        // of the true beat correlates. A listener resolves that by preference,
-        // so weight candidates by how tempo-like they are. Without this, a fifth
-        // of tracks locked onto a wrong multiple even though the period itself
-        // was right to a hundredth of a BPM.
-        let candidate_bpm = onsets.rate * 60.0 / lag as f64;
-        // Adding the candidate's own multiples separates a beat from a
-        // subdivision of it: every multiple of the beat correlates, while
-        // every other multiple of a subdivision lands between beats.
-        let mut support = score;
-        let mut weight = 1.0;
-        for k in 2..=options.harmonics {
-            weight *= options.harmonic_decay;
-            support += weight * scores.get(lag * k).copied().unwrap_or(0.0);
-        }
-        let combined = support * tempo_prior(candidate_bpm, options);
-        if combined > best.0 {
-            best = (combined, lag);
-        }
-    }
-
-    // Two corrections belong here and neither survived measurement.
-    //
-    // One doubled a candidate whenever the midpoint between its beats carried
-    // correlation. Real tracks nearly always have hi-hats at twice the beat,
-    // so it fired on tempos that were already right: 13 octave errors in 40
-    // against 5 without it.
-    //
-    // The other re-ranked the chosen period against its metrical relatives
-    // — a half, two thirds, three halves, a double — using the comb score
-    // below, which unlike autocorrelation can tell a beat from three halves of
-    // one. It fixed the 3:2 case it was written for and broke a 92.5 BPM case
-    // in the same synthetic, and on 150 real tracks it cost three points of
-    // accuracy (95% to 92%) and gained an octave error. The check is
-    // symmetric: it moves a tempo in the wrong direction exactly as readily as
-    // the right one. See TODO.md for both sets of numbers.
-    let lag = best.1;
-
-    if lag == 0 {
-        return TempoResult::empty();
-    }
-
-    // Refine to a fractional lag.
-    //
-    // Integer lags quantise the tempo badly: at 172 envelope samples per second
-    // the lags either side of 128 BPM are 1.6 BPM apart, which put the median
-    // error at 0.375 BPM against rekordbox. Scoring fractional lags with linear
-    // interpolation between envelope samples removes that entirely.
-    let refined_lag = refine_lag(values, lag, options.refine_phases);
-    let bpm = onsets.rate * 60.0 / refined_lag;
-
-    // Confidence: how much the winning lag stands out from the field.
-    let mean: f64 = scores.iter().skip(min_lag).sum::<f64>() / (max_lag - min_lag + 1) as f64;
-    let peak = scores.get(lag).copied().unwrap_or(0.0);
-    let confidence = if mean > 0.0 { ((peak / mean) - 1.0).clamp(0.0, 1.0) } else { 0.0 };
-
-    // Phase: the offset within one beat that collects the most onset energy.
-    let mut best_phase = (f64::NEG_INFINITY, 0_usize);
-    for phase in 0..lag {
-        let mut sum = 0.0_f64;
-        let mut i = phase;
-        while i < values.len() {
-            sum += f64::from(values.get(i).copied().unwrap_or(0.0));
-            i += lag;
-        }
-        if sum > best_phase.0 {
-            best_phase = (sum, phase);
-        }
-    }
-
-    let first_beat_secs = onsets.seconds(best_phase.1);
-    let beat_secs = 60.0 / bpm;
-    let total_secs = onsets.seconds(values.len());
-    let beat_count = if beat_secs > 0.0 {
-        ((total_secs - first_beat_secs) / beat_secs).floor().max(0.0) as usize
-    } else {
-        0
     };
+    // Confidence: the winner against the best candidate that is not a
+    // multiple of it, both of them prior-free.
+    let rival = candidates
+        .iter()
+        .skip(1)
+        .find(|c| !related(c.bpm, best.bpm))
+        .map_or(0.0, |c| c.acf * c.fourier);
+    let own = best.acf * best.fourier;
+    let confidence = if own > 0.0 { ((own - rival) / own).clamp(0.0, 1.0) } else { 0.0 };
 
-    let tempo_x100 = u16::try_from((bpm * 100.0).round() as i64).unwrap_or(0);
-    let beats = (0..beat_count.min(100_000))
-        .map(|i| {
-            let time = first_beat_secs + i as f64 * beat_secs;
-            Beat {
-                // Downbeat every four beats. Which beat is *the* downbeat needs
-                // musical structure we do not detect yet, so this is a grid
-                // aligned to the beat, not a claim about the bar.
-                beat_number: u16::try_from(i % 4 + 1).unwrap_or(1),
-                tempo_x100,
-                time_ms: u32::try_from((time * 1000.0).round() as i64).unwrap_or(0),
-            }
-        })
-        .collect();
-
-    TempoResult { bpm, confidence, first_beat_secs, beats }
+    // The whole track at the winning tempo, then split where it changes.
+    let segments = segment(&values, onsets.rate, onsets.origin_secs, best.bpm, options);
+    let beats = beats_of(&segments, 0);
+    let (bpm, first_beat_secs) = segments.first().map_or((0.0, 0.0), |s| (s.bpm(), s.start_secs()));
+    TempoResult { bpm, confidence, first_beat_secs, segments, beats }
 }
 
-/// How readily a tempo is heard *as* the tempo.
+/// The candidate stage alone, best first. For measurement.
+pub fn tempo_candidates(onsets: &OnsetEnvelope, options: TempoOptions) -> Vec<Candidate> {
+    if onsets.len() < 64 || onsets.rate <= 0.0 {
+        return Vec::new();
+    }
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+    candidates(&values, onsets.rate, options)
+}
+
+/// Whether two tempos are a simple ratio of each other.
+fn related(a: f64, b: f64) -> bool {
+    if a <= 0.0 || b <= 0.0 {
+        return false;
+    }
+    let ratio = if a > b { a / b } else { b / a };
+    [1.0, 2.0, 3.0, 4.0, 1.5, 4.0 / 3.0]
+        .iter()
+        .any(|r| (ratio - r).abs() < 0.02 * r)
+}
+
+// ---------------------------------------------------------------- candidates
+
+/// Every tempo worth considering, scored, best first.
+fn candidates(values: &[f64], rate: f64, options: TempoOptions) -> Vec<Candidate> {
+    let n = values.len();
+    let mean = values.iter().sum::<f64>() / n as f64;
+    let centred: Vec<f64> = values.iter().map(|v| v - mean).collect();
+    let variance = centred.iter().map(|v| v * v).sum::<f64>() / n as f64;
+    if variance <= 0.0 {
+        return Vec::new();
+    }
+
+    let lag_of = |bpm: f64| rate * 60.0 / bpm;
+    // Lags out to twice the slowest tempo, so a candidate's own double can be
+    // read for whichever candidate asks.
+    let min_lag = (lag_of(options.max_bpm * 2.0).floor() as usize).max(2);
+    let max_lag = (lag_of(options.min_bpm / 2.0).ceil() as usize).min(n / 2);
+    if max_lag <= min_lag + 2 {
+        return Vec::new();
+    }
+    let acf = autocorrelation(&centred, variance, min_lag, max_lag);
+    let acf_at = |lag: f64| interpolate(&acf, lag - min_lag as f64);
+
+    // Peaks of the autocorrelation inside the range, with their multiples
+    // and simple fractions, so that the octave a listener would choose is
+    // in the running even when it is not the strongest correlation.
+    let in_range = |bpm: f64| bpm >= options.min_bpm && bpm <= options.max_bpm;
+    let mut bpms: Vec<f64> = Vec::new();
+    let lo = lag_of(options.max_bpm).floor() as usize;
+    let hi = lag_of(options.min_bpm).ceil() as usize;
+    for lag in lo.max(min_lag + 1)..hi.min(max_lag - 1) {
+        let here = acf_at(lag as f64);
+        if here <= acf_at(lag as f64 - 1.0) || here < acf_at(lag as f64 + 1.0) || here <= 0.0 {
+            continue;
+        }
+        // Parabolic interpolation of the peak.
+        let a = acf_at(lag as f64 - 1.0);
+        let c = acf_at(lag as f64 + 1.0);
+        let denom = a - 2.0 * here + c;
+        let offset = if denom.abs() > f64::EPSILON { 0.5 * (a - c) / denom } else { 0.0 };
+        let bpm = rate * 60.0 / (lag as f64 + offset.clamp(-0.5, 0.5));
+        for ratio in [1.0, 2.0, 0.5, 1.5, 2.0 / 3.0, 3.0, 1.0 / 3.0, 4.0 / 3.0, 0.75] {
+            let relative = bpm * ratio;
+            if in_range(relative) && !bpms.iter().any(|b| (b - relative).abs() < relative * 0.01) {
+                bpms.push(relative);
+            }
+        }
+    }
+    if bpms.is_empty() {
+        return Vec::new();
+    }
+
+    // The Fourier magnitude at every candidate rate, and the strongest in
+    // range to normalise by.
+    let fourier_raw: Vec<f64> = bpms.iter().map(|&bpm| fourier_magnitude(&centred, rate, bpm)).collect();
+    let fourier_peak = fourier_raw.iter().fold(0.0_f64, |a, &b| a.max(b));
+    let acf_peak = bpms.iter().map(|&bpm| acf_at(lag_of(bpm))).fold(0.0_f64, f64::max);
+
+    let mut out: Vec<Candidate> = bpms
+        .iter()
+        .zip(&fourier_raw)
+        .map(|(&bpm, &ft)| {
+            let acf = (acf_at(lag_of(bpm)) / acf_peak.max(f64::EPSILON)).max(0.0);
+            let fourier = if fourier_peak > 0.0 { ft / fourier_peak } else { 0.0 };
+            let prior = tempo_prior(bpm, options);
+            // The Fourier term enters as a square root: its job is to rule
+            // out a period with no spectral line at all (a hundredth of the
+            // strongest), not to prefer the hat rate over the beat, where
+            // it is louder by half.
+            Candidate { bpm, acf, fourier, prior, score: acf * fourier.sqrt() * prior }
+        })
+        .collect();
+    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+/// Normalised autocorrelation for lags `min_lag..=max_lag`.
+fn autocorrelation(centred: &[f64], variance: f64, min_lag: usize, max_lag: usize) -> Vec<f64> {
+    let n = centred.len();
+    (min_lag..=max_lag)
+        .map(|lag| {
+            let count = n.saturating_sub(lag);
+            if count == 0 {
+                return 0.0;
+            }
+            let sum: f64 = centred.iter().zip(centred.iter().skip(lag)).map(|(a, b)| a * b).sum();
+            sum / (count as f64 * variance)
+        })
+        .collect()
+}
+
+/// Linear interpolation into a table, clamped at the ends.
+fn interpolate(table: &[f64], x: f64) -> f64 {
+    if table.is_empty() {
+        return 0.0;
+    }
+    let x = x.clamp(0.0, (table.len() - 1) as f64);
+    let i = x.floor() as usize;
+    let frac = x - i as f64;
+    let a = table.get(i).copied().unwrap_or(0.0);
+    let b = table.get(i + 1).copied().unwrap_or(a);
+    a + (b - a) * frac
+}
+
+/// Seconds per window of the Fourier magnitude.
 ///
-/// A log-normal centred where dance music sits. It only breaks ties between
-/// octaves — it is far too broad to move an estimate that the signal supports.
+/// Not the whole track: a sum over five minutes resolves 0.2 BPM, so a
+/// candidate read off the autocorrelation a tenth of a BPM from the truth
+/// drifts through most of a cycle and cancels itself. Twenty-second windows
+/// resolve 3 BPM, which is coarse enough to be robust to that and fine
+/// enough to keep a tempo apart from its three-halves relative.
+const FOURIER_WINDOW_SECS: f64 = 20.0;
+
+/// Magnitude of the envelope's Fourier component at one tempo, averaged
+/// over Hann windows of `FOURIER_WINDOW_SECS`.
+fn fourier_magnitude(centred: &[f64], rate: f64, bpm: f64) -> f64 {
+    let omega = 2.0 * std::f64::consts::PI * bpm / 60.0 / rate;
+    let window = ((FOURIER_WINDOW_SECS * rate) as usize).clamp(64, centred.len().max(64));
+    let hop = window / 2;
+    // A rotating phasor rather than a sin and cos per sample: the envelope
+    // is fifty thousand samples long and there are dozens of candidates.
+    let (step_re, step_im) = (omega.cos(), omega.sin());
+    let mut total = 0.0;
+    let mut windows = 0.0;
+    let mut start = 0;
+    while start + window <= centred.len() {
+        let (mut re, mut im) = (1.0_f64, 0.0_f64);
+        let (mut sum_re, mut sum_im) = (0.0_f64, 0.0_f64);
+        for (i, &v) in centred[start..start + window].iter().enumerate() {
+            let hann = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / window as f64).cos();
+            let w = v * hann;
+            sum_re += w * re;
+            sum_im += w * im;
+            let next_re = re * step_re - im * step_im;
+            im = re * step_im + im * step_re;
+            re = next_re;
+        }
+        total += (sum_re * sum_re + sum_im * sum_im).sqrt() / window as f64;
+        windows += 1.0;
+        start += hop;
+        if start + window > centred.len() && windows == 0.0 {
+            break;
+        }
+    }
+    if windows > 0.0 { total / windows } else { 0.0 }
+}
+
+/// How readily a tempo is heard *as* the tempo: a log-normal centred where
+/// dance music sits. It only breaks ties between octaves.
 fn tempo_prior(bpm: f64, options: TempoOptions) -> f64 {
     if bpm <= 0.0 || options.prior_width <= 0.0 || options.prior_centre <= 0.0 {
         return 0.0;
     }
-    let lobe = |centre: f64, width: f64| {
-        if centre <= 0.0 || width <= 0.0 {
-            return 0.0;
-        }
-        let x = (bpm / centre).ln() / width;
-        (-0.5 * x * x).exp()
-    };
-    let first = lobe(options.prior_centre, options.prior_width);
-    let second = options.prior_second_weight
-        * lobe(options.prior_second_centre, options.prior_second_width);
-    // The taller of the two, not their sum. A sum would raise the ground
-    // between the humps, and the claim is that music sits *on* them.
-    first.max(second)
+    let x = (bpm / options.prior_centre).ln() / options.prior_width;
+    (-0.5 * x * x).exp()
 }
 
-/// Finds the fractional lag that best explains the onset envelope.
-///
-/// Searches a fine grid either side of the integer peak, scoring each candidate
-/// by a comb filter: sum the envelope at every multiple of the candidate period,
-/// reading between samples by linear interpolation. The true period maximises it.
-/// How much onset energy lands on a grid of this period, at its best phase.
-///
-/// Normalised per beat, so a longer period is not rewarded simply for fitting
-/// fewer beats into the track. This is the score that can tell a beat from a
-/// subdivision of one: a grid on the real beat lands on full beats every time,
-/// while one at three halves of it alternates between beats and the hi-hats
-/// between them, and averages lower.
-fn comb_score(values: &[f32], period: f64, phases: usize) -> f64 {
+// ---------------------------------------------------------------- fitting
+
+/// A grid fitted to one stretch of the envelope: period and phase in
+/// envelope samples.
+#[derive(Debug, Clone, Copy)]
+struct Fit {
+    /// Envelope sample of the first beat, which may be negative: the grid is
+    /// extended back to the start of the file.
+    phase: f64,
+    period: f64,
+}
+
+/// Fits a constant-tempo grid to `values[from..to]` near `bpm`.
+fn fit(values: &[f64], rate: f64, bpm: f64, from: usize, to: usize, options: TempoOptions) -> Option<Fit> {
+    let slice = values.get(from..to)?;
+    if slice.len() < 8 {
+        return None;
+    }
+    let coarse = rate * 60.0 / bpm;
+    let period = refine_period(slice, coarse, options.refine_phases);
+    let phase = best_phase(slice, period, 64);
+    let mut fit = Fit { phase: phase + from as f64, period };
+    // Snap and refit, three times: each pass moves the line a little closer
+    // to the onsets and the next pass then snaps a few more of them.
+    for _ in 0..3 {
+        let Some(next) = snap_and_fit(values, from, to, fit) else { break };
+        fit = next;
+    }
+    Some(fit)
+}
+
+/// Comb-filter score of a grid: onset energy summed at every beat of the
+/// period from `phase`, normalised per beat.
+fn comb(values: &[f64], period: f64, phase: f64) -> f64 {
     if period < 2.0 || values.is_empty() {
         return 0.0;
     }
-    let sample_at = |x: f64| -> f64 {
-        if x < 0.0 {
-            return 0.0;
-        }
-        let i = x.floor() as usize;
-        let frac = x - i as f64;
-        let a = f64::from(values.get(i).copied().unwrap_or(0.0));
-        let b = f64::from(values.get(i + 1).copied().unwrap_or(0.0));
-        a + (b - a) * frac
-    };
-
-    let mut best = 0.0_f64;
-    let steps = phases.max(1);
-    for step in 0..steps {
-        let phase = period * step as f64 / steps as f64;
-        let mut sum = 0.0;
-        let mut x = phase;
-        while x < values.len() as f64 {
-            sum += sample_at(x);
-            x += period;
-        }
-        let beats = ((values.len() as f64 - phase) / period).max(1.0);
-        let normalised = sum / beats;
-        if normalised > best {
-            best = normalised;
-        }
+    let mut sum = 0.0;
+    let mut count = 0.0;
+    let mut x = phase;
+    while x < values.len() as f64 {
+        sum += sample_at(values, x);
+        count += 1.0;
+        x += period;
     }
-    best
+    if count > 0.0 { sum / count } else { 0.0 }
 }
 
-/// Finds the fractional lag that best explains the onset envelope.
+/// Linear interpolation between envelope samples.
+fn sample_at(values: &[f64], x: f64) -> f64 {
+    if x < 0.0 {
+        return 0.0;
+    }
+    let i = x.floor() as usize;
+    let frac = x - i as f64;
+    let a = values.get(i).copied().unwrap_or(0.0);
+    let b = values.get(i + 1).copied().unwrap_or(0.0);
+    a + (b - a) * frac
+}
+
+/// Finds the fractional period near `coarse` that best explains the onsets.
 ///
-/// Searches a fine grid either side of the integer peak. Integer lags quantise
-/// the tempo badly: at 172 envelope samples per second the lags either side of
-/// 128 BPM are 1.6 BPM apart, which put the median error at 0.375 BPM against
-/// rekordbox. Scoring fractional lags removes that entirely.
-fn refine_lag(values: &[f32], coarse: usize, phases: usize) -> f64 {
-    let mut best = (comb_score(values, coarse as f64, phases), coarse as f64);
-    // +/- one integer lag covers the quantisation error; 0.002 steps put the
-    // residual tempo error well under 0.01 BPM.
-    let mut candidate = coarse as f64 - 1.0;
-    while candidate <= coarse as f64 + 1.0 {
-        let score = comb_score(values, candidate, phases);
-        if score > best.0 {
-            best = (score, candidate);
+/// Integer lags quantise the tempo badly: at 172 envelope samples per second
+/// the lags either side of 128 BPM are 1.6 BPM apart. A fine search over
+/// fractional periods, each scored at its best phase, removes that.
+fn refine_period(values: &[f64], coarse: f64, phases: usize) -> f64 {
+    let score = |period: f64| {
+        let steps = phases.max(1);
+        (0..steps)
+            .map(|step| comb(values, period, period * step as f64 / steps as f64))
+            .fold(0.0_f64, f64::max)
+    };
+    let mut best = (score(coarse), coarse);
+    // Two passes: a coarse sweep of ±1 sample, then a fine one around the
+    // winner. The sweep is what costs, so it is kept to a few hundred combs.
+    for (span, step) in [(1.0, 0.02), (0.03, 0.002)] {
+        let centre = best.1;
+        let mut candidate = centre - span;
+        while candidate <= centre + span {
+            let s = score(candidate);
+            if s > best.0 {
+                best = (s, candidate);
+            }
+            candidate += step;
         }
-        candidate += 0.002;
+    }
+    best.1
+}
+
+/// The phase in `0..period` at which the comb collects the most energy.
+fn best_phase(values: &[f64], period: f64, phases: usize) -> f64 {
+    let steps = phases.max(1);
+    let mut best = (f64::NEG_INFINITY, 0.0);
+    for step in 0..steps {
+        let phase = period * step as f64 / steps as f64;
+        let s = comb(values, period, phase);
+        if s > best.0 {
+            best = (s, phase);
+        }
+    }
+    // Sharpen with a parabola through the neighbours: the comb is smooth in
+    // phase at the scale of one step.
+    let step = period / steps as f64;
+    let (a, b, c) = (
+        comb(values, period, best.1 - step),
+        best.0,
+        comb(values, period, best.1 + step),
+    );
+    let denom = a - 2.0 * b + c;
+    let offset = if denom.abs() > f64::EPSILON { 0.5 * (a - c) / denom } else { 0.0 };
+    best.1 + offset.clamp(-1.0, 1.0) * step
+}
+
+/// Snaps every predicted beat in `from..to` to the nearest onset peak and
+/// fits a line through the snapped ones, weighted by the peak's strength.
+fn snap_and_fit(values: &[f64], from: usize, to: usize, current: Fit) -> Option<Fit> {
+    let period = current.period;
+    if period < 2.0 {
+        return None;
+    }
+    // A beat may be snapped this far: less than half a beat, so that two
+    // predictions cannot claim one onset, and less than a hat's distance.
+    let reach = (period * 0.2).max(1.0);
+    let first = ((from as f64 - current.phase) / period).ceil() as i64;
+    let last = ((to as f64 - 1.0 - current.phase) / period).floor() as i64;
+    if last < first + 4 {
+        return None;
+    }
+
+    // Every predicted beat snapped to its nearest onset peak, with the
+    // peak's height as its weight: a beat in a breakdown, with no onset to
+    // snap to, should not pull the line.
+    let mut snapped: Vec<(f64, f64, f64)> = Vec::new(); // (index, time, weight)
+    for k in first..=last {
+        let predicted = current.phase + k as f64 * period;
+        if let Some((at, height)) = local_peak(values, predicted, reach) {
+            snapped.push((k as f64, at, height));
+        }
+    }
+    if snapped.len() < 4 {
+        return None;
+    }
+    // Beats with next to no onset are left out altogether rather than
+    // merely down-weighted. An intro of pads has a noise-floor peak near
+    // every predicted beat, and a minute of those, however light, tilts a
+    // line that is then extrapolated back across the same minute.
+    let mut heights: Vec<f64> = snapped.iter().map(|&(_, _, h)| h).collect();
+    heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let floor = heights.get(heights.len() / 2).copied().unwrap_or(0.0) * 0.2;
+    let strong: Vec<(f64, f64, f64)> = snapped.iter().copied().filter(|&(_, _, h)| h >= floor).collect();
+    let snapped = if strong.len() >= 4 { strong } else { snapped };
+
+    // Weighted least squares of snapped time on beat index, twice: the
+    // second pass leaves out the beats that sit furthest from the first
+    // line. A section of swung or late-hitting percussion snaps its beats
+    // consistently off the grid, and left in, it bends a whole track's
+    // tempo by a hundredth of a BPM, which is a beat of drift by the end.
+    let line = |points: &[(f64, f64, f64)]| -> Option<(f64, f64)> {
+        let (mut sw, mut sx, mut sy, mut sxx, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for &(x, y, w) in points {
+            sw += w;
+            sx += w * x;
+            sy += w * y;
+            sxx += w * x * x;
+            sxy += w * x * y;
+        }
+        let denom = sw * sxx - sx * sx;
+        if sw <= 0.0 || denom.abs() < f64::EPSILON {
+            return None;
+        }
+        let slope = (sw * sxy - sx * sy) / denom;
+        Some((slope, (sy - slope * sx) / sw))
+    };
+    let (slope, intercept) = line(&snapped)?;
+    let mut residuals: Vec<f64> = snapped.iter().map(|&(x, y, _)| (y - intercept - slope * x).abs()).collect();
+    residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Keep the closest four fifths, and never anything further than a
+    // tenth of a beat from the line.
+    let cutoff = residuals
+        .get(residuals.len() * 4 / 5)
+        .copied()
+        .unwrap_or(f64::INFINITY)
+        .min(period * 0.1);
+    let kept: Vec<(f64, f64, f64)> = snapped
+        .iter()
+        .copied()
+        .filter(|&(x, y, _)| (y - intercept - slope * x).abs() <= cutoff)
+        .collect();
+    let (slope, intercept) = if kept.len() >= 4 { line(&kept)? } else { (slope, intercept) };
+
+    // A fit that walked away from the candidate period is a fit to the wrong
+    // onsets; keep the old one.
+    if (slope - period).abs() > period * 0.02 {
+        return None;
+    }
+    Some(Fit { phase: intercept, period: slope })
+}
+
+/// The highest envelope sample within `reach` of `around`, with its
+/// position sharpened by a parabola through its neighbours.
+fn local_peak(values: &[f64], around: f64, reach: f64) -> Option<(f64, f64)> {
+    let lo = (around - reach).floor().max(0.0) as usize;
+    let hi = ((around + reach).ceil() as usize).min(values.len().saturating_sub(1));
+    if lo >= hi {
+        return None;
+    }
+    let mut best = (0.0_f64, lo);
+    for i in lo..=hi {
+        let v = values.get(i).copied().unwrap_or(0.0);
+        if v > best.0 {
+            best = (v, i);
+        }
+    }
+    if best.0 <= 0.0 {
+        return None;
+    }
+    let i = best.1;
+    let a = if i > 0 { values.get(i - 1).copied().unwrap_or(0.0) } else { best.0 };
+    let c = values.get(i + 1).copied().unwrap_or(0.0);
+    let denom = a - 2.0 * best.0 + c;
+    let offset = if denom.abs() > f64::EPSILON { 0.5 * (a - c) / denom } else { 0.0 };
+    Some((i as f64 + offset.clamp(-0.5, 0.5), best.0))
+}
+
+// ---------------------------------------------------------------- segments
+
+/// The tempo of each window along the track as a ratio to `bpm`, with the
+/// window's start in envelope samples. For measurement.
+pub fn local_tempos(onsets: &OnsetEnvelope, bpm: f64, options: TempoOptions) -> Vec<(f64, Option<f64>)> {
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+    let window = ((options.segment_window_secs * onsets.rate) as usize).max(64);
+    let hop = window / 2;
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start + window <= values.len() {
+        out.push((onsets.time_of(start as f64), local_tempo(&values[start..start + window], onsets.rate, bpm, options)));
+        start += hop;
+    }
+    out
+}
+
+/// How the fit stage arrives at a segment's tempo, for measurement: the BPM
+/// from the comb alone, then after each snap-and-refit pass.
+pub fn fit_report(onsets: &OnsetEnvelope, bpm: f64, options: TempoOptions) -> Vec<f64> {
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+    let n = values.len();
+    let coarse = onsets.rate * 60.0 / bpm;
+    let period = refine_period(&values, coarse, options.refine_phases);
+    let phase = best_phase(&values, period, 64);
+    let mut out = vec![onsets.rate * 60.0 / period];
+    let mut fit = Fit { phase, period };
+    for _ in 0..3 {
+        let Some(next) = snap_and_fit(&values, 0, n, fit) else { break };
+        fit = next;
+        out.push(onsets.rate * 60.0 / fit.period);
+    }
+    out
+}
+
+/// Windows in a row that must agree on a new tempo before it is believed.
+/// Three of them, hopping half a window, cover two windows' worth of
+/// track: a shorter stretch is a fill, not a section.
+const SEGMENT_MIN_WINDOWS: usize = 3;
+
+/// Whether a ratio between two tempos is one a rhythm produces on its own.
+///
+/// A dotted-eighth delay puts a real period at four thirds of the beat; a
+/// triplet feel at three halves. Windows that measure such a period have not
+/// changed tempo, and a DJ edit that happens to jump by exactly that ratio
+/// is rarer than the pattern.
+fn rhythmic_ratio(ratio: f64) -> bool {
+    [1.5, 2.0 / 3.0, 4.0 / 3.0, 0.75].iter().any(|r| (ratio - r).abs() < 0.03 * r)
+}
+
+/// Splits the track where the tempo changes and fits each stretch.
+fn segment(values: &[f64], rate: f64, origin_secs: f64, bpm: f64, options: TempoOptions) -> Vec<Segment> {
+    let n = values.len();
+    let window = ((options.segment_window_secs * rate) as usize).max(64);
+    // Local tempo per window, as a ratio to the track's, or None where the
+    // window has too little to say.
+    let hop = window / 2;
+    let mut local: Vec<Option<f64>> = Vec::new();
+    let mut starts: Vec<usize> = Vec::new();
+    let mut start = 0;
+    while start + window <= n {
+        starts.push(start);
+        local.push(local_tempo(&values[start..start + window], rate, bpm, options));
+        start += hop;
+    }
+
+    // The tempos the track holds: the track's own, plus any ratio that at
+    // least `SEGMENT_MIN_WINDOWS` windows agree on (within the threshold),
+    // that differs from the track's, and that is not a ratio a rhythm
+    // produces. A ratio fewer windows agree on is a fill or a breakdown.
+    let differs = |ratio: f64| (ratio - 1.0).abs() > options.segment_threshold && !rhythmic_ratio(ratio);
+    let mut clusters: Vec<(f64, usize)> = Vec::new(); // (mean ratio, count)
+    for ratio in local.iter().flatten().copied().filter(|&r| differs(r)) {
+        match clusters.iter_mut().find(|(centre, _)| (ratio - *centre).abs() < options.segment_threshold) {
+            Some((centre, count)) => {
+                *centre = (*centre * *count as f64 + ratio) / (*count as f64 + 1.0);
+                *count += 1;
+            }
+            None => clusters.push((ratio, 1)),
+        }
+    }
+    clusters.retain(|&(_, count)| count >= SEGMENT_MIN_WINDOWS);
+
+    // Every window is assigned to the nearest tempo, the track's own
+    // included, or carries the previous window's when it says nothing
+    // clearly; then a lone window between two of the other tempo is
+    // absorbed, because a window straddling a change measures neither.
+    let assigned: Vec<Option<f64>> = local
+        .iter()
+        .map(|ratio| {
+            ratio.and_then(|r| {
+                std::iter::once(1.0)
+                    .chain(clusters.iter().map(|&(c, _)| c))
+                    .filter(|c| (r - c).abs() < options.segment_threshold * 1.5)
+                    .min_by(|a, b| (r - a).abs().partial_cmp(&(r - b).abs()).unwrap_or(std::cmp::Ordering::Equal))
+            })
+        })
+        .collect();
+    // Leading windows that say nothing take the first tempo that is heard,
+    // not the track's: an intro without a beat belongs to what follows it.
+    let mut previous = assigned.iter().flatten().next().copied().unwrap_or(1.0);
+    let mut labels: Vec<f64> = vec![1.0; local.len()];
+    for (i, value) in assigned.iter().enumerate() {
+        previous = value.unwrap_or(previous);
+        labels[i] = previous;
+    }
+    for i in 1..labels.len().saturating_sub(1) {
+        if (labels[i - 1] - labels[i + 1]).abs() < 1e-9 && (labels[i] - labels[i - 1]).abs() > 1e-9 {
+            labels[i] = labels[i - 1];
+        }
+    }
+
+    // Runs of equal labels become stretches to fit. A stretch reaches from
+    // the start of its first window to the end of its last, and a window
+    // beyond either end is included so that the boundary search below has
+    // both grids covering the change.
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut runs: Vec<(usize, usize, f64)> = Vec::new(); // (from, to, bpm)
+    let mut i = 0;
+    while i < labels.len() {
+        let mut end = i;
+        while end < labels.len() && (labels[end] - labels[i]).abs() < 1e-9 {
+            end += 1;
+        }
+        let from = starts.get(i.saturating_sub(1)).copied().unwrap_or(0);
+        let to = if end >= starts.len() { n } else { (starts[end] + window).min(n) };
+        runs.push((from, to, bpm * labels[i]));
+        i = end;
+    }
+    if runs.is_empty() {
+        runs.push((0, n, bpm));
+    }
+
+    let mut fits: Vec<(usize, usize, Fit)> = Vec::new();
+    for (from, to, run_bpm) in runs {
+        let Some(f) = fit(values, rate, run_bpm, from, to, options) else { continue };
+        fits.push((from, to, f));
+    }
+    if fits.is_empty() {
+        return segments;
+    }
+
+    // Boundaries: where the onsets stop supporting one grid and start
+    // supporting the next.
+    let mut boundaries: Vec<f64> = Vec::new();
+    for pair in fits.windows(2) {
+        let (_, _, a) = pair[0];
+        let (from_b, to_b, b) = pair[1];
+        boundaries.push(boundary(values, from_b, to_b, a, b));
+    }
+
+    // Envelope sample 0 is half a frame into the file, so the file's start
+    // is a little before it; the first segment begins there.
+    let mut from_sample = -origin_secs * rate;
+    for (index, (_, _, f)) in fits.iter().enumerate() {
+        let to_sample = boundaries.get(index).copied().unwrap_or(n as f64);
+        if to_sample <= from_sample {
+            continue;
+        }
+        segments.push(Segment {
+            from_secs: origin_secs + from_sample / rate,
+            to_secs: origin_secs + to_sample / rate,
+            period_secs: f.period / rate,
+            phase_secs: origin_secs + f.phase / rate,
+        });
+        from_sample = to_sample;
+    }
+    segments
+}
+
+/// The tempo of one window as a ratio to `bpm`, or None when the window has
+/// no clear beat. Octaves of the track's tempo count as agreeing: a
+/// breakdown that keeps only the hats is not a tempo change.
+fn local_tempo(window: &[f64], rate: f64, bpm: f64, options: TempoOptions) -> Option<f64> {
+    let n = window.len();
+    let mean = window.iter().sum::<f64>() / n as f64;
+    let centred: Vec<f64> = window.iter().map(|v| v - mean).collect();
+    let variance = centred.iter().map(|v| v * v).sum::<f64>() / n as f64;
+    if variance <= 0.0 {
+        return None;
+    }
+    let lag_of = |b: f64| rate * 60.0 / b;
+    let min_lag = (lag_of(options.max_bpm).floor() as usize).max(2);
+    let max_lag = (lag_of(options.min_bpm).ceil() as usize).min(n / 3);
+    if max_lag <= min_lag + 2 {
+        return None;
+    }
+    let acf = autocorrelation(&centred, variance, min_lag, max_lag);
+    let home = interpolate(&acf, lag_of(bpm) - min_lag as f64);
+    // The strongest peak in the window.
+    let mut best = (0.0_f64, 0usize);
+    for i in 1..acf.len() - 1 {
+        if acf[i] > acf[i - 1] && acf[i] >= acf[i + 1] && acf[i] > best.0 {
+            best = (acf[i], i);
+        }
+    }
+    if best.0 <= 0.0 {
+        return None;
+    }
+    let peak_bpm = rate * 60.0 / (best.1 + min_lag) as f64;
+    // Fold onto the octave of the track's tempo.
+    let mut ratio = peak_bpm / bpm;
+    while ratio > 1.5 {
+        ratio /= 2.0;
+    }
+    while ratio < 0.75 {
+        ratio *= 2.0;
+    }
+    // The track's own tempo still correlates well: no change. A different
+    // period has to win outright, by a margin, to be believed.
+    if home >= best.0 * 0.6 {
+        return Some(1.0);
+    }
+    Some(ratio)
+}
+
+/// How strong the new grid's beats must be, relative to the median beat of
+/// its own stretch, before the change is placed: three quarters, for four
+/// beats in a row. Measured on the DJ edit in the golden playlist: the
+/// incoming track's beat sits at a third to a half of its eventual level
+/// for three bars under the outgoing one, and rekordbox switches at the bar
+/// where it reaches full level.
+const BOUNDARY_STRENGTH: f64 = 0.75;
+const BOUNDARY_BEATS: usize = 4;
+
+/// The envelope sample where the grid changes from `a` to `b`.
+///
+/// Not where `b` first appears: in a DJ edit the next track's beat comes in
+/// under the last one's breakdown, quietly, bars before it drops, and
+/// rekordbox holds the old grid until the drop. So the change is placed at
+/// the first beat of `b`, searched from `from` (the start of `b`'s stretch)
+/// to `to` (its end), that begins `BOUNDARY_BEATS` beats in a row each at
+/// least `BOUNDARY_STRENGTH` of the median beat of `b`'s whole stretch.
+/// Should no beat qualify, the change goes where the onsets stop following
+/// `a` and start following `b`, which is what a plain crossfade looks like.
+fn boundary(values: &[f64], from: usize, to: usize, a: Fit, b: Fit) -> f64 {
+    let lo = from.min(to);
+    let hi = from.max(to).min(values.len());
+    if hi <= lo || b.period < 2.0 {
+        return lo as f64;
+    }
+    // Beats of each grid inside the zone, with their onset support. The
+    // reach is half the fit's: a beat is supported only by an onset that is
+    // nearly on it, because two grids at nearby tempos drift through each
+    // other and a wide reach lets the new one claim the old one's onsets
+    // for several beats every cycle.
+    let beats_of = |f: Fit| -> Vec<(f64, f64)> {
+        let reach = (f.period * 0.1).max(1.0);
+        let first = ((lo as f64 - f.phase) / f.period).ceil() as i64;
+        let last = ((hi as f64 - f.phase) / f.period).floor() as i64;
+        (first..=last)
+            .map(|k| {
+                let at = f.phase + k as f64 * f.period;
+                (at, local_peak(values, at, reach).map_or(0.0, |(_, height)| height))
+            })
+            .collect()
+    };
+    let beats_a = beats_of(a);
+    let beats_b = beats_of(b);
+
+    let mut heights: Vec<f64> = beats_b.iter().map(|(_, h)| *h).collect();
+    heights.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+    let median = heights.get(heights.len() / 2).copied().unwrap_or(0.0);
+    let threshold = median * BOUNDARY_STRENGTH;
+    // Mean support of a grid's beats from `t` over the next two bars.
+    let ahead = |beats: &[(f64, f64)], t: f64| -> f64 {
+        let run: Vec<f64> = beats.iter().filter(|(at, _)| *at >= t).take(BOUNDARY_BEATS * 2).map(|(_, h)| *h).collect();
+        if run.is_empty() { 0.0 } else { run.iter().sum::<f64>() / run.len() as f64 }
+    };
+    if threshold > 0.0 {
+        for (i, &(cut, _)) in beats_b.iter().enumerate() {
+            let run = beats_b.get(i..i + BOUNDARY_BEATS).unwrap_or(&[]);
+            // Full strength, and stronger than the old grid carried on: two
+            // grids at nearby tempos drift through each other, and for a
+            // few beats every cycle the new one lands on the old one's
+            // onsets and looks supported.
+            if run.len() == BOUNDARY_BEATS
+                && run.iter().all(|(_, h)| *h >= threshold)
+                && ahead(&beats_b, cut) >= ahead(&beats_a, cut)
+            {
+                return cut;
+            }
+        }
+    }
+
+    // For every possible boundary (each beat of b), the support for a before
+    // it plus the support for b from it on; ties go to the later cut.
+    let mut best = (f64::NEG_INFINITY, hi as f64);
+    for &(cut, _) in &beats_b {
+        let score: f64 = beats_a.iter().filter(|(t, _)| *t < cut).map(|(_, s)| s).sum::<f64>()
+            + beats_b.iter().filter(|(t, _)| *t >= cut).map(|(_, s)| s).sum::<f64>();
+        if score >= best.0 {
+            best = (score, cut);
+        }
     }
     best.1
 }
