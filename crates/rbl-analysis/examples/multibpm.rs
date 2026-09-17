@@ -64,6 +64,12 @@ struct Track {
 }
 
 impl Track {
+    /// Whether the row's file is one of ours. Compared lexically cleaned:
+    /// rows from before the rig canonicalised its paths carry a `..`.
+    fn is_staged(&self) -> bool {
+        normalized(&self.path).starts_with(staging_dir())
+    }
+
     fn matches(&self, filter: Option<&str>) -> bool {
         filter.is_none_or(|f| {
             self.title.to_lowercase().contains(f) || self.file_name.to_lowercase().contains(f)
@@ -71,11 +77,15 @@ impl Track {
     }
 }
 
+/// Canonical, because the path is what the library rows will carry and
+/// rekordbox marks a row whose path holds `..` as missing.
 fn root() -> PathBuf {
-    std::env::var("RB_LITE_MULTIBPM").map_or_else(
+    let raw = std::env::var("RB_LITE_MULTIBPM").map_or_else(
         |_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/multibpm"),
         PathBuf::from,
-    )
+    );
+    let _ = std::fs::create_dir_all(&raw);
+    raw.canonicalize().unwrap_or(raw)
 }
 fn staging_dir() -> PathBuf {
     root().join("tracks")
@@ -190,7 +200,7 @@ fn pairs(conn: &rusqlite::Connection, filter: Option<&str>) -> Result<Vec<(Track
     let staging = staging_dir();
     let mut out = Vec::new();
     for copy in copies {
-        if !copy.path.starts_with(&staging) {
+        if !copy.is_staged() {
             println!("  skipping {} — not under {}", copy.title, staging.display());
             continue;
         }
@@ -236,13 +246,15 @@ fn reset(writer: &mut Writer, filter: Option<&str>) -> Result<(), String> {
     let staging = staging_dir();
     let share = writer.library().location().share_root.clone();
     let copies = members(writer.library().connection(), RESULTS_PLAYLIST)?;
+    let mut registered = read_registered();
     let mut removed = 0;
     for copy in copies.iter().filter(|c| c.matches(filter)) {
-        if !copy.path.starts_with(&staging) {
+        if !copy.is_staged() {
             println!("  leaving {} — not under {}", copy.title, staging.display());
             continue;
         }
         writer.delete_track(&copy.id).map_err(|e| format!("delete {}: {e}", copy.title))?;
+        registered.remove(&copy.id);
         if !copy.analysis_path.is_empty() {
             let dat = rbl_anlz::resolve(&share, &copy.analysis_path);
             if let Some(dir) = dat.parent() {
@@ -252,6 +264,7 @@ fn reset(writer: &mut Writer, filter: Option<&str>) -> Result<(), String> {
         removed += 1;
         println!("  removed {}", copy.title);
     }
+    write_registered(&registered)?;
     println!("reset: {removed} copies removed from the collection");
     Ok(())
 }
@@ -527,6 +540,24 @@ fn write_registered(all: &BTreeMap<String, Registered>) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// `.` and `..` resolved lexically, as the importer stores paths.
+fn normalized(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// FNV-1a, enough to notice a rewritten file.
