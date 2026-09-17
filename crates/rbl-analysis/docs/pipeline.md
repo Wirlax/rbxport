@@ -22,8 +22,13 @@ flowchart TD
     end
 
     S6 --> Q1{6. Does the tempo change<br/>anywhere in the track?<br/>16 s windows, whole track}
-    Q1 -- yes --> S7[7. Cut at the beat where the new tempo<br/>is settled and the kicks are reliable;<br/>repeat steps 1–5 on the stretch after the cut]
-    S7 --> Q1
+    Q1 -- yes --> S7[7. Find the two settled tempos either side<br/>and the last bar at the old one]
+    S7 --> S7b[7a. Bisect the next bar's downbeat:<br/>it lies between where the old tempo and the new tempo<br/>would put it; find the kick between those two bounds]
+    S7b --> S7c[7b. Cut at that downbeat;<br/>the bar's tempo is its own length]
+    S7c --> Q1b{7c. Is this bar already<br/>at the new settled tempo?}
+    Q1b -- no --> S7b
+    Q1b -- yes --> S7d[7d. Repeat steps 1–5 on the settled stretch after it]
+    S7d --> Q1
     Q1 -- no --> S8
 
     subgraph P3 [Phase 3 — beat 1]
@@ -59,7 +64,8 @@ flowchart TD
 | 3. kick attack, 900–9000 Hz RMS spike | **new** | today the beat is the peak of the full-band onset envelope, sharpened by a parabola |
 | 4. backtrack to the zero crossing | **new** | rekordbox's grids sit on the spike itself; the gate will say whether the zero crossing or the spike start matches it |
 | 5. fit through the placed points, extend over the track | **changes** | the snap-and-refit exists; it would take these sample-accurate points |
-| 6–7. tempo change, cut where the new beat is settled | built | the switch goes where the incoming beat is at full strength |
+| 6. tempo change anywhere | built | 16 s windows over the whole track |
+| 7–7d. gradual change gridded bar by bar | **new** | today the old tempo is held to a single cut where the incoming beat is at full strength. With bisection, a rise or fall between two settled tempos — linear or not, up or down — gets a cut at every bar's first downbeat and each bar its own tempo, as rekordbox's per-beat tempo allows |
 | 8–11. beat 1 from where the music changes; half-beat move; numbering | built | novelty peaks over half-beat profiles at 1, 2, 4 and 8 bars |
 | 12. phrase starts | built | the four-bar novelty peaks on downbeats |
 | 13–14. Faraldo's edmkey | **changes** | today: every bin (not peaks), 8192 frames, 55–2000 Hz, no whitening, no gate, edma profiles; the harmonic folding is the same |

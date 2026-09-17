@@ -24,11 +24,15 @@ and [key.md](key.md).
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
   across the join, as rekordbox writes it.
 - **A grid is set where the kick drums state the tempo reliably.** Through
-  a stretch where they do not — a gradual rise, a breakdown, a new tempo
-  that is only hinted at by percussion — the grid holds the tempo it had,
-  and switches where the new tempo is settled and the kicks are reliable
-  again. The code places a change where the incoming beat is at full
-  strength, not where it first appears.
+  a stretch where they do not — a breakdown, a new tempo that is only
+  hinted at by percussion — the grid holds the tempo it had and switches
+  where the new tempo is settled and the kicks are reliable again.
+- **A gradual tempo change between two settled tempos is gridded bar by
+  bar.** Each bar's first downbeat is found by bisection: it lies between
+  where the old tempo and the new tempo would put it, and the kick is
+  looked for between those bounds. A cut goes at every such downbeat and
+  each bar carries its own tempo, so a rise or fall — linear or not, up or
+  down — is followed a bar at a time until the tempo is settled again.
 
 ## Downbeat
 

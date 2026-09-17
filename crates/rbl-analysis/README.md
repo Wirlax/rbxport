@@ -16,7 +16,7 @@ flowchart TD
     S([decoded track]) --> A[1. Detect the BPM over the whole track]
     A --> B[2. Lay the grid on the kicks:<br/>find each kick's attack, fit a line through them,<br/>extend it over the whole track]
     B --> Q1{3. Does the tempo change?}
-    Q1 -- yes --> C[4. Cut where the new beat is settled;<br/>redo 1–2 after the cut]
+    Q1 -- yes --> C[4. Between the two settled tempos, grid the change bar by bar:<br/>bisect each bar's first downbeat between where the old and the new tempo<br/>would put it, and cut there; redo 1–2 on the settled stretch after]
     C --> Q1
     Q1 -- no --> D[5. Find beat 1: where the music changes]
     D --> Q2{6. Do the changes land between the grid's beats?}
