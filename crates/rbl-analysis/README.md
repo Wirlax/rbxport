@@ -31,7 +31,10 @@ Each stage is a module and has its own document:
 | Key — the chromagram, the profile match, and the rule pipeline | `key.rs` | [docs/key.md](docs/key.md) |
 | Waveform — the three-band strip rekordbox draws | `waveform.rs` | (below) |
 
-Two more documents cover the whole crate:
+Two more documents cover the whole crate, and one the plan:
+
+- [docs/pipeline.md](docs/pipeline.md) — the target pipeline as a flowchart,
+  with each box marked built, changing or new.
 
 - [docs/rules.md](docs/rules.md) — the rules Chris has set for how this
   library's music is to be read, and what the code does with each.
