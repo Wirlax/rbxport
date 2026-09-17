@@ -2,17 +2,16 @@
 
 Finds the tempo and puts a beat on every kick. Code: `onset.rs` (the
 onset envelope), `tempo.rs` (tempo, fit, tempo changes) and `attack.rs`
-(the kick's attack). Steps 1–7 of [pipeline.md](pipeline.md).
+(the kick's attack). Steps 1–6 of [pipeline.md](pipeline.md).
 
 ```mermaid
 flowchart TD
     A[1. Detect the BPM over the whole track] --> B[2. Lay a first grid at that BPM]
     B --> C[3. For each beat, find the kick's attack]
-    C --> D[4. Backtrack to the zero crossing]
-    D --> E[5. Fit a line through the attacks;<br/>extend it over the whole track]
-    E --> Q{6. Does the tempo change?}
+    C --> E[4. Fit a line through the attacks;<br/>extend it over the whole track]
+    E --> Q{5. Does the tempo change?}
     Q -- no --> Z([grid])
-    Q -- yes --> F[7. Grid the change bar by bar,<br/>then the settled stretch after it]
+    Q -- yes --> F[6. Grid the change bar by bar,<br/>then the settled stretch after it]
     F --> Q
 ```
 
@@ -69,16 +68,9 @@ For each beat of the first grid:
   where it starts.
 
 A beat with no spike near it (a breakdown, a beatless intro) is left
-unplaced and does not pull the line in step 5.
+unplaced and does not pull the line in step 4.
 
-## 4. Zero crossing
-
-From the attack, walk back to the previous zero crossing of the
-band-passed signal. That sample is the beat. It can sit a few
-milliseconds before the spike on a slow attack; the gate decides whether
-rekordbox's beat is the spike or the crossing, and the step is a switch.
-
-## 5. Fit and extend
+## 4. Fit and extend
 
 A straight line is fitted through the placed beats (time against beat
 index), weighted by each spike's height, twice: the second time without
@@ -88,7 +80,7 @@ the period to well under 0.01 BPM. The line is extended back to the start
 of the file — the first beat is the first grid position at or after time
 zero, as rekordbox does — and forward to the end.
 
-## 6. Does the tempo change?
+## 5. Does the tempo change?
 
 The tempo is measured again in 16-second windows over the whole track, by
 autocorrelation of each window alone, folded onto the track's octave. A
@@ -96,9 +88,9 @@ window where the track's tempo still fits at 60 % of the best peak has not
 changed. A second tempo is believed when at least three windows agree on
 it, it differs by more than 2 %, and it is not a ratio a rhythm makes on
 its own (3⁄2, 2⁄3, 4⁄3, 3⁄4). The stretches where each tempo is *settled*
-— consecutive windows at one tempo — are the anchors for step 7.
+— consecutive windows at one tempo — are the anchors for step 6.
 
-## 7. Grid the change
+## 6. Grid the change
 
 Between two settled tempos there is a stretch where the tempo is moving,
 or where the old track's beat has stopped and the new one is coming in.
@@ -112,7 +104,7 @@ one bar at a time:
 - put a cut there: the bar just gridded gets its own tempo, its own
   length divided into four;
 - repeat until a bar comes out at the new settled tempo, then run steps
-  1–5 on the settled stretch after it.
+  1–4 on the settled stretch after it.
 
 A rise or fall that is gradual and not linear is followed a bar at a time;
 a DJ edit where the new beat arrives under a breakdown gets its cut at the

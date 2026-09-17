@@ -25,7 +25,8 @@ cargo run --release -p rbl-analysis --example golden -- bassroot
   candidates, the segments, the fit's passes, the half-beat scores and the
   first beats side by side with rekordbox's.
 - `downbeat` checks the downbeat stage on rekordbox's own grids, so it is
-  judged apart from our grid.
+  judged apart from our grid. `RB_LITE_PLACEMENT=envelope` on `eval`
+  places beats on the onset envelope's peak instead of the kick's attack.
 - `key` measures the key rules — what each fired on, fixed and broke — and
   searches the bass-rule knobs. `bassroot` measures the bass as evidence by
   itself, per band and window.
@@ -47,12 +48,19 @@ placed at the right beat for the numbering after it to match.
 
 | metric | start | now |
 |---|---|---|
-| bpm | 146 | **155 / 155** |
-| downbeat | 27 | **151 / 155** |
-| grid | 26 | **146 / 155** |
-| key | 27 | **130 / 155** |
+| bpm | 146 | **154 / 155** |
+| downbeat | 27 | **143 / 155** |
+| grid | 26 | **140 / 155** |
+| key | 27 | **140 / 155** |
 
-The target is 99 %, at most one miss per metric.
+The target is 99 %, at most one miss per metric. Every downbeat and grid
+miss but four is one of the eleven rekordbox 6 grids below, whose beats
+sit 25 ms after the kick: with beats placed on the kick's attack our
+offset from rekordbox 7 grids is a median 0.0 ms, and from those eleven
+−24 to −27 ms, on the tolerance edge. With the envelope peak instead of
+the attack (`RB_LITE_PLACEMENT=envelope`) the beats sit 1 ms later, six of
+the eleven scrape in, and the gate reads 155 / 151 / 146 / 140 — a better
+number from a worse placement.
 
 ## The misses
 
@@ -61,10 +69,9 @@ weaver – diya, Missing, Insane Stampede, Sky Fall, Concrete Jungle, Voltage,
 Goddess, Drift Around Me, Angels, Force of Gravity.* Their rekordbox grids
 sit exactly 1105 samples (25 ms) after the kick; the other 140 MP3s sit on
 it. Chris confirmed the playlist was analysed at different times, some by
-rekordbox 6 and some by 7. Our beats are on the kick, so these fail the
-grid metric on the tolerance edge and two of them (Drift Around Me, Insane
-Stampede, at −26 ms) fail the downbeat metric. Re-analysing them in
-rekordbox 7 would settle it. Before that was known, the cause was chased
+rekordbox 6 and some by 7. Our beats are on the kick, so all eleven fail
+the grid metric and eight the downbeat metric, at −24 to −27 ms.
+Re-analysing them in rekordbox 7 would settle it. Before that was known, the cause was chased
 through the file and the decoder: it is not the Xing/Info frame, the LAME
 tag's CRC, the encoder version, the ID3 version, or anything in
 `djmdContent`; and rekordbox's own bundled `libmpg123`, driven from Python,
@@ -73,23 +80,24 @@ gives exactly our timeline (gapless off) or exactly 1105 samples earlier
 
 **Two DJ edits, both gridded by hand.** `Go Back [136-174]`: 136 BPM until
 bar 61, rising until bar 82.2, then 174; the hand grid holds 136 through the
-rise and switches at bar 82.25. Ours switches at the same millisecond, but
-our 136 line is 0.02 BPM off across an intro with no kicks (18 ms at the
-first beat) and our beat 1 is one beat before the hand grid's. `Bring Me
-Back to Life [138-150]`: the hand grid is anchored where the kicks state
-the tempo and holds 138 until 105 s; the 150 beat is audible, quietly,
-from 64 s and our switch goes there.
+rise and switches at bar 82.25. The bar-by-bar walk cannot follow the rise
+because it begins in a breakdown with no kick to track, so the cut goes
+where the new beat is at full strength — the same millisecond as the hand
+grid — but our 136 line is 0.05 BPM off across an intro with no kicks and
+our beat 1 is one beat before the hand grid's. `Bring Me Back to Life
+[138-150]`: the hand grid is anchored where the kicks state the tempo and
+holds 138 until 105 s; the 150 beat is audible, quietly, from 64 s and our
+switch goes there.
 
 **BATTERY OPERATED.** Rekordbox's beats sit where every band of the
 spectrum and the phrase structure say the off-beat is; the grid is half a
 beat from ours.
 
 **They Want Your Soul.** The comb says 133.003 BPM; the snap-and-refit
-pulls it to 132.986, which drifts 22 ms by the end; 86 % of beats match.
-The refit stays because it is right more often than the comb alone (with
-the comb alone the grid metric drops from 146 to 143).
+pulls it to 132.99, which drifts 20 ms by the end; 90 % of beats match.
+The refit stays because it is right more often than the comb alone.
 
-**Key.** See [key.md](key.md): 11 mode misses, 8 fifths, 6 others.
+**Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 3 others.
 
 ## Rekordbox facts learned on the way
 

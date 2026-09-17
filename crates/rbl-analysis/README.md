@@ -28,7 +28,7 @@ flowchart TD
     H --> T([BPM, grid, beat 1, phrases, key, waveform])
 ```
 
-[docs/pipeline.md](docs/pipeline.md) has the full procedure, nineteen steps
+[docs/pipeline.md](docs/pipeline.md) has the full procedure, eighteen steps
 with each marked as built, changing or new. Each stage is a module and has
 its own document:
 
@@ -53,13 +53,16 @@ Against the `RBX-BPM-GRID-TEST` playlist (155 tracks):
 
 | metric | before this work | now |
 |---|---|---|
-| BPM within 0.05 | 146 | **155 / 155** |
-| first downbeat within 25 ms | 27 | **151 / 155** |
-| whole grid (98 % of beats within 25 ms, same number) | 26 | **146 / 155** |
-| key, same name | 27 | **130 / 155** |
+| BPM within 0.05 | 146 | **154 / 155** |
+| first downbeat within 25 ms | 27 | **143 / 155** |
+| whole grid (98 % of beats within 25 ms, same number) | 26 | **140 / 155** |
+| key, same name | 27 | **140 / 155** |
 
-The target is 99 % on each. [docs/golden-gate.md](docs/golden-gate.md) lists
-every miss.
+The target is 99 % on each. Eleven of the playlist's grids come from
+rekordbox 6 and sit 25 ms after the kick; with beats on the kick's attack
+(a median 0.0 ms from rekordbox 7's), those eleven are most of the
+downbeat and grid misses. [docs/golden-gate.md](docs/golden-gate.md)
+lists every miss.
 
 ## Waveform
 

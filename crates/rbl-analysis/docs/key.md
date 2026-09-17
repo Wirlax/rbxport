@@ -1,7 +1,7 @@
 # Key
 
 Finds the musical key and names it the way rekordbox does (`Fm`, `Db`,
-`F#m`). Code: `key.rs`. Steps 13–19 of [pipeline.md](pipeline.md).
+`F#m`). Code: `key.rs`. Steps 12–18 of [pipeline.md](pipeline.md).
 
 The front end is Ángel Faraldo's **edmkey** method, as Essentia's
 `KeyExtractor` runs it. Every number below is Essentia's default, taken
@@ -9,19 +9,19 @@ from its source. After it, the rules in [rules.md](rules.md) are applied.
 
 ```mermaid
 flowchart TD
-    A[13. Cut the track into 4096-sample frames, hop 4096, Hann window] --> B[Magnitude spectrum of each frame]
+    A[12. Cut the track into 4096-sample frames, hop 4096, Hann window] --> B[Magnitude spectrum of each frame]
     B --> C[Spectral peaks: up to 60 per frame, 25–3500 Hz,<br/>magnitude at least 0.0001, position interpolated between bins]
     C --> D[Spectral whitening: flatten the peaks' envelope<br/>so loud regions do not drown quiet ones]
     D --> E[HPCP, 12 bins: each peak credits its pitch class<br/>and those of f/2, f/3, f/4 with weights 1, 0.6, 0.36, 0.22;<br/>cosine weighting one semitone wide; A = 440 Hz]
     E --> F[Gate: in each frame, bins below 0.2 of the frame's peak → 0]
     F --> G[Average the frames]
     G --> H[Detuning correction: roll the profile<br/>so its strongest bin sits on a semitone]
-    H --> I[14. Correlate against the major and minor profiles<br/>at all 12 tonics: 24 scores]
-    I --> J[15–18. Rule pipeline]
-    J --> K[19. Name the key]
+    H --> I[13. Correlate against the major and minor profiles<br/>at all 12 tonics: 24 scores]
+    I --> J[14–17. Rule pipeline]
+    J --> K[18. Name the key]
 ```
 
-## 13. From audio to a pitch-class profile
+## 12. From audio to a pitch-class profile
 
 - **Frames.** 4096 samples with a hop of 4096 (no overlap) and a Hann
   window. At 44.1 kHz that is 93 ms per frame and 10.8 Hz per bin; the
@@ -46,7 +46,7 @@ flowchart TD
   concert pitch, the profile's strongest bin is off-centre; the profile is
   rolled so it sits on a semitone.
 
-## 14. Profile match
+## 13. Profile match
 
 The profile is correlated (Pearson) against a major and a minor key
 profile rotated to each of the 12 tonics. Essentia's default for this
@@ -70,7 +70,7 @@ and `edmm` (a flat major profile and an `edma`-like minor, i.e. "assume
 minor"). The gate scores all four; the one that ships is the one that
 agrees with rekordbox most.
 
-## 15–18. Rules
+## 14–17. Rules
 
 The 24 scores go through the rule pipeline. Each rule is a named step
 with its own knobs; the gate reports for each how often it fired, what
@@ -95,17 +95,34 @@ Which rules ship, with which knobs, is decided by the gate
 ([golden-gate.md](golden-gate.md)); the rules that do not ship stay in the
 pipeline for the rig and for other libraries.
 
-## 19. Name
+## 18. Name
 
 Rekordbox's names: `Dbm`, `F#m`, `Abm`, `Bbm` for the minors, `Db`, `F#`,
 `Ab`, `Bb`, `Eb` for the majors, matching `djmdKey.ScaleName`.
+
+## Result
+
+**140 of 155** (90 %). The profile match alone gets 92; `PreferMinor`
+at 0.1 fires on 61 tracks, fixes 54 and breaks 6. `edma` at 0.1 and
+Shaath at 0.2 tie at 140; Krumhansl gives 139 and `bgate`, Essentia's
+default, 138.
+
+The 15 misses: nine are the same tonic in the other mode (eight tracks
+rekordbox calls major — `Acid Jump`, `Dolce (Extended Mix)`, `Around`,
+`Airplane Mode`, `Guilty Pleasures` ×2, `Final Call`, `GIN AND TONIC` —
+and `Renegade Master` the other way), three are a fifth away (`Goddess`,
+`Big Jet Plane`, `Da Ga Dam`), three are elsewhere (`XTC Nation`,
+`Tiamat`, `Ride The Train`).
 
 ## Before this front end
 
 The earlier front end credited every spectrum bin (not just peaks) from
 8192-sample frames between 55 Hz and 2 kHz, with the same harmonic
-folding, no whitening and no gate, matched against `edma` with
-`PreferMinor` at 0.3. It scored 130 of 155; the profile match alone 89,
-the bass rules fixed none. The eleven remaining mode misses, eight fifths
-and six others are listed in [golden-gate.md](golden-gate.md). Faraldo's
-front end is measured against that 130.
+folding, no whitening and no gate. Its best was 132 of 155, and that only
+with a flat major profile (`edmm`) that never says major at all; with
+`edma` and `PreferMinor` at 0.3 it scored 130. Two things in the port of
+Faraldo's method mattered: the HPCP is built with A = 440 Hz as bin 0, so
+the profiles have to be rotated to C; and Essentia passes peaks within
+100 Hz of the top through whitening unchanged, which on a spectrum not
+scaled to 1 lets them outweigh everything else — here they are whitened
+like the rest.
