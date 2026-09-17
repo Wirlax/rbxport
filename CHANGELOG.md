@@ -7,6 +7,16 @@ the version numbers [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Analyze reads the whole track instead of the first three minutes. The beat
+  grid it reports stays on the beat to the last bar, a tempo change part-way
+  through (a DJ edit) gets a second grid with the count running on, and
+  beat 1 is chosen from where the music changes — drops, breakdowns, new
+  bass lines — rather than assumed to be the first kick. Against the
+  155-track RBX-BPM-GRID-TEST playlist the BPM now matches rekordbox on every
+  track (was 146), the downbeat on 151 (was 27) and the whole grid on 146
+  (was 26). The result is still reported, not written to the library.
+- Key detection agrees with rekordbox on 130 of those 155 tracks, up from 27.
 ### Added
 - Analyze Track writes its result to the library: the beat grid and every
   waveform go into the analysis files beside rekordbox's own, and the BPM,
