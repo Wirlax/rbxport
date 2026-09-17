@@ -34,10 +34,10 @@ its own document:
 
 | stage | module | doc |
 |---|---|---|
-| Beat grid — tempo, the position of every beat, tempo changes | `onset.rs`, `tempo.rs` | [docs/beat.md](docs/beat.md) |
+| Beat grid — tempo, a beat on each kick's attack, tempo changes gridded bar by bar | `onset.rs`, `tempo.rs`, `attack.rs` | [docs/beat.md](docs/beat.md) |
 | First downbeat — which beat is 1, and whether the grid is on the kick | `downbeat.rs` | [docs/downbeat.md](docs/downbeat.md) |
 | Phrase starts — where sections begin; phrase *labels* are not done | `downbeat.rs`, `phrase.rs` | [docs/phrase.md](docs/phrase.md) |
-| Key — the chromagram, the profile match, and the rule pipeline | `key.rs` | [docs/key.md](docs/key.md) |
+| Key — Faraldo's edmkey front end, the profile match, and the rule pipeline | `key.rs` | [docs/key.md](docs/key.md) |
 | Waveform — the three-band strip rekordbox draws | `waveform.rs` | (below) |
 
 Two more documents cover the whole crate:

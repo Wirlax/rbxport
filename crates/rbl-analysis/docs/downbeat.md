@@ -2,6 +2,7 @@
 
 Decides which beat is beat 1, and checks that the grid is on the kick and
 not on the off-beat. Code: `downbeat.rs`, applied in `lib.rs::analyse`.
+Steps 8–12 of [pipeline.md](pipeline.md).
 
 ```mermaid
 flowchart TD
@@ -61,6 +62,9 @@ grid on the beat at all?".
    on its own beats and renumbered from its own downbeat. A DJ edit's two
    halves are two pieces of music, and a bar count carried across a tempo
    change that landed a beat off would misnumber the whole second half.
+   A bar-by-bar transition ([beat.md](beat.md), step 7) needs no asking:
+   its cuts are downbeats by construction, so the count runs 1–4 through
+   it from the settled stretch before.
 
 On rekordbox's own grids, this picks rekordbox's downbeat on 153 of the
 155 test tracks (`golden downbeat`). On our grids it is 151.

@@ -1,136 +1,124 @@
 # Beat grid
 
-Finds the tempo and the time of every beat. Code: `onset.rs` (the onset
-envelope) and `tempo.rs` (everything after it).
+Finds the tempo and puts a beat on every kick. Code: `onset.rs` (the
+onset envelope), `tempo.rs` (tempo, fit, tempo changes) and `attack.rs`
+(the kick's attack). Steps 1–7 of [pipeline.md](pipeline.md).
 
 ```mermaid
 flowchart TD
-    A[mono audio] --> B[Onset envelope<br/>one value per 5.8 ms: how much a hit happened here]
-    B --> C[Candidates<br/>which tempos are possible, best first]
-    C --> D[Fit<br/>the exact period and phase]
-    D --> E[Segments<br/>does the tempo change? where?]
-    E --> F[Beats<br/>time of every beat, numbered 1–4 from the first]
+    A[1. Detect the BPM over the whole track] --> B[2. Lay a first grid at that BPM]
+    B --> C[3. For each beat, find the kick's attack]
+    C --> D[4. Backtrack to the zero crossing]
+    D --> E[5. Fit a line through the attacks;<br/>extend it over the whole track]
+    E --> Q{6. Does the tempo change?}
+    Q -- no --> Z([grid])
+    Q -- yes --> F[7. Grid the change bar by bar,<br/>then the settled stretch after it]
+    F --> Q
 ```
 
-## 1. Onset envelope
+## 1. Detect the BPM
 
-The rest of the stage never looks at the audio. It looks at a list of
-numbers, one every 256 samples (5.8 ms at 44.1 kHz), saying how much a
-percussive hit happened at that moment.
+The track is reduced to an **onset envelope**: one number every 256
+samples (5.8 ms at 44.1 kHz) saying how much a percussive hit happened
+then. It is spectral flux — a 1024-sample window every 256 samples, and
+for each window the sum of how much every frequency bin *rose* since the
+last one. Rises only, so held notes and decays add nothing and a kick,
+which raises many bins at once, adds a lot. A local average is subtracted,
+the result is clipped at zero, and the whole envelope is scaled to a peak
+of 1. Each value is stamped with the time at the centre of its window.
 
-How it is made:
+Two measurements of the envelope are combined, over the whole track:
 
-- Take a 1024-sample window every 256 samples and compute its spectrum.
-- For each window, sum how much every frequency bin *rose* since the
-  previous window. Only rises count. A held note or a fading sound adds
-  nothing; a kick, which raises many bins at once, adds a lot.
-- Subtract a local average (±16 values) and clip at zero, so a quiet intro
-  and a loud drop count the same.
-- Scale the whole thing so its peak is 1.
+- **Autocorrelation** — at which lags the envelope lines up with itself.
+  Peaks at the beat period and its multiples, and also at one and a half
+  beats (kick, hat, kick, hat).
+- **Fourier magnitude** — how strong the rhythm is at one exact rate, in
+  20-second windows averaged. Strong at the beat rate and its multiples,
+  never at two thirds of it. This is what rules out the one-and-a-half
+  error.
 
-Each value is stamped with the time at the *centre* of its window. A hit
-raises the spectrum most as the window's middle passes over it, so that is
-when the value peaks. Stamping the start of the window put every beat 12 ms
-early.
+Every autocorrelation peak between 70 and 200 BPM is a candidate, with its
+simple multiples and fractions. Each is scored
+`autocorrelation × √fourier × prior`, the prior a broad bell centred on
+132 BPM that only breaks ties between octaves. Drum & bass comes back at
+174, not 87: the faster octave wins when it carries the rhythm.
 
-## 2. Candidates
+The whole track is used, not an excerpt, so a tempo change anywhere is
+seen (step 6).
 
-Two measurements are combined. Each has a failure the other does not.
+## 2. First grid
 
-**Autocorrelation.** Slide the envelope against itself and see at which
-lags it lines up. It lines up at the beat period and at every multiple of
-it. It also lines up at one and a half beats: a grid that wide lands on
-kick, hat, kick, hat, and hats show up strongly in the envelope. Tracks were
-coming back at two thirds of their real tempo because of this.
+The winning BPM is refined to a fraction of an envelope sample with a comb
+(the envelope summed at every beat of a trial period, at the best of 32
+phases), and the phase is the one of 64 that collects the most onset
+energy. This grid is only as accurate as the envelope, ±3 ms; it says
+where to look for each kick.
 
-**Fourier magnitude.** How strong the envelope's rhythm is at one exact rate.
-It is strong at the beat rate and at multiples of it (twice the tempo,
-three times). It is *not* strong at two thirds of the tempo, because a
-rhythm has no component slower than its own pulse. It is measured in
-20-second windows and averaged, not over the whole track: over five minutes
-a candidate a tenth of a BPM off drifts through most of a cycle and cancels
-itself out.
+## 3. The kick's attack
 
-Every peak of the autocorrelation between 70 and 200 BPM is a candidate,
-and so are its simple multiples and fractions (×2, ×½, ×3⁄2, ×2⁄3, ×3, ×⅓,
-×4⁄3, ×¾) when they fall in range. Each candidate is scored:
+Beat 1 is always on the kick, and the grid goes on the kick's *attack*.
+The attack is the start of an RMS spike in the 900–9000 Hz band — the
+click at the front of a kick, which the kick's body (below 200 Hz) and the
+bass line do not have.
 
-```
-score = autocorrelation × √fourier × prior
-```
+For each beat of the first grid:
 
-The prior is a broad bell centred on 132 BPM; it only breaks ties between
-octaves. The Fourier term is square-rooted because its job is to throw out a
-candidate with no rhythm at its rate at all, not to prefer the hi-hat rate
-over the beat.
+- band-pass the audio around the beat to 900–9000 Hz;
+- take the RMS in 1 ms steps over a window of a few tens of ms either side;
+- the spike is the biggest rise nearest the beat; the attack is the step
+  where it starts.
 
-Which octave is "the" tempo is a convention. Drum & bass with kick and snare
-alternating at 87 comes back as 174, which is what rekordbox does and what
-the test playlist wants. Nothing in the playlist is below 123 BPM, so the
-slow end is untested.
+A beat with no spike near it (a breakdown, a beatless intro) is left
+unplaced and does not pull the line in step 5.
 
-## 3. Fit
+## 4. Zero crossing
 
-The winning candidate is only accurate to about one envelope sample. A grid
-needs far better: at 130 BPM, 0.05 BPM of error is 115 ms of drift over five
-minutes, a beat and a half by the end.
+From the attack, walk back to the previous zero crossing of the
+band-passed signal. That sample is the beat. It can sit a few
+milliseconds before the spike on a slow attack; the gate decides whether
+rekordbox's beat is the spike or the crossing, and the step is a switch.
 
-- **Period.** Try fractional periods around the candidate. Score each by a
-  comb: add up the envelope at every beat of that period, at the best of 32
-  starting phases. A sweep of ±1 sample in 0.02 steps, then ±0.03 in 0.002
-  steps around the winner.
-- **Phase.** With the period fixed, try 64 starting phases across one beat
-  and keep the best, sharpened by fitting a parabola through its
-  neighbours.
-- **Snap and refit.** Move each predicted beat to the highest envelope
-  value within ±20 % of a beat (again sharpened by a parabola). Fit a
-  straight line through the snapped beats, weighted by how strong each hit
-  was. Beats with next to no hit (under a fifth of the median) are left
-  out: an intro of pads has a small noise bump near every predicted beat,
-  and a minute of those bends the line. Then refit without the fifth of
-  beats furthest from the first line, and never with any beat over a tenth
-  of a period off it: a stretch of swung percussion pulls the tempo by a
-  hundredth of a BPM otherwise. Three passes.
+## 5. Fit and extend
 
-Six hundred beats average a 5.8 ms hop down to well under a millisecond. On
-the test playlist our beats sit 0 to +3 ms from rekordbox's (median +1 ms).
+A straight line is fitted through the placed beats (time against beat
+index), weighted by each spike's height, twice: the second time without
+the fifth of beats furthest from the first line and never with any beat
+over a tenth of a period off it. Six hundred sample-accurate points fix
+the period to well under 0.01 BPM. The line is extended back to the start
+of the file — the first beat is the first grid position at or after time
+zero, as rekordbox does — and forward to the end.
 
-## 4. Segments
+## 6. Does the tempo change?
 
-A DJ edit can jump tempo part-way through. Rekordbox writes such a track as
-one tempo, then another, with the beat count carrying on 1–4 across the
-join. One straight line through such a track is wrong on both sides.
+The tempo is measured again in 16-second windows over the whole track, by
+autocorrelation of each window alone, folded onto the track's octave. A
+window where the track's tempo still fits at 60 % of the best peak has not
+changed. A second tempo is believed when at least three windows agree on
+it, it differs by more than 2 %, and it is not a ratio a rhythm makes on
+its own (3⁄2, 2⁄3, 4⁄3, 3⁄4). The stretches where each tempo is *settled*
+— consecutive windows at one tempo — are the anchors for step 7.
 
-- Measure the tempo in 16-second windows, hopping 8 seconds, by
-  autocorrelation of the window alone, with the result folded onto the
-  octave of the track's tempo.
-- A window where the track's own tempo still fits at 60 % of the best
-  peak has not changed (a breakdown that keeps only the hats is not a tempo
-  change).
-- A different tempo is believed when at least three windows agree on it,
-  it differs from the track's by more than 2 %, and it is not a ratio a
-  rhythm makes on its own (3⁄2, 2⁄3, 4⁄3, 3⁄4: a dotted-eighth delay or a
-  triplet feel).
-- Every window is assigned to the nearest known tempo; a lone window
-  between two of the other tempo is absorbed; an intro with no beat belongs
-  to the first tempo heard.
-- Each run of windows is fitted on its own (step 3).
+## 7. Grid the change
 
-**Where the change goes.** Not where the new beat first appears. In a DJ
-edit the next track's beat comes in under the last one's breakdown at a
-third to a half of its final level, for several bars, and rekordbox holds
-the old grid until the drop. So the change is placed at the first beat of
-the new grid that starts four beats in a row each at least 75 % as strong
-as the new stretch's median beat, and whose next two bars are at least as
-well supported as the old grid's would be. (Two grids at nearby tempos
-drift through each other, and for a few beats every cycle the new one
-lands on the old one's hits and looks supported.) On `Go Back [136-174]`
-this lands on rekordbox's change to the millisecond.
+Between two settled tempos there is a stretch where the tempo is moving,
+or where the old track's beat has stopped and the new one is coming in.
+Both are gridded from the last settled bar at the old tempo forward,
+one bar at a time:
 
-The first beat of the first segment is the first grid position at or after
-time zero — the grid is extended back to the start of the file, which is
-what rekordbox does too. A track whose first kick is at the very start
-gets a first beat at ~24 ms, the MP3 encoder delay.
+- the next bar's first downbeat lies between where the old tempo would
+  put it and where the new tempo would put it;
+- bisect between those two bounds, looking for the kick's attack (step 3)
+  nearest each trial point, until the downbeat is found;
+- put a cut there: the bar just gridded gets its own tempo, its own
+  length divided into four;
+- repeat until a bar comes out at the new settled tempo, then run steps
+  1–5 on the settled stretch after it.
+
+A rise or fall that is gradual and not linear is followed a bar at a time;
+a DJ edit where the new beat arrives under a breakdown gets its cut at the
+first bar where the kick is found at the new tempo. The beat count carries
+on 1–4 across every cut, as rekordbox writes it, and each beat carries the
+tempo of its bar, which rekordbox's grid format allows.
 
 ## Output
 
@@ -138,12 +126,9 @@ gets a first beat at ~24 ms, the MP3 encoder delay.
 
 - `bpm` — the tempo the track starts at, which is what a library shows.
 - `segments` — one per tempo: where it starts and ends, the period, and
-  any beat's time (the grid is that plus whole periods).
-- `beats` — every beat's time in ms, its tempo ×100 (as ANLZ stores it),
-  and its number in the bar. Numbering is 1–4 from the first beat here;
-  [downbeat.md](downbeat.md) fixes it.
-- `confidence` — how far the winner stood above the best candidate that is
-  not a simple ratio of it.
-
-`tempo_candidates`, `local_tempos` and `fit_report` expose the inner tables
-for the test rig.
+  any beat's time. A bar-by-bar transition is a run of one-bar segments.
+- `beats` — every beat's time in ms, its tempo ×100, and its number in the
+  bar. Numbering is 1–4 from the first beat here; [downbeat.md](downbeat.md)
+  fixes it.
+- `confidence` — how far the winning tempo stood above the best candidate
+  that is not a simple ratio of it.

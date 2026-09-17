@@ -44,6 +44,10 @@ and [key.md](key.md).
 
 ## Key
 
+- **Key detection is Ángel Faraldo's edmkey method**, as Essentia's
+  `KeyExtractor` runs it: spectral peaks, whitening, a harmonic pitch
+  class profile, a per-frame gate, detuning correction, and his profiles
+  fitted on electronic dance music. The rules below are applied after it.
 - **A toss-up between a major key and its parallel minor goes to the
   minor.** (D or Dm: Dm.) The code's `PreferMinor` rule adds a fixed bias
   to every minor key's score.
