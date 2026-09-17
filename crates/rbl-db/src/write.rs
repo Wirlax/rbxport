@@ -45,6 +45,20 @@
 //!
 //! # Analysis
 //!
+//! [`Writer::register_analysis`] writes what rekordbox writes on a track it
+//! has analysed, read off the reference library's 38,681 rows rather than a
+//! recording: `AnalysisDataPath` derived from the row's `UUID` (38,674 rows),
+//! `Analysed = 105` (37,663 rows, and the only value on a row whose files are
+//! present), `BPM`, and the `djmdKey` row rekordbox itself uses for the key
+//! name. `AnalysisUpdated` (0–10, meaning **[UNKNOWN]**) and the meaning of
+//! the individual bits of `Analysed` are still unexplained and are left
+//! alone.
+//!
+//! # What this deliberately will not do
+//!
+//! Custom cue colours and `contentCue`/`contentFile` are **not implemented**.
+//! Their values are still unexplained, and a wrong one in a 38,681-track
+//! collection is not recoverable by undo. See [`Unsupported`].
 //! [`Writer::set_analysis`] registers an analysis this app made: the BPM,
 //! the key, where the files went, and the length. `Analysed` is a bitfield
 //! whose bits are not all explained (`analysed_bits`): 105 on 37,652 of the
@@ -104,6 +118,12 @@ pub const ROOT: &str = "root";
 
 /// How many backups of the library to keep.
 const BACKUPS_KEPT: usize = 5;
+
+/// `djmdContent.Analysed` on a track rekordbox has analysed: 105 on 37,663 of
+/// the reference library's 38,681 live rows, and the only value on a row whose
+/// analysis files are present [OBS]. A bitfield whose bits are **[UNKNOWN]**;
+/// the value is mirrored whole.
+pub const ANALYSED_FULL: i64 = 105;
 
 /// Attempts before giving up on finding an unused id.
 const ID_ATTEMPTS: usize = 64;
@@ -199,6 +219,19 @@ impl Unsupported {
                 "contentCue and contentFile are not understood and must not be touched",
         }
     }
+}
+
+/// What [`Writer::register_analysis`] records on a track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisRegistration<'a> {
+    /// BPM x100, as `djmdContent.BPM` stores it.
+    pub bpm_x100: u32,
+    /// The key by rekordbox's name (`Dbm`, `F#`, …), or `None` to leave the
+    /// column as it is.
+    pub key: Option<&'a str>,
+    /// The `.DAT`'s path relative to the share root, from
+    /// [`Writer::analysis_data_path_for`]. The files must already be there.
+    pub analysis_data_path: &'a str,
 }
 
 /// A guarded write session.
@@ -638,6 +671,85 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    // -------------------------------------------------------------- analysis
+
+    /// Where a track's analysis files belong.
+    ///
+    /// rekordbox derives the path from the row's `UUID`:
+    /// `/PIONEER/USBANLZ/<first three>/<rest>/ANLZ0000.DAT`, on 38,674 of
+    /// the reference library's 38,681 rows [OBS]; the counter rises on each
+    /// re-analysis. A row that already has a path keeps it, so files are
+    /// replaced in place rather than left behind.
+    pub fn analysis_data_path_for(&self, content: &str) -> Result<String> {
+        let (existing, uuid): (Option<String>, Option<String>) = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT AnalysisDataPath, UUID FROM djmdContent
+                 WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|_| DbError::WriteRefused(format!("{content} is not a live track")))?;
+        if let Some(path) = existing.filter(|p| !p.is_empty()) {
+            return Ok(path);
+        }
+        let uuid = uuid.unwrap_or_default();
+        match (uuid.get(..3), uuid.get(3..)) {
+            (Some(head), Some(tail)) if !tail.is_empty() => {
+                Ok(format!("/PIONEER/USBANLZ/{head}/{tail}/ANLZ0000.DAT"))
+            }
+            _ => Err(DbError::WriteRefused(format!(
+                "{content} has no UUID to derive an analysis path from"
+            ))),
+        }
+    }
+
+    /// Registers an analysis on a track: BPM, key, the analysis path, and the
+    /// `Analysed` value rekordbox sets on a track it has analysed itself.
+    ///
+    /// The files must already be at the path — a row is never pointed at
+    /// nothing. Every value is one rekordbox writes, read off the reference
+    /// library (see the module docs): `Analysed` is [`ANALYSED_FULL`], and
+    /// the `KeyID` is the `djmdKey` row rekordbox uses for that name — two
+    /// rows share some names, and the one on thousands of tracks is taken
+    /// over the one on a dozen. A key name no `djmdKey` row carries is
+    /// refused rather than invented. `AnalysisUpdated` is left alone.
+    pub fn register_analysis(
+        &mut self,
+        content: &str,
+        analysis: &AnalysisRegistration<'_>,
+    ) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let key_id = match analysis.key {
+            Some(name) if !name.is_empty() => Some(key_id_for(&tx, name)?),
+            _ => None,
+        };
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdContent
+             SET BPM = ?1, KeyID = COALESCE(?2, KeyID), AnalysisDataPath = ?3, Analysed = ?4,
+                 rb_local_usn = ?5, updated_at = ?6
+             WHERE ID = ?7 AND rb_local_deleted = 0",
+            params![
+                i64::from(analysis.bpm_x100),
+                key_id,
+                analysis.analysis_data_path,
+                ANALYSED_FULL,
+                usn,
+                stamp,
+                content
+            ],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
     }
 
     /// Finds an unused id below a ceiling, for tables whose ids are smaller.
@@ -1542,6 +1654,20 @@ fn is_descendant(conn: &Connection, candidate: &str, ancestor: &str) -> bool {
 /// `max(the registry counter, the largest USN in use) + 1`. Taking the larger
 /// of the two matters: the counter has been observed lagging the table maximum,
 /// and reusing a USN makes rekordbox's sync skip the row.
+/// The `djmdKey` row for a key name: where two rows share a name, the one
+/// rekordbox's own analyses point at, which is the one on the most tracks.
+fn key_id_for(conn: &Connection, name: &str) -> Result<String> {
+    conn.query_row(
+        "SELECT k.ID FROM djmdKey k
+         LEFT JOIN djmdContent c ON c.KeyID = k.ID AND c.rb_local_deleted = 0
+         WHERE k.ScaleName = ?1 AND k.rb_local_deleted = 0
+         GROUP BY k.ID ORDER BY COUNT(c.ID) DESC, k.ID LIMIT 1",
+        params![name],
+        |r| r.get(0),
+    )
+    .map_err(|_| DbError::WriteRefused(format!("no djmdKey row is named {name:?}")))
+}
+
 fn next_usn(conn: &Connection) -> i64 {
     let counter: i64 = conn
         .query_row(

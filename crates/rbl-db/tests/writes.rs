@@ -6,7 +6,10 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_db::fixture::{self, playlist_id, track_id, Shape};
-use rbl_db::write::{Changed, TrackField, Unsupported, Writer, ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ROOT};
+use rbl_db::write::{
+    AnalysisRegistration, Changed, TrackField, Unsupported, Writer, ANALYSED_FULL, ATTRIBUTE_FOLDER,
+    ATTRIBUTE_PLAYLIST, ROOT,
+};
 use rbl_db::{DbError, Library, OpenMode};
 use rusqlite::params;
 
@@ -1298,6 +1301,92 @@ fn a_loop_that_ends_before_it_starts_is_refused() {
     assert!(matches!(f.writer.add_loop(&track_id(0), 1, 5000, 5000, 4), Err(DbError::WriteRefused(_))));
     assert!(matches!(f.writer.add_loop(&track_id(0), 1, 5000, 1000, 4), Err(DbError::WriteRefused(_))));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
+}
+
+// ---------------------------------------------------------------- analysis
+
+#[test]
+fn an_analysis_path_is_derived_from_the_uuid_and_kept_once_set() {
+    let f = fixture();
+    let track = track_id(1);
+    f.conn()
+        .execute(
+            "UPDATE djmdContent SET UUID = 'a1b2c3d4-0000-4000-8000-000000000001', AnalysisDataPath = NULL WHERE ID = ?1",
+            params![track],
+        )
+        .unwrap();
+    assert_eq!(
+        f.writer.analysis_data_path_for(&track).unwrap(),
+        "/PIONEER/USBANLZ/a1b/2c3d4-0000-4000-8000-000000000001/ANLZ0000.DAT"
+    );
+
+    f.conn()
+        .execute("UPDATE djmdContent SET AnalysisDataPath = '/PIONEER/USBANLZ/a1b/x/ANLZ0002.DAT' WHERE ID = ?1", params![track])
+        .unwrap();
+    assert_eq!(f.writer.analysis_data_path_for(&track).unwrap(), "/PIONEER/USBANLZ/a1b/x/ANLZ0002.DAT");
+
+    f.conn().execute("UPDATE djmdContent SET UUID = NULL, AnalysisDataPath = NULL WHERE ID = ?1", params![track]).unwrap();
+    assert!(matches!(f.writer.analysis_data_path_for(&track), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn registering_an_analysis_sets_bpm_key_path_and_analysed_in_one_usn() {
+    let mut f = fixture();
+    let track = track_id(1);
+    // Two rows named alike, as the reference library has: the one on more
+    // tracks is the one rekordbox uses.
+    for (id, n) in [("900001", 3), ("900002", 1)] {
+        f.conn()
+            .execute(
+                "INSERT INTO djmdKey (ID, ScaleName, created_at, updated_at) VALUES (?1, 'Dbm', '2020-01-01', '2020-01-01')",
+                params![id],
+            )
+            .unwrap();
+        for k in 0..n {
+            f.conn()
+                .execute("UPDATE djmdContent SET KeyID = ?1 WHERE ID = ?2", params![id, track_id(2 + k + if id == "900001" { 0 } else { 3 })])
+                .unwrap();
+        }
+    }
+    let usn_before: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+
+    let changed = f
+        .writer
+        .register_analysis(
+            &track,
+            &AnalysisRegistration { bpm_x100: 13600, key: Some("Dbm"), analysis_data_path: "/PIONEER/USBANLZ/a1b/x/ANLZ0000.DAT" },
+        )
+        .unwrap();
+    assert_eq!(changed.rows, 1);
+    assert!(changed.usn > usn_before);
+
+    let (bpm, key, path, analysed, usn): (i64, String, String, i64, i64) = f
+        .conn()
+        .query_row(
+            "SELECT BPM, KeyID, AnalysisDataPath, Analysed, rb_local_usn FROM djmdContent WHERE ID = ?1",
+            params![track],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!((bpm, key.as_str(), path.as_str(), analysed), (13600, "900001", "/PIONEER/USBANLZ/a1b/x/ANLZ0000.DAT", ANALYSED_FULL));
+    assert_eq!(usn, changed.usn);
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), changed.usn);
+
+    // No key: the column is left as it was.
+    f.writer
+        .register_analysis(&track, &AnalysisRegistration { bpm_x100: 13700, key: None, analysis_data_path: "/PIONEER/USBANLZ/a1b/x/ANLZ0000.DAT" })
+        .unwrap();
+    let key: String = f.one("SELECT KeyID FROM djmdContent WHERE ID = ?1", &[&track]);
+    assert_eq!(key, "900001");
+
+    // A name no row carries is refused, and nothing moves.
+    let counter: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    let refused = f
+        .writer
+        .register_analysis(&track, &AnalysisRegistration { bpm_x100: 1, key: Some("H#m"), analysis_data_path: "/x" })
+        .unwrap_err();
+    assert!(matches!(refused, DbError::WriteRefused(_)), "{refused}");
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), counter);
 }
 
 #[test]
