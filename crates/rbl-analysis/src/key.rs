@@ -16,8 +16,17 @@
 //!   the answer a fifth away. Each bin also credits the classes of f/2, f/3,
 //!   f/4 with decaying weight, so a note's harmonics vote for the note.
 //!
-//! Every choice is a field of [`KeyOptions`] so the golden rig can search
-//! them; the defaults are what scored best on the golden playlist.
+//! The profile match is then handed to a **rule pipeline** ([`Rule`]): named
+//! corrections, each with its own knobs, applied in order to the ranked
+//! candidates. The rules are the ones set out in `rules.md` — a toss-up
+//! goes to the minor; when the match is close, the bass in the intro, the
+//! outro and on the downbeats names the tonic — and the golden rig reports,
+//! per rule, how often it fired, what it fixed and what it broke, so a new
+//! rule is judged the same way as a new profile.
+//!
+//! Every front-end choice is a field of [`KeyOptions`] so the golden rig
+//! can search them; the defaults are what scored best on the golden
+//! playlist.
 
 use realfft::RealFftPlanner;
 
@@ -98,14 +107,6 @@ pub struct KeyOptions {
     /// Whether each frame's chroma is scaled to a peak of 1 before it is
     /// added, so a loud drop does not outweigh a quiet intro.
     pub frame_norm: bool,
-    /// Added to a minor key's score. Dance music is mostly minor, and a
-    /// profile correlation alone has no way to know that.
-    pub minor_bias: f64,
-    /// Weight of a second chroma taken from the bass alone (`low_hz` up to
-    /// `bass_high_hz`), added to the full-range one. The bass line states
-    /// the key of a dance track more plainly than anything above it.
-    pub bass_weight: f64,
-    pub bass_high_hz: f64,
     /// Whether to find the track's tuning first. A track a third of a
     /// semitone off concert pitch puts every note between two classes.
     pub tuning: bool,
@@ -138,17 +139,99 @@ impl Default for KeyOptions {
             harmonics: 4,
             harmonic_decay: 0.6,
             frame_norm: false,
-            // 89 % of the library is minor. Anything from 0.3 to 0.5 scores
-            // the same; below 0.3 the relative major wins too often.
-            minor_bias: 0.3,
-            bass_weight: 0.0,
-            bass_high_hz: 250.0,
             // Measured to change nothing on the golden playlist, which is
             // mastered at concert pitch throughout; kept for material that
             // is not.
             tuning: false,
         }
     }
+}
+
+/// A correction applied to the ranked candidates after the profile match.
+///
+/// Each is one of the rules in `rules.md`, with the knobs it needs. They are
+/// applied in the order given; each sees the ranking the previous one left.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Rule {
+    /// A toss-up between a major key and its parallel minor goes to the
+    /// minor: `bias` is added to every minor key's score. 89 % of the
+    /// library is minor, and a correlation alone cannot know that.
+    PreferMinor { bias: f64 },
+    /// When the match is close, the bass names the tonic. Fires when the
+    /// best key's score exceeds the best score at any *other* tonic by less
+    /// than `margin`; then the bass's strongest pitch class over `source`
+    /// becomes the tonic, and the mode is whichever scores higher there.
+    BassRoot { margin: f64, source: BassSource },
+    /// The bass votes on every key: `weight` times the bass's chroma at a
+    /// key's tonic (scaled to a peak of 1) is added to that key's score,
+    /// so a clear bass root tips a close match without overriding a clear
+    /// one.
+    BassVote { weight: f64, source: BassSource },
+}
+
+/// Where the bass is read for [`Rule::BassRoot`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BassSource {
+    /// The first and last `secs` of the track: in intros and outros the
+    /// bass is usually playing the root.
+    Edges { secs: f64 },
+    /// The first frame of every bar.
+    Downbeats,
+    /// Both of the above.
+    EdgesAndDownbeats { secs: f64 },
+    /// The frames between beats, where the kick's own pitch is absent.
+    OffBeats,
+    /// The second eighth of every beat: the kick, tail included, takes the
+    /// first sixteenth to eighth of a beat, so the second eighth is the
+    /// bass line alone.
+    SecondEighth,
+    /// The second eighths of the first `bars` bars after each phrase
+    /// start: where a bass line states the root before it moves.
+    PhraseStart { bars: usize },
+    /// Every frame.
+    Whole,
+}
+
+/// The grid the bass rules read against.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct KeyGrid {
+    /// Every beat's time in seconds and its number in the bar (1 is the
+    /// downbeat).
+    pub beats: Vec<(f64, u16)>,
+    /// Where phrases start, in seconds.
+    pub phrase_starts: Vec<f64>,
+}
+
+/// The rules that ship, in order.
+pub const DEFAULT_RULES: &[Rule] = &[Rule::PreferMinor { bias: 0.3 }];
+
+/// What the rules are allowed to look at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyEvidence {
+    /// The whole track's chroma.
+    pub chroma: [f64; 12],
+    /// The bass band's chroma over each [`BassSource`], in the order the
+    /// enum lists them: edges, downbeats, both, off-beats, second eighth,
+    /// phrase starts, whole.
+    pub bass: [[f64; 12]; 7],
+}
+
+/// The profile match's scores, one per key: `scores[tonic][minor as usize]`.
+pub type Scores = [[f64; 2]; 12];
+
+/// One key's standing after a rule.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Verdict {
+    pub tonic: usize,
+    pub minor: bool,
+}
+
+/// What a rule did to a track, for the golden rig.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Applied {
+    pub rule: Rule,
+    pub before: Verdict,
+    pub after: Verdict,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,46 +258,240 @@ impl MusicalKey {
 /// Detects the key. Returns `None` when the audio is too short or has no
 /// discernible pitch content, rather than guessing C major.
 pub fn detect_key(samples: &[f32], sample_rate: u32) -> Option<MusicalKey> {
-    detect_key_with(samples, sample_rate, KeyOptions::default())
+    detect_key_with(samples, sample_rate, KeyOptions::default(), DEFAULT_RULES, &KeyGrid::default()).map(|r| r.key)
 }
 
-/// Detects the key with the front end and matcher under the caller's control.
+/// A detection and how the rules arrived at it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyReport {
+    pub key: MusicalKey,
+    /// What the profile match alone said.
+    pub matched: Verdict,
+    /// Every rule that changed the verdict, in order.
+    pub applied: Vec<Applied>,
+}
+
+/// Detects the key with the front end and the rules under the caller's
+/// control. `grid` is the beat grid, for the rules that read the bass on
+/// or between beats; empty when no grid is known.
 #[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
-pub fn detect_key_with(samples: &[f32], sample_rate: u32, options: KeyOptions) -> Option<MusicalKey> {
+pub fn detect_key_with(
+    samples: &[f32],
+    sample_rate: u32,
+    options: KeyOptions,
+    rules: &[Rule],
+    grid: &KeyGrid,
+) -> Option<KeyReport> {
+    let evidence = gather_evidence(samples, sample_rate, options, rules, grid)?;
+    judge(&evidence, options, rules)
+}
+
+/// Everything the profile match and the rules will look at. The bass is
+/// only read when a rule asks for it.
+pub fn gather_evidence(
+    samples: &[f32],
+    sample_rate: u32,
+    options: KeyOptions,
+    rules: &[Rule],
+    grid: &KeyGrid,
+) -> Option<KeyEvidence> {
     let frames = chroma_frames(samples, sample_rate, options)?;
     let offset = if options.tuning { tuning_offset(&frames) } else { 0 };
-    let mut chroma = fold_frames(&frames, options.frame_norm, offset);
-    if options.bass_weight > 0.0 {
-        let bass = KeyOptions { high_hz: options.bass_high_hz, harmonics: 1, ..options };
-        if let Some(bass_frames) = chroma_frames(samples, sample_rate, bass) {
-            let bass_chroma = fold_frames(&bass_frames, options.frame_norm, offset);
-            let scale = options.bass_weight * total(&chroma) / total(&bass_chroma).max(f64::EPSILON);
-            for (slot, b) in chroma.iter_mut().zip(bass_chroma.iter()) {
-                *slot += b * scale;
-            }
-        }
-    }
-    best_key(&chroma, options)
+    let chroma = fold_frames(&frames, options.frame_norm, offset);
+    let wants_bass = rules.iter().find_map(|r| match r {
+        Rule::BassRoot { source, .. } | Rule::BassVote { source, .. } => Some(*source),
+        Rule::PreferMinor { .. } => None,
+    });
+    let bass = match wants_bass {
+        Some(source) => bass_evidence(samples, sample_rate, options, offset, source, grid),
+        None => [[0.0; 12]; 7],
+    };
+    Some(KeyEvidence { chroma, bass })
 }
 
-/// The key that best explains a chroma.
-pub fn best_key(chroma: &[f64; 12], options: KeyOptions) -> Option<MusicalKey> {
-    if total(chroma) <= f64::EPSILON {
+/// The band the bass root is read from, and how many subharmonics fold
+/// into it. Measured on the golden playlist against every other choice:
+/// the bass's strongest class names rekordbox's tonic on 102 of 155 tracks
+/// with this band read between beats, against 45 with 40–120 Hz.
+pub const BASS_LOW_HZ: f64 = 80.0;
+pub const BASS_HIGH_HZ: f64 = 400.0;
+pub const BASS_HARMONICS: usize = 2;
+
+/// The bass band's chroma over every [`BassSource`], in the enum's order.
+/// Only the requested source's edge length and bar count are honoured; the
+/// others use 45 s and four bars.
+pub fn bass_evidence(
+    samples: &[f32],
+    sample_rate: u32,
+    options: KeyOptions,
+    offset: i32,
+    source: BassSource,
+    grid: &KeyGrid,
+) -> [[f64; 12]; 7] {
+    let beats = &grid.beats;
+    let bass = KeyOptions { low_hz: BASS_LOW_HZ, high_hz: BASS_HIGH_HZ, harmonics: BASS_HARMONICS, ..options };
+    let Some(frames) = chroma_frames(samples, sample_rate, bass) else {
+        return [[0.0; 12]; 7];
+    };
+    let hop_secs = KEY_HOP as f64 / f64::from(sample_rate);
+    let total_secs = frames.len() as f64 * hop_secs;
+    let edge_secs = match source {
+        BassSource::Edges { secs } | BassSource::EdgesAndDownbeats { secs } => secs,
+        _ => 45.0,
+    };
+    let phrase_bars = match source {
+        BassSource::PhraseStart { bars } => bars,
+        _ => 4,
+    };
+    // A bar's length from the grid, for the phrase windows.
+    let bar_secs = beats.windows(2).map(|w| w[1].0 - w[0].0).next().unwrap_or(0.5) * 4.0;
+    let in_phrase_window = |t: f64| {
+        grid.phrase_starts.iter().any(|&start| t >= start && t < start + phrase_bars as f64 * bar_secs)
+    };
+    let frame_of = |t: f64| (t / hop_secs).floor().max(0.0) as usize;
+    let on_beat: std::collections::HashSet<usize> = beats.iter().map(|&(t, _)| frame_of(t)).collect();
+    let on_downbeat: std::collections::HashSet<usize> =
+        beats.iter().filter(|&&(_, n)| n == 1).map(|&(t, _)| frame_of(t)).collect();
+    let at_edge = |i: usize| {
+        let t = i as f64 * hop_secs;
+        t < edge_secs || t >= total_secs - edge_secs
+    };
+    // Frames whose centre falls in the second half of a beat. Beats are in
+    // order, so one pass over both.
+    let centre_secs = |i: usize| i as f64 * hop_secs + KEY_FRAME as f64 / 2.0 / f64::from(sample_rate);
+    let mut second_eighth = vec![false; frames.len()];
+    let mut b = 0usize;
+    for (i, slot) in second_eighth.iter_mut().enumerate() {
+        let t = centre_secs(i);
+        while b + 1 < beats.len() && beats[b + 1].0 <= t {
+            b += 1;
+        }
+        if let (Some(&(start, _)), Some(&(next, _))) = (beats.get(b), beats.get(b + 1)) {
+            *slot = t >= start.midpoint(next) && t < next;
+        }
+    }
+    let pick = |keep: &dyn Fn(usize) -> bool| -> [f64; 12] {
+        let kept: Vec<[f64; BINS]> = frames.iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, f)| *f).collect();
+        fold_frames(&kept, options.frame_norm, offset)
+    };
+    [
+        pick(&at_edge),
+        pick(&|i| on_downbeat.contains(&i)),
+        pick(&|i| at_edge(i) || on_downbeat.contains(&i)),
+        pick(&|i| !on_beat.contains(&i)),
+        pick(&|i| second_eighth[i]),
+        pick(&|i| second_eighth[i] && in_phrase_window(centre_secs(i))),
+        pick(&|_| true),
+    ]
+}
+
+/// The profile match followed by the rules.
+pub fn judge(evidence: &KeyEvidence, options: KeyOptions, rules: &[Rule]) -> Option<KeyReport> {
+    if total(&evidence.chroma) <= f64::EPSILON {
         return None;
     }
-    let mut best: Option<(f64, usize, bool)> = None;
-    for tonic in 0..12 {
-        for minor in [false, true] {
-            let profile = if minor { &options.profile.minor } else { &options.profile.major };
-            let score = correlate(chroma, profile, tonic) + if minor { options.minor_bias } else { 0.0 };
-            if best.is_none_or(|(b, _, _)| score > b) {
-                best = Some((score, tonic, minor));
+    let mut scores = match_profiles(&evidence.chroma, options.profile);
+    let matched = best_of(&scores);
+    let mut verdict = matched;
+    let mut applied = Vec::new();
+    for &rule in rules {
+        let next = apply(rule, evidence, &mut scores, verdict);
+        if next != verdict {
+            applied.push(Applied { rule, before: verdict, after: next });
+            verdict = next;
+        }
+    }
+    let names = if verdict.minor { MINOR_NAMES } else { MAJOR_NAMES };
+    let key = MusicalKey {
+        name: (*names.get(verdict.tonic)?).to_owned(),
+        tonic: u8::try_from(verdict.tonic).ok()?,
+        minor: verdict.minor,
+    };
+    Some(KeyReport { key, matched, applied })
+}
+
+/// Pearson correlation of the chroma against every rotation of both
+/// profiles.
+pub fn match_profiles(chroma: &[f64; 12], profile: Profile) -> Scores {
+    let mut scores = [[0.0_f64; 2]; 12];
+    for (tonic, slot) in scores.iter_mut().enumerate() {
+        slot[0] = correlate(chroma, &profile.major, tonic);
+        slot[1] = correlate(chroma, &profile.minor, tonic);
+    }
+    scores
+}
+
+/// The best-scoring key.
+fn best_of(scores: &Scores) -> Verdict {
+    let mut best = (f64::NEG_INFINITY, Verdict { tonic: 0, minor: false });
+    for (tonic, slot) in scores.iter().enumerate() {
+        for (m, &score) in slot.iter().enumerate() {
+            if score > best.0 {
+                best = (score, Verdict { tonic, minor: m == 1 });
             }
         }
     }
-    let (_, tonic, minor) = best?;
-    let names = if minor { MINOR_NAMES } else { MAJOR_NAMES };
-    Some(MusicalKey { name: (*names.get(tonic)?).to_owned(), tonic: u8::try_from(tonic).ok()?, minor })
+    best.1
+}
+
+/// The bass chroma a source names.
+fn bass_of(evidence: &KeyEvidence, source: BassSource) -> [f64; 12] {
+    evidence.bass[match source {
+        BassSource::Edges { .. } => 0,
+        BassSource::Downbeats => 1,
+        BassSource::EdgesAndDownbeats { .. } => 2,
+        BassSource::OffBeats => 3,
+        BassSource::SecondEighth => 4,
+        BassSource::PhraseStart { .. } => 5,
+        BassSource::Whole => 6,
+    }]
+}
+
+/// Applies one rule to the ranking, returning the verdict it leaves.
+fn apply(rule: Rule, evidence: &KeyEvidence, scores: &mut Scores, current: Verdict) -> Verdict {
+    match rule {
+        Rule::BassVote { weight, source } => {
+            let bass = bass_of(evidence, source);
+            let peak = bass.iter().fold(0.0_f64, |a, &b| a.max(b));
+            if peak <= 0.0 {
+                return current;
+            }
+            for (tonic, slot) in scores.iter_mut().enumerate() {
+                let vote = weight * bass[tonic] / peak;
+                slot[0] += vote;
+                slot[1] += vote;
+            }
+            best_of(scores)
+        }
+        Rule::PreferMinor { bias } => {
+            for slot in scores.iter_mut() {
+                slot[1] += bias;
+            }
+            best_of(scores)
+        }
+        Rule::BassRoot { margin, source } => {
+            let own = scores[current.tonic][usize::from(current.minor)];
+            let rival = scores
+                .iter()
+                .enumerate()
+                .filter(|(tonic, _)| *tonic != current.tonic)
+                .flat_map(|(_, slot)| slot.iter().copied())
+                .fold(f64::NEG_INFINITY, f64::max);
+            if own - rival >= margin {
+                return current;
+            }
+            let bass = bass_of(evidence, source);
+            if total(&bass) <= f64::EPSILON {
+                return current;
+            }
+            let tonic = bass
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map_or(current.tonic, |(i, _)| i);
+            Verdict { tonic, minor: scores[tonic][1] >= scores[tonic][0] }
+        }
+    }
 }
 
 fn total(chroma: &[f64; 12]) -> f64 {

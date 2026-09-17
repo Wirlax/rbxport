@@ -99,7 +99,14 @@ pub fn analyse(samples: &[f32], sample_rate: u32) -> Analysis {
         offset += count;
     }
     tempo.beats = beats;
-    let key = key::detect_key(samples, sample_rate);
+    // The key rules may read the bass on or between beats and after phrase
+    // starts, so they are given the grid.
+    let key_grid = key::KeyGrid {
+        beats: tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0, b.beat_number)).collect(),
+        phrase_starts: grid.phrase_starts.clone(),
+    };
+    let key = key::detect_key_with(samples, sample_rate, key::KeyOptions::default(), key::DEFAULT_RULES, &key_grid)
+        .map(|report| report.key);
     let waveform = waveform::compute(samples, sample_rate);
 
     let mut peak = 0.0_f32;

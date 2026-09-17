@@ -17,6 +17,8 @@ the version numbers [Semantic Versioning](https://semver.org/).
   track (was 146), the downbeat on 151 (was 27) and the whole grid on 146
   (was 26). The result is still reported, not written to the library.
 - Key detection agrees with rekordbox on 130 of those 155 tracks, up from 27.
+  A toss-up between a major key and its parallel minor now goes to the
+  minor, as it does in this library.
 ### Added
 - Analyze Track writes its result to the library: the beat grid and every
   waveform go into the analysis files beside rekordbox's own, and the BPM,

@@ -54,7 +54,7 @@ const POSITIONS: usize = 8;
 pub const MIN_BEATS_FOR_OWN_PHASE: usize = 64;
 
 /// Where the grid sits in the bar.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GridPhase {
     /// The music's beats are half a beat after the grid's: the grid was
     /// built on the off-beat and must move.
@@ -63,6 +63,9 @@ pub struct GridPhase {
     /// than an index into the grid: moving the grid by half a beat can put
     /// a new first beat before the old one and renumber everything.
     pub downbeat_secs: f64,
+    /// Where phrases start, in seconds, in order: the downbeats at which
+    /// the music changes most over four bars either side.
+    pub phrase_starts: Vec<f64>,
 }
 
 /// Decides where the grid's beats sit in the bar, and whether they sit on
@@ -71,7 +74,8 @@ pub struct GridPhase {
 /// `beat_secs` is every beat's time in seconds, in order. A track too short
 /// to have a bar in it comes back unshifted with the first beat a downbeat.
 pub fn grid_phase(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> GridPhase {
-    let unshifted = GridPhase { half_beat_off: false, downbeat_secs: beat_secs.first().copied().unwrap_or(0.0) };
+    let unshifted =
+        GridPhase { half_beat_off: false, downbeat_secs: beat_secs.first().copied().unwrap_or(0.0), phrase_starts: Vec::new() };
     if beat_secs.len() < 8 || samples.is_empty() || sample_rate == 0 {
         return unshifted;
     }
@@ -95,7 +99,75 @@ pub fn grid_phase(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> GridP
         .map_or(0, |(i, _)| i);
     // An odd position is a midpoint: the beats are there, not on the grid.
     // The downbeat is that position itself, as a time.
-    GridPhase { half_beat_off: best % 2 == 1, downbeat_secs: halves.get(best).copied().unwrap_or(0.0) }
+    GridPhase {
+        half_beat_off: best % 2 == 1,
+        downbeat_secs: halves.get(best).copied().unwrap_or(0.0),
+        phrase_starts: phrase_starts(&profiles, &halves, best),
+    }
+}
+
+/// Where phrases start: the half-beat positions, on the downbeat, at which
+/// the music changes most at the four-bar scale.
+///
+/// `halves` is the half-beat grid the profiles were taken on and
+/// `downbeat` the position in `0..8` that is beat 1. A start is a novelty
+/// peak on a downbeat at least `MIN_PHRASE_PEAK` of the strongest peak.
+/// Returned as times in seconds, in order.
+pub fn phrase_starts(profiles: &[[f64; BANDS]], halves: &[f64], downbeat: usize) -> Vec<f64> {
+    const SCALE: usize = 32;
+    let peaks = novelty_peaks(profiles, SCALE);
+    let strongest = peaks.iter().map(|&(_, v)| v).fold(0.0_f64, f64::max);
+    peaks
+        .iter()
+        .filter(|&&(i, v)| i % POSITIONS == downbeat && v >= strongest * MIN_PHRASE_PEAK)
+        .filter_map(|&(i, _)| halves.get(i).copied())
+        .collect()
+}
+
+/// A novelty peak counts as a phrase start from this share of the
+/// strongest peak in the track.
+const MIN_PHRASE_PEAK: f64 = 0.3;
+
+/// The novelty at every slot at one scale, with everything but local
+/// maxima set to zero, as `(slot, novelty)` for the maxima.
+fn novelty_peaks(profiles: &[[f64; BANDS]], scale: usize) -> Vec<(usize, f64)> {
+    let n = profiles.len();
+    if n < scale * 2 {
+        return Vec::new();
+    }
+    let mut prefix = vec![[0.0_f64; BANDS]; n + 1];
+    for (i, profile) in profiles.iter().enumerate() {
+        for b in 0..BANDS {
+            prefix[i + 1][b] = prefix[i][b] + profile[b];
+        }
+    }
+    let mean_over = |from: usize, to: usize| -> [f64; BANDS] {
+        let mut out = [0.0_f64; BANDS];
+        let len = (to - from) as f64;
+        for b in 0..BANDS {
+            out[b] = (prefix[to][b] - prefix[from][b]) / len;
+        }
+        out
+    };
+    let mut novelty = vec![0.0_f64; n];
+    for (i, slot) in novelty.iter_mut().enumerate().take(n - scale + 1).skip(scale) {
+        let before = mean_over(i - scale, i);
+        let after = mean_over(i, i + scale);
+        let mut d = 0.0;
+        for b in 0..BANDS {
+            let diff = after[b] - before[b];
+            d += diff * diff;
+        }
+        *slot = d.sqrt();
+    }
+    (0..n)
+        .filter(|&i| {
+            let left = if i > 0 { novelty[i - 1] } else { 0.0 };
+            let right = novelty.get(i + 1).copied().unwrap_or(0.0);
+            novelty[i] > left && novelty[i] >= right && novelty[i] > 0.0
+        })
+        .map(|i| (i, novelty[i]))
+        .collect()
 }
 
 /// How much novelty lands on each of `positions` slots per bar, when the

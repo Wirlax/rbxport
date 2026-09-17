@@ -366,6 +366,51 @@ fn a_pure_tone_has_no_meaningful_key_but_does_not_panic() {
 }
 
 #[test]
+fn the_key_rules_apply_in_order_and_report_what_they_changed() {
+    use rbl_analysis::key::{judge, BassSource, KeyEvidence, KeyOptions, Rule, Verdict};
+    // A chroma that reads as C major and C minor almost equally: the notes
+    // of both (C D F G A B) with the third left out.
+    let mut chroma = [0.0_f64; 12];
+    for class in [0, 2, 5, 7, 9, 11] {
+        chroma[class] = 1.0;
+    }
+    chroma[0] = 2.0;
+    chroma[7] = 1.5;
+    let mut bass = [[0.0_f64; 12]; 7];
+    // The bass between beats says G.
+    bass[4][7] = 1.0;
+    let evidence = KeyEvidence { chroma, bass };
+    let options = KeyOptions::default();
+
+    // No rules: the profile match alone.
+    let plain = judge(&evidence, options, &[]).unwrap();
+    assert!(plain.applied.is_empty());
+    assert_eq!(plain.matched.tonic, 0);
+
+    // A toss-up goes to the minor, and the report says which rule did it.
+    let minor = judge(&evidence, options, &[Rule::PreferMinor { bias: 0.3 }]).unwrap();
+    assert_eq!(minor.key.name, "Cm", "got {}", minor.key.name);
+    assert_eq!(minor.applied.len(), 1);
+    assert_eq!(minor.applied[0].after, Verdict { tonic: 0, minor: true });
+
+    // The bass rule fires only under its margin: a huge margin lets it
+    // rename the tonic, a zero margin never fires.
+    let fired = judge(&evidence, options, &[Rule::BassRoot { margin: 10.0, source: BassSource::SecondEighth }]).unwrap();
+    assert_eq!(fired.key.tonic, 7, "got {}", fired.key.name);
+    let quiet = judge(&evidence, options, &[Rule::BassRoot { margin: 0.0, source: BassSource::SecondEighth }]).unwrap();
+    assert!(quiet.applied.is_empty());
+    assert_eq!(quiet.key.tonic, 0);
+
+    // A vote big enough moves the tonic too.
+    let voted = judge(&evidence, options, &[Rule::BassVote { weight: 10.0, source: BassSource::SecondEighth }]).unwrap();
+    assert_eq!(voted.key.tonic, 7);
+
+    // Silence has no key, whatever the rules.
+    let silent = KeyEvidence { chroma: [0.0; 12], bass };
+    assert!(judge(&silent, options, &[Rule::PreferMinor { bias: 0.3 }]).is_none());
+}
+
+#[test]
 fn the_tuning_offset_follows_a_detuned_track() {
     use rbl_analysis::key::{chroma_frames, tuning_offset, KeyOptions};
     let options = KeyOptions::default();

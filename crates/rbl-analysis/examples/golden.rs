@@ -69,6 +69,7 @@ fn main() {
         "eval" => eval(),
         "downbeat" => downbeat_experiment(),
         "key" => key_experiment(),
+        "bassroot" => bassroot_experiment(),
         other => println!("unknown mode {other:?}; use `cache` or `eval`"),
     }
 }
@@ -549,36 +550,22 @@ fn downbeat_experiment() {
     println!("downbeat right on rekordbox's grid: {ok} / {n}");
 }
 
-/// Searches the key front end and matcher against rekordbox's key names.
-///
-/// Each front end costs one FFT pass over every track; the matcher variants
-/// on top of it are free, so the front ends are few and the matchers many.
+/// Measures the key rules against rekordbox's key names: the profile match
+/// alone, then each rule set, with what every rule fired on, fixed and
+/// broke; and a search over the `BassRoot` knobs.
 fn key_experiment() {
-    use rbl_analysis::key::{best_key, chroma_frames, fold_frames, KeyOptions, Profile};
+    use rbl_analysis::key::{gather_evidence, judge, BassSource, KeyEvidence, KeyOptions, Rule, DEFAULT_RULES};
     let dir = cache_dir();
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
         .unwrap_or_default();
     paths.sort();
-    let base = KeyOptions::default();
-    let fronts: Vec<(&str, KeyOptions)> = vec![
-        ("h4/.6 <1k", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 1000.0, ..base }),
-        ("h4/.6 <1.5k", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 1500.0, ..base }),
-        ("h4/.6 <2k", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 2000.0, ..base }),
-        ("h4/.6 <3k", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 3000.0, ..base }),
-        ("h3/.6 <2k", KeyOptions { harmonics: 3, harmonic_decay: 0.6, high_hz: 2000.0, ..base }),
-        ("h5/.6 <2k", KeyOptions { harmonics: 5, harmonic_decay: 0.6, high_hz: 2000.0, ..base }),
-        ("h4/.5 <2k", KeyOptions { harmonics: 4, harmonic_decay: 0.5, high_hz: 2000.0, ..base }),
-        ("h4/.7 <2k", KeyOptions { harmonics: 4, harmonic_decay: 0.7, high_hz: 2000.0, ..base }),
-        ("h4/.6 <2k sqrt", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 2000.0, power: 0.5, ..base }),
-        ("h4/.6 <2k 80+", KeyOptions { harmonics: 4, harmonic_decay: 0.6, high_hz: 2000.0, low_hz: 80.0, ..base }),
-    ];
-    let bass = KeyOptions { high_hz: 250.0, harmonics: 1, power: 1.0, ..base };
+    let options = KeyOptions::default();
+    let edges = [30.0, 45.0, 90.0];
 
-    // Per track: rekordbox's key, then one folded chroma per front end (both
-    // normalisations) and the bass chroma.
-    // Indexed [front][norm][tuning].
-    struct Row { rb: String, title: String, chroma: Vec<[[[f64; 12]; 2]; 2]>, bass: [[[f64; 12]; 2]; 2] }
+    // Per track: rekordbox's key and the evidence for each edge length,
+    // with the bass read against the grid our own analysis finds.
+    struct Row { rb: String, title: String, evidence: Vec<KeyEvidence> }
     let started = Instant::now();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -589,225 +576,105 @@ fn key_experiment() {
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(path) = paths.get(i) else { break };
                 let Some(track) = read_track(path) else { continue };
-                let fold_all = |frames: &[[f64; rbl_analysis::key::BINS]]| {
-                    let offset = rbl_analysis::key::tuning_offset(frames);
-                    [[fold_frames(frames, false, 0), fold_frames(frames, false, offset)],
-                     [fold_frames(frames, true, 0), fold_frames(frames, true, offset)]]
-                };
-                let chroma: Vec<[[[f64; 12]; 2]; 2]> = fronts.iter().map(|(_, o)| {
-                    let frames = chroma_frames(&track.samples, track.sample_rate, *o).unwrap_or_default();
-                    fold_all(&frames)
+                let analysis = rbl_analysis::analyse(&track.samples, track.sample_rate);
+                let grid = key_grid_of(&track, &analysis);
+                let evidence: Vec<KeyEvidence> = edges.iter().filter_map(|&secs| {
+                    let rules = [Rule::BassRoot { margin: 1.0, source: BassSource::Edges { secs } }];
+                    gather_evidence(&track.samples, track.sample_rate, options, &rules, &grid)
                 }).collect();
-                let bass_frames = chroma_frames(&track.samples, track.sample_rate, bass).unwrap_or_default();
-                let bass = fold_all(&bass_frames);
-                rows.lock().unwrap().push(Row { rb: track.key.clone(), title: track.title.clone(), chroma, bass });
+                if evidence.len() == edges.len() {
+                    rows.lock().unwrap().push(Row { rb: track.key.clone(), title: track.title.clone(), evidence });
+                }
             });
         }
     });
     let rows = rows.into_inner().unwrap();
-    println!("chroma for {} tracks in {:.1}s", rows.len(), started.elapsed().as_secs_f64());
-
-    let profiles: Vec<(&str, Profile)> = vec![
-        ("edma", Profile::EDMA), ("temperley", Profile::TEMPERLEY), ("krumhansl", Profile::KRUMHANSL),
-        ("shaath", Profile::SHAATH), ("diatonic", Profile::DIATONIC),
-    ];
-    let mut results: Vec<(usize, usize, String)> = Vec::new();
-    let biases = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5];
-    let bass_weights = [0.0, 0.5, 1.0];
-    let name_of = |fname: &str, norm: bool, tuning: bool, pname: &str, minor_bias: f64, bass_weight: f64| {
-        format!("{fname:<14} norm {} tune {} {pname:<9} bias {minor_bias:.2} bass {bass_weight:.1}", u8::from(norm), u8::from(tuning))
-    };
-    for (fi, (fname, fopt)) in fronts.iter().enumerate() {
-        for norm in [false, true] {
-            for tuning in [false, true] {
-                for (pname, profile) in &profiles {
-                    for minor_bias in biases {
-                        for bass_weight in bass_weights {
-                            let options = KeyOptions { profile: *profile, minor_bias, frame_norm: norm, bass_weight, tuning, ..*fopt };
-                            let (mut exact, mut compatible) = (0usize, 0usize);
-                            for row in &rows {
-                                let mut chroma = row.chroma[fi][usize::from(norm)][usize::from(tuning)];
-                                if bass_weight > 0.0 {
-                                    let b = row.bass[usize::from(norm)][usize::from(tuning)];
-                                    let scale = bass_weight * chroma.iter().sum::<f64>() / b.iter().sum::<f64>().max(1e-12);
-                                    for (slot, v) in chroma.iter_mut().zip(b.iter()) { *slot += v * scale; }
-                                }
-                                let ours = best_key(&chroma, options).map(|k| k.name).unwrap_or_default();
-                                if ours == row.rb { exact += 1; }
-                                if ours == row.rb || relative(&ours) == row.rb || a_fifth_away(&ours, &row.rb) { compatible += 1; }
-                            }
-                            results.push((exact, compatible, name_of(fname, norm, tuning, pname, minor_bias, bass_weight)));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    results.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
     let n = rows.len();
-    println!("top variants (exact / compatible of {n}):");
-    for (exact, compatible, name) in results.iter().take(25) {
-        println!("  {exact:>3} / {compatible:>3}  {name}");
-    }
-    // Two refinements on the best front end: the mode from the third above
-    // the tonic rather than a flat bias, and profiles learned from the
-    // playlist itself with each track held out of its own profile.
-    if let Some((_, _, name)) = results.first() {
-        println!("refinements on the best front end ({name}):");
-    }
-    let best = results.first().map(|r| r.2.clone()).unwrap_or_default();
-    let mut best_front: Option<(usize, KeyOptions)> = None;
-    'find: for (fi, (fname, fopt)) in fronts.iter().enumerate() {
-        for norm in [false, true] {
-            for tuning in [false, true] {
-                for (pname, profile) in &profiles {
-                    for minor_bias in biases {
-                        for bass_weight in bass_weights {
-                            if name_of(fname, norm, tuning, pname, minor_bias, bass_weight) == best {
-                                best_front = Some((fi, KeyOptions { profile: *profile, minor_bias, frame_norm: norm, bass_weight, tuning, ..*fopt }));
-                                break 'find;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if let Some((fi, options)) = best_front {
-        let chroma_of = |row: &Row| row.chroma[fi][usize::from(options.frame_norm)][usize::from(options.tuning)];
-        let tonic_of = |name: &str| -> Option<(usize, bool)> {
-            MINORS.iter().position(|k| *k == name).map(|i| (i, true)).or_else(|| MAJORS.iter().position(|k| *k == name).map(|i| (i, false)))
-        };
-        // Mode from the thirds: major when the major third beats the minor
-        // third by a factor.
-        for factor in [0.8, 1.0, 1.2, 1.5, 2.0] {
-            let mut exact = 0usize;
-            for row in &rows {
-                let chroma = chroma_of(row);
-                let Some(k) = best_key(&chroma, options) else { continue };
-                let t = usize::from(k.tonic);
-                let major = chroma[(t + 4) % 12] > chroma[(t + 3) % 12] * factor;
-                let name = if major { MAJORS[t] } else { MINORS[t] };
-                if name == row.rb { exact += 1; }
-            }
-            println!("  mode by thirds, factor {factor:.1}: {exact} / {n}");
-        }
-        // Tonic from the biased search, mode from the two profiles at that
-        // tonic with a smaller bias of its own.
-        for mode_bias in [0.0, 0.05, 0.1, 0.15, 0.2, 0.25] {
-            let mut exact = 0usize;
-            for row in &rows {
-                let chroma = chroma_of(row);
-                let Some(k) = best_key(&chroma, options) else { continue };
-                let t = usize::from(k.tonic);
-                let corr = |profile: &[f64; 12]| {
-                    let rotated: Vec<f64> = (0..12).map(|i| profile[(i + 12 - t) % 12]).collect();
-                    let mc = chroma.iter().sum::<f64>() / 12.0; let mp = rotated.iter().sum::<f64>() / 12.0;
-                    let (mut num, mut dc, mut dp) = (0.0, 0.0, 0.0);
-                    for i in 0..12 { let a = chroma[i] - mc; let b = rotated[i] - mp; num += a * b; dc += a * a; dp += b * b; }
-                    num / (dc.sqrt() * dp.sqrt()).max(1e-12)
-                };
-                let minor = corr(&options.profile.minor) + mode_bias > corr(&options.profile.major);
-                let name = if minor { MINORS[t] } else { MAJORS[t] };
-                if name == row.rb { exact += 1; }
-            }
-            println!("  tonic biased, mode with bias {mode_bias:.2}: {exact} / {n}");
-        }
-        // Learned profiles, leave-one-out.
-        let labelled: Vec<(usize, bool, [f64; 12])> = rows.iter().filter_map(|row| {
-            let (t, minor) = tonic_of(&row.rb)?;
-            let c = chroma_of(row);
-            let sum: f64 = c.iter().sum();
-            let mut rotated = [0.0_f64; 12];
-            for i in 0..12 { rotated[i] = c[(i + t) % 12] / sum.max(1e-12); }
-            Some((t, minor, rotated))
-        }).collect();
-        for minor_bias in [0.0, 0.1, 0.2, 0.3] {
-            let mut exact = 0usize;
-            let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-            let mut lines = Vec::new();
-            for (i, row) in rows.iter().enumerate() {
-                let mut major = [0.0_f64; 12]; let mut minor = [0.0_f64; 12];
-                let (mut nmaj, mut nmin) = (0.0_f64, 0.0_f64);
-                for (j, (_, is_minor, rotated)) in labelled.iter().enumerate() {
-                    if j == i { continue; }
-                    let target = if *is_minor { &mut minor } else { &mut major };
-                    for k in 0..12 { target[k] += rotated[k]; }
-                    if *is_minor { nmin += 1.0 } else { nmaj += 1.0 }
-                }
-                for k in 0..12 { major[k] /= nmaj.max(1.0); minor[k] /= nmin.max(1.0); }
-                let learned = KeyOptions { profile: Profile { major, minor }, minor_bias, ..options };
-                let ours = best_key(&chroma_of(row), learned).map(|k| k.name).unwrap_or_default();
-                if ours == row.rb { exact += 1; } else {
-                    let kind = if relative(&ours) == row.rb { "relative" } else if a_fifth_away(&ours, &row.rb) { "fifth" } else if parallel(&ours) == row.rb { "parallel" } else { "other" };
-                    *kinds.entry(kind).or_default() += 1;
-                    lines.push(format!("    {:<46} rb {:<4} ours {:<4} {kind}", truncate(&row.title, 46), row.rb, ours));
-                }
-            }
-            println!("  learned profiles (leave-one-out), bias {minor_bias:.1}: {exact} / {n}  {kinds:?}");
-            if minor_bias == 0.1 { for l in lines { println!("{l}"); } }
-        }
-        // Margins: where rekordbox's key ranks among our candidates.
-        let mut ranks: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    println!("evidence for {n} tracks in {:.1}s", started.elapsed().as_secs_f64());
+
+    // A rule set's score, and what each rule did.
+    let score = |rules: &[Rule], edge_index: usize, verbose: bool| -> usize {
+        let mut exact = 0usize;
+        let mut per_rule: Vec<(usize, usize, usize)> = vec![(0, 0, 0); rules.len()]; // fired, fixed, broke
         for row in &rows {
-            let chroma = chroma_of(row);
-            let mut scored: Vec<(f64, String)> = Vec::new();
-            for tonic in 0..12 { for minor in [false, true] {
-                let o = KeyOptions { ..options };
-                let profile = if minor { o.profile.minor } else { o.profile.major };
-                let rotated: Vec<f64> = (0..12).map(|i| profile[(i + 12 - tonic) % 12]).collect();
-                let mc = chroma.iter().sum::<f64>() / 12.0; let mp = rotated.iter().sum::<f64>() / 12.0;
-                let (mut num, mut dc, mut dp) = (0.0, 0.0, 0.0);
-                for i in 0..12 { let a = chroma[i] - mc; let b = rotated[i] - mp; num += a * b; dc += a * a; dp += b * b; }
-                let score = num / (dc.sqrt() * dp.sqrt()).max(1e-12) + if minor { o.minor_bias } else { 0.0 };
-                scored.push((score, if minor { MINORS[tonic].to_owned() } else { MAJORS[tonic].to_owned() }));
-            }}
-            scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-            let rank = scored.iter().position(|(_, k)| *k == row.rb).unwrap_or(24);
-            *ranks.entry(rank).or_default() += 1;
-        }
-        println!("  rank of rekordbox's key among our 24 (0 = ours): {ranks:?}");
-    }
-    // The failures of the best variant, classified.
-    if let Some((_, _, name)) = results.first() {
-        println!("failures of the best ({name}):");
-    }
-    let best = results.first().map(|r| r.2.clone()).unwrap_or_default();
-    // Re-derive the best options from its name is clumsy; instead rerun the
-    // search for the best tuple by index.
-    let mut best_opts: Option<(usize, KeyOptions)> = None;
-    'outer: for (fi, (fname, fopt)) in fronts.iter().enumerate() {
-        for norm in [false, true] {
-            for tuning in [false, true] {
-                for (pname, profile) in &profiles {
-                    for minor_bias in biases {
-                        for bass_weight in bass_weights {
-                            if name_of(fname, norm, tuning, pname, minor_bias, bass_weight) == best {
-                                best_opts = Some((fi, KeyOptions { profile: *profile, minor_bias, frame_norm: norm, bass_weight, tuning, ..*fopt }));
-                                break 'outer;
-                            }
-                        }
-                    }
+            let Some(report) = judge(&row.evidence[edge_index], options, rules) else { continue };
+            if report.key.name == row.rb { exact += 1; }
+            let name_of = |v: rbl_analysis::key::Verdict| if v.minor { MINORS[v.tonic] } else { MAJORS[v.tonic] };
+            for applied in &report.applied {
+                let index = rules.iter().position(|r| *r == applied.rule).unwrap_or(0);
+                per_rule[index].0 += 1;
+                let was_right = name_of(applied.before) == row.rb;
+                let is_right = name_of(applied.after) == row.rb;
+                if !was_right && is_right { per_rule[index].1 += 1; }
+                if was_right && !is_right { per_rule[index].2 += 1; }
+                if verbose && was_right != is_right {
+                    println!("    {:<44} rb {:<4} {:?}: {} -> {}  {}", truncate(&row.title, 44), row.rb, applied.rule, name_of(applied.before), name_of(applied.after), if is_right { "fixed" } else { "BROKE" });
                 }
             }
         }
-    }
-    if let Some((fi, options)) = best_opts {
-        let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        for row in &rows {
-            let mut chroma = row.chroma[fi][usize::from(options.frame_norm)][usize::from(options.tuning)];
-            if options.bass_weight > 0.0 {
-                let b = row.bass[usize::from(options.frame_norm)][usize::from(options.tuning)];
-                let scale = options.bass_weight * chroma.iter().sum::<f64>() / b.iter().sum::<f64>().max(1e-12);
-                for (slot, v) in chroma.iter_mut().zip(b.iter()) { *slot += v * scale; }
+        if verbose {
+            for (rule, (fired, fixed, broke)) in rules.iter().zip(&per_rule) {
+                println!("  {rule:?}: fired {fired}, fixed {fixed}, broke {broke}");
             }
-            let ours = best_key(&chroma, options).map(|k| k.name).unwrap_or_default();
-            if ours == row.rb { continue; }
-            let kind = if relative(&ours) == row.rb { "relative" } else if a_fifth_away(&ours, &row.rb) { "fifth" } else if parallel(&ours) == row.rb { "parallel" } else { "other" };
-            *kinds.entry(kind).or_default() += 1;
-            println!("  {:<46} rb {:<4} ours {:<4} {kind}", truncate(&row.title, 46), row.rb, ours);
         }
-        println!("  {kinds:?}");
+        exact
+    };
+
+    println!("profile match alone: {} / {n}", score(&[], 1, false));
+    println!("PreferMinor 0.3 alone: {} / {n}", score(&[Rule::PreferMinor { bias: 0.3 }], 1, false));
+    println!("shipped rules ({DEFAULT_RULES:?}): {} / {n}", score(DEFAULT_RULES, 1, true));
+
+    println!("BassRoot search (after PreferMinor 0.3):");
+    let mut results: Vec<(usize, String)> = Vec::new();
+    for (ei, secs) in edges.iter().enumerate() {
+        let sources = [
+            BassSource::Edges { secs: *secs }, BassSource::Downbeats, BassSource::EdgesAndDownbeats { secs: *secs },
+            BassSource::OffBeats, BassSource::SecondEighth, BassSource::PhraseStart { bars: 4 }, BassSource::Whole,
+        ];
+        for source in sources {
+            if ei > 0 && !matches!(source, BassSource::Edges { .. } | BassSource::EdgesAndDownbeats { .. }) {
+                continue;
+            }
+            for margin in [0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 1.0] {
+                let rules = [Rule::PreferMinor { bias: 0.3 }, Rule::BassRoot { margin, source }];
+                results.push((score(&rules, ei, false), format!("margin {margin:.2} {source:?}")));
+            }
+        }
+    }
+    for source in [BassSource::SecondEighth, BassSource::PhraseStart { bars: 4 }, BassSource::OffBeats, BassSource::Whole, BassSource::Edges { secs: 45.0 }] {
+        for weight in [0.05, 0.1, 0.15, 0.2, 0.3, 0.5] {
+            let rules = [Rule::PreferMinor { bias: 0.3 }, Rule::BassVote { weight, source }];
+            results.push((score(&rules, 1, false), format!("vote {weight:.2} {source:?}")));
+            let rules = [Rule::BassVote { weight, source }, Rule::PreferMinor { bias: 0.3 }];
+            results.push((score(&rules, 1, false), format!("vote {weight:.2} {source:?} before PreferMinor")));
+        }
+    }
+    results.sort_by_key(|r| std::cmp::Reverse(r.0));
+    for (exact, name) in results.iter().take(16) {
+        println!("  {exact:>3} / {n}  {name}");
+    }
+    let second: Vec<&(usize, String)> = results.iter().filter(|(_, n)| n.contains("SecondEighth") || n.contains("PhraseStart")).take(8).collect();
+    for (exact, name) in second { println!("  {exact:>3} / {n}  {name}"); }
+    println!("failures of the shipped rules:");
+    let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for row in &rows {
+        let Some(report) = judge(&row.evidence[1], options, DEFAULT_RULES) else { continue };
+        let ours = report.key.name;
+        if ours == row.rb { continue; }
+        let kind = if relative(&ours) == row.rb { "relative" } else if a_fifth_away(&ours, &row.rb) { "fifth" } else if parallel(&ours) == row.rb { "parallel" } else { "other" };
+        *kinds.entry(kind).or_default() += 1;
+        println!("  {:<46} rb {:<4} ours {:<4} {kind}", truncate(&row.title, 46), row.rb, ours);
+    }
+    println!("  {kinds:?}");
+}
+
+/// The grid a track's analysis gives the key rules.
+fn key_grid_of(track: &Track, analysis: &rbl_analysis::Analysis) -> rbl_analysis::key::KeyGrid {
+    let beat_secs: Vec<f64> = analysis.tempo.beats.iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+    let phase = rbl_analysis::downbeat::grid_phase(&track.samples, track.sample_rate, &beat_secs);
+    rbl_analysis::key::KeyGrid {
+        beats: analysis.tempo.beats.iter().map(|b| (f64::from(b.time_ms) / 1000.0, b.beat_number)).collect(),
+        phrase_starts: phase.phrase_starts,
     }
 }
 
@@ -845,5 +712,97 @@ fn a_fifth_away(a: &str, b: &str) -> bool {
     match (index(a), index(b)) {
         (Some((ia, ma)), Some((ib, mb))) => ma == mb && ((ia + 7) % 12 == ib || (ib + 7) % 12 == ia),
         _ => false,
+    }
+}
+
+/// Does the strongest pitch class of the bass name rekordbox's tonic? For
+/// several bands and windows: the whole track, the first and last 45 s,
+/// the first frame of each bar, and the frames between beats.
+fn bassroot_experiment() {
+    use rbl_analysis::key::{chroma_frames, fold_frames, KeyOptions, BINS};
+    let dir = cache_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
+        .unwrap_or_default();
+    paths.sort();
+    let bands: Vec<(&str, f64, f64, usize)> = vec![
+        ("40-120 h1", 40.0, 120.0, 1), ("55-250 h1", 55.0, 250.0, 1), ("80-250 h1", 80.0, 250.0, 1),
+        ("55-500 h2", 55.0, 500.0, 2), ("80-400 h2", 80.0, 400.0, 2), ("40-250 h1", 40.0, 250.0, 1),
+    ];
+    let windows = ["whole", "edges 45s", "downbeats", "off-beats", "edges+downbeats", "2nd eighth", "phrase 2 bars", "phrase 4 bars", "phrase 8 bars"];
+    let tonic_of = |name: &str| -> Option<usize> {
+        MINORS.iter().position(|k| *k == name).or_else(|| MAJORS.iter().position(|k| *k == name))
+    };
+    let counts = std::sync::Mutex::new(vec![vec![(0usize, 0usize); windows.len()]; bands.len()]); // (argmax hit, top-2 hit)
+    let phrase_counts = std::sync::Mutex::new((0usize, 0usize)); // tracks, phrase starts
+    let n = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(12);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(path) = paths.get(i) else { break };
+                let Some(track) = read_track(path) else { continue };
+                let Some(rb_tonic) = tonic_of(&track.key) else { continue };
+                let analysis = rbl_analysis::analyse(&track.samples, track.sample_rate);
+                let beats: Vec<f64> = analysis.tempo.beats.iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+                let downbeats: Vec<f64> = analysis.tempo.beats.iter().filter(|b| b.beat_number == 1).map(|b| f64::from(b.time_ms) / 1000.0).collect();
+                let phrase_starts = key_grid_of(&track, &analysis).phrase_starts;
+                let bar_secs = beats.windows(2).map(|w| w[1] - w[0]).next().unwrap_or(0.5) * 4.0;
+                let hop_secs = 4096.0 / f64::from(track.sample_rate);
+                n.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                { let mut pc = phrase_counts.lock().unwrap(); pc.0 += 1; pc.1 += phrase_starts.len(); }
+                for (bi, (_, lo, hi, h)) in bands.iter().enumerate() {
+                    let options = KeyOptions { low_hz: *lo, high_hz: *hi, harmonics: *h, ..KeyOptions::default() };
+                    let Some(frames) = chroma_frames(&track.samples, track.sample_rate, options) else { continue };
+                    let total_secs = frames.len() as f64 * hop_secs;
+                    let pick = |keep: &dyn Fn(usize) -> bool| -> Vec<[f64; BINS]> {
+                        frames.iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, f)| *f).collect()
+                    };
+                    let frame_of = |t: f64| (t / hop_secs).floor().max(0.0) as usize;
+                    let down: std::collections::HashSet<usize> = downbeats.iter().map(|&t| frame_of(t)).collect();
+                    let on_beat: std::collections::HashSet<usize> = beats.iter().map(|&t| frame_of(t)).collect();
+                    let centre = |i: usize| i as f64 * hop_secs + 8192.0 / 2.0 / f64::from(track.sample_rate);
+                    let second_eighth = |i: usize| {
+                        let t = centre(i);
+                        let b = beats.partition_point(|&x| x <= t);
+                        b > 0 && b < beats.len() && t >= (beats[b - 1] + beats[b]) / 2.0
+                    };
+                    let sets: Vec<Vec<[f64; BINS]>> = vec![
+                        frames.clone(),
+                        pick(&|i| { let t = i as f64 * hop_secs; t < 45.0 || t >= total_secs - 45.0 }),
+                        pick(&|i| down.contains(&i)),
+                        pick(&|i| !on_beat.contains(&i)),
+                        pick(&|i| { let t = i as f64 * hop_secs; down.contains(&i) || t < 45.0 || t >= total_secs - 45.0 }),
+                        pick(&second_eighth),
+                        pick(&|i| second_eighth(i) && phrase_starts.iter().any(|&s| centre(i) >= s && centre(i) < s + 2.0 * bar_secs)),
+                        pick(&|i| second_eighth(i) && phrase_starts.iter().any(|&s| centre(i) >= s && centre(i) < s + 4.0 * bar_secs)),
+                        pick(&|i| second_eighth(i) && phrase_starts.iter().any(|&s| centre(i) >= s && centre(i) < s + 8.0 * bar_secs)),
+                    ];
+                    for (wi, set) in sets.iter().enumerate() {
+                        let chroma = fold_frames(set, false, 0);
+                        let mut order: Vec<usize> = (0..12).collect();
+                        order.sort_by(|a, b| chroma[*b].partial_cmp(&chroma[*a]).unwrap());
+                        let mut c = counts.lock().unwrap();
+                        if order[0] == rb_tonic { c[bi][wi].0 += 1; }
+                        if order[0] == rb_tonic || order[1] == rb_tonic { c[bi][wi].1 += 1; }
+                    }
+                }
+            });
+        }
+    });
+    let n = n.load(std::sync::atomic::Ordering::Relaxed);
+    let counts = counts.into_inner().unwrap();
+    let pc = phrase_counts.into_inner().unwrap();
+    println!("phrase starts found: {:.1} per track", pc.1 as f64 / pc.0.max(1) as f64);
+    println!("strongest bass class == rekordbox tonic (top-1 / top-2) of {n}:");
+    print!("{:<12}", "band");
+    for w in &windows { print!(" {w:>16}"); }
+    println!();
+    for (row, (name, ..)) in counts.iter().zip(&bands) {
+        print!("{name:<12}");
+        for (hit, top2) in row { print!(" {hit:>7} / {top2:<6}"); }
+        println!();
     }
 }
