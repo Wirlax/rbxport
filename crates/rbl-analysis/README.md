@@ -13,7 +13,7 @@ What happens, in order (the track is assumed to be in 4/4):
 
 ```mermaid
 flowchart TD
-    S([decoded track]) --> A[1. Detect the BPM from the first 120 s]
+    S([decoded track]) --> A[1. Detect the BPM over the whole track]
     A --> B[2. Lay the grid on the kicks:<br/>find each kick's attack, fit a line through them,<br/>extend it over the whole track]
     B --> Q1{3. Does the tempo change?}
     Q1 -- yes --> C[4. Cut where the new beat is settled;<br/>redo 1–2 after the cut]
@@ -28,7 +28,7 @@ flowchart TD
     H --> T([BPM, grid, beat 1, phrases, key, waveform])
 ```
 
-[docs/pipeline.md](docs/pipeline.md) has the full procedure, twenty steps
+[docs/pipeline.md](docs/pipeline.md) has the full procedure, nineteen steps
 with each marked as built, changing or new. Each stage is a module and has
 its own document:
 
