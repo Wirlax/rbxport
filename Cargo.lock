@@ -3423,6 +3423,7 @@ dependencies = [
  "rbl-db",
  "rbl-index",
  "realfft",
+ "rusqlite",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",

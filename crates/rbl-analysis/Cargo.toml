@@ -20,3 +20,5 @@ rbl-audio = { path = "../rbl-audio" }
 rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }
 rbl-index = { path = "../rbl-index" }
+# For the rigs' read queries; the features unify with rbl-db's.
+rusqlite = "0.40"
