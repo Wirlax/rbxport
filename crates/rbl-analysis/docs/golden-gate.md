@@ -89,13 +89,16 @@ holds 138 until 105 s; the 150 beat is audible, quietly, from 64 s and our
 switch goes there.
 
 **BATTERY OPERATED.** Half a beat off. Chris re-gridded it in rekordbox
-(its first beat moved 19 ms), and our grid sits on the midpoints of the
-corrected one. Neither judge is sure here: the phrase-structure novelty
-prefers our half by 9 %, and a line fitted through the kick attacks on the
-other half collects 8 % more kick. The novelty decides, because on
-rekordbox's own grids it is right on 153 of 155 and the kick on 150 —
-locking the grid to the kick fixed this track and broke five others where
-an off-beat clap has the sharper transient.
+twice (its first beat moved 19 ms, to 51 ms) and confirmed the corrected
+grid; ours sits on its midpoints. Both of our judges lean the wrong way
+here, weakly: the phrase-structure novelty prefers our half by 10 %, and
+the line fitted through the kick attacks on our half collects 4 % more
+kick than the one on rekordbox's. Each judge is wrong on about one track
+in 155 on rekordbox's own grids (the novelty on 2, the kick on 5); this is
+the track where they coincide. Letting the kick break a thin novelty
+margin was measured at every threshold and changed nothing; locking the
+grid to the kick outright fixed this track and broke five others where an
+off-beat clap has the sharper transient.
 
 **Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 2 others.
 
