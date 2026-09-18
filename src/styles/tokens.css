@@ -193,10 +193,10 @@
   --s-player-vocal-h: 5px; /* measured from a 2x capture of rekordbox 7.2.11 running; vocal strip above the overview */
   --s-player-phrase-h: 14px; /* measured from a 2x capture of rekordbox 7.2.11 running; phrase bar y 127..141pt */
   --s-player-detail-h: 146px; /* measured from a 2x capture of rekordbox 7.2.11 running; detail waveform y 141..287pt */
-  --s-wave-inset-top: 11px; /* measured from docs/screenshots; the detail band runs y 358..650; the waveform paints y 380..647 */
-  --s-wave-inset-bottom: 2px; /* measured from docs/screenshots; the detail band runs y 358..650; the waveform paints y 380..647 */
-  --s-beat-marker-top: 26px; /* measured from docs/screenshots; the detail band runs y 358..650: a marker's head starts at y 410 */
-  --s-beat-marker-bottom: 6.5px; /* measured from docs/screenshots; the detail band runs y 358..650: a marker's foot ends at y 637 */
+  --s-wave-inset-top: 20px; /* by request 2026-09-18: the waveform a little shorter than the measured 11px inset drew it, and room for the beat markers to reach 15px above it */
+  --s-wave-inset-bottom: 16px; /* by request 2026-09-18: the waveform a little shorter than the measured 2px inset drew it, and room for the beat markers to reach 15px below it */
+  --s-beat-marker-top: 5px; /* by request 2026-09-18: the waveform's top inset less the 15px a marker reaches above the waveform (measured, rekordbox's own started 26px down the band) */
+  --s-beat-marker-bottom: 1px; /* by request 2026-09-18: the waveform's bottom inset less the 15px a marker reaches below the waveform (measured, rekordbox's own ended 6.5px up the band) */
   --s-beat-head-h: 4px; /* measured from docs/screenshots; the detail band runs y 358..650: the triangle at each end of a marker, y 410..417 */
   --s-player-pad-h: 48px; /* measured from a 2x capture of rekordbox 7.2.11 running; hot-cue / memory bar y 287..335pt */
   --s-pad-tab-w: 80px; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the CUE/LOOP and GRID tabs, x 83..163pt */

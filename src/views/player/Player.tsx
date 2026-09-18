@@ -424,14 +424,24 @@ const JUMPS = [
 ] as const;
 
 /**
- * What the waveform leaves clear at the top and bottom of its band.
- *
- * Measured: rekordbox's detail waveform paints y 374..647 inside a band that
- * runs 358..650. The strip above carries the bar count and the heads of the
- * cue markers, which is why it is the larger of the two. The overview does not
- * take it: its own grid row is already the 30pt the capture paints.
+ * What the waveform leaves clear at the top and bottom of its band: the
+ * `--s-wave-inset-*` tokens, read once. The strip above carries the bar
+ * count and the heads of the cue markers, and the beat markers reach 15px
+ * past the waveform at both ends, which is why it is inset as far as it is.
+ * The overview does not take it: its own grid row is already the 30pt the
+ * capture paints.
  */
-const WAVE_INSET = { top: 11, bottom: 2 };
+let waveInset: { top: number; bottom: number } | null = null;
+function waveInsetOf(): { top: number; bottom: number } {
+  if (waveInset) return waveInset;
+  const read = (name: string, fallback: number) => {
+    if (typeof document === "undefined") return fallback;
+    const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  waveInset = { top: read("--s-wave-inset-top", 20), bottom: read("--s-wave-inset-bottom", 16) };
+  return waveInset;
+}
 
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
@@ -1743,7 +1753,7 @@ export const Player = memo(function Player({
                   // it and deck B's, whose canvas is flipped, hangs from it
                   // [OBS]. On its own the deck draws the centred waveform.
                   half={dual ? "overlaid" : false}
-                  inset={WAVE_INSET}
+                  inset={waveInsetOf()}
                 />
               ) : null}
               <BeatGrid

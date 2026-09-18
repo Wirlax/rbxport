@@ -214,10 +214,11 @@ test("deck B reads the other way up, and its detail meets deck A's at the centre
   const beat = b.getByTestId("player-detail").locator("span[style*='left']").first();
   const beatBox = await box(beat);
   const beatBoxA = await box(a.getByTestId("player-detail").locator("span[style*='left']").first());
-  // Deck A's beat line starts the measured distance under its band's top;
+  // Deck A's beat line starts the token's distance under its band's top;
   // deck B's ends the same distance above its band's bottom.
-  expect(beatBoxA.y - detailA.y).toBeGreaterThan(20);
-  expect(bottom(detail) - bottom(beatBox)).toBeGreaterThan(20);
+  const lineTop = (await token(page, "--s-beat-marker-top")) + (await token(page, "--s-beat-head-h")) + 1;
+  expect(beatBoxA.y - detailA.y).toBeCloseTo(lineTop, 0);
+  expect(bottom(detail) - bottom(beatBox)).toBeCloseTo(lineTop, 0);
   expect(beatBox.y - detail.y).toBeLessThan(beatBoxA.y - detailA.y);
 });
 

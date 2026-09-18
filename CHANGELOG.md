@@ -110,6 +110,8 @@ the version numbers [Semantic Versioning](https://semver.org/).
   pauses it and sets the cue at the head. The switch is View › "Click on
   the waveform for PLAY and CUE".
 - Analyze Track is shift + command + A: the preset's A calls Memory Cue 1.
+- The detail waveform is a little shorter in its band, and the beat
+  markers reach 15px above and below it.
 - The read-only badge is blue, and says why on hover; the LINK button is
   not shown until LINK can be turned on; the blurbs are gone from every
   Preferences pane, and so is the blue halo on a secondary window.
