@@ -487,6 +487,7 @@ pub fn run() {
             cues::convert_memory_cues_to_hot,
             commands::filter_values,
             device_settings::device_settings,
+            device_settings::write_device_defaults,
             device_settings::save_device_settings,
             explorer::explorer_roots,
             explorer::explorer_children,
@@ -495,6 +496,8 @@ pub fn run() {
             details::track_details,
             details::track_lookups,
             details::set_track_field,
+            details::add_artwork,
+            details::clear_artwork,
         ])
         .build(context);
 

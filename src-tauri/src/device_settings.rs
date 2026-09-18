@@ -255,9 +255,26 @@ pub fn dev_defaults(dto: &StickDefaultsDto) -> AppResult<DevSetting> {
     Ok(dev)
 }
 
-/// Gives a stick that has no `DEVSETTING.DAT` the defaults, after an export
-/// has put the rest of the layout there. A stick that has one keeps it.
-/// Called from inside `export_playlist`'s `blocking` closure, which is
+/// Gives a stick that holds an export but no `DEVSETTING.DAT` the defaults,
+/// when the device panel opens on it — which is when rekordbox writes one
+/// too. A stick that has one keeps it; a stick with no export gets nothing.
+#[tauri::command]
+pub async fn write_device_defaults(path: String, defaults: StickDefaultsDto) -> AppResult<DeviceSettingsDto> {
+    crate::commands::blocking("write_device_defaults", move || {
+        let mount = Path::new(&path);
+        if !mount.is_dir() {
+            return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+        }
+        if rbl_devices::inspect(mount).is_some() {
+            write_dev_defaults(mount, &defaults)?;
+        }
+        Ok(to_dto(&rbl_devices::settings::read(mount)))
+    })
+    .await
+}
+
+/// Gives a stick that has no `DEVSETTING.DAT` the defaults. A stick that
+/// has one keeps it. Called from inside a `blocking` closure, which is
 /// `spawn_blocking` with a name; never from the async thread.
 pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()> {
     let current = rbl_devices::settings::read(mount);

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSettings, TreeNode } from "@/ipc/types";
+import { usePreferences } from "@/store/usePreferences";
 import { ColorTab } from "./ColorTab";
 import { ColumnTab } from "./ColumnTab";
 import styles from "./DevicePanel.module.css";
@@ -61,11 +62,20 @@ export function DevicePanel({
   // Read when the device changes, and again after a sync: an export writes a
   // library, and with it the rows the Category, Sort and Color tabs edit.
   const exportStamp = device.export?.written ?? "";
+  // Opening the panel on a stick that holds an export but no DEVSETTING.DAT
+  // gives it the DJ System defaults, which is when rekordbox writes one too;
+  // an export on its own leaves the stick without.
+  const stickDefaults = usePreferences().djSystem;
+  const hasExport = device.export !== null;
   useEffect(() => {
     let cancelled = false;
     setSettings(null);
     void getBackend()
-      .then((backend) => backend.deviceSettings(device.path))
+      .then(async (backend) => {
+        const read = await backend.deviceSettings(device.path);
+        if (read.hasDevSetting || !hasExport) return read;
+        return backend.writeDeviceDefaults(device.path, stickDefaults);
+      })
       .then((read) => {
         if (!cancelled) setSettings(read);
       })
@@ -75,7 +85,10 @@ export function DevicePanel({
     return () => {
       cancelled = true;
     };
-  }, [device.path, exportStamp, onError]);
+    // The defaults are read once, when the panel opens; a preference changed
+    // while it is open is for the next stick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.path, exportStamp, hasExport, onError]);
 
   // Every change is written at once and the panel shows what came back.
   const save = useCallback(

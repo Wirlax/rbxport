@@ -502,6 +502,8 @@ export interface Backend {
 
   /** Opens a folder picker; null when it is cancelled. */
   pickFolder(title: string): Promise<string | null>;
+  /** The platform's file dialog for one JPEG or PNG; null when cancelled. */
+  pickImage(title: string): Promise<string | null>;
 
   /**
    * Opens the Preferences window on `pane`, or turns the open one to it.
@@ -538,6 +540,12 @@ export interface Backend {
    * flags clear.
    */
   deviceSettings(path: string): Promise<DeviceSettings>;
+  /**
+   * Gives a stick that holds an export but no DEVSETTING.DAT the DJ System
+   * defaults, as rekordbox does when its device panel opens; a stick that
+   * has one keeps it. Resolves to what the stick now holds.
+   */
+  writeDeviceDefaults(path: string, defaults: StickDefaults): Promise<DeviceSettings>;
   /** Writes them back and resolves to what the stick now holds. */
   saveDeviceSettings(path: string, settings: DeviceSettings): Promise<DeviceSettings>;
 
@@ -957,6 +965,10 @@ export interface Edits {
    * `readOnly` rather than mapped onto a guess.
    */
   setTrackField(track: string, field: TrackField, value: string): Promise<number>;
+  /** Add Artwork: the image is filed in the share tree and the track points at it. */
+  addArtwork(track: string, image: string): Promise<number>;
+  /** Delete Artwork: the track points at no image; the file stays. */
+  clearArtwork(track: string): Promise<number>;
 
   /**
    * Cues. Unlike the edits above these do not return a generation: a cue

@@ -245,6 +245,16 @@ async function realBackend(): Promise<Backend> {
       return picked;
     },
     autoRelocate: (folders) => invoke<RelocateReport>("auto_relocate", { folders }),
+    pickImage: async (title) => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title,
+        filters: [{ name: "Image", extensions: ["jpg", "jpeg", "png"] }],
+      });
+      return typeof picked === "string" ? picked : null;
+    },
     pickFolder: async (title) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({ multiple: false, directory: true, title });
@@ -265,6 +275,7 @@ async function realBackend(): Promise<Backend> {
       await getCurrentWindow().close();
     },
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
+    writeDeviceDefaults: (path, defaults) => invoke<DeviceSettings>("write_device_defaults", { path, defaults }),
     saveDeviceSettings: (path, settings) =>
       invoke<DeviceSettings>("save_device_settings", { path, settings }),
     explorerRoots: () => invoke<ExplorerRoot[]>("explorer_roots"),
@@ -309,6 +320,8 @@ async function realBackend(): Promise<Backend> {
       convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
       setTrackField: (track, field, value) =>
         invoke<number>("set_track_field", { track, field, value }),
+      addArtwork: (track, image) => invoke<number>("add_artwork", { track, image }),
+      clearArtwork: (track) => invoke<number>("clear_artwork", { track }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
     trackDetails: (trackId) => invoke<TrackDetails>("track_details", { track: trackId }),

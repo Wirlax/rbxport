@@ -18,9 +18,10 @@
  *   not been seen), and the Release Date box (its three segments' order is
  *   assumed) — is drawn read-only with the reason in its tooltip.
  * - **Artwork**: the picture large and centred, with an import and a delete
- *   button beneath. Both are inert: where rekordbox files an imported sleeve
- *   (`/PIONEER/Artwork/<3 hex>/<uuid>/artwork.jpg`) is observed, how it
- *   names the directory is not.
+ *   button beneath. Import files the image where rekordbox files an imported
+ *   sleeve (`/PIONEER/Artwork/<3 hex>/<uuid>/artwork.jpg` [OBS]; the three
+ *   hex digits taken as the uuid's own first three [ASSUME]) and points the
+ *   track at it; delete points it at nothing and leaves the file.
  *
  * The reload glyph right of the tabs is drawn and inert: it matches the
  * `brws_refresh` shape, which suggests Reload Tag, but nothing confirms it.
@@ -171,7 +172,7 @@ export function InfoPanel({
         </div>
       ) : (
         <div role="tabpanel" id="info-panel-artwork" aria-labelledby="info-tab-artwork" className={styles.artwork}>
-          <ArtworkTab track={track} details={record} />
+          <ArtworkTab track={track} details={record} readOnly={readOnly} onEdit={onEdit} />
         </div>
       )}
     </aside>
@@ -681,9 +682,30 @@ function Check({ label, name, checked }: { label: string; name: string; checked:
 
 // ------------------------------------------------------------------ Artwork
 
-function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails | null }) {
+function ArtworkTab({ track, details, readOnly, onEdit }: {
+  track: RowDto;
+  details: TrackDetails | null;
+  readOnly: boolean;
+  onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
+}) {
   const hasArtwork = details?.hasArtwork ?? track.hasArtwork;
   const tip = useTooltip();
+  const id = track.id;
+  const add = () => {
+    void (async () => {
+      const backend = await getBackend();
+      const image = await backend.pickImage("Choose the artwork");
+      if (image === null) return;
+      await onEdit("Artwork added.", (b) => b.edits.addArtwork(id, image));
+    })();
+  };
+  const remove = () => {
+    void (async () => {
+      const backend = await getBackend();
+      if (!(await backend.confirm("Remove this track's artwork? The image file stays where it is."))) return;
+      await onEdit("Artwork removed.", (b) => b.edits.clearArtwork(id));
+    })();
+  };
   return (
     <div className={styles.artworkArea}>
       <div className={styles.picture} style={{ ["--hue" as string]: `${track.artworkHue}deg` }}>
@@ -700,8 +722,9 @@ function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails |
           type="button"
           className={styles.artworkButton}
           aria-label="Add Artwork"
-          title={tip("Not wired: where rekordbox files an imported sleeve is observed, how it names the directory is not.")}
-          disabled
+          title={tip(readOnly ? "The library is read-only." : "Add Artwork")}
+          disabled={readOnly}
+          onClick={add}
         >
           <ArtworkImportIcon className={styles.artworkGlyph} />
         </button>
@@ -709,8 +732,9 @@ function ArtworkTab({ track, details }: { track: RowDto; details: TrackDetails |
           type="button"
           className={styles.artworkButton}
           aria-label="Delete Artwork"
-          title={tip("Not wired: whether rekordbox clears ImagePath to empty or NULL, and whether it removes the file, has not been recorded.")}
-          disabled
+          title={tip(readOnly ? "The library is read-only." : "Delete Artwork")}
+          disabled={readOnly || !hasArtwork}
+          onClick={remove}
         >
           <ArtworkDeleteIcon className={styles.artworkGlyph} />
         </button>

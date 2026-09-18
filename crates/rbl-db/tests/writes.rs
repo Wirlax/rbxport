@@ -1515,3 +1515,27 @@ fn a_bpm_typed_over_retimes_the_grid_and_sets_the_column() {
     let plain: i64 = f.one("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&track_id(1)]);
     assert_eq!(plain, 9_000);
 }
+
+#[test]
+fn artwork_is_filed_in_the_share_tree_and_cleared_to_empty() {
+    let mut f = fixture();
+    let location = f.writer.library().location().clone();
+    let image = f._dir.path().join("cover.png");
+    std::fs::write(&image, b"\x89PNG not really").unwrap();
+
+    f.writer.set_artwork(&track_id(0), Some(&image)).unwrap();
+    let path: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert!(path.starts_with("/PIONEER/Artwork/") && path.ends_with("/artwork.png"), "{path}");
+    let parts: Vec<&str> = path.split('/').collect();
+    assert_eq!(parts.len(), 6, "{path}");
+    assert_eq!(parts[3], &parts[4][..3], "the bucket is the uuid's first three characters");
+    let filed = location.share_root.join(path.trim_start_matches('/'));
+    assert_eq!(std::fs::read(&filed).unwrap(), b"\x89PNG not really");
+
+    assert!(matches!(f.writer.set_artwork(&track_id(0), Some(&f._dir.path().join("x.txt"))), Err(DbError::WriteRefused(_))));
+
+    f.writer.set_artwork(&track_id(0), None).unwrap();
+    let cleared: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(cleared, "");
+    assert!(filed.is_file(), "the file stays where it is");
+}

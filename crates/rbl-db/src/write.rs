@@ -113,7 +113,7 @@ const ID_ATTEMPTS: usize = 64;
 const WRITABLE_COLUMNS: &[&str] = &[
     "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL",
     // The information panel's Info tab.
-    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM",
+    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM", "ImagePath",
     "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
 ];
 
@@ -883,6 +883,38 @@ impl Writer {
             TrackField::Key => self.touch_key(content, value),
             TrackField::Bpm => self.set_bpm(content, value),
         }
+    }
+
+    /// Add Artwork and Delete Artwork on the information panel.
+    ///
+    /// An image is copied into the share tree where rekordbox files an
+    /// imported sleeve — `/PIONEER/Artwork/<3 hex>/<uuid>/artwork.<ext>`
+    /// [OBS for the shape; ASSUME that the three hex digits are the
+    /// uuid's own first three, which is what a bucketing by name looks
+    /// like] — and `ImagePath` points at it. `None` clears `ImagePath` to
+    /// empty, which is what the library holds for a track without artwork
+    /// [OBS on the index: empty for the half of the library that has none];
+    /// the file is left where it is.
+    pub fn set_artwork(&mut self, content: &str, image: Option<&Path>) -> Result<Changed> {
+        let Some(image) = image else {
+            return self.touch_content(content, "ImagePath", &Value::Text(String::new()));
+        };
+        let extension = image
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png"))
+            .ok_or_else(|| DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display())))?;
+        let bytes = std::fs::read(image)?;
+        let uuid = self.rng.uuid4();
+        let bucket = uuid.get(..3).unwrap_or("000").to_owned();
+        let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
+        let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&target, bytes)?;
+        self.touch_content(content, "ImagePath", &Value::Text(relative))
     }
 
     /// A BPM typed over the analysed one: `128`, `128.5`.

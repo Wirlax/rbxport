@@ -633,6 +633,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (d) d.color = color ?? "0";
       return bump();
     },
+    addArtwork: (track) => {
+      const row = all.find((r) => r.id === track);
+      if (row) {
+        row.hasArtwork = true;
+        const d = details.get(track);
+        if (d) d.hasArtwork = true;
+      }
+      return bump();
+    },
+    clearArtwork: (track) => {
+      const row = all.find((r) => r.id === track);
+      if (row) {
+        row.hasArtwork = false;
+        const d = details.get(track);
+        if (d) d.hasArtwork = false;
+      }
+      return bump();
+    },
     setTrackField: (track, field, value) => {
       const row = all.find((r) => r.id === track);
       if (!row) return bump();
@@ -1619,6 +1637,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
     pickFolder: () => wait("/Users/mock/Music/Moved"),
+    pickImage: () => wait("/Users/mock/Pictures/cover.jpg"),
     // No windows in a browser: the shell draws the Preferences over itself,
     // and its resets are its own to do.
     openPreferences: () => wait(false),
@@ -1643,6 +1662,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The device tabs. Held per stick so a change survives switching tabs
     // and devices, the way a written file would.
     deviceSettings: (path) => wait(copySettings(settingsOf(path))),
+    // The mock's sticks carry their settings from the start, so there is
+    // nothing to give; what the stick holds comes back.
+    writeDeviceDefaults: (path) => wait(copySettings(settingsOf(path))),
     saveDeviceSettings: (path, settings) => {
       const current = settingsOf(path);
       // A stick without a library keeps its reference rows: nothing to

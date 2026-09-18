@@ -732,9 +732,10 @@ pub async fn export_playlist<R: tauri::Runtime>(
             &mut on_progress,
         )
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-        if let Some(defaults) = &defaults {
-            crate::device_settings::write_dev_defaults(std::path::Path::new(&destination), defaults)?;
-        }
+        // `DEVSETTING.DAT` is not written here: rekordbox writes none until
+        // the device panel is opened, and neither does this — the panel asks
+        // for the defaults when it opens on a stick that has none.
+        let _ = &defaults;
 
         // Re-read what was written with the independent parser: an export that
         // cannot be read back is not an export.

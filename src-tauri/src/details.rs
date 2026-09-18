@@ -151,6 +151,31 @@ pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLo
     .await
 }
 
+/// Add Artwork: the image at `image` is filed in the share tree and the
+/// track points at it.
+#[tauri::command]
+pub async fn add_artwork<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    image: String,
+) -> AppResult<u32> {
+    edit(app, state, "add_artwork", Touched::Tracks, move |w| {
+        w.set_artwork(&track, Some(std::path::Path::new(&image))).map(|_| ())
+    })
+    .await
+}
+
+/// Delete Artwork: the track points at no image; the file stays.
+#[tauri::command]
+pub async fn clear_artwork<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<u32> {
+    edit(app, state, "clear_artwork", Touched::Tracks, move |w| w.set_artwork(&track, None).map(|_| ())).await
+}
+
 /// Writes one of the Info tab's editable fields.
 ///
 /// `field` is the wire name — `title`, `artist`, `year`, … — and the set of
