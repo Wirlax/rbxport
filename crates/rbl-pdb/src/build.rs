@@ -115,7 +115,19 @@ impl PageBuilder {
     }
 
     /// Renders the page. Every row is marked present.
+    ///
+    /// The header fields follow rekordbox's own data pages [OBS 7.2.11]:
+    /// `0x18` the row count, `0x19` and `0x1a` derived from it, `0x1b` the
+    /// flags `0x24`, `0x1c` the free bytes, `0x1e` the used bytes rounded
+    /// up to four, `0x20` the row count again. Each row group ends in the
+    /// present mask twice.
     pub fn finish(self) -> Vec<u8> {
+        self.finish_with(0)
+    }
+
+    /// [`finish`](Self::finish) with the page's sequence number, which
+    /// rekordbox increments as it writes pages.
+    pub fn finish_with(self, sequence: u32) -> Vec<u8> {
         let mut page = vec![0_u8; self.page_size];
         let num_rows = self.row_offsets.len();
 
@@ -123,14 +135,29 @@ impl PageBuilder {
         page[0x04..0x08].copy_from_slice(&self.page_index.to_le_bytes());
         page[0x08..0x0c].copy_from_slice(&self.page_type.to_le_bytes());
         page[0x0c..0x10].copy_from_slice(&self.next_page.to_le_bytes());
+        page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
+        let rows_u16 = u16::try_from(num_rows).unwrap_or(u16::MAX);
         page[0x18] = u8::try_from(num_rows.min(0xff)).unwrap_or(0xff);
+        // Two bytes rekordbox derives from the row count [OBS 7.2.11, twelve
+        // pages of 1 to 61 rows]: the count times 32 in its low byte, and
+        // the count over eight.
+        page[0x19] = u8::try_from((num_rows * 32) & 0xff).unwrap_or(0);
+        page[0x1a] = u8::try_from((num_rows / 8).min(0xff)).unwrap_or(0xff);
         page[0x1b] = 0x24; // ordinary data page
-        let used = u16::try_from(self.heap.len()).unwrap_or(u16::MAX);
-        page[0x1c..0x1e].copy_from_slice(&u16::try_from(self.free_space()).unwrap_or(0).to_le_bytes());
-        page[0x1e..0x20].copy_from_slice(&used.to_le_bytes());
+        let used = self.heap.len().div_ceil(4) * 4;
+        // rekordbox's figure counts two bytes per row and four per group
+        // against the free space, not the whole 36-byte group [OBS 7.2.11:
+        // 3912 free with 8 rows in 124 bytes, 3270 with 27 rows in 724].
+        let free = self
+            .page_size
+            .saturating_sub(PAGE_HEADER_LEN)
+            .saturating_sub(used)
+            .saturating_sub(2 * num_rows + 4 * groups_for(num_rows));
+        page[0x1c..0x1e].copy_from_slice(&u16::try_from(free).unwrap_or(0).to_le_bytes());
+        page[0x1e..0x20].copy_from_slice(&u16::try_from(used).unwrap_or(u16::MAX).to_le_bytes());
+        page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
         if num_rows > 0xff {
-            page[0x22..0x24]
-                .copy_from_slice(&u16::try_from(num_rows).unwrap_or(u16::MAX).to_le_bytes());
+            page[0x22..0x24].copy_from_slice(&rows_u16.to_le_bytes());
         }
 
         // Heap.
@@ -151,14 +178,56 @@ impl PageBuilder {
                     page[at..at + 2].copy_from_slice(&offset.to_le_bytes());
                 }
             }
-            let flags_at = base - 4;
-            if flags_at + 2 <= page.len() {
-                page[flags_at..flags_at + 2].copy_from_slice(&present.to_le_bytes());
+            // The mask twice: rekordbox writes it in both trailing words.
+            for at in [base - 4, base - 2] {
+                if at + 2 <= page.len() {
+                    page[at..at + 2].copy_from_slice(&present.to_le_bytes());
+                }
             }
         }
 
         page
     }
+}
+
+/// Row groups a page with this many rows has: sixteen rows to a group.
+fn groups_for(num_rows: usize) -> usize {
+    num_rows.div_ceil(16)
+}
+
+/// The page that heads every table in a rekordbox file: flags `0x64`, no
+/// rows, `0x1fff` in both row-count words, `0x03ec` at `0x24`, and a body
+/// naming itself, its first data page (or `0x03ffffff` when it has none),
+/// then 1004 copies of `ff 1f f8 ff` [OBS 7.2.11, every table of an empty
+/// and of a 61-track export]. rekordbox reads a file whose tables start
+/// with a plain data page as corrupted.
+fn index_page(page_size: usize, page_index: u32, page_type: u32, next_page: u32, first_data_page: Option<u32>) -> Vec<u8> {
+    let mut page = vec![0_u8; page_size];
+    page[0x04..0x08].copy_from_slice(&page_index.to_le_bytes());
+    page[0x08..0x0c].copy_from_slice(&page_type.to_le_bytes());
+    page[0x0c..0x10].copy_from_slice(&next_page.to_le_bytes());
+    page[0x10..0x14].copy_from_slice(&1_u32.to_le_bytes());
+    page[0x1b] = 0x64;
+    page[0x20..0x22].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    page[0x22..0x24].copy_from_slice(&0x1fff_u16.to_le_bytes());
+    page[0x24..0x26].copy_from_slice(&0x03ec_u16.to_le_bytes());
+    let body = PAGE_HEADER_LEN;
+    page[body..body + 4].copy_from_slice(&page_index.to_le_bytes());
+    page[body + 4..body + 8].copy_from_slice(&first_data_page.unwrap_or(0x03ff_ffff).to_le_bytes());
+    page[body + 8..body + 12].copy_from_slice(&0x03ff_ffff_u32.to_le_bytes());
+    let mut at = body + 18;
+    for _ in 0..1004 {
+        if at + 4 > page.len() {
+            break;
+        }
+        page[at..at + 4].copy_from_slice(&[0xff, 0x1f, 0xf8, 0xff]);
+        at += 4;
+    }
+    // The run ends on a half pattern.
+    if at + 2 <= page.len() {
+        page[at..at + 2].copy_from_slice(&[0xff, 0x1f]);
+    }
+    page
 }
 
 /// Builds a whole file: header page listing the tables, then their pages.
@@ -173,10 +242,8 @@ impl FileBuilder {
         Self { page_size, tables: Vec::new() }
     }
 
-    /// Adds a table whose rows are already encoded.
-    ///
-    /// The first page of a table is a placeholder that carries no rows, which is
-    /// what rekordbox's own files do.
+    /// Adds a table whose rows are already encoded. Its index page and its
+    /// empty candidate are added when the file is finished.
     pub fn add_table(&mut self, page_type: u32, rows: &[Vec<u8>]) {
         // Page indices are assigned in `finish`, so use a placeholder for now
         // and patch the links afterwards.
@@ -196,42 +263,87 @@ impl FileBuilder {
         self.tables.push((page_type, pages));
     }
 
+    /// Renders the file the way rekordbox lays one out [OBS 7.2.11]: the
+    /// header page, then for each table its index page followed by its
+    /// data pages — or, for a table with no rows, one zeroed page that the
+    /// header names as the table's empty candidate — and after all tables
+    /// one zeroed empty-candidate page for every table that had rows. Every
+    /// last data page points at its table's empty candidate. The header
+    /// carries the page count, `1` at `0x10`, and the sequence the pages
+    /// reached, as rekordbox's does.
     pub fn finish(self) -> Vec<u8> {
-        let header_pages = 1;
-        // Each table gets an empty first page plus its data pages.
-        let mut out = vec![0_u8; self.page_size * header_pages];
-
+        let page_size = self.page_size;
         let num_tables = self.tables.len();
-        out[0x04..0x08].copy_from_slice(&u32::try_from(self.page_size).unwrap_or(4096).to_le_bytes());
-        out[0x08..0x0c].copy_from_slice(&u32::try_from(num_tables).unwrap_or(0).to_le_bytes());
-        out[0x14..0x18].copy_from_slice(&1_u32.to_le_bytes()); // sequence
+        let mut out = vec![0_u8; page_size];
+        let mut next_index: u32 = 1;
+        let mut sequence: u32 = 1;
+        // (page_type, first page, last page, empty candidate)
+        let mut entries: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(num_tables);
+        // Tables with rows get their empty candidate after all the tables.
+        let mut pending_candidates: Vec<(usize, usize)> = Vec::new();
+        let mut pages: Vec<Vec<u8>> = Vec::new();
 
-        let mut next_index = u32::try_from(header_pages).unwrap_or(1);
-        let mut entries = Vec::new();
-
-        for (page_type, pages) in self.tables {
-            let first = next_index;
-            let count = u32::try_from(pages.len()).unwrap_or(1);
-            let last = first + count - 1;
-            for (i, mut page) in pages.into_iter().enumerate() {
-                let index = first + u32::try_from(i).unwrap_or(0);
-                page[0x04..0x08].copy_from_slice(&index.to_le_bytes());
-                let next = if index == last { last } else { index + 1 };
-                page[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
-                out.extend_from_slice(&page);
+        for (table_at, (page_type, table_pages)) in self.tables.into_iter().enumerate() {
+            let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x22] != 0 || p[0x23] != 0);
+            let index_at = next_index;
+            next_index += 1;
+            if has_rows {
+                let first_data = next_index;
+                let count = u32::try_from(table_pages.len()).unwrap_or(1);
+                let last_data = first_data + count - 1;
+                pages.push(index_page(page_size, index_at, page_type, first_data, Some(first_data)));
+                for (i, mut page) in table_pages.into_iter().enumerate() {
+                    let index = first_data + u32::try_from(i).unwrap_or(0);
+                    page[0x04..0x08].copy_from_slice(&index.to_le_bytes());
+                    sequence += 1;
+                    page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
+                    // Patched to the empty candidate once that is allocated.
+                    let next = if index == last_data { u32::MAX } else { index + 1 };
+                    page[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
+                    pages.push(page);
+                }
+                next_index = last_data + 1;
+                pending_candidates.push((table_at, pages.len() - 1));
+                entries.push((page_type, index_at, last_data, u32::MAX));
+            } else {
+                // The zeroed page right after the index page is the candidate.
+                let candidate = next_index;
+                next_index += 1;
+                pages.push(index_page(page_size, index_at, page_type, candidate, None));
+                pages.push(vec![0_u8; page_size]);
+                entries.push((page_type, index_at, index_at, candidate));
             }
-            entries.push((page_type, first, last));
-            next_index = last + 1;
+        }
+        // rekordbox hands out the candidates in the order it wrote the
+        // tables, and it writes `history` (type 19) before the others.
+        pending_candidates.sort_by_key(|&(table_at, _)| entries.get(table_at).map_or(0, |e| u8::from(e.0 != 19)));
+        for (table_at, last_page_at) in pending_candidates {
+            let candidate = next_index;
+            next_index += 1;
+            pages.push(vec![0_u8; page_size]);
+            if let Some(page) = pages.get_mut(last_page_at) {
+                page[0x0c..0x10].copy_from_slice(&candidate.to_le_bytes());
+            }
+            if let Some(entry) = entries.get_mut(table_at) {
+                entry.3 = candidate;
+            }
         }
 
-        for (i, (page_type, first, last)) in entries.into_iter().enumerate() {
+        out[0x04..0x08].copy_from_slice(&u32::try_from(page_size).unwrap_or(4096).to_le_bytes());
+        out[0x08..0x0c].copy_from_slice(&u32::try_from(num_tables).unwrap_or(0).to_le_bytes());
+        out[0x0c..0x10].copy_from_slice(&next_index.to_le_bytes()); // next unused page
+        out[0x10..0x14].copy_from_slice(&1_u32.to_le_bytes());
+        out[0x14..0x18].copy_from_slice(&sequence.to_le_bytes());
+        for (i, (page_type, first, last, candidate)) in entries.into_iter().enumerate() {
             let at = 28 + i * 16;
             out[at..at + 4].copy_from_slice(&page_type.to_le_bytes());
+            out[at + 4..at + 8].copy_from_slice(&candidate.to_le_bytes());
             out[at + 8..at + 12].copy_from_slice(&first.to_le_bytes());
             out[at + 12..at + 16].copy_from_slice(&last.to_le_bytes());
         }
-
-        out[0x0c..0x10].copy_from_slice(&next_index.to_le_bytes()); // next unused page
+        for page in pages {
+            out.extend_from_slice(&page);
+        }
         out
     }
 }

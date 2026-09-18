@@ -167,11 +167,12 @@ pub fn key_row(id: u32, name: &str) -> Vec<u8> {
     row
 }
 
-/// `colors`: four zero bytes, a byte rekordbox writes as `01`, the u2 id,
-/// one pad byte, then the name [OBS 7.2.11: `00 00 00 00 01 01 00 00 0b "Pink"`].
+/// `colors`: four zero bytes, the id as one byte, the id again as two, one
+/// pad byte, then the name [OBS 7.2.11: `00 00 00 00 01 01 00 00 0b "Pink"`,
+/// `00 00 00 00 02 02 00 00 09 "Red"`].
 pub fn color_row(id: u16, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; 8];
-    row[4] = 0x01;
+    row[4] = u8::try_from(id).unwrap_or(0);
     put_u2(&mut row, 5, id);
     row.extend_from_slice(&device_sql_string(name));
     row
