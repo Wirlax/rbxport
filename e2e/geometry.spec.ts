@@ -36,7 +36,9 @@ test("the tree is the measured width", async ({ page }) => {
 test("the source rail is the measured width", async ({ page }) => {
   // browseSetting.xml TreeShortcut w=57.
   const expected = await token(page, "--s-tree-rail-w");
-  const box = await page.getByRole("tablist", { name: "Library sources" }).boundingBox();
+  // The rail holds the sources tablist and, at its foot, the Sync button;
+  // the measured width is the rail's, border included.
+  const box = await page.getByRole("tablist", { name: "Library sources" }).locator("..").boundingBox();
   expect(box?.width).toBeCloseTo(expected, 0);
 });
 

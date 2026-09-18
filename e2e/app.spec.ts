@@ -577,6 +577,11 @@ test("a connected device appears under Devices", async ({ page }) => {
 });
 
 test("a device shows what is on it, and a second write only syncs the difference", async ({ page }) => {
+  // A stick with nothing on it: the DJ System switch that would give it an
+  // empty database on open is off here, so the first write is a full export.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("rbl.preferences", JSON.stringify({ djSystem: { createDatabaseFolders: false } }));
+  });
   await page.goto("/");
   await page.getByRole("tablist", { name: "Library sources" })
     .getByRole("tab", { name: "Devices" })
