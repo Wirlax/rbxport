@@ -663,3 +663,77 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     assert!(ended.b.playing);
     assert!(ended.b.frames > ended.a.frames);
 }
+
+#[test]
+fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them() {
+    let s = shell();
+    // One real file in playlist 1, so there is something to copy; the
+    // fixture's other rows point at audio that does not exist and are
+    // skipped, which is a stick's ordinary condition, not a failure.
+    let audio = s._dir.path().join("Silent Two Seconds.wav");
+    write_wav(&audio, 2);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    let id = report.tracks[0].id.clone();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![id])).unwrap();
+
+    let progress: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&progress);
+    s.app.listen("sync:progress", move |event| {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+            seen.lock().unwrap().push((
+                value["path"].as_str().unwrap_or_default().to_owned(),
+                value["state"].as_str().unwrap_or_default().to_owned(),
+            ));
+        }
+    });
+
+    // A stick that is not there says nothing about what it holds.
+    let gone = s._dir.path().join("gone");
+    let err = run(commands::device_sync_state(gone.display().to_string())).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
+
+    // A stick with nothing on it: no selection, nothing on the device.
+    let stick_a = tempfile::tempdir().unwrap();
+    let stick_b = tempfile::tempdir().unwrap();
+    let fresh = run(commands::device_sync_state(stick_a.path().display().to_string())).unwrap();
+    assert!(fresh.selected.is_empty());
+    assert!(fresh.on_device.is_empty());
+
+    // Two sticks and one that was pulled: the two are written, the third
+    // reports its error, and the run says which is which as it goes.
+    let reports = run(commands::sync_devices(
+        s.handle(),
+        s.state(),
+        vec![playlist_id(1)],
+        vec![
+            stick_a.path().display().to_string(),
+            gone.display().to_string(),
+            stick_b.path().display().to_string(),
+        ],
+        None,
+    ))
+    .unwrap();
+    assert_eq!(reports.len(), 3);
+    let written_a = reports[0].report.as_ref().expect("stick A written");
+    assert!(reports[0].error.is_none());
+    assert_eq!(written_a.playlists, 1);
+    assert_eq!(written_a.tracks, 1);
+    assert!(written_a.verified);
+    assert!(reports[1].report.is_none());
+    assert_eq!(reports[1].error.as_deref(), Some("That device is no longer connected. It may have been unplugged or renamed."));
+    let written_b = reports[2].report.as_ref().expect("stick B written");
+    assert_eq!(written_b.tracks, written_a.tracks);
+    assert_eq!(
+        progress.lock().unwrap().iter().map(|(_, state)| state.as_str()).collect::<Vec<_>>(),
+        ["writing", "done", "writing", "failed", "writing", "done"],
+    );
+
+    // Each stick remembers the selection it was given, by the tree's id,
+    // and shows the playlist it holds.
+    for stick in [&stick_a, &stick_b] {
+        let state = run(commands::device_sync_state(stick.path().display().to_string())).unwrap();
+        assert_eq!(state.selected.len(), 1);
+        assert_eq!(state.selected[0].library_id, playlist_id(1));
+        assert_eq!(state.on_device, vec![state.selected[0].name.clone()]);
+    }
+}
