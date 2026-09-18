@@ -55,6 +55,8 @@ beforeEach(async () => {
       asked.push(trackId);
       return new Promise<Uint8Array>(() => {});
     },
+    // The module subscribes once on load; nothing is re-analysed here.
+    onAnalysisChanged: () => () => undefined,
   } as unknown as Backend);
   ({ WaveformPreview } = await import("./WaveformPreview"));
   host = document.createElement("div");
