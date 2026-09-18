@@ -17,22 +17,6 @@ import { getBackend } from "@/ipc/client";
 import type { AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
 import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } from "@/lib/clock";
-import { usePreferences } from "@/store/usePreferences";
-import type { WaveformRate } from "@/lib/preferences";
-
-/**
- * The least time between two frames of the deck, for Waveform Drawing Rate
- * in Preferences. High is every frame the display gives; medium and low
- * skip to every second and every fourth, which is what the rate buys on a
- * laptop running on its battery.
- */
-export function frameInterval(rate: WaveformRate): number {
-  switch (rate) {
-    case "medium": return 1000 / 30;
-    case "low": return 1000 / 15;
-    default: return 0;
-  }
-}
 
 export interface Playback {
   /** True while audio is actually running. */
@@ -109,8 +93,8 @@ export interface Playback {
   /**
    * Where playback is at this instant, extrapolated from the last tick
    * rather than read from the last frame: `positionRef` moves with the
-   * frame loop, which at a low drawing rate is up to 66 ms behind. Sync
-   * reads this, because a beat is a few of those.
+   * frame loop, which is up to a frame behind. Sync reads this, because a
+   * beat is only a few frames.
    */
   positionNow: () => number;
   /**
@@ -402,19 +386,13 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
-  const rate = usePreferences().view.waveformRate;
   useEffect(() => {
     if (!playing) return;
     let frame = 0;
     let last = performance.now();
-    const least = frameInterval(rate);
     const tick = () => {
       frame = requestAnimationFrame(tick);
       const now = performance.now();
-      // A frame that comes too soon for the drawing rate is skipped whole:
-      // the clock is extrapolated from the anchor, so nothing drifts. A
-      // quarter frame of slack, or jitter would skip one frame too many.
-      if (least > 0 && now - last < least - 4) return;
       const target = extrapolate(anchor.current, now);
       const next = follow(positionRef.current, target, now - last);
       last = now;
@@ -422,7 +400,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, emit, rate]);
+  }, [playing, emit]);
 
   const idle = !canPlay || trackId === null;
 

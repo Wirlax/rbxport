@@ -23,7 +23,6 @@ describe("sanitisePreferences", () => {
         browseFontSize: 4,
         browseLineSpace: 9,
         keyDisplay: "alphanumeric",
-        waveformRate: "fast",
         overviewWaveform: "full",
         explorer: "yes",
       },
@@ -41,7 +40,6 @@ describe("sanitisePreferences", () => {
     expect(out.view.browseFontSize).toBe(4);
     expect(out.view.browseLineSpace).toBe(BROWSE_SCALE_DEFAULT);
     expect(out.view.keyDisplay).toBe("alphanumeric");
-    expect(out.view.waveformRate).toBe("high");
     expect(out.view.overviewWaveform).toBe("full");
     expect(out.view.explorer).toBe(true);
     expect(out.analysis.auto).toBe(false);

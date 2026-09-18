@@ -16,9 +16,6 @@ import type {
   KeyDisplay, MenuSlot, OverviewWaveform, WaveformColor, WaveformPosition,
 } from "@/ipc/types";
 
-/** How fast the deck redraws while it plays. */
-export type WaveformRate = "high" | "medium" | "low";
-
 /** BEAT SYNC matches the tempo and the bar; BPM SYNC the tempo alone. */
 export type SyncType = "beat" | "bpm";
 
@@ -83,8 +80,6 @@ export interface ViewPreferences {
   browseLineSpace: number;
   /** Key display format: `Ebm` or `2A`. */
   keyDisplay: KeyDisplay;
-  /** Waveform Drawing Rate. */
-  waveformRate: WaveformRate;
   /** Full/Preview Waveform: the deck's overview, single-sided or mirrored. */
   overviewWaveform: OverviewWaveform;
   /** Media Browser › Explorer: the folders on disk in the tree. */
@@ -209,7 +204,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
     browseBold: false,
     browseLineSpace: BROWSE_SCALE_DEFAULT,
     keyDisplay: "classic",
-    waveformRate: "high",
     overviewWaveform: "half",
     explorer: true,
     previewCueMarkers: true,
@@ -321,7 +315,6 @@ function slots(value: unknown): MenuSlot[] | null {
 
 const KEY_DISPLAYS: readonly KeyDisplay[] = ["classic", "alphanumeric"];
 const OVERVIEWS: readonly OverviewWaveform[] = ["half", "full"];
-const RATES: readonly WaveformRate[] = ["high", "medium", "low"];
 const WAVEFORM_COLORS: readonly WaveformColor[] = ["blue", "rgb", "3band"];
 const POSITIONS: readonly WaveformPosition[] = ["center", "left"];
 const SYNC_TYPES: readonly SyncType[] = ["beat", "bpm"];
@@ -358,7 +351,6 @@ export function sanitisePreferences(value: unknown): Preferences {
       browseBold: bool(view.browseBold, d.view.browseBold),
       browseLineSpace: step(view.browseLineSpace, d.view.browseLineSpace),
       keyDisplay: oneOf(view.keyDisplay, KEY_DISPLAYS, d.view.keyDisplay),
-      waveformRate: oneOf(view.waveformRate, RATES, d.view.waveformRate),
       overviewWaveform: oneOf(view.overviewWaveform, OVERVIEWS, d.view.overviewWaveform),
       explorer: bool(view.explorer, d.view.explorer),
       previewCueMarkers: bool(view.previewCueMarkers, d.view.previewCueMarkers),

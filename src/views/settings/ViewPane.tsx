@@ -184,19 +184,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
         />
       </Section>
       <Section title="Waveform">
-        <Sub>Waveform Drawing Rate</Sub>
-        <Radios
-          label="Waveform Drawing Rate"
-          nested
-          value={view.waveformRate}
-          choices={[
-            { value: "high", label: "High Speed" },
-            { value: "medium", label: "Medium Speed" },
-            { value: "low", label: "Low Speed" },
-          ]}
-          onChange={(waveformRate) => set({ waveformRate })}
-        />
-        <Separator />
         <Sub>Full/Preview Waveform</Sub>
         <Radios
           label="Full/Preview Waveform"
