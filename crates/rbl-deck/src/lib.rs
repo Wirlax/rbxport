@@ -616,6 +616,45 @@ impl Engine {
     /// the music rather than a rounded one. Returning to a cue used to land
     /// 0.3 ms in front of it every time, measured, because the position went
     /// out as a rounded integer.
+    /// Sets a loop between two points, in milliseconds, and turns it on. A
+    /// head already past the out point is sent back to the in point.
+    pub fn set_loop_ms(&self, deck: Deck, in_ms: f64, out_ms: f64) {
+        let to_frames = |ms: f64| (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
+        self.set_loop_frames(deck, to_frames(in_ms), to_frames(out_ms));
+    }
+
+    /// [`set_loop_ms`](Self::set_loop_ms) in device-rate frames.
+    pub fn set_loop_frames(&self, deck: Deck, from: u64, to: u64) {
+        let Some(handle) = self.deck(deck) else { return };
+        if to <= from {
+            return;
+        }
+        handle.clock().set_loop(Some((from, to)));
+        handle.clock().set_looping(true);
+        if handle.clock().position() >= to || handle.clock().position() < from {
+            self.seek_frames(deck, from);
+        }
+        handle.send(deck::Command::Wake);
+    }
+
+    /// RELOOP and EXIT: back into the loop from its in point, or out of it
+    /// with the range kept for the next RELOOP.
+    pub fn set_looping(&self, deck: Deck, on: bool) {
+        let Some(handle) = self.deck(deck) else { return };
+        let Some((from, _)) = handle.clock().loop_range() else { return };
+        handle.clock().set_looping(on);
+        if on {
+            self.seek_frames(deck, from);
+        }
+        handle.send(deck::Command::Wake);
+    }
+
+    /// Forgets the loop.
+    pub fn clear_loop(&self, deck: Deck) {
+        let Some(handle) = self.deck(deck) else { return };
+        handle.clock().set_loop(None);
+    }
+
     pub fn seek_ms(&self, deck: Deck, ms: f64) {
         let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
         self.seek_frames(deck, frames);
@@ -710,6 +749,9 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             master_tempo: false,
             key_shift: 0,
             start_in_frames: 0,
+            loop_in_frames: 0,
+            loop_out_frames: 0,
+            looping: false,
         })
     }
 }

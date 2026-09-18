@@ -35,13 +35,13 @@ function tickAt(seconds: number, generation: number, playing = true): Tick {
     tempo: 1,
     masterTempo: false,
     keyShift: 0,
-    startInFrames: 0,
+    startInFrames: 0, loopInFrames: 0, loopOutFrames: 0, looping: false,
   };
   return {
     a: deck,
     b: {
       frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
-      tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
+      tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0, loopInFrames: 0, loopOutFrames: 0, looping: false,
     },
     sampleRate: RATE,
     peakLeft: 0,

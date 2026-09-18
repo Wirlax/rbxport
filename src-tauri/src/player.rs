@@ -33,6 +33,7 @@ const TICKS_PER_DECK_TICK: u32 = 3;
 /// One deck in a tick.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the deck's flags, sent together")]
 pub struct DeckTickDto {
     pub frames: u64,
     pub total_frames: u64,
@@ -49,6 +50,11 @@ pub struct DeckTickDto {
     pub key_shift: i8,
     /// Output frames until a started deck sounds: a play held for the beat.
     pub start_in_frames: u64,
+    /// The loop's in and out points, device-rate frames; both 0 for none.
+    pub loop_in_frames: u64,
+    pub loop_out_frames: u64,
+    /// Whether the deck is inside the loop.
+    pub looping: bool,
 }
 
 /// Both decks, which is what one tick carries: about 200 bytes, well inside
@@ -85,6 +91,9 @@ impl TickDto {
             master_tempo: false,
             key_shift: 0,
             start_in_frames: 0,
+            loop_in_frames: 0,
+            loop_out_frames: 0,
+            looping: false,
         };
         Self {
             a: empty,
@@ -398,6 +407,9 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         master_tempo: s.master_tempo,
         key_shift: s.key_shift,
         start_in_frames: s.start_in_frames,
+        loop_in_frames: s.loop_in_frames,
+        loop_out_frames: s.loop_out_frames,
+        looping: s.looping,
     };
     let (peak_left, peak_right) = master.peaks();
     TickDto {

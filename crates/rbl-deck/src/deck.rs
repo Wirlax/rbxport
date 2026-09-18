@@ -257,6 +257,7 @@ impl Worker {
 
     fn load(&mut self, path: &std::path::Path) {
         self.clock.set_start_in(0);
+        self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
         self.clock.set_loaded(false);
@@ -282,6 +283,30 @@ impl Worker {
             Err(e) => {
                 self.clock.set_total(0);
                 self.clock.set_position(0);
+                (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
+            }
+        }
+    }
+
+    /// The loop the deck is inside, if it is inside one.
+    fn active_loop(&self) -> Option<(u64, u64)> {
+        if self.clock.looping() { self.clock.loop_range() } else { None }
+    }
+
+    /// Back to the loop's in point, quietly: no generation change, so the
+    /// callback plays straight on from the block before the jump to the
+    /// block after it with nothing faded, which is what makes a loop seam
+    /// inaudible. The blocks already in the ring were trimmed to the out
+    /// point by `produce`, so nothing past it is queued.
+    fn loop_jump(&mut self, frame: u64) {
+        let Some(streamer) = self.streamer.as_mut() else { return };
+        match streamer.seek(frame) {
+            Ok(landed) => {
+                self.clock.set_end_of_stream(false);
+                self.head = landed as f64;
+                self.restart_stretch();
+            }
+            Err(e) => {
                 (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
             }
         }
@@ -357,6 +382,7 @@ impl Worker {
         self.window = PcmWindow::empty();
         self.clock.set_scrubbing(false);
         self.clock.set_start_in(0);
+        self.clock.set_loop(None);
         self.clock.set_playing(false);
         self.streamer = None;
         self.generation = self.clock.bump_generation();
@@ -484,6 +510,17 @@ impl Worker {
             return false;
         }
         let generation = self.generation;
+        // At or past the out point: round again before another frame is
+        // decoded. A loop set behind the head, or a seek past its end while
+        // it is on, comes back here too.
+        let active = self.active_loop();
+        if let Some((from, to)) = active {
+            let at = if self.stretching() { self.head as u64 } else { self.streamer.as_ref().map_or(0, Streamer::position) };
+            if at >= to {
+                self.loop_jump(from);
+            }
+        }
+        let stretching = self.stretching();
         let Some(streamer) = self.streamer.as_mut() else { return false };
         if streamer.finished() {
             self.clock.set_end_of_stream(true);
@@ -492,11 +529,17 @@ impl Worker {
 
         // Through the stretcher whenever the speed or the key is not the
         // file's own; at unity with no shift the decoded audio goes straight.
-        if (self.tempo - 1.0).abs() > f32::EPSILON || self.key_shift != 0 {
+        if stretching {
             return self.produce_stretched(generation);
         }
         let mut block = Block::empty(generation, 0);
-        let frames = match streamer.fill(&mut block.samples) {
+        // Only up to the out point, so the jump lands on the frame: a block
+        // that ran past it would play the audio beyond the loop first.
+        let room = active.map_or(BLOCK_FRAMES, |(_, to)| {
+            usize::try_from(to.saturating_sub(streamer.position())).unwrap_or(BLOCK_FRAMES).clamp(1, BLOCK_FRAMES)
+        });
+        let Some(target) = block.samples.get_mut(..room * 2) else { return false };
+        let frames = match streamer.fill(target) {
             Ok(frames) => frames,
             Err(e) => {
                 // A decode that fails mid-track stops the deck rather than
@@ -520,7 +563,21 @@ impl Worker {
         block.position = streamer.position() - frames as u64;
         self.head = streamer.position() as f64;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
-        self.producer.push(block).is_ok()
+        let pushed = self.producer.push(block).is_ok();
+        // Reached the out point with this block: round now, so the next block
+        // decoded is the in point rather than a bufferful past the out.
+        if let Some((from, to)) = active {
+            if self.streamer.as_ref().is_some_and(|s| s.position() >= to) {
+                self.loop_jump(from);
+            }
+        }
+        pushed
+    }
+
+    /// Whether the audio goes through a stretcher rather than straight: the
+    /// speed or the key is not the file's own.
+    fn stretching(&self) -> bool {
+        (self.tempo - 1.0).abs() > f32::EPSILON || self.key_shift != 0
     }
 
     /// The same, with the tempo control in the path.
@@ -558,7 +615,17 @@ impl Worker {
         }
         self.head += frames as f64 * tempo;
         block.frames = u16::try_from(frames.min(BLOCK_FRAMES)).unwrap_or(0);
-        self.producer.push(block).is_ok()
+        let pushed = self.producer.push(block).is_ok();
+        // Stretched, the head is counted rather than read, so the loop
+        // rounds at a block's granularity — a few milliseconds at most —
+        // rather than on the frame [ASSUME: close enough for a beat loop;
+        // sample-exact would mean trimming the stretcher's output].
+        if let Some((from, to)) = self.active_loop() {
+            if self.head as u64 >= to {
+                self.loop_jump(from);
+            }
+        }
+        pushed
     }
 
     /// Gives the stretcher everything it asks for that there is input for.

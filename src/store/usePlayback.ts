@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { AppErrorDto, DeckId, Tick } from "@/ipc/types";
+import type { AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
 import { canPlay } from "@/ipc/audio";
 import { extrapolate, follow, NO_ANCHOR, pinned, SNAP_SECONDS, type Anchor } from "@/lib/clock";
 import { usePreferences } from "@/store/usePreferences";
@@ -67,6 +67,13 @@ export interface Playback {
   seek: (seconds: number) => void;
   /** Seek by fraction, for clicking the waveform. */
   seekFraction: (fraction: number) => void;
+  /** The deck's loop, as the engine reports it; null for none. */
+  loop: DeckLoop | null;
+  /** Sets a loop between two points, in seconds, and turns it on. */
+  setLoop: (inSeconds: number, outSeconds: number) => void;
+  /** RELOOP (true) or EXIT (false). */
+  setLoopActive: (on: boolean) => void;
+  clearLoop: () => void;
   /**
    * Dragging a waveform, with the audio following the pointer.
    *
@@ -116,6 +123,14 @@ export interface Playback {
    * Returns its own unsubscribe.
    */
   subscribe: (listener: (seconds: number) => void) => () => void;
+}
+
+/** A deck's loop, in seconds. */
+export interface DeckLoop {
+  inSeconds: number;
+  outSeconds: number;
+  /** Inside it (RELOOP) or out of it with the range kept (EXIT). */
+  active: boolean;
 }
 
 /** The preview player is deck A; the 2-player layout adds B. */
@@ -173,6 +188,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const [masterTempo, setMasterTempoState] = useState(false);
   const [keyShift, setKeyShiftState] = useState(0);
   const [shiftsKey, setShiftsKey] = useState(true);
+  const [loop, setLoopState] = useState<DeckLoop | null>(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -222,6 +238,21 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       setMasterTempoState(deck.masterTempo);
       setKeyShiftState(deck.keyShift);
       setShiftsKey(tick.shiftsKey);
+      setLoopState((current) => {
+        const next =
+          rate > 0 && deck.loopOutFrames > deck.loopInFrames
+            ? { inSeconds: deck.loopInFrames / rate, outSeconds: deck.loopOutFrames / rate, active: deck.looping }
+            : null;
+        // Same loop, same object: a tick must not re-render every reader.
+        if (
+          current === next ||
+          (current !== null && next !== null && current.inSeconds === next.inSeconds &&
+            current.outSeconds === next.outSeconds && current.active === next.active)
+        ) {
+          return current;
+        }
+        return next;
+      });
       // A drag owns the playhead, and the deck's head is not under the
       // pointer: it is rate-limited so the drag stays audible, so it trails a
       // fast hand and rests a block past a still one. Taking it as the anchor
@@ -650,9 +681,35 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
     [],
   );
 
+  // The loop is the engine's: shown from the tick, so what is drawn is what
+  // sounds. A failure is reported as a deck error, like a seek's.
+  const loopCall = useCallback(
+    (call: (backend: Backend) => Promise<void>) => {
+      if (idle) return;
+      void (async () => {
+        try {
+          await call(await getBackend());
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : FALLBACK);
+        }
+      })();
+    },
+    [idle],
+  );
+  const setLoop = useCallback(
+    (inSeconds: number, outSeconds: number) => {
+      if (!Number.isFinite(inSeconds) || !Number.isFinite(outSeconds) || outSeconds <= inSeconds) return;
+      loopCall((b) => b.deckSetLoop(DECK, Math.max(0, inSeconds) * 1000, outSeconds * 1000));
+    },
+    [loopCall, DECK],
+  );
+  const setLoopActive = useCallback((on: boolean) => loopCall((b) => b.deckLoopActive(DECK, on)), [loopCall, DECK]);
+  const clearLoop = useCallback(() => loopCall((b) => b.deckClearLoop(DECK)), [loopCall, DECK]);
+
   return {
     playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
+    loop, setLoop, setLoopActive, clearLoop,
   };
 }

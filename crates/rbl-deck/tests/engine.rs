@@ -1266,3 +1266,61 @@ fn the_limiter_off_leaves_the_clamp_to_flat_top_the_sum() {
     assert!(flat > 100, "only {flat} samples hit the rail: the sum was not clipped");
     assert!(h.engine.master().reduction_db() < 1e-6, "off, the limiter reported work");
 }
+
+#[test]
+fn a_loop_rounds_at_its_out_point_with_no_gap_and_exit_plays_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ramp.wav");
+    // Four seconds of a ramp, so the audio says where in the file it is.
+    ramp(&path, RATE as usize * 4);
+
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    // A loop from 1 s to 1.5 s, set before play so the first pass is exact.
+    let from = u64::from(RATE);
+    let to = u64::from(RATE) + u64::from(RATE) / 2;
+    h.engine.set_loop_frames(Deck::A, from, to);
+    assert_eq!(h.position(Deck::A), from, "setting a loop behind the head sends it to the in point");
+    let snap = h.engine.snapshot().a;
+    assert_eq!((snap.loop_in_frames, snap.loop_out_frames, snap.looping), (from, to, true));
+
+    h.engine.play(Deck::A);
+    // Three passes' worth of audio: the head must never reach the out point.
+    let audio = h.play_until_paced(Deck::A, from + 100);
+    let mut out = audio;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut highest = 0;
+    let mut pulled = 0_usize;
+    while pulled < RATE as usize * 3 / 2 && Instant::now() < deadline {
+        let chunk = h.sink.pull(512);
+        pulled += chunk.len() / 2;
+        out.extend(chunk);
+        highest = highest.max(h.position(Deck::A));
+        std::thread::sleep(Duration::from_micros(512 * 1_000_000 / u64::from(RATE)));
+    }
+    assert!(highest < to + 600, "the head ran past the out point to {highest} (out is {to})");
+    assert!(highest >= from, "the head never reached the loop");
+    // Past the fade-in, the audio stayed at the ramp's 0.625..0.6875 band:
+    // nothing from outside the loop was heard. The seam is the ramp's own
+    // step from 0.6875 back to 0.625, which the output smoother rings on for
+    // a hundred frames, and never a silence.
+    let played: Vec<f32> = out.into_iter().skip(4096).filter(|s| *s != 0.0).collect();
+    assert!(played.len() > RATE as usize, "not enough audio to judge: {}", played.len());
+    let (lo, hi) = played.iter().fold((1.0_f32, 0.0_f32), |(lo, hi), &s| (lo.min(s), hi.max(s)));
+    assert!(lo > 0.58 && hi < 0.74, "the loop played audio from {lo} to {hi} of the ramp");
+    let silent = played.windows(64).any(|w| w.iter().all(|s| s.abs() < 1e-3));
+    assert!(!silent, "a loop seam went silent");
+
+    // EXIT: the head carries on past the out point.
+    h.engine.set_looping(Deck::A, false);
+    h.play_until_paced(Deck::A, to + 4_096);
+    assert!(h.position(Deck::A) > to, "after EXIT the head stayed inside the loop");
+    assert!(!h.engine.snapshot().a.looping);
+    // RELOOP: back to the in point, looping again.
+    h.engine.set_looping(Deck::A, true);
+    assert_eq!(h.position(Deck::A), from);
+    assert!(h.engine.snapshot().a.looping);
+    h.engine.clear_loop(Deck::A);
+    assert_eq!(h.engine.snapshot().a.loop_out_frames, 0);
+}

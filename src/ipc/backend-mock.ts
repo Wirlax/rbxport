@@ -845,6 +845,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const deckA = {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
+    loopInFrames: 0, loopOutFrames: 0, looping: false,
   };
   // Deck B holds its own tempo and key lock even though a browser has no
   // audio to apply them to: a control that snapped back on the next tick would
@@ -852,6 +853,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const deckB = {
     frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
+    loopInFrames: 0, loopOutFrames: 0, looping: false,
   };
   const deckTickListeners = new Set<(tick: Tick) => void>();
   const deckEventListeners = new Set<(event: DeckEvent) => void>();
@@ -903,6 +905,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         deckA.frames + Math.round(((now - clockAt) / 1000) * SAMPLE_RATE),
         deckA.totalFrames,
       );
+      // Inside a loop the head rounds at the out point, as the deck does.
+      if (deckA.looping && deckA.loopOutFrames > deckA.loopInFrames && deckA.frames >= deckA.loopOutFrames) {
+        deckA.frames = deckA.loopInFrames + ((deckA.frames - deckA.loopOutFrames) % (deckA.loopOutFrames - deckA.loopInFrames));
+      }
       clockAt = now;
       if (deckA.frames >= deckA.totalFrames) deckA.playing = false;
       sendTick();
@@ -1313,6 +1319,37 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     deckSeek: (_deck, positionMs) => {
       deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
       deckA.generation += 1;
+      sendTick();
+      return wait(undefined);
+    },
+    deckSetLoop: (_deck, inMs, outMs) => {
+      const from = Math.max(0, Math.round((inMs / 1000) * SAMPLE_RATE));
+      const to = Math.max(0, Math.round((outMs / 1000) * SAMPLE_RATE));
+      if (to <= from) return wait(undefined);
+      deckA.loopInFrames = from;
+      deckA.loopOutFrames = to;
+      deckA.looping = true;
+      if (deckA.frames >= to || deckA.frames < from) {
+        deckA.frames = from;
+        deckA.generation += 1;
+      }
+      sendTick();
+      return wait(undefined);
+    },
+    deckLoopActive: (_deck, on) => {
+      if (deckA.loopOutFrames <= deckA.loopInFrames) return wait(undefined);
+      deckA.looping = on;
+      if (on) {
+        deckA.frames = deckA.loopInFrames;
+        deckA.generation += 1;
+      }
+      sendTick();
+      return wait(undefined);
+    },
+    deckClearLoop: () => {
+      deckA.loopInFrames = 0;
+      deckA.loopOutFrames = 0;
+      deckA.looping = false;
       sendTick();
       return wait(undefined);
     },

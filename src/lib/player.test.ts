@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  beatLoopRange,
   BEATS_PER_BAR,
   DETAIL_BARS,
   beatsIn,
@@ -704,5 +705,22 @@ describe("the tempo fader", () => {
     // Nothing to work with.
     expect(tempoForTypedBpm("fast", 12_800)).toBeNull();
     expect(tempoForTypedBpm("130", 0)).toBeNull();
+  });
+});
+
+describe("beatLoopRange", () => {
+  const grid = { times: new Uint32Array([1000, 1500, 2000, 2500, 3000]), numbers: new Uint8Array([1, 2, 3, 4, 1]) };
+  it("runs from the snapped beat for the asked number of beats on the grid", () => {
+    expect(beatLoopRange(grid, grid, 1620, 2)).toEqual([1500, 2500]);
+    // Off the grid's end, the average beat carries the loop on.
+    expect(beatLoopRange(grid, grid, 2400, 4)).toEqual([2500, 4500]);
+    // Unquantized, it starts where the head is.
+    expect(beatLoopRange(grid, null, 1620, 1)).toEqual([1620, 2120]);
+    // A fraction of a beat.
+    expect(beatLoopRange(grid, grid, 1000, 0.5)).toEqual([1000, 1250]);
+  });
+  it("has nothing to count on without a grid", () => {
+    expect(beatLoopRange({ times: new Uint32Array(), numbers: new Uint8Array() }, null, 100, 4)).toBeNull();
+    expect(beatLoopRange(grid, grid, 1000, 0)).toBeNull();
   });
 });

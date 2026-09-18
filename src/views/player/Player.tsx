@@ -53,6 +53,7 @@ import {
   type BeatGrid as BeatGridData,
   type CuePanel,
   type PadMode,
+  beatLoopRange,
 } from "@/lib/player";
 import { usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
@@ -823,6 +824,39 @@ export const Player = memo(function Player({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
+
+  // Loops. AU sets a beat loop of the chosen length from the head, snapped
+  // to the grid when Q is on; MA takes IN and OUT by hand. RELOOP/EXIT and
+  // the loop itself are the engine's, read back on every tick, so what the
+  // buttons show is what sounds. Nothing is written to the library.
+  const [loopMode, setLoopMode] = useState<"auto" | "manual">("auto");
+  const [loopBeats, setLoopBeats] = useState(4);
+  /** A LOOP IN pressed and waiting for its OUT, in seconds. */
+  const [loopIn, setLoopIn] = useState<number | null>(null);
+  const activeLoop = playback.loop?.active ?? false;
+  const autoLoop = useCallback(() => {
+    if (playback.idle) return;
+    if (activeLoop) {
+      playback.setLoopActive(false);
+      return;
+    }
+    const range = beatLoopRange(grid, quantize ? quantizeGrid : null, playback.positionNow() * 1000, loopBeats);
+    if (range) playback.setLoop(range[0] / 1000, range[1] / 1000);
+  }, [playback, activeLoop, grid, quantize, quantizeGrid, loopBeats]);
+  const markLoopIn = useCallback(() => {
+    if (playback.idle) return;
+    setLoopIn(playback.positionNow());
+  }, [playback]);
+  const markLoopOut = useCallback(() => {
+    if (playback.idle || loopIn === null) return;
+    const out = playback.positionNow();
+    if (out > loopIn) playback.setLoop(loopIn, out);
+    setLoopIn(null);
+  }, [playback, loopIn]);
+  const reloopOrExit = useCallback(() => {
+    if (!playback.loop) return;
+    playback.setLoopActive(!playback.loop.active);
+  }, [playback]);
 
   // What the other deck reads when its BEAT SYNC is pressed. A ref holding a
   // closure over the current render, registered once: the shell keeps the
@@ -1743,22 +1777,104 @@ export const Player = memo(function Player({
               </button>
             </div>
 
-            <div className={styles.auto} role="group" aria-label="Cue mode">
-              <button type="button" className={styles.chip} data-on aria-pressed>AU</button>
-              <button type="button" className={styles.chip} aria-pressed={false}>MA</button>
+            {/* AU/MA is "Change Auto Beat Loop/Manual Loop display" in
+                german.lang, and the `‹ 2 ›` beside it "Switch the page of
+                beat length": the auto beat loop's length in beats, which
+                its number sets from the head. MA puts IN, OUT and
+                RELOOP/EXIT in the same place. [ASSUME: the capture shows
+                the controls, not a loop in use.] */}
+            <div className={styles.auto} role="group" aria-label="Loop mode">
+              <button
+                type="button"
+                className={styles.chip}
+                data-on={loopMode === "auto" || undefined}
+                aria-pressed={loopMode === "auto"}
+                title={tip("Auto Beat Loop")}
+                onClick={() => setLoopMode("auto")}
+              >
+                AU
+              </button>
+              <button
+                type="button"
+                className={styles.chip}
+                data-on={loopMode === "manual" || undefined}
+                aria-pressed={loopMode === "manual"}
+                title={tip("Manual Loop")}
+                onClick={() => setLoopMode("manual")}
+              >
+                MA
+              </button>
             </div>
 
-            {/* Not a pad page. The capture's `‹ 2 ›` sits beside AU/MA,
-                which german.lang describes as "Change Auto Beat Loop/Manual
-                Loop display", and the arrows as "Switch the page of beat
-                length": it is the auto beat loop's length, in beats. The
-                pads are A to H whatever it reads. [ASSUME] Loops are not
-                built, so it is drawn and inert. */}
-            <div className={styles.page} aria-label="Beat loop length">
-              <button type="button" className={styles.step} aria-label="Shorter loop" disabled>‹</button>
-              <span className={styles.pageNumber}>2</span>
-              <button type="button" className={styles.step} aria-label="Longer loop" disabled>›</button>
-            </div>
+            {loopMode === "auto" ? (
+              <div className={styles.page} role="group" aria-label="Beat loop">
+                <button
+                  type="button"
+                  className={styles.step}
+                  aria-label="Shorter loop"
+                  disabled={loopBeats <= 0.25}
+                  onClick={() => setLoopBeats((beats) => Math.max(0.25, beats / 2))}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className={styles.pageNumber}
+                  data-on={activeLoop || undefined}
+                  aria-pressed={activeLoop}
+                  aria-label={activeLoop ? "Exit loop" : `${loopBeats} beat loop`}
+                  title={tip(activeLoop ? "Exit the loop" : `Loop ${loopBeats} beat${loopBeats === 1 ? "" : "s"} from here`)}
+                  disabled={playback.idle || grid.times.length < 2}
+                  onClick={autoLoop}
+                >
+                  {loopBeats < 1 ? `1/${Math.round(1 / loopBeats)}` : loopBeats}
+                </button>
+                <button
+                  type="button"
+                  className={styles.step}
+                  aria-label="Longer loop"
+                  disabled={loopBeats >= 32}
+                  onClick={() => setLoopBeats((beats) => Math.min(32, beats * 2))}
+                >
+                  ›
+                </button>
+              </div>
+            ) : (
+              <div className={styles.page} role="group" aria-label="Manual loop">
+                <button
+                  type="button"
+                  className={styles.memoryLabel}
+                  data-on={loopIn !== null || undefined}
+                  aria-label="Loop in"
+                  title={tip("Loop In")}
+                  disabled={playback.idle}
+                  onClick={markLoopIn}
+                >
+                  IN
+                </button>
+                <button
+                  type="button"
+                  className={styles.memoryLabel}
+                  aria-label="Loop out"
+                  title={tip("Loop Out")}
+                  disabled={playback.idle || loopIn === null}
+                  onClick={markLoopOut}
+                >
+                  OUT
+                </button>
+                <button
+                  type="button"
+                  className={styles.memoryLabel}
+                  data-on={activeLoop || undefined}
+                  aria-label={activeLoop ? "Exit loop" : "Reloop"}
+                  title={tip("Reloop/Exit")}
+                  disabled={!playback.loop}
+                  onClick={reloopOrExit}
+                >
+                  {activeLoop ? "EXIT" : "RELOOP"}
+                </button>
+              </div>
+            )}
           </div>
           )}
 

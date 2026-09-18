@@ -44,10 +44,18 @@ pub struct DeckClock {
     /// with the start, counted down by the callback, and cleared by a pause,
     /// a seek or a load.
     start_in: AtomicU64,
+    /// The loop's in and out points in device-rate frames, and whether the
+    /// deck is inside it. A range of `0..0` is no loop. The decode thread
+    /// reads these on every block and jumps back at the out point; the
+    /// callback never looks at them.
+    loop_in: AtomicU64,
+    loop_out: AtomicU64,
+    looping: AtomicBool,
 }
 
 /// A deck's state at one instant, for the tick the interface extrapolates from.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::struct_excessive_bools, reason = "a snapshot of the deck's flags, read together")]
 pub struct DeckSnapshot {
     pub position_frames: u64,
     pub total_frames: u64,
@@ -63,6 +71,11 @@ pub struct DeckSnapshot {
     pub key_shift: i8,
     /// Output frames until a started deck sounds; 0 once it is under way.
     pub start_in_frames: u64,
+    /// The loop's in and out points, device-rate frames; `0..0` for none.
+    pub loop_in_frames: u64,
+    pub loop_out_frames: u64,
+    /// Whether the deck is inside the loop: RELOOP on, EXIT off.
+    pub looping: bool,
 }
 
 impl DeckClock {
@@ -78,7 +91,37 @@ impl DeckClock {
             master_tempo: self.master_tempo(),
             key_shift: self.key_shift(),
             start_in_frames: self.start_in.load(Ordering::Relaxed),
+            loop_in_frames: self.loop_in.load(Ordering::Relaxed),
+            loop_out_frames: self.loop_out.load(Ordering::Relaxed),
+            looping: self.looping.load(Ordering::Relaxed),
         }
+    }
+
+    /// The loop, when there is one: `(in, out)` with in before out.
+    pub fn loop_range(&self) -> Option<(u64, u64)> {
+        let (from, to) = (self.loop_in.load(Ordering::Relaxed), self.loop_out.load(Ordering::Relaxed));
+        (to > from).then_some((from, to))
+    }
+
+    /// Sets the loop; `None` clears it and leaves the loop off.
+    pub fn set_loop(&self, range: Option<(u64, u64)>) {
+        let (from, to) = range.filter(|(from, to)| to > from).unwrap_or((0, 0));
+        // Out first: a reader between the two stores sees either the old
+        // range or `from..old_out`, never a range that ends before it starts
+        // when the new one lies past the old.
+        self.loop_out.store(to, Ordering::Relaxed);
+        self.loop_in.store(from, Ordering::Relaxed);
+        if range.is_none() {
+            self.looping.store(false, Ordering::Relaxed);
+        }
+    }
+
+    pub fn looping(&self) -> bool {
+        self.looping.load(Ordering::Relaxed)
+    }
+
+    pub fn set_looping(&self, on: bool) {
+        self.looping.store(on && self.loop_range().is_some(), Ordering::Relaxed);
     }
 
     /// Frames of silence the callback has still to let pass before the deck

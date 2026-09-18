@@ -373,6 +373,15 @@ export interface Backend {
   deckPause(deck: DeckId): Promise<void>;
   deckSeek(deck: DeckId, positionMs: number): Promise<void>;
   /**
+   * Sets a loop between two points and turns it on. A head already past
+   * the out point goes back to the in point. The deck rounds at the out
+   * point itself, on the frame, with nothing faded at the seam.
+   */
+  deckSetLoop(deck: DeckId, inMs: number, outMs: number): Promise<void>;
+  /** RELOOP (on): back in from the in point. EXIT (off): out, the range kept. */
+  deckLoopActive(deck: DeckId, on: boolean): Promise<void>;
+  deckClearLoop(deck: DeckId): Promise<void>;
+  /**
    * Dragging the waveform like a record.
    *
    * Between `deckScrubBegin` and `deckScrubEnd` the deck reads a decoded
@@ -637,6 +646,11 @@ export interface DeckTick {
   keyShift: number;
   /** Output frames until a started deck sounds: a play held for the beat. */
   startInFrames: number;
+  /** The loop's in and out points in the same frames; both 0 for none. */
+  loopInFrames: number;
+  loopOutFrames: number;
+  /** Whether the deck is inside the loop: RELOOP on, EXIT off. */
+  looping: boolean;
 }
 
 /** Both decks at one instant. About 200 bytes, well inside the event cap. */

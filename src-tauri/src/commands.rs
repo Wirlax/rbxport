@@ -1061,6 +1061,53 @@ pub async fn deck_seek<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Sets a deck's loop between two points and turns it on; a head already
+/// past the out point goes back to the in point.
+#[tauri::command]
+pub async fn deck_set_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    in_ms: f64,
+    out_ms: f64,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.set_loop_ms(crate::player::deck_of(&deck), in_ms, out_ms);
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
+/// RELOOP (on) and EXIT (off): back into the loop from its in point, or out
+/// of it with the range kept.
+#[tauri::command]
+pub async fn deck_loop_active<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+    on: bool,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.set_looping(crate::player::deck_of(&deck), on);
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
+/// Forgets a deck's loop.
+#[tauri::command]
+pub async fn deck_clear_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: State<'_, Arc<crate::player::Player>>,
+    deck: String,
+) -> AppResult<()> {
+    if let Some(engine) = player.opened() {
+        engine.clear_loop(crate::player::deck_of(&deck));
+        crate::player::start_ticker(&app);
+    }
+    Ok(())
+}
+
 /// The master output level, 0 to 1.
 ///
 /// It reaches the meters on the next tick rather than coming back from here:

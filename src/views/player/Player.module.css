@@ -1016,6 +1016,20 @@
 }
 .chip[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
 
+/* The beat count is the auto loop's button: a press loops that many beats
+   from the head, and lit it is the loop that is playing. IN and RELOOP light
+   the same way. */
+button.pageNumber {
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+  padding: 5px 0;
+  cursor: default;
+}
+button.pageNumber:disabled { color: var(--c-icon-off); }
+.pageNumber[data-on],
+.memoryLabel[data-on] { background: var(--c-pad-active); color: var(--c-icon-on); }
+
 .pageNumber {
   min-width: 68px;
   text-align: center;

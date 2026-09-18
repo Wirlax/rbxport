@@ -676,3 +676,29 @@ export function tempoForTypedBpm(typed: string, trackBpmX100: number): number | 
   const tempo = bpm / (trackBpmX100 / 100);
   return Math.min(Math.max(tempo, 0.5), 2);
 }
+
+/**
+ * A beat loop of `beats` beats from `atMs`: the in point snapped to
+ * `snapTo` when quantize is on, the out point `beats` beats later on the
+ * track's own grid. Past the grid's end the average beat carries on. Null
+ * with no grid to count on, or a length that is not positive.
+ */
+export function beatLoopRange(
+  grid: BeatGrid,
+  snapTo: BeatGrid | null,
+  atMs: number,
+  beats: number,
+): [number, number] | null {
+  const { times } = grid;
+  if (times.length < 2 || !(beats > 0)) return null;
+  const start = snapTo ? nearestBeatMs(snapTo, atMs) : atMs;
+  const first = times[0] ?? 0;
+  const last = times[times.length - 1] ?? 0;
+  const period = (last - first) / (times.length - 1);
+  if (!(period > 0)) return null;
+  const at = lowerBound(times, start);
+  const onBeat = times[at] === start;
+  const target = at + beats;
+  const end = onBeat && Number.isInteger(beats) && target < times.length ? (times[target] ?? start) : start + beats * period;
+  return end > start ? [start, end] : null;
+}
