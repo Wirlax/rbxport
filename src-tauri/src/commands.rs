@@ -878,7 +878,9 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> Vec<(String, Vec<u8
     }
     let base = share.join(relative.trim_start_matches(['/', '\\']));
     let mut out = Vec::new();
-    for extension in ["DAT", "EXT"] {
+    // The three files rekordbox 7 copies to a stick [OBS 7.2.11]; a track
+    // analysed by an older version has no .2EX, and none is written then.
+    for extension in ["DAT", "EXT", "2EX"] {
         let path = base.with_extension(extension);
         if let Ok(bytes) = std::fs::read(&path) {
             out.push((extension.to_owned(), bytes));
