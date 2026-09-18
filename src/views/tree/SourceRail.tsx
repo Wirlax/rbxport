@@ -12,7 +12,7 @@ import type { SVGProps } from "react";
 
 import type { Source } from "@/lib/tree";
 
-import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, SmartListIcon } from "@/components/icons";
+import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, SmartListIcon, SyncIcon } from "@/components/icons";
 import styles from "./SourceRail.module.css";
 import { useTooltip } from "@/store/usePreferences";
 
@@ -38,30 +38,49 @@ export interface SourceRailProps {
   onSelect: (source: Source) => void;
   /** Sources with nothing in them, shown but dimmed rather than hidden. */
   empty?: ReadonlySet<Source>;
+  /**
+   * Opens the Sync Manager. rekordbox keeps its ⟳ at the foot of this rail,
+   * away from the sections above, and so does this.
+   */
+  onOpenSync?: (() => void) | undefined;
 }
 
-export function SourceRail({ selected, onSelect, empty }: SourceRailProps) {
+export function SourceRail({ selected, onSelect, empty, onOpenSync }: SourceRailProps) {
   const tip = useTooltip();
   return (
-    <div className={styles.rail} role="tablist" aria-label="Library sources" aria-orientation="vertical">
-      {SOURCES.map(({ id, label, Icon }) => (
+    <div className={styles.rail}>
+      <div className={styles.sources} role="tablist" aria-label="Library sources" aria-orientation="vertical">
+        {SOURCES.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={styles.button}
+            role="tab"
+            aria-selected={selected === id}
+            // Dimmed rather than removed: a missing Devices button reads as a
+            // broken app, an empty one reads as no device plugged in.
+            data-empty={empty?.has(id) || undefined}
+            title={tip(label)}
+            aria-label={label}
+            onClick={() => onSelect(id)}
+          >
+            <Icon className={styles.icon} />
+            <span className={styles.label}>{label}</span>
+          </button>
+        ))}
+      </div>
+      {onOpenSync ? (
         <button
-          key={id}
           type="button"
-          className={styles.button}
-          role="tab"
-          aria-selected={selected === id}
-          // Dimmed rather than removed: a missing Devices button reads as a
-          // broken app, an empty one reads as no device plugged in.
-          data-empty={empty?.has(id) || undefined}
-          title={tip(label)}
-          aria-label={label}
-          onClick={() => onSelect(id)}
+          className={styles.sync}
+          title={tip("Sync Manager")}
+          aria-label="Sync Manager"
+          onClick={onOpenSync}
         >
-          <Icon className={styles.icon} />
-          <span className={styles.label}>{label}</span>
+          <SyncIcon className={styles.icon} />
+          <span className={styles.label}>Sync</span>
         </button>
-      ))}
+      ) : null}
     </div>
   );
 }

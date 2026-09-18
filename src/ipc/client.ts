@@ -5,11 +5,9 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  Backup,
-  Duplicates,
-  XmlImportReport,
-  AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
-  PreferencesRequest, UpdateCheck, UpdateProgress,
+  AnalysisResult, AudioDevices, Backend, Backup, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
+  Diagnostics, Duplicates, Limiter, PreferencesRequest, SyncDeviceReport, SyncProgress, UpdateCheck,
+  UpdateProgress, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
@@ -276,6 +274,14 @@ async function realBackend(): Promise<Backend> {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
     },
+    openSyncWindow: async () => {
+      await invoke<void>("open_sync_window");
+      return true;
+    },
+    syncDevices: (playlists, destinations, defaults) =>
+      invoke<SyncDeviceReport[]>("sync_devices", { playlists, destinations, defaults: defaults ?? null }),
+    deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),
+    onSyncProgress: (listener) => subscribe<SyncProgress>("sync:progress", listener),
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
     writeDeviceDefaults: (path, defaults) => invoke<DeviceSettings>("write_device_defaults", { path, defaults }),
     saveDeviceSettings: (path, settings) =>

@@ -8,6 +8,10 @@
   border-right: 1px solid var(--c-black);
   padding-top: 4px;
 }
+.sources {
+  display: flex;
+  flex-direction: column;
+}
 
 .button {
   display: flex;
@@ -26,6 +30,12 @@
 /* Nothing in it, but still there: a missing button reads as a broken app. */
 .button[data-empty] { opacity: .45; }
 .button:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+/* The Sync Manager's button, at the foot of the rail as rekordbox keeps its ⟳. */
+.sync {
+  composes: button;
+  margin-top: auto;
+  margin-bottom: 4px;
+}
 
 .icon { width: 16px; height: 16px; }
 .label { font-size: var(--f-size-xs); line-height: 1.1; text-align: center; }

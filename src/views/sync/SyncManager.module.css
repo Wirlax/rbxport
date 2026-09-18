@@ -1,0 +1,268 @@
+/* Geometry and colour come from design/tokens; nothing here is a literal colour. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 55%);
+}
+
+/* rekordbox opens a window; this is that window drawn inside ours, title
+   bar included, clamped to the screen it has. */
+.window {
+  display: flex;
+  flex-direction: column;
+  width: var(--s-sync-w);
+  height: var(--s-sync-h);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--c-black);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-pref-label);
+}
+.window:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+/* As a window of its own the shell draws the chrome, and this fills it. */
+.window[data-windowed] {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+
+.titlebar {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: var(--s-pref-title-h);
+  background: var(--c-titlebar);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-pref-window-title);
+  font-weight: 700;
+  /* The strip drags the window, so a press on it must not take the name. */
+  user-select: none;
+}
+.close {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  height: 100%;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--c-icon-off);
+  font: inherit;
+  font-weight: 400;
+  cursor: default;
+}
+.close:hover { color: var(--c-icon-on); }
+
+/* Two columns with the SYNC button between them, as rekordbox lays out the
+   rekordbox and Device columns of its manager. */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+}
+
+.column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-panel);
+}
+.headingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+.heading {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: var(--f-size-pref-sub);
+  font-weight: 700;
+  line-height: 22px;
+}
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--c-black);
+}
+.empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--c-text-dim);
+}
+
+/* A row: twisty, icon, name, and the checkbox at the right edge. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 12px 0 8px;
+  cursor: default;
+  user-select: none;
+}
+.row:hover { background: var(--c-raised); }
+.twisty {
+  flex: none;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 5px solid transparent;
+  border-left-color: var(--c-text);
+  background: none;
+  cursor: default;
+}
+.twisty[data-open] {
+  border-left-color: transparent;
+  border-top-color: var(--c-text);
+  border-bottom: 0;
+  margin-top: 3px;
+}
+.twisty[data-leaf] { border-left-color: transparent; width: 10px; }
+.icon { width: 14px; height: 12px; flex: none; color: var(--c-text); }
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The checkbox rekordbox draws: a square that fills blue when ticked, and a
+   dash when a folder is only partly ticked. */
+.tick {
+  appearance: none;
+  margin: 0;
+  flex: none;
+  position: relative;
+  width: var(--s-pref-checkbox);
+  height: var(--s-pref-checkbox);
+  box-sizing: border-box;
+  border: 1px solid var(--c-pref-control-off);
+  background: var(--c-panel);
+  cursor: default;
+}
+.tick:checked,
+.tick:indeterminate { border-color: var(--c-pref-select); background: var(--c-pref-select); }
+.tick:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--c-icon-on);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.tick:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 6.5px;
+  height: 2px;
+  background: var(--c-icon-on);
+}
+.tick:disabled { opacity: .4; }
+.tick:focus-visible { outline: 1px solid var(--c-accent); outline-offset: 1px; }
+
+/* The middle: SYNC, centred between the columns. */
+.middle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+}
+.sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--s-pref-button-h);
+  padding: 0 14px;
+  border: 1px solid var(--c-pref-select);
+  border-radius: 3px;
+  background: var(--c-pref-select);
+  color: var(--c-icon-on);
+  font: inherit;
+  font-weight: 700;
+  cursor: default;
+}
+.sync:hover:not(:disabled) { border-color: var(--c-icon-on); }
+.sync:disabled {
+  border-color: var(--c-pref-button-border);
+  background: var(--c-pref-button-bottom);
+  color: var(--c-device-disabled);
+}
+.chevron { font-size: var(--f-size-pref-sub); line-height: 1; }
+
+/* A device: its row, and under it, when ticked, what it holds. */
+.device[data-ticked] { background: var(--c-raised); }
+.library {
+  padding: 4px 12px 8px 30px;
+  font-size: var(--f-size-pref-small);
+}
+.libraryHead { color: var(--c-text-dim); margin-bottom: 2px; }
+.libraryList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.libraryList li {
+  padding-left: 12px;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.libraryNote { padding-left: 12px; color: var(--c-text-dim); line-height: 20px; }
+.capacity { margin-top: 4px; color: var(--c-text-dim); }
+
+/* Refresh, Close: the Preferences window's grey button. */
+.button,
+.refresh {
+  height: var(--s-pref-button-h);
+  padding: 0 14px;
+  border: 1px solid var(--c-pref-button-border);
+  border-radius: 2px;
+  background: linear-gradient(var(--c-pref-button-top), var(--c-pref-button-bottom));
+  color: var(--c-icon-on);
+  font: inherit;
+  cursor: default;
+}
+.refresh { height: 22px; padding: 0 10px; font-size: var(--f-size-pref-small); }
+.button:hover:not(:disabled),
+.refresh:hover:not(:disabled) { border-color: var(--c-accent); }
+.button:disabled,
+.refresh:disabled { color: var(--c-device-disabled); }
+
+.footer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px 8px;
+}
+.status {
+  flex: 1;
+  min-width: 0;
+  color: var(--c-text);
+  font-size: var(--f-size-pref-small);
+  line-height: 18px;
+}

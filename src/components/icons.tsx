@@ -275,6 +275,12 @@ export const SubBrowseIcon = (props: IconProps) => (
   </svg>
 );
 
+export const SyncIcon = (props: IconProps) => (
+  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
+    <path d="M3.2 6.6A5.2 5.2 0 0 1 12.4 4.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/> <path d="M12.8 1.6v3.4H9.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/> <path d="M12.8 9.4A5.2 5.2 0 0 1 3.6 11.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/> <path d="M3.2 14.4V11h3.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
 export const TickIcon = (props: IconProps) => (
   <svg viewBox="0 0 12 8" aria-hidden focusable="false" {...props}>
     <path d="M1 4.1L4.1 7 11 1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

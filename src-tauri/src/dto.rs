@@ -286,6 +286,52 @@ pub struct ExportReportDto {
     pub verified: bool,
 }
 
+/// What one destination got out of a sync: its report, or why it got none.
+///
+/// A stick that fails must not stop the others, so the outcome is per stick
+/// rather than one error for the run.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDeviceReportDto {
+    /// The mount point it was written to.
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<ExportReportDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One playlist a stick was last synced with.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPlaylistDto {
+    /// `djmdPlaylist.ID` in decimal: the tree's node id, so the window can
+    /// tick the same rows again.
+    pub library_id: String,
+    pub name: String,
+}
+
+/// What a stick was last synced with, and what it holds now.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSyncStateDto {
+    /// The playlists our last export was asked for; empty when the stick
+    /// is not ours.
+    pub selected: Vec<SyncPlaylistDto>,
+    /// The playlist names in its `export.pdb`, folders left out; empty
+    /// when it holds no export.
+    pub on_device: Vec<String>,
+}
+
+/// One step of a sync, as the `sync:progress` event carries it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgressDto {
+    pub path: String,
+    /// `writing`, then `done` or `failed`.
+    pub state: &'static str,
+}
+
 /// What importing a rekordbox XML document did.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

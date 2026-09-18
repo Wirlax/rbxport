@@ -10,9 +10,9 @@
  * parity test once `rbl-index` lands.
  */
 import type {
-  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey, Tick, TrackDetails,
-  TrackField,
+  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
+  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -559,6 +559,78 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const fresh = referenceDeviceSettings(device?.name ?? "", device?.export !== null);
     deviceSettings.set(path, fresh);
     return fresh;
+  };
+
+  // What the Sync Manager reads off a stick: the playlists our last export
+  // was asked for, and the playlist names in its export. TEST is
+  // rekordbox's, so it holds playlists but remembers no selection of ours;
+  // DJ STICK holds nothing until something is written to it.
+  const syncSelections = new Map<string, SyncPlaylist[]>();
+  const deviceLibraries = new Map<string, string[]>([
+    ["/Volumes/TEST", ["Main Set", "Warm Up", "Closing"]],
+  ]);
+  const syncProgressListeners = new Set<(progress: SyncProgress) => void>();
+
+  /**
+   * "Writes" playlists to a stick: no filesystem in a browser, so this is
+   * the bookkeeping — what a later `listDevices`, `deviceSettings` and
+   * `deviceSyncState` report — and the counts an export reports.
+   */
+  const writeTo = (device: Device, playlistIds: string[], defaults: StickDefaults | undefined): ExportReport => {
+    // The union of the playlists, each track counted once however many
+    // hold it, as the real selection is built.
+    const union = new Set<string>();
+    for (const id of playlistIds) for (const track of membersOf(id)) union.add(track);
+    const tracks = union.size;
+    const already = device.export;
+    const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
+    const removed = already?.ours === true ? Math.max(0, already.tracks - tracks) : 0;
+    device.export = {
+      tracks,
+      playlists: playlistIds.length,
+      ours: true,
+      written: "2026-09-08 00:30:00.000 +00:00",
+    };
+    // The export writes a library, which is what the tabs need. A stick
+    // that had none takes the Preferences window's defaults, as the
+    // real export does; one that had its own keeps them.
+    const settings = settingsOf(device.path);
+    const fresh = !settings.hasLibrarySettings && defaults !== undefined;
+    deviceSettings.set(device.path, {
+      ...settings,
+      ...(fresh
+        ? {
+            hasDevSetting: true,
+            waveformColor: defaults.waveformColor,
+            waveformPosition: defaults.waveformPosition,
+            overviewWaveform: defaults.overviewWaveform,
+            keyDisplay: defaults.keyDisplay,
+            categories: defaults.categories ?? settings.categories,
+            sorts: defaults.sorts ?? settings.sorts,
+            subColumn: defaults.subColumn,
+          }
+        : {}),
+      hasDeviceLibrary: true,
+      hasOneLibrary: true,
+      hasLibrarySettings: true,
+      deviceName: settings.deviceName || "RBXPORT",
+    });
+    const names = playlistIds.map((id) => findNode(id)?.name ?? id);
+    syncSelections.set(
+      device.path,
+      playlistIds.map((id, i) => ({ libraryId: id, name: names[i] ?? id })),
+    );
+    deviceLibraries.set(device.path, names);
+    return {
+      tracks,
+      playlists: playlistIds.length,
+      bytesCopied: (tracks - reused) * 8_000_000,
+      analysisFiles: tracks - reused,
+      reused,
+      removed,
+      skipped: [],
+      verified: true,
+    };
   };
 
   const edits: Edits = {
@@ -1276,51 +1348,57 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     exportPlaylist: (playlistId, destination, defaults) => {
       if (destination === undefined) return wait(null);
       const device = devices.find((d) => d.path === destination);
-      const tracks = playlistSize(playlistId);
-      const already = device?.export;
-      const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
-      if (device) {
-        device.export = {
-          tracks,
-          playlists: 1,
-          ours: true,
-          written: "2026-09-08 00:30:00.000 +00:00",
-        };
-        // The export writes a library, which is what the tabs need. A stick
-        // that had none takes the Preferences window's defaults, as the
-        // real export does; one that had its own keeps them.
-        const settings = settingsOf(device.path);
-        const fresh = !settings.hasLibrarySettings && defaults !== undefined;
-        deviceSettings.set(device.path, {
-          ...settings,
-          ...(fresh
-            ? {
-                hasDevSetting: true,
-                waveformColor: defaults.waveformColor,
-                waveformPosition: defaults.waveformPosition,
-                overviewWaveform: defaults.overviewWaveform,
-                keyDisplay: defaults.keyDisplay,
-                categories: defaults.categories ?? settings.categories,
-                sorts: defaults.sorts ?? settings.sorts,
-                subColumn: defaults.subColumn,
-              }
-            : {}),
-          hasDeviceLibrary: true,
-          hasOneLibrary: true,
-          hasLibrarySettings: true,
-          deviceName: settings.deviceName || "RBXPORT",
+      if (!device) {
+        // The counts are still answered for a folder picked by hand: a
+        // browser has no picker, so the panel's flow is what is driven.
+        const tracks = playlistSize(playlistId);
+        return wait({
+          tracks, playlists: 1, bytesCopied: tracks * 8_000_000, analysisFiles: tracks,
+          reused: 0, removed: 0, skipped: [], verified: true,
         });
       }
+      return wait(writeTo(device, [playlistId], defaults));
+    },
+
+    // No windows in a browser: the shell draws the manager over itself.
+    openSyncWindow: () => wait(false),
+    // Stick after stick, each announced before and after, as the real run
+    // is. A destination that is not a mock device is a stick that was
+    // pulled: its entry carries the error and the others their reports.
+    syncDevices: async (playlists, destinations, defaults) => {
+      if (playlists.length === 0) throw new Error("That playlist has no tracks to export.");
+      const reports = [];
+      for (const path of destinations) {
+        const tell = (state: SyncProgress["state"]) => {
+          for (const listener of syncProgressListeners) listener({ path, state });
+        };
+        tell("writing");
+        await wait(undefined);
+        const device = devices.find((d) => d.path === path);
+        if (device) {
+          reports.push({ path, report: writeTo(device, playlists, defaults) });
+          tell("done");
+        } else {
+          reports.push({ path, error: "That device is no longer connected." });
+          tell("failed");
+        }
+      }
+      return reports;
+    },
+    deviceSyncState: (path) => {
+      if (!devices.some((d) => d.path === path)) {
+        return Promise.reject(new Error("That device is no longer connected."));
+      }
       return wait({
-        tracks,
-        playlists: 1,
-        bytesCopied: (tracks - reused) * 8_000_000,
-        analysisFiles: tracks - reused,
-        reused,
-        removed: 0,
-        skipped: [],
-        verified: true,
+        selected: (syncSelections.get(path) ?? []).map((p) => ({ ...p })),
+        onDevice: [...(deviceLibraries.get(path) ?? [])],
       });
+    },
+    onSyncProgress: (listener) => {
+      syncProgressListeners.add(listener);
+      return () => {
+        syncProgressListeners.delete(listener);
+      };
     },
 
     // One device, so the panel has something to show. A browser cannot see a

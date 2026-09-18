@@ -268,12 +268,14 @@ export interface TreeViewProps {
    * whose children are not known until somebody looks.
    */
   onExpand?: (node: TreeNode) => void;
+  /** Opens the Sync Manager from the foot of the rail. */
+  onOpenSync?: () => void;
 }
 
 export function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
-  onExpand, showCounts = false,
+  onExpand, showCounts = false, onOpenSync,
 }: TreeViewProps) {
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
@@ -394,7 +396,7 @@ export function TreeView({
 
   return (
     <nav className={styles.tree} aria-label="Library">
-      <SourceRail selected={source} onSelect={jumpTo} empty={empty} />
+      <SourceRail selected={source} onSelect={jumpTo} empty={empty} onOpenSync={onOpenSync} />
       <div className={styles.nodes} role="tree" ref={list}>
         {visible.map((node) => (
           <Row

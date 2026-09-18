@@ -540,6 +540,34 @@ export interface Backend {
   closeWindow(): Promise<void>;
 
   /**
+   * Opens the Sync Manager window, or brings the open one to the front.
+   * False where there are no windows — a browser — and the shell draws the
+   * manager over itself instead.
+   */
+  openSyncWindow(): Promise<boolean>;
+
+  /**
+   * Writes the same playlists to every destination, one after another, and
+   * says how each fared. A stick that fails does not stop the rest: its
+   * entry carries the error and the others their reports.
+   */
+  syncDevices(
+    playlists: string[],
+    destinations: string[],
+    /** What a stick with no settings of its own is given; see `StickDefaults`. */
+    defaults: StickDefaults | undefined,
+  ): Promise<SyncDeviceReport[]>;
+
+  /** What a stick was last synced with, and what it holds now. */
+  deviceSyncState(path: string): Promise<DeviceSyncState>;
+
+  /**
+   * Each stick as a sync reaches it and leaves it, so a run over several
+   * sticks can say which one it is on. Returns its own unsubscribe.
+   */
+  onSyncProgress(listener: (progress: SyncProgress) => void): () => void;
+
+  /**
    * The values the track filter bar can offer for a list: which whole BPMs
    * and which keys it holds, counted over the source and query alone so a
    * picked value never hides the others. Rust tallies them in one pass; the
@@ -796,6 +824,35 @@ export interface ExportReport {
   skipped: string[];
   /** Whether the export read back correctly with the independent parser. */
   verified: boolean;
+}
+
+/** What one destination got out of a sync: its report, or why it got none. */
+export interface SyncDeviceReport {
+  /** The mount point it was written to. */
+  path: string;
+  report?: ExportReport;
+  error?: string;
+}
+
+/** One playlist a stick was last synced with. */
+export interface SyncPlaylist {
+  /** The tree's node id for the playlist, so it can be ticked again. */
+  libraryId: string;
+  name: string;
+}
+
+/** What a stick was last synced with, and what it holds now. */
+export interface DeviceSyncState {
+  /** Our last export's playlists; empty when the stick is not ours. */
+  selected: SyncPlaylist[];
+  /** The playlist names in its export, folders left out; empty without one. */
+  onDevice: string[];
+}
+
+/** One step of a sync: a stick being written, then done or failed. */
+export interface SyncProgress {
+  path: string;
+  state: "writing" | "done" | "failed";
 }
 
 /**

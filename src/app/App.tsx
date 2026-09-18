@@ -49,6 +49,7 @@ import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
 import { Preferences, type Pane } from "@/views/settings/Preferences";
+import { SyncManager } from "@/views/sync/SyncManager";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
@@ -270,6 +271,15 @@ export function App() {
     void getBackend().then(async (backend) => {
       const opened = await backend.openPreferences(pane).catch(() => false);
       if (!opened) setSettingsOpen(pane);
+    });
+  }, []);
+  // The Sync Manager, the same way: a window of its own in the shell, and
+  // drawn over this one in a browser.
+  const [syncOpen, setSyncOpen] = useState(false);
+  const openSyncManager = useCallback(() => {
+    void getBackend().then(async (backend) => {
+      const opened = await backend.openSyncWindow().catch(() => false);
+      if (!opened) setSyncOpen(true);
     });
   }, []);
   const prefs = usePreferencesStore();
@@ -1555,6 +1565,7 @@ export function App() {
           readOnly={readOnly}
           onExpand={explorer.expand}
           showCounts={viewPrefs.playlistCounts}
+          onOpenSync={openSyncManager}
         />
         <div
           className={styles.splitter}
@@ -1714,6 +1725,9 @@ export function App() {
           }}
           onClose={() => setSettingsOpen(null)}
         />
+      ) : null}
+      {syncOpen ? (
+        <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} />
       ) : null}
 
       {/* The LINK strip: present from the moment a player or mixer is heard,

@@ -17,13 +17,9 @@ use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
     ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
-    CountedDto, FilterValuesDto, TagCategoryDto,
-    ExportProgressDto,
-    BackupDto,
+    BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
+    ExportProgressDto, FilterValuesDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
-    DuplicatesDto,
-    DuplicateGroupDto,
-    DuplicateTrackDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -644,6 +640,100 @@ pub async fn export_playlist<R: tauri::Runtime>(
 
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
     Ok(report)
+}
+
+/// Writes the same playlists to every destination, and says how each fared.
+///
+/// The Sync Manager's SYNC. The selection is built once — each track read
+/// once however many sticks it goes to — and written stick by stick, so two
+/// sticks synced together hold the same thing. One stick failing (pulled,
+/// full, refusing a write) must not stop the rest: the outcome is per stick,
+/// and only building the selection can fail the whole run. The window hears
+/// `sync:progress` before and after each stick, because a run over several
+/// sticks is minutes long and a button that says nothing for minutes reads
+/// as a hang.
+#[tauri::command]
+pub async fn sync_devices<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    playlists: Vec<String>,
+    destinations: Vec<String>,
+    // What a stick with no settings of its own is given; see the DJ System
+    // pane. A stick that has settings keeps them.
+    defaults: Option<crate::device_settings::StickDefaultsDto>,
+) -> AppResult<Vec<SyncDeviceReportDto>> {
+    let library = state.library()?;
+    let share = state.share_root();
+    let state = Arc::clone(&state);
+    blocking("sync_devices", move || {
+        let selection = ExportSelection::from_playlists(&state, &library, &share, &playlists)?;
+        let mut reports = Vec::with_capacity(destinations.len());
+        for destination in destinations {
+            let progress = |state: &'static str| {
+                let _ = tauri::Emitter::emit(
+                    &app,
+                    "sync:progress",
+                    SyncProgressDto { path: destination.clone(), state },
+                );
+            };
+            progress("writing");
+            let written = write_export(std::path::Path::new(&destination), &selection, defaults.as_ref(), &mut |_| {});
+            progress(if written.is_ok() { "done" } else { "failed" });
+            reports.push(match written {
+                Ok(report) => SyncDeviceReportDto { path: destination, report: Some(report), error: None },
+                Err(e) => {
+                    tracing::warn!(destination, error = %e, "sync to one device failed");
+                    SyncDeviceReportDto { path: destination, report: None, error: Some(e.message) }
+                }
+            });
+        }
+        Ok(reports)
+    })
+    .await
+}
+
+/// What a stick was last synced with, and what it holds.
+///
+/// The Sync Manager ticks a stick's last selection back on when the stick
+/// is ticked, so a weekly sync is two clicks rather than a hunt through the
+/// tree; that comes from our manifest, so a stick rekordbox wrote offers
+/// nothing. What it holds comes from `export.pdb` itself, whoever wrote it,
+/// because that is what the player will show.
+#[tauri::command]
+pub async fn device_sync_state(path: String) -> AppResult<DeviceSyncStateDto> {
+    blocking("device_sync_state", move || {
+        let mount = std::path::Path::new(&path);
+        if !mount.is_dir() {
+            return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+        }
+        let selected = rbl_export::Manifest::load(mount)
+            .map(|manifest| {
+                manifest
+                    .playlists
+                    .into_iter()
+                    .map(|playlist| SyncPlaylistDto {
+                        library_id: playlist.library_id.to_string(),
+                        name: playlist.name,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(DeviceSyncStateDto { selected, on_device: playlists_on_device(mount) })
+    })
+    .await
+}
+
+/// The playlist names in a stick's `export.pdb`, in tree order, folders
+/// left out. Empty when there is no export or it does not parse: a stick
+/// that cannot be read holds nothing the window can name.
+fn playlists_on_device(mount: &std::path::Path) -> Vec<String> {
+    let pdb = rbl_devices::settings::export_root(mount).join("rekordbox/export.pdb");
+    let Ok(bytes) = std::fs::read(&pdb) else { return Vec::new() };
+    let Ok(parsed) = rbl_pdb::Pdb::parse(&bytes) else { return Vec::new() };
+    let Some(table) = parsed.table(rbl_pdb::PageType::PlaylistTree) else { return Vec::new() };
+    let mut nodes = parsed.playlist_nodes(table);
+    nodes.sort_by_key(|node| (node.parent_id, node.sort_order));
+    nodes.into_iter().filter(|node| !node.is_folder).map(|node| node.name).collect()
 }
 
 /// What an export is asked to write: the tracks, the playlists that name

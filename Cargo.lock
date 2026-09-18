@@ -3674,6 +3674,7 @@ dependencies = [
  "rbl-index",
  "rbl-link",
  "rbl-onelibrary",
+ "rbl-pdb",
  "rbl-prolink",
  "semver",
  "serde",

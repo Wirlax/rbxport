@@ -18,6 +18,7 @@ pub mod player;
 mod preferences;
 mod protocol;
 mod relocate;
+mod sync_window;
 mod device_settings;
 pub mod dto;
 mod error;
@@ -372,8 +373,10 @@ pub fn run() {
         // Windows, where the main window's close box is the way out).
         .on_window_event(|window, event| {
             if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                if let Some(preferences) = window.app_handle().get_webview_window(crate::preferences::WINDOW) {
-                    let _ = preferences.close();
+                for label in [crate::preferences::WINDOW, crate::sync_window::WINDOW] {
+                    if let Some(extra) = window.app_handle().get_webview_window(label) {
+                        let _ = extra.close();
+                    }
                 }
             }
         })
@@ -461,6 +464,9 @@ pub fn run() {
             commands::relocate_track,
             relocate::auto_relocate,
             preferences::open_preferences,
+            sync_window::open_sync_window,
+            commands::sync_devices,
+            commands::device_sync_state,
             device_settings::reference_stick_settings,
             commands::create_playlist,
             commands::create_folder,
