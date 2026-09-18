@@ -26,7 +26,10 @@ the version numbers [Semantic Versioning](https://semver.org/).
   first) and Convert Memory Cues to Hot Cues are live, and the tree menu's
   Export a playlist to a file writes an m3u8 or a tab-separated txt.
 - Preferences › Advanced › Database backs the library up on request, lists
-  the backups, and puts one back.
+  the backups, and puts one back; and finds duplicates, tracks that share a
+  title and an artist, with a copy removed at a time.
+- Loops are drawn on both waveforms, and a memory loop called plays as a
+  loop.
 - An export says which track it is on, and a stick plugged in or pulled out
   is noticed within two seconds.
 - The BPM is typed over in the list and the Info tab, and the beat grid is
