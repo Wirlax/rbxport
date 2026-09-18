@@ -209,7 +209,7 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
   await expect(dialog.getByRole("heading", { name: "About" })).toBeVisible();
   await expect(dialog.getByText("Made with ❤️ in California")).toBeVisible();
   // The ask sits at the foot of the pane, just above where it was made.
-  const support = dialog.getByRole("button", { name: "Support this app" });
+  const support = dialog.getByRole("button", { name: "Support this app for $20" });
   await expect(support).toBeVisible();
   const [supportBox, madeBox, paneBox] = await Promise.all([
     support.boundingBox(),

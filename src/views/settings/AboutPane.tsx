@@ -15,8 +15,10 @@ export const ABOUT_LINKS: readonly { label: string; url: string }[] = [
   { label: "Twitch", url: "https://twitch.tv/triodeofficial" },
 ];
 
-/** Where "Support this app" goes: the page that takes a contribution. */
-export const SUPPORT_URL = "https://paypal.me/chrisle";
+/** The amount the button asks for, in US dollars. */
+export const SUPPORT_AMOUNT = 20;
+/** Where the button goes: the PayPal page, opened with that amount filled in. */
+export const SUPPORT_URL = `https://paypal.me/chrisle/${SUPPORT_AMOUNT}USD`;
 
 export function AboutPane() {
   const [version, setVersion] = useState<string | null>(null);
@@ -80,7 +82,7 @@ export function AboutPane() {
           the ask, and where it was made. */}
       <div className={styles.aboutFoot}>
         <button type="button" className={styles.aboutSupport} onClick={() => open(SUPPORT_URL)}>
-          Support this app
+          Support this app for ${SUPPORT_AMOUNT}
         </button>
         <p className={styles.aboutMade}>Made with ❤️ in California</p>
       </div>
