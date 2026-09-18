@@ -319,6 +319,12 @@ pub fn detect_key_with(
     judge(&evidence, options, rules)
 }
 
+/// Whether any of `rules` reads the bass on the grid, so that a caller
+/// without a grid yet knows whether to wait for one.
+pub fn wants_grid(rules: &[Rule]) -> bool {
+    rules.iter().any(|r| matches!(r, Rule::BassRoot { .. } | Rule::BassVote { .. }))
+}
+
 /// Everything the profile match and the rules will look at. The bass is
 /// only read when a rule asks for it.
 pub fn gather_evidence(

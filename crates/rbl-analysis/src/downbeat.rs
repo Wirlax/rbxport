@@ -38,7 +38,7 @@ const HOP: usize = 512;
 /// carries structure: the kick and bass at the bottom, hats at the top.
 const BAND_EDGES: [f64; 13] =
     [40.0, 65.0, 100.0, 160.0, 250.0, 400.0, 630.0, 1000.0, 1600.0, 2500.0, 4000.0, 6300.0, 10000.0];
-const BANDS: usize = BAND_EDGES.len() - 1;
+pub const BANDS: usize = BAND_EDGES.len() - 1;
 
 /// The bar lengths novelty is measured over, in half beats: one, two, four
 /// and eight bars. One bar catches the bass line changing; eight catches
@@ -74,9 +74,16 @@ pub struct GridPhase {
 /// `beat_secs` is every beat's time in seconds, in order. A track too short
 /// to have a bar in it comes back unshifted with the first beat a downbeat.
 pub fn grid_phase(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> GridPhase {
+    grid_phase_from(&band_frames(samples, sample_rate), sample_rate, beat_secs)
+}
+
+/// [`grid_phase`] over band frames already taken from the track with
+/// [`band_frames`], which cost most of the stage and do not depend on the
+/// grid, so a caller can take them while the grid is still being found.
+pub fn grid_phase_from(frames: &[[f64; BANDS]], sample_rate: u32, beat_secs: &[f64]) -> GridPhase {
     let unshifted =
         GridPhase { half_beat_off: false, downbeat_secs: beat_secs.first().copied().unwrap_or(0.0), phrase_starts: Vec::new() };
-    if beat_secs.len() < 8 || samples.is_empty() || sample_rate == 0 {
+    if beat_secs.len() < 8 || frames.is_empty() || sample_rate == 0 {
         return unshifted;
     }
     // The half-beat grid: every beat and the midpoint after it.
@@ -85,7 +92,7 @@ pub fn grid_phase(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> GridP
         halves.push(pair[0]);
         halves.push(pair[0].midpoint(pair[1]));
     }
-    let profiles = beat_profiles(samples, sample_rate, &halves);
+    let profiles = beat_profiles_from(frames, sample_rate, &halves);
     if profiles.len() < POSITIONS * 2 {
         return unshifted;
     }
@@ -236,7 +243,11 @@ pub fn position_scores(profiles: &[[f64; BANDS]], positions: usize, scales: &[us
 /// One spectral profile per beat: the mean log energy of each band over the
 /// frames the beat spans.
 pub fn beat_profiles(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> Vec<[f64; BANDS]> {
-    let frames = band_frames(samples, sample_rate);
+    beat_profiles_from(&band_frames(samples, sample_rate), sample_rate, beat_secs)
+}
+
+/// [`beat_profiles`] over frames already taken with [`band_frames`].
+pub fn beat_profiles_from(frames: &[[f64; BANDS]], sample_rate: u32, beat_secs: &[f64]) -> Vec<[f64; BANDS]> {
     if frames.is_empty() {
         return Vec::new();
     }
@@ -270,7 +281,7 @@ pub fn beat_profiles(samples: &[f32], sample_rate: u32, beat_secs: &[f64]) -> Ve
 }
 
 /// Log band energies per frame, over the whole track.
-fn band_frames(samples: &[f32], sample_rate: u32) -> Vec<[f64; BANDS]> {
+pub fn band_frames(samples: &[f32], sample_rate: u32) -> Vec<[f64; BANDS]> {
     if samples.len() < FRAME {
         return Vec::new();
     }
