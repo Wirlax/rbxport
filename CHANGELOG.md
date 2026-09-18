@@ -110,6 +110,11 @@ the version numbers [Semantic Versioning](https://semver.org/).
   pauses it and sets the cue at the head. The switch is View › "Click on
   the waveform for PLAY and CUE".
 - Analyze Track is shift + command + A: the preset's A calls Memory Cue 1.
+- The 3Band waveform is painted in rekordbox's own seven colours, one per
+  combination of bands that reach a pixel: blue for the low alone, brown
+  where the mid overlaps it, the cream core where all three do, amber and
+  white for a mid or high standing alone, and the two rarer pairs. The
+  same palette for the overview and the detail.
 - The tree scrolls to its last row and no further: scrolled to the bottom,
   the last playlist sits at the bottom of the pane rather than a pane's
   height above it.

@@ -14,10 +14,13 @@
   --c-text-dim: #9A9A9A;
   --c-icon-off: #A0A0A0; /* skins/*_off.svg fill rgb(160,160,160) */
   --c-icon-on: #F0F0F0; /* skins/*_on.svg fill rgb(240,240,240) */
-  --c-wave-low: #0055E1;
-  --c-wave-mid: #B26505; /* detail view */
-  --c-wave-mid-ovw: #FF8C00; /* overview view */
-  --c-wave-high: #F5EAD6;
+  --c-wave-low: #0055E1; /* rekordbox's 3Band waveform, the low band standing alone; sampled from rekordbox in mixxxdj/mixxx#12326 and the same value our own capture measured */
+  --c-wave-mid: #FFA600; /* rekordbox's 3Band waveform, the mid band standing alone (mixxxdj/mixxx#12326); our overview capture measured #FF8C00 where the mid stood mostly alone */
+  --c-wave-high: #FFFFFF; /* rekordbox's 3Band waveform, the high band standing alone (mixxxdj/mixxx#12326) */
+  --c-wave-low-mid: #B4690A; /* rekordbox's 3Band waveform where the low and mid bands overlap (mixxxdj/mixxx#12326); our detail capture measured #B26505 there */
+  --c-wave-low-high: #D2DCFA; /* rekordbox's 3Band waveform where the low and high bands overlap without the mid (mixxxdj/mixxx#12326) */
+  --c-wave-mid-high: #FFF0D7; /* rekordbox's 3Band waveform where the mid and high bands overlap without the low (mixxxdj/mixxx#12326) */
+  --c-wave-all: #F5EBD7; /* rekordbox's 3Band waveform where all three bands overlap, the cream core (mixxxdj/mixxx#12326); our capture measured #F5EAD6 */
   --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
   --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry. The fallback for an index without a measured colour: the other eight measured indices come over the wire per cue from rbl_anlz::DRAWN_CUE_COLOURS */

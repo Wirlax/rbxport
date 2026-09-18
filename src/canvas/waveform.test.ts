@@ -2,33 +2,50 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { bandStops, drawBands, drawColumns, drawPreviewCues, ramp, strideOf, waveformKindOf } from "./waveform";
+import {
+  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, ramp, segments,
+  strideOf, waveformKindOf,
+} from "./waveform";
 
-describe("the three-band colour ramp", () => {
-  it("runs blue, amber, cream rather than blue to cream", () => {
-    // rekordbox colours a column by its frequency content. A two-stop ramp
-    // turns every mid-heavy track grey-blue, which is what this replaced.
+describe("the three-band colours", () => {
+  it("colours a stretch by the bands that reach it: rekordbox's seven", () => {
+    // Sampled from rekordbox itself (mixxxdj/mixxx#12326): a band alone,
+    // two overlapping, all three.
+    expect(bandColour(BAND_LOW)).toBe("rgb(0,85,225)");
+    expect(bandColour(BAND_MID)).toBe("rgb(255,166,0)");
+    expect(bandColour(BAND_HIGH)).toBe("rgb(255,255,255)");
+    expect(bandColour(BAND_LOW | BAND_MID)).toBe("rgb(180,105,10)");
+    expect(bandColour(BAND_LOW | BAND_HIGH)).toBe("rgb(210,220,250)");
+    expect(bandColour(BAND_MID | BAND_HIGH)).toBe("rgb(255,240,215)");
+    expect(bandColour(BAND_LOW | BAND_MID | BAND_HIGH)).toBe("rgb(245,235,215)");
+  });
+
+  it("cuts a column into stretches from the outside in", () => {
+    // Low 127 reaches the whole way, mid half, high a quarter: blue outside,
+    // brown where the mid joins, cream where all three do.
+    expect(segments(127, 64, 32, 100)).toEqual([
+      [100, BAND_LOW],
+      [100 * (64 / 127), BAND_LOW | BAND_MID],
+      [100 * (32 / 127), BAND_LOW | BAND_MID | BAND_HIGH],
+    ]);
+    // A mid louder than the low is amber outside and brown within.
+    expect(segments(32, 127, 0, 100)).toEqual([[100, BAND_MID], [100 * (32 / 127), BAND_LOW | BAND_MID]]);
+    // Bands that reach the same distance share a stretch; silence has none.
+    expect(segments(64, 64, 0, 100)).toEqual([[100 * (64 / 127), BAND_LOW | BAND_MID]]);
+    expect(segments(0, 0, 0, 100)).toEqual([]);
+    // The quietest sound is still half a pixel.
+    expect(segments(1, 0, 0, 10)).toEqual([[0.5, BAND_LOW]]);
+  });
+
+  it("ramps blue, amber, cream for a drawing with one value a column", () => {
     const stops = bandStops("detail");
     expect(ramp(stops, 0)).toBe("rgb(0,85,225)");
-    expect(ramp(stops, 0.5)).toBe("rgb(178,101,5)");
-    expect(ramp(stops, 1)).toBe("rgb(245,234,214)");
-  });
-
-  it("gives the overview a brighter amber than the detail", () => {
-    // Two tokens, --c-wave-mid and --c-wave-mid-ovw, and they differ.
-    expect(ramp(bandStops("overview"), 0.5)).toBe("rgb(255,140,0)");
-    expect(ramp(bandStops("overview"), 0.5)).not.toBe(ramp(bandStops("detail"), 0.5));
-  });
-
-  it("interpolates between the stops rather than stepping", () => {
-    const stops = bandStops("detail");
+    expect(ramp(stops, 0.5)).toBe("rgb(255,166,0)");
+    expect(ramp(stops, 1)).toBe("rgb(245,235,215)");
+    expect(bandStops("overview")).toEqual(bandStops("detail"));
     const quarter = ramp(stops, 0.25);
     expect(quarter).not.toBe(ramp(stops, 0));
     expect(quarter).not.toBe(ramp(stops, 0.5));
-  });
-
-  it("clamps anything outside the range, including nonsense", () => {
-    const stops = bandStops("detail");
     expect(ramp(stops, -1)).toBe(ramp(stops, 0));
     expect(ramp(stops, 99)).toBe(ramp(stops, 1));
     expect(ramp(stops, Number.NaN)).toBe(ramp(stops, 0));
@@ -44,10 +61,13 @@ describe("the three-band colour ramp", () => {
       const [r, g, b] = rgb.slice(4, -1).split(",").map(Number);
       return `#${[r, g, b].map((n) => (n ?? 0).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
     };
-    expect(hex(ramp(bandStops("detail"), 0))).toBe(token("low"));
-    expect(hex(ramp(bandStops("detail"), 0.5))).toBe(token("mid"));
-    expect(hex(ramp(bandStops("overview"), 0.5))).toBe(token("mid-ovw"));
-    expect(hex(ramp(bandStops("detail"), 1))).toBe(token("high"));
+    expect(hex(bandColour(BAND_LOW))).toBe(token("low"));
+    expect(hex(bandColour(BAND_MID))).toBe(token("mid"));
+    expect(hex(bandColour(BAND_HIGH))).toBe(token("high"));
+    expect(hex(bandColour(BAND_LOW | BAND_MID))).toBe(token("low-mid"));
+    expect(hex(bandColour(BAND_LOW | BAND_HIGH))).toBe(token("low-high"));
+    expect(hex(bandColour(BAND_MID | BAND_HIGH))).toBe(token("mid-high"));
+    expect(hex(bandColour(BAND_LOW | BAND_MID | BAND_HIGH))).toBe(token("all"));
   });
 });
 
@@ -65,15 +85,16 @@ describe("the three-band waveform", () => {
     return { ctx: ctx as unknown as CanvasRenderingContext2D, fills };
   }
 
-  it("draws each band in its own colour, brightest last", () => {
-    // One column: low 60, mid 30, high 10, at PWV6's six-bit full scale.
+  it("draws each stretch in the colour of the bands that reach it, the core last", () => {
+    // One column: low 60, mid 30, high 10. Blue where only the low reaches,
+    // brown where the mid joins it, the cream core where all three do.
     const { ctx, fills } = recorder();
     drawBands(ctx, new Uint8Array([60, 30, 10]), 1, 100, "overview");
     expect(fills).toHaveLength(3);
     expect(fills.map((f) => f.style)).toEqual([
-      ramp(bandStops("overview"), 0),
-      ramp(bandStops("overview"), 0.5),
-      ramp(bandStops("overview"), 1),
+      bandColour(BAND_LOW),
+      bandColour(BAND_LOW | BAND_MID),
+      bandColour(BAND_LOW | BAND_MID | BAND_HIGH),
     ]);
     // Low is the outer envelope; the bright core is smallest and on top.
     expect(fills[0]!.h).toBeGreaterThan(fills[1]!.h);
@@ -128,15 +149,15 @@ describe("the three-band waveform", () => {
     const { ctx, fills } = recorder();
     drawBands(ctx, new Uint8Array([127, 64, 32]), 1, 100, "detail", "overlaid", { top: 8, bottom: 2 });
     expect(fills).toHaveLength(3);
-    // Every band stands on the floor, and the loudest reaches the top inset.
+    // Every stretch stands on the floor, and the loudest reaches the top inset.
     for (const fill of fills) expect(fill.y + fill.h).toBeCloseTo(98, 5);
     expect(fills[0]!.y).toBeCloseTo(8, 5);
     expect(fills[1]!.h).toBeCloseTo(90 * (64 / 127), 5);
     expect(fills[2]!.h).toBeCloseTo(90 * (32 / 127), 5);
     expect(fills.map((f) => f.style)).toEqual([
-      ramp(bandStops("detail"), 0),
-      ramp(bandStops("detail"), 0.5),
-      ramp(bandStops("detail"), 1),
+      bandColour(BAND_LOW),
+      bandColour(BAND_LOW | BAND_MID),
+      bandColour(BAND_LOW | BAND_MID | BAND_HIGH),
     ]);
   });
 
@@ -323,7 +344,7 @@ describe("the BLUE and RGB palettes", () => {
     expect(fills).toHaveLength(2);
     expect(fills[0]!.style).toBe("rgb(0,85,225)");
     expect(fills[0]!.h).toBeCloseTo(100, 5);
-    expect(fills[1]!.style).toBe("rgb(245,234,214)");
+    expect(fills[1]!.style).toBe("rgb(245,235,215)");
     expect(fills[1]!.h).toBeCloseTo((15 / 31) * 100, 5);
   });
 

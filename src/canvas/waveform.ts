@@ -54,21 +54,43 @@ export function waveformKindOf(palette: WavePalette, detail: boolean):
 }
 
 /**
- * The three bands, from `src/styles/tokens.css`.
- *
- * rekordbox colours a column by its frequency content: bass blue, mids amber,
- * highs near-white. `PWAV` gives three bits of "whiteness" per column, which
- * is that spectrum in miniature, so the ramp runs through all three rather
- * than straight from blue to white — a two-stop ramp turns every mid-heavy
- * track grey-blue and loses the thing that makes a waveform readable.
+ * rekordbox's 3Band colours: not one per band but one per *combination* of
+ * bands. Where only the low band reaches, the waveform is blue; where the
+ * mid overlaps it, brown; where all three overlap, the cream core; the mid
+ * alone is amber and the high alone white. Seven colours, sampled from
+ * rekordbox itself (mixxxdj/mixxx#12326), of which a real track shows five
+ * or so — a high band that outreaches the mid is rare. The `--c-wave-*`
+ * tokens carry the same values, and the test guards against drift.
  */
-const LOW = [0x00, 0x55, 0xe1] as const; // --c-wave-low  #0055E1
-const MID_DETAIL = [0xb2, 0x65, 0x05] as const; // --c-wave-mid  #B26505
-const MID_OVERVIEW = [0xff, 0x8c, 0x00] as const; // --c-wave-mid-ovw #FF8C00
-const HIGH = [0xf5, 0xea, 0xd6] as const; // --c-wave-high #F5EAD6
+const LOW = [0x00, 0x55, 0xe1] as const; // --c-wave-low #0055E1
+const MID = [0xff, 0xa6, 0x00] as const; // --c-wave-mid #FFA600
+const HIGH = [0xff, 0xff, 0xff] as const; // --c-wave-high #FFFFFF
+const LOW_MID = [0xb4, 0x69, 0x0a] as const; // --c-wave-low-mid #B4690A
+const LOW_HIGH = [0xd2, 0xdc, 0xfa] as const; // --c-wave-low-high #D2DCFA
+const MID_HIGH = [0xff, 0xf0, 0xd7] as const; // --c-wave-mid-high #FFF0D7
+const ALL = [0xf5, 0xeb, 0xd7] as const; // --c-wave-all #F5EBD7
 
-export function bandStops(band: WaveBand): readonly (readonly number[])[] {
-  return [LOW, band === "overview" ? MID_OVERVIEW : MID_DETAIL, HIGH];
+/** The bit each band sets in a combination. */
+export const BAND_LOW = 1;
+export const BAND_MID = 2;
+export const BAND_HIGH = 4;
+
+/** The colour rekordbox paints where this combination of bands reaches. */
+export function bandColour(combination: number): string {
+  const c = [
+    LOW, LOW, MID, LOW_MID, HIGH, LOW_HIGH, MID_HIGH, ALL,
+  ][combination & 7] ?? LOW;
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+/**
+ * The stops of a ramp through the three bands, low to cream, for a drawing
+ * that has one value a column rather than three: the row preview's stacked
+ * slabs, and any caller that wants "how bright is this column" as a colour.
+ * The same palette for the overview and the detail.
+ */
+export function bandStops(_band: WaveBand = "overview"): readonly (readonly number[])[] {
+  return [LOW, MID, ALL];
 }
 
 /** Colour at `t` (0..1) along a ramp through every stop in turn. */
@@ -82,7 +104,7 @@ export function ramp(stops: readonly (readonly number[])[], t: number): string {
   const scaled = clamped * last;
   const i = Math.min(Math.floor(scaled), last - 1);
   const a = stops[i] ?? LOW;
-  const b = stops[i + 1] ?? HIGH;
+  const b = stops[i + 1] ?? ALL;
   const f = scaled - i;
   const c = (n: number) => Math.round((a[n] ?? 0) + ((b[n] ?? 0) - (a[n] ?? 0)) * f);
   return `rgb(${c(0)},${c(1)},${c(2)})`;
@@ -188,12 +210,11 @@ export function drawBands(
     ] as const;
 
     if (half === "overlaid") {
-      // From the baseline, each band over the last, reaching the whole band
-      // at full scale as the centred waveform reaches half of it each way.
-      for (const [value, colour] of bands) {
-        if (value === 0) continue;
-        const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * usable);
-        ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
+      // From the baseline, reaching the whole band at full scale as the
+      // centred waveform reaches half of it each way; each stretch of the
+      // column in the colour of the bands that reach it.
+      for (const [reach, combination] of segments(low, mid, high, usable)) {
+        ctx.fillStyle = bandColour(combination);
         ctx.fillRect(x, floor - reach, 1, reach);
       }
       continue;
@@ -213,15 +234,42 @@ export function drawBands(
       continue;
     }
 
-    // Centred: low first so the blue is the outer envelope, high last so the
-    // bright core sits on top of both.
-    for (const [value, colour] of bands) {
-      if (value === 0) continue;
-      const reach = Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * (usable / 2));
-      ctx.fillStyle = `rgb(${colour?.[0] ?? 0},${colour?.[1] ?? 0},${colour?.[2] ?? 0})`;
+    // Centred: the furthest-reaching band's stretch first, as the outer
+    // envelope, then each nearer stretch over it in the colour of every band
+    // that reaches that far, the core last.
+    for (const [reach, combination] of segments(low, mid, high, usable / 2)) {
+      ctx.fillStyle = bandColour(combination);
       ctx.fillRect(x, centre - reach, 1, reach * 2);
     }
   }
+}
+
+/**
+ * A column as stretches from the outside in: each band's reach, furthest
+ * first, paired with the bands that reach at least that far. Drawn in this
+ * order each nearer stretch covers the last, so a pixel ends up in the
+ * colour of exactly the bands that reach it. Bands with the same reach
+ * share a stretch; a silent band has none.
+ */
+export function segments(low: number, mid: number, high: number, full: number): [number, number][] {
+  const reachOf = (value: number) =>
+    value === 0 ? 0 : Math.max(0.5, (Math.min(value, BAND_FULL_SCALE) / BAND_FULL_SCALE) * full);
+  const reaches: [number, number][] = [
+    [reachOf(low), BAND_LOW],
+    [reachOf(mid), BAND_MID],
+    [reachOf(high), BAND_HIGH],
+  ];
+  reaches.sort((a, b) => b[0] - a[0]);
+  const out: [number, number][] = [];
+  let combination = 0;
+  for (const [reach, band] of reaches) {
+    if (reach === 0) break;
+    combination |= band;
+    const last = out[out.length - 1];
+    if (last && last[0] === reach) last[1] = combination;
+    else out.push([reach, combination]);
+  }
+  return out;
 }
 
 /**
@@ -241,7 +289,7 @@ function monoColumn(data: Uint8Array, at: number): Column {
   const byte = data[at] ?? 0;
   return {
     height: (byte & HEIGHT_MASK) / HEIGHT_MASK,
-    colour: ramp([LOW, HIGH], (byte >> WHITENESS_SHIFT) / 7),
+    colour: ramp([LOW, ALL], (byte >> WHITENESS_SHIFT) / 7),
   };
 }
 
