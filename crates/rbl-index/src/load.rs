@@ -168,7 +168,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,
                 BPM, Length, Rating, ColorID, FolderPath, FileNameL,
                 AnalysisDataPath, DJPlayCount, StockDate, ReleaseDate, Commnt, Analysed,
-                ImagePath
+                ImagePath, ReleaseYear
          FROM djmdContent
          WHERE rb_local_deleted = 0",
     )?;
@@ -224,6 +224,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         // `Analysed` is a bitfield whose values are not yet all understood
         // (105/104/16/17/1 observed); non-zero means rekordbox analysed it.
         lib.analysed.push(u8::from(num(r, 18)? != 0));
+        lib.year.push(u16::try_from(num(r, 20)?.clamp(0, i64::from(u16::MAX))).unwrap_or(0));
 
         // Keyed by the parsed id, not the text: the map is only ever looked
         // up from a membership row, and parsing 75,386 of those is cheaper
@@ -447,6 +448,36 @@ fn read_playlists(
     read_lists(conn, content_row, PLAYLIST_TABLES)
 }
 
+/// Fills in `SmartList` for the intelligent playlists.
+fn read_smart_lists(
+    conn: &Connection,
+    table: &str,
+    index_by_id: &HashMap<String, usize>,
+    playlists: &mut Playlists,
+) {
+    let Ok(mut stmt) = conn.prepare(&format!(
+        "SELECT ID, SmartList FROM `{table}`
+         WHERE rb_local_deleted = 0 AND SmartList IS NOT NULL AND SmartList != ''"
+    )) else {
+        return;
+    };
+    let mut rules: Vec<Option<String>> = vec![None; playlists.len()];
+    let Ok(mut rows) = stmt.query([]) else { return };
+    while let Ok(Some(r)) = rows.next() {
+        let (Ok(Some(id)), Ok(Some(xml))) = (r.get::<_, Option<String>>(0), r.get::<_, Option<String>>(1)) else {
+            continue;
+        };
+        if let Some(slot) = index_by_id.get(&id).and_then(|&index| rules.get_mut(index)) {
+            *slot = Some(xml);
+        }
+    }
+    let mut smart = StrColumn::with_capacity(playlists.len(), 256);
+    for rule in &rules {
+        smart.push(rule.as_deref().unwrap_or(""));
+    }
+    playlists.smart = smart;
+}
+
 /// Whether a table exists, so a schema without it degrades to an empty tree.
 ///
 /// Histories are read from tables the required-column probe does not insist
@@ -487,10 +518,19 @@ fn read_lists(
         // Parent is resolved after every playlist is known.
         playlists.parent.push(NO_ID);
         playlists.seq.push(clamp_u32(num(r, 3)?));
-        // 0 a playlist (or a session), 1 a folder; anything else is not a
-        // folder, which is the safer reading of a value nobody has seen.
-        playlists.folder.push(num(r, 4)? == 1);
+        // 0 a playlist (or a session), 1 a folder, 4 an intelligent
+        // playlist; anything else is treated as a playlist, which is the
+        // safer reading of a value nobody has seen.
+        playlists.attribute.push(u8::try_from(num(r, 4)?).unwrap_or(0));
+        playlists.smart.push("");
         playlists.members.push(Vec::new());
+    }
+
+    // The rules of the intelligent playlists. Only the playlist table has the
+    // column, and a schema without it still reads: the rules are then empty
+    // and every intelligent playlist opens with nothing in it.
+    if tables.lists == PLAYLIST_TABLES.lists {
+        read_smart_lists(conn, tables.lists, &index_by_id, &mut playlists);
     }
 
     // Second pass for parents, now that every id has an index.

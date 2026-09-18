@@ -1302,3 +1302,35 @@ fn a_loop_that_ends_before_it_starts_is_refused() {
     assert!(matches!(f.writer.add_loop(&track_id(0), 1, 5000, 1000, 4), Err(DbError::WriteRefused(_))));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue"), 0);
 }
+
+#[test]
+fn an_intelligent_playlist_takes_no_tracks_by_hand() {
+    let mut f = fixture();
+    let id = f.writer.create_playlist("Rule", ROOT).unwrap();
+    f.conn()
+        .execute(
+            "UPDATE djmdPlaylist SET Attribute = 4,
+                SmartList = '<NODE Id=\"1\" LogicalOperator=\"1\" AutomaticUpdate=\"1\"><CONDITION PropertyName=\"rating\" Operator=\"1\" ValueUnit=\"\" ValueLeft=\"5\" ValueRight=\"\"/></NODE>'
+             WHERE ID = ?1",
+            [&id],
+        )
+        .unwrap();
+
+    for result in [
+        f.writer.add_tracks(&id, &[track_id(0)]).map(|_| ()),
+        f.writer.remove_tracks(&id, &[track_id(0)]).map(|_| ()),
+        f.writer.reorder(&id, &[track_id(0)]).map(|_| ()),
+    ] {
+        let Err(DbError::WriteRefused(reason)) = result else {
+            panic!("a membership edit on a rule should be refused");
+        };
+        assert!(reason.contains("rule"), "{reason}");
+    }
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE PlaylistID = (SELECT ID FROM djmdPlaylist WHERE Name = 'Rule')"), 0);
+
+    // The rule itself survives a rename, and the playlist can still go.
+    f.writer.rename(&id, "Rule renamed").unwrap();
+    let kept: String = f.one("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", &[&id]);
+    assert!(kept.contains("PropertyName"));
+    f.writer.delete_playlist(&id).unwrap();
+}

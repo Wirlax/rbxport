@@ -55,7 +55,7 @@ use std::path::{Path, PathBuf};
 use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_CUE_ID, MAX_PLAYLIST_ID};
 use rbl_core::time;
 use rusqlite::types::Value;
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::{is_rekordbox_running, DbError, Library, OpenMode, Result};
 
@@ -66,6 +66,9 @@ const USN_TABLES: &[&str] = &["djmdContent", "djmdPlaylist", "djmdSongPlaylist"]
 pub const ATTRIBUTE_PLAYLIST: i64 = 0;
 /// `djmdPlaylist.Attribute`: a folder that holds other playlists.
 pub const ATTRIBUTE_FOLDER: i64 = 1;
+/// `djmdPlaylist.Attribute`: an intelligent playlist, whose tracks are what
+/// its `SmartList` rule admits rather than rows of `djmdSongPlaylist`.
+pub const ATTRIBUTE_SMART: i64 = 4;
 
 /// `ParentID` of a top-level playlist or folder. A string, not an id.
 pub const ROOT: &str = "root";
@@ -413,6 +416,7 @@ impl Writer {
         if !node_exists(&tx, playlist)? {
             return Err(DbError::WriteRefused(format!("no playlist {playlist}")));
         }
+        refuse_if_smart(&tx, playlist)?;
         let mut track_no: i64 = tx.query_row(
             "SELECT COALESCE(MAX(TrackNo), 0) FROM djmdSongPlaylist
              WHERE PlaylistID = ?1 AND rb_local_deleted = 0",
@@ -456,6 +460,7 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        refuse_if_smart(&tx, playlist)?;
 
         let mut rows = 0;
         let mut usn = 0;
@@ -485,6 +490,7 @@ impl Writer {
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        refuse_if_smart(&tx, playlist)?;
 
         let mut stmt = tx.prepare(
             "SELECT ContentID FROM djmdSongPlaylist
@@ -1149,6 +1155,25 @@ fn node_exists(conn: &Connection, id: &str) -> Result<bool> {
         |r| r.get(0),
     )?;
     Ok(n > 0)
+}
+
+/// An intelligent playlist has no membership rows to add to, remove from or
+/// reorder: its tracks are its rule. Writing `djmdSongPlaylist` rows under
+/// one would leave rows rekordbox never reads.
+fn refuse_if_smart(conn: &Connection, playlist: &str) -> Result<()> {
+    let attribute: Option<i64> = conn
+        .query_row(
+            "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![playlist],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if attribute == Some(ATTRIBUTE_SMART) {
+        return Err(DbError::WriteRefused(
+            "an intelligent playlist's tracks are its rule; they cannot be edited by hand".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Whether `candidate` sits somewhere under `ancestor`.

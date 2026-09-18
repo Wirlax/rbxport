@@ -1,6 +1,6 @@
 //! Noticing a stick being plugged in or pulled out.
 //!
-//! macOS has DiskArbitration and Windows `WM_DEVICECHANGE`, but both are
+//! macOS has `DiskArbitration` and Windows `WM_DEVICECHANGE`, but both are
 //! reached through foreign calls the workspace forbids as `unsafe`. What both
 //! platforms offer safely is a cheap place to look: every non-boot volume on
 //! macOS is an entry under `/Volumes`, and on Windows a mounted drive is a

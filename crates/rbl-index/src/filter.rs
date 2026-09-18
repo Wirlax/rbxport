@@ -293,6 +293,12 @@ impl Library {
             TrackSource::History(index) => {
                 self.histories().members.get(*index).cloned().unwrap_or_default()
             }
+            // A rule that does not parse admits nothing, which is what
+            // rekordbox shows for a rule it cannot read.
+            TrackSource::SmartPlaylist(index) => {
+                let rule = self.playlists().smart_rule(*index);
+                rule.map(|rule| rule.evaluate(self)).unwrap_or_default()
+            }
         }
     }
 }

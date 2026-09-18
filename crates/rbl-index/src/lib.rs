@@ -15,6 +15,7 @@
 pub mod cache;
 pub mod folder;
 pub mod key;
+pub mod smart;
 pub mod strings;
 pub mod testing;
 mod filter;
@@ -25,6 +26,7 @@ pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
 pub use load::{content_version, load, reload_cues_of, reload_playlists, LoadStats};
+pub use smart::SmartRule;
 pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};
@@ -69,6 +71,9 @@ pub struct Library {
     pub color: Vec<u8>,
     pub play_count: Vec<u16>,
     pub analysed: Vec<u8>,
+    /// `djmdContent.ReleaseYear`; 0 when unknown. Two bytes a row, for the
+    /// intelligent playlists that ask for a year.
+    pub year: Vec<u16>,
 
     pub artists: Interner,
     pub albums: Interner,
@@ -288,13 +293,25 @@ pub struct Playlists {
     pub names: StrColumn,
     pub parent: Vec<u32>,
     pub seq: Vec<u32>,
-    /// `Attribute = 1`: a folder, whether or not anything is in it yet. A
-    /// tree that told folders from playlists by their children called an
-    /// empty folder a playlist, and put what its menu made beside it.
-    pub folder: Vec<bool>,
-    /// Row indices per playlist, in `TrackNo` order.
+    /// `djmdPlaylist.Attribute`: 0 a playlist, 1 a folder, 4 an intelligent
+    /// playlist. A folder is one by its own attribute whether or not anything
+    /// is in it yet: a tree that told folders from playlists by their
+    /// children called an empty folder a playlist, and put what its menu made
+    /// beside it.
+    pub attribute: Vec<u8>,
+    /// `djmdPlaylist.SmartList`, the rule of an intelligent playlist as
+    /// rekordbox stores it. Empty for everything else. Kept as text: parsing
+    /// is microseconds and the snapshot stays a plain column.
+    pub smart: StrColumn,
+    /// Row indices per playlist, in `TrackNo` order. An intelligent playlist
+    /// has none: its rows are what its rule admits when it is opened.
     pub members: Vec<Vec<Row>>,
 }
+
+/// `Attribute` of a folder.
+pub const ATTRIBUTE_FOLDER: u8 = 1;
+/// `Attribute` of an intelligent playlist.
+pub const ATTRIBUTE_SMART: u8 = 4;
 
 impl Library {
     /// Sets the row count. Only the snapshot reader needs this: every other
@@ -314,7 +331,19 @@ impl Playlists {
     /// Whether the list is a folder, by its own attribute rather than by
     /// whether anything is under it.
     pub fn is_folder(&self, index: usize) -> bool {
-        self.folder.get(index).copied().unwrap_or(false)
+        self.attribute.get(index).copied() == Some(ATTRIBUTE_FOLDER)
+    }
+    /// Whether the list is an intelligent playlist: a rule, not a membership.
+    pub fn is_smart(&self, index: usize) -> bool {
+        self.attribute.get(index).copied() == Some(ATTRIBUTE_SMART)
+    }
+    /// The rule of an intelligent playlist, when it is one and the rule
+    /// parses.
+    pub fn smart_rule(&self, index: usize) -> Option<SmartRule> {
+        if !self.is_smart(index) {
+            return None;
+        }
+        SmartRule::parse(self.smart.get(index))
     }
     pub fn name(&self, index: usize) -> &str {
         self.names.get(index)
@@ -467,6 +496,7 @@ impl Library {
                 + self.label.capacity() + self.key.capacity()
                 + self.bpm_x100.capacity() + self.length_sec.capacity()
                 + self.play_count.capacity()) * 4
+            + self.year.capacity() * 2
             + self.rating.capacity() + self.color.capacity() + self.analysed.capacity();
         let strings = self.title.heap_bytes() + self.title_folded.heap_bytes()
             + self.comment.heap_bytes() + self.folder_path.heap_bytes()
@@ -488,6 +518,8 @@ impl Library {
             .sum();
         let playlists = self.playlists().ids.capacity() * 8
             + self.playlists().names.heap_bytes()
+            + self.playlists().smart.heap_bytes()
+            + self.playlists().attribute.capacity()
             + self.playlists().members.iter().map(|m| m.capacity() * 4).sum::<usize>();
         vecs + strings + interners + ranks + cues + tags + playlists
     }

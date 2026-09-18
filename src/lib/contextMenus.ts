@@ -125,8 +125,10 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
  * no cloud library behind this app, so the rows would promise a feature that
  * is not coming, which is a different thing from one not built yet.
  */
-export function treeMenu(kind: "playlist" | "folder"): readonly MenuRow<TreeAction>[] {
+export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder"): readonly MenuRow<TreeAction>[] {
   const folder = kind === "folder";
+  // An intelligent playlist is exported, renamed and deleted like any other;
+  // what it cannot do is take tracks by hand, which its rows never offer.
   return [
     { label: folder ? "Export Folder" : "Export Playlist", action: "export", submenu: true },
     SEPARATOR,

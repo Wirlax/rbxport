@@ -147,6 +147,14 @@ export const ListIcon = (props: IconProps) => (
   </svg>
 );
 
+/** An intelligent playlist: a list with a rule's asterisk on it. */
+export const SmartListIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
+    <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/>
+    <path d="M9 5.6v3.8M7.4 6.5l3.2 2M7.4 8.5l3.2-2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+  </svg>
+);
+
 export const LockIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <path d="M5.1 7.4V5.4a2.9 2.9 0 0 1 5.8 0v2.0" fill="none" stroke="currentColor" strokeWidth="1.5"/> <rect x="3.2" y="7.2" width="9.6" height="7.0" rx="1.1" fill="currentColor"/>

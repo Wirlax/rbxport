@@ -8,7 +8,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
-import { DeviceIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon } from "@/components/icons";
+import { DeviceIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
 import { treeMenu } from "@/lib/contextMenus";
 import {
@@ -111,7 +111,9 @@ const Row = memo(function Row({
           ? NoteIcon
           : node.kind === "device"
             ? DeviceIcon
-            : ListIcon;
+            : node.kind === "smartPlaylist"
+              ? SmartListIcon
+              : ListIcon;
   // Whether the drag is over this row right now. Only the row under the
   // pointer is marked — every playlist lighting up for the whole drag read
   // as a grid of errors — and a drag that ends elsewhere clears it.
@@ -180,9 +182,9 @@ const Row = memo(function Row({
       }}
       data-move={moveEdge ?? undefined}
       onContextMenu={(e) => {
-        // Only the two kinds that have a menu: the fixed roots and the device
+        // Only the kinds that have a menu: the fixed roots and the device
         // nodes are not playlists and have nothing to offer.
-        if ((node.kind !== "playlist" && node.kind !== "folder") || !onMenu) return;
+        if ((node.kind !== "playlist" && node.kind !== "smartPlaylist" && node.kind !== "folder") || !onMenu) return;
         e.preventDefault();
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
@@ -407,7 +409,8 @@ export function TreeView({
             onRename={onRenameNode}
             onRenameEnd={endRename}
             movable={
-              Boolean(onMoveNode) && (node.kind === "playlist" || node.kind === "folder")
+              Boolean(onMoveNode) &&
+              (node.kind === "playlist" || node.kind === "smartPlaylist" || node.kind === "folder")
             }
             moveEdge={moveTo?.node.id === node.id ? moveTo.edge : null}
             onMoveStart={onMoveNode ? setMoving : undefined}
@@ -428,7 +431,9 @@ export function TreeView({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          rows={treeMenu(menu.node.kind === "folder" ? "folder" : "playlist")}
+          rows={treeMenu(
+            menu.node.kind === "folder" ? "folder" : menu.node.kind === "smartPlaylist" ? "smartPlaylist" : "playlist",
+          )}
           label={menu.node.kind === "folder" ? "Folder" : "Playlist"}
           context={{ inPlaylist: true, hasFile: true, readOnly }}
           onChoose={(action) => {

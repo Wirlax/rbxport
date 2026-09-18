@@ -252,7 +252,7 @@ export function App() {
   // The table's layout follows the kind of thing being browsed, as
   // browseSetting.xml does, rather than each individual playlist.
   const columnContext: ColumnContext =
-    selectedNode?.kind === "playlist"
+    selectedNode?.kind === "playlist" || selectedNode?.kind === "smartPlaylist"
       ? "playlist"
       : selectedNode?.kind === "history"
         ? "history"

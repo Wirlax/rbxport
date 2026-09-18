@@ -211,7 +211,12 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
       // All Tracks belongs here: rekordbox shows it above the playlists and
       // in no other section.
       return nodes.filter(
-        (n) => n.kind === "allTracks" || n.kind === "collection" || n.kind === "folder" || n.kind === "playlist",
+        (n) =>
+          n.kind === "allTracks" ||
+          n.kind === "collection" ||
+          n.kind === "folder" ||
+          n.kind === "playlist" ||
+          n.kind === "smartPlaylist",
       );
   }
 }

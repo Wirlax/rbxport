@@ -21,6 +21,9 @@ pub struct TestTrack {
     pub cues: Vec<Cue>,
     /// The file's absolute path, as `djmdContent.FolderPath` holds it.
     pub path: &'static str,
+    pub genre: &'static str,
+    pub year: u16,
+    pub play_count: u16,
 }
 
 /// Builds an index directly, bypassing SQL.
@@ -38,7 +41,7 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.release_date.push("");
         lib.artist.push(lib.artists.push(t.artist));
         lib.album.push(lib.albums.push(t.album));
-        lib.genre.push(lib.genres.push(""));
+        lib.genre.push(lib.genres.push(t.genre));
         lib.label.push(lib.labels.push(""));
         // One interner entry per track, names repeating, which is what
         // `djmdKey` does on the reference library (`A` under two ids).
@@ -47,8 +50,9 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.length_sec.push(t.length_sec);
         lib.rating.push(t.rating);
         lib.color.push(t.color);
-        lib.play_count.push(0);
+        lib.play_count.push(t.play_count);
         lib.analysed.push(u8::from(t.bpm_x100 > 0));
+        lib.year.push(t.year);
     }
     lib.count = tracks.len();
     lib.set_cues(Cues::from_per_track(tracks.iter().map(|t| t.cues.clone()).collect()));
@@ -76,20 +80,31 @@ pub fn add_history(lib: &mut Library, name: &str, rows: &[Row]) -> usize {
     histories.names.push(name);
     histories.parent.push(crate::NO_ID);
     histories.seq.push(u32::try_from(index).unwrap_or(0));
-    histories.folder.push(false);
+    histories.attribute.push(0);
+    histories.smart.push("");
     histories.members.push(rows.to_vec());
     lib.set_histories(histories);
     index
 }
 
+/// Adds an intelligent playlist with the given rule XML, returning its index.
+pub fn add_smart_playlist(lib: &mut Library, name: &str, rule: &str) -> usize {
+    add_list_with(lib, name, &[], crate::ATTRIBUTE_SMART, rule)
+}
+
 fn add_list(lib: &mut Library, name: &str, rows: &[Row], folder: bool) -> usize {
+    add_list_with(lib, name, rows, if folder { crate::ATTRIBUTE_FOLDER } else { 0 }, "")
+}
+
+fn add_list_with(lib: &mut Library, name: &str, rows: &[Row], attribute: u8, rule: &str) -> usize {
     let mut playlists = (*lib.playlists()).clone();
     let index = playlists.ids.len();
     playlists.ids.push(1000 + u64::try_from(index).unwrap_or(0));
     playlists.names.push(name);
     playlists.parent.push(crate::NO_ID);
     playlists.seq.push(u32::try_from(index).unwrap_or(0));
-    playlists.folder.push(folder);
+    playlists.attribute.push(attribute);
+    playlists.smart.push(rule);
     playlists.members.push(rows.to_vec());
     lib.set_playlists(playlists);
     index

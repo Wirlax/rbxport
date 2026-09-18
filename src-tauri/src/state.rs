@@ -399,11 +399,22 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
             .ok()
             .and_then(|numeric| library.histories().index_of(numeric))
             .map_or(TrackSource::Collection, TrackSource::History),
+        // An intelligent playlist arrives under the same wire kind as an
+        // ordinary one — the tree node is the only thing that knows which it
+        // is, and the index does too, so the shell decides here.
         TrackSourceDto::Playlist { id } => id
             .parse::<u64>()
             .ok()
-            .and_then(|numeric| library.playlists().index_of(numeric))
-            .map_or(TrackSource::Collection, TrackSource::Playlist),
+            .and_then(|numeric| {
+                let playlists = library.playlists();
+                let index = playlists.index_of(numeric)?;
+                Some(if playlists.is_smart(index) {
+                    TrackSource::SmartPlaylist(index)
+                } else {
+                    TrackSource::Playlist(index)
+                })
+            })
+            .unwrap_or(TrackSource::Collection),
     };
     ViewSpec {
         source,

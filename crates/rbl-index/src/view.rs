@@ -60,6 +60,9 @@ pub enum TrackSource {
     /// Index into `Library::histories`. A session, or a folder of them —
     /// a folder has no members of its own, so it opens empty.
     History(usize),
+    /// Index into `Library::playlists` of an intelligent playlist: the rows
+    /// are whatever its rule admits at the moment it is opened.
+    SmartPlaylist(usize),
 }
 
 #[derive(Debug, Clone)]

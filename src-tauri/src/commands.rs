@@ -130,6 +130,9 @@ fn build_tree(library: &Library) -> Vec<TreeNodeDto> {
 struct ListStyle {
     folder: &'static str,
     leaf: &'static str,
+    /// An intelligent playlist: a rule rather than a membership. Histories
+    /// have none, so theirs is the leaf.
+    smart: &'static str,
     /// Filed by date rather than by hand: folders are a year and a month,
     /// which rekordbox shows in calendar order under their month's name, not
     /// in the order they were made. Sessions keep their `Seq`, which is the
@@ -138,8 +141,10 @@ struct ListStyle {
 }
 
 impl ListStyle {
-    const PLAYLISTS: Self = Self { folder: "folder", leaf: "playlist", calendar: false };
-    const HISTORIES: Self = Self { folder: "history", leaf: "history", calendar: true };
+    const PLAYLISTS: Self =
+        Self { folder: "folder", leaf: "playlist", smart: "smartPlaylist", calendar: false };
+    const HISTORIES: Self =
+        Self { folder: "history", leaf: "history", smart: "history", calendar: true };
 }
 
 /// A month folder's name as rekordbox shows it: `djmdHistory` stores the
@@ -215,15 +220,27 @@ fn push_lists(
             (true, Some(month)) => month.to_owned(),
             _ => name.to_owned(),
         };
+        let smart = !folder && lists.is_smart(index);
         nodes.push(TreeNodeDto {
             id: lists.ids.get(index).copied().unwrap_or(0).to_string(),
             name,
-            kind: if folder { style.folder } else { style.leaf },
+            kind: if folder {
+                style.folder
+            } else if smart {
+                style.smart
+            } else {
+                style.leaf
+            },
             depth,
             expanded: if folder { Some(depth < open_to) } else { None },
-            child_count: Some(
-                u32::try_from(if folder { under } else { members }).unwrap_or(u32::MAX),
-            ),
+            // An intelligent playlist's count is whatever its rule admits
+            // today, which is not known until it is opened; the tree shows
+            // none rather than evaluating every rule to draw itself.
+            child_count: if smart {
+                None
+            } else {
+                Some(u32::try_from(if folder { under } else { members }).unwrap_or(u32::MAX))
+            },
         });
         if let Some(below) = children.get(index) {
             for &child in below.iter().rev() {
@@ -669,8 +686,15 @@ pub async fn export_playlist<R: tauri::Runtime>(
             return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
         };
         let name = playlists.name(index).to_owned();
-        let rows: Vec<u32> = playlists.members.get(index).cloned().unwrap_or_default();
+        // An intelligent playlist is exported as what its rule admits now,
+        // which is what rekordbox writes to a stick for one too.
+        let source = if playlists.is_smart(index) {
+            rbl_index::TrackSource::SmartPlaylist(index)
+        } else {
+            rbl_index::TrackSource::Playlist(index)
+        };
         drop(playlists);
+        let rows: Vec<u32> = library.source_rows(&source);
 
         if rows.is_empty() {
             return Err(AppError::new(

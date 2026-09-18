@@ -42,7 +42,10 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// player with no cue markers and an empty HOT CUE list. 4 added whether each
 /// playlist is a folder, and the histories: formats 1 to 3 left them out, so
 /// every start that hit the snapshot had no Histories section at all.
-pub const FORMAT: u32 = 4;
+/// 5 added the release year, and each playlist's attribute and rule: format
+/// 4 knew only whether a playlist was a folder, so an intelligent playlist
+/// read from the snapshot opened empty.
+pub const FORMAT: u32 = 5;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -202,6 +205,7 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     w.bytes(&library.color);
     w.u16s(&library.play_count);
     w.bytes(&library.analysed);
+    w.u16s(&library.year);
     for interner in [
         &library.artists,
         &library.albums,
@@ -379,6 +383,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.color = r.bytes()?;
     lib.play_count = r.u16s()?;
     lib.analysed = r.bytes()?;
+    lib.year = r.u16s()?;
     lib.artists = r.interner()?;
     lib.albums = r.interner()?;
     lib.genres = r.interner()?;
@@ -480,7 +485,8 @@ fn write_lists(w: &mut Writer, lists: &Playlists) {
     w.strings(&lists.names);
     w.u32s(&lists.parent);
     w.u32s(&lists.seq);
-    w.bytes(&lists.folder.iter().map(|&f| u8::from(f)).collect::<Vec<u8>>());
+    w.bytes(&lists.attribute);
+    w.strings(&lists.smart);
     w.u64(lists.members.len() as u64);
     for members in &lists.members {
         w.u32s(members);
@@ -493,7 +499,8 @@ fn read_lists(r: &mut Reader<'_>) -> Option<Playlists> {
         names: r.strings()?,
         parent: r.u32s()?,
         seq: r.u32s()?,
-        folder: r.bytes()?.into_iter().map(|b| b == 1).collect(),
+        attribute: r.bytes()?,
+        smart: r.strings()?,
         members: Vec::new(),
     };
     let count = r.count(8)?;

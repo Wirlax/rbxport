@@ -47,8 +47,10 @@ export function specForNode(
     // at all.
     // The Explorer's folders open as themselves, and its heading as an empty
     // folder: rekordbox shows an Explorer with nothing in it there.
+    // An intelligent playlist is asked for as a playlist: the backend knows
+    // which of its playlists are rules and answers with what the rule admits.
     source:
-      node?.kind === "playlist"
+      node?.kind === "playlist" || node?.kind === "smartPlaylist"
         ? { kind: "playlist", id: node.id }
         : node?.kind === "history"
           ? { kind: "history", id: node.id }

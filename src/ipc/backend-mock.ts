@@ -254,6 +254,11 @@ function makeTree(): TreeNode[] {
       // The count the real tree carries, from the same seed `openView` uses.
       nodes.push({ id, name, kind: "playlist", depth: 2, childCount: mockPlaylistSize(id) });
     }
+    // One intelligent playlist in the first folder, as a library with rules
+    // shows: no count, since a rule's count is only known once it is opened.
+    if (fi === 0) {
+      nodes.push({ id: "smart-0", name: "Fresh 128s", kind: "smartPlaylist", depth: 2 });
+    }
   }
   // Histories, filed as rekordbox files them: a folder per year, one per month
   // inside it under the month's name, and the sessions under that. The year

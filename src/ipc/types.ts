@@ -88,6 +88,8 @@ export interface TreeNode {
   name: string;
   kind:
     | "collection" | "histories" | "folder" | "playlist" | "history" | "allTracks" | "device"
+    /** An intelligent playlist: a rule, whose tracks are whatever it admits when opened. */
+    | "smartPlaylist"
     /** The Explorer heading, and a folder on disk under it. */
     | "explorer" | "directory"
     /** A line of information in the tree, not a place: nothing opens when it is clicked. */
