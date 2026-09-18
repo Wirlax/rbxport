@@ -24,6 +24,21 @@ pub fn short_ascii(text: &str) -> Vec<u8> {
     out
 }
 
+/// Encodes a string in the long ASCII form rekordbox uses once the short
+/// form's length byte runs out: `0x40`, a `u16` length that counts these
+/// four header bytes and the text, a pad byte, then the text with no
+/// terminator [OBS 7.2.11: `40 85 00 00` before a 129-byte path].
+pub fn long_ascii(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let len = 4 + bytes.len();
+    let mut out = Vec::with_capacity(len);
+    out.push(0x40);
+    out.extend_from_slice(&u16::try_from(len).unwrap_or(u16::MAX).to_le_bytes());
+    out.push(0x00);
+    out.extend_from_slice(bytes);
+    out
+}
+
 /// Encodes a string in the long UTF-16LE form, for text ASCII cannot carry.
 pub fn long_utf16le(text: &str) -> Vec<u8> {
     let units: Vec<u16> = text.encode_utf16().collect();
@@ -40,10 +55,11 @@ pub fn long_utf16le(text: &str) -> Vec<u8> {
     out
 }
 
-/// Picks the encoding rekordbox would: ASCII when it fits, UTF-16 otherwise.
+/// Picks the encoding rekordbox would: short ASCII when it fits, long ASCII
+/// for longer ASCII, UTF-16 for anything else.
 pub fn device_sql_string(text: &str) -> Vec<u8> {
-    if text.is_ascii() && text.len() < 0x7e {
-        short_ascii(text)
+    if text.is_ascii() {
+        if text.len() < 0x7e { short_ascii(text) } else { long_ascii(text) }
     } else {
         long_utf16le(text)
     }

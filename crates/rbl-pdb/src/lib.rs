@@ -227,9 +227,11 @@ impl<'a> Pdb<'a> {
         let b = self.bytes;
         match u1(b, offset) {
             0x40 => {
+                // Flag, u16 length counting the four header bytes, a pad
+                // byte, then the text; see `build::long_ascii`.
                 let len = u2(b, offset + 1) as usize;
-                let start = offset + 3;
-                b.get(start..start + len.saturating_sub(0))
+                let start = offset + 4;
+                b.get(start..start + len.saturating_sub(4))
                     .map(|s| String::from_utf8_lossy(s).into_owned())
                     .unwrap_or_default()
             }

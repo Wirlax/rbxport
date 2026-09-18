@@ -382,3 +382,26 @@ fn rekordbox_album_and_colour_rows_read_and_write_the_same() {
     assert_eq!((colours[0].id, colours[0].name.as_str()), (1, "Pink"));
 }
 
+/// A path too long for the short form is written the way rekordbox 7.2.11
+/// writes it [OBS 2026-09-17: `40 85 00 00` before a 129-byte path] and reads
+/// back whole, without the byte before it or the bytes after it.
+#[test]
+fn a_long_ascii_string_reads_and_writes_as_rekordbox_does() {
+    let path = "/Contents/NIIKO x SWAE, Honey & Badger/NIIKO X SWAE & Honey & Badger - Automatic/niiko x swae, honey & badger - automatic (ex.mp3";
+    assert_eq!(path.len(), 129);
+    let encoded = rbl_pdb::build::device_sql_string(path);
+    assert_eq!(&encoded[..4], &[0x40, 0x85, 0x00, 0x00]);
+    assert_eq!(encoded.len(), 133);
+
+    let mut file = rbl_pdb::build::FileBuilder::new(4096);
+    let mut row = rbl_pdb::rows::simple_named_row(1, "x");
+    row.truncate(4);
+    row.extend_from_slice(&encoded);
+    row.extend_from_slice(b"ati"); // whatever follows must not be read as part of it
+    file.add_table(1, &[row]);
+    let bytes = file.finish();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+    let rows = pdb.named_rows(pdb.table(rbl_pdb::PageType::Genres).expect("table"));
+    assert_eq!(rows[0].name, path);
+}
+
