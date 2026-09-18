@@ -67,7 +67,7 @@
         "https://pub-8a641d6e2afb49198292186d27dcc37e.r2.dev/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }

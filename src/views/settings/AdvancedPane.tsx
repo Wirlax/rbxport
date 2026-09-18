@@ -98,7 +98,7 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
         </Section>
         <Section title="Update Manager">
           <Toggle
-            label="Check for a new version when rbxport starts."
+            label="Keep rbxport up to date: check for a new version when it starts and install it in the background."
             checked={advanced.checkUpdates}
             onChange={(checkUpdates) => set({ checkUpdates })}
           />
@@ -114,6 +114,11 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             ]}
             onChange={(updateFrequency) => set({ updateFrequency })}
           />
+          <Note>
+            A new version is downloaded and put in place without asking, and
+            is the one that runs the next time rbxport opens. On Windows it
+            is installed when rbxport quits.
+          </Note>
           <div className={styles.actions} data-gap-above>
             <Button
               onClick={() => {

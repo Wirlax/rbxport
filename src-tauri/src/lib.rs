@@ -444,7 +444,8 @@ pub fn run() {
             commands::master_limiter,
             commands::set_master_limiter,
             update::check_for_update,
-            update::install_update,
+            update::download_update,
+            update::restart_to_update,
             commands::deck_tempo,
             commands::deck_metronome,
             commands::deck_key_shift,
@@ -523,7 +524,16 @@ pub fn run() {
         .build(context);
 
     match result {
-        Ok(app) => app.run(|_handle, _event| {}),
+        Ok(app) => {
+            crate::update::Updates::clear_stale(app.handle());
+            app.run(|handle, event| {
+                // An update downloaded this run and waiting for the quit
+                // (Windows) is installed now, silently.
+                if matches!(event, tauri::RunEvent::Exit) {
+                    crate::update::on_exit(handle);
+                }
+            });
+        }
         Err(e) => {
             tracing::error!(error = %e, "fatal: could not start the application");
             std::process::exit(1);

@@ -21,7 +21,8 @@ declare global {
 let host: HTMLDivElement;
 let root: Root;
 let onCheck: ReturnType<typeof vi.fn>;
-let onInstall: ReturnType<typeof vi.fn>;
+let onRetry: ReturnType<typeof vi.fn>;
+let onRestart: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn>;
 
 const CHECK: UpdateCheck = {
@@ -36,12 +37,13 @@ const CHECK: UpdateCheck = {
     },
     { version: "0.5.0", date: "2026-09-11", body: "## [0.5.0] — 2026-09-11\n\n### Fixed\n- A crash." },
   ],
+  ready: null,
 };
 
 function mount(state: UpdaterState) {
   act(() => {
     root.render(
-      <UpdateManager state={state} onCheck={onCheck} onInstall={onInstall} onClose={onClose} />,
+      <UpdateManager state={state} onCheck={onCheck} onRetry={onRetry} onRestart={onRestart} onClose={onClose} />,
     );
   });
 }
@@ -67,7 +69,8 @@ function escape() {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   onCheck = vi.fn();
-  onInstall = vi.fn();
+  onRetry = vi.fn();
+  onRestart = vi.fn();
   onClose = vi.fn();
   host = document.createElement("div");
   document.body.append(host);
@@ -95,12 +98,15 @@ describe("UpdateManager", () => {
     expect(host.querySelector('[aria-label="Close"]')).not.toBeNull();
   });
 
-  it("offers a download with both versions and what changed in between", () => {
-    mount({ phase: "available", check: CHECK });
+  it("shows a download with both versions and what changed in between, and can be closed over it", () => {
+    mount({ phase: "downloading", check: CHECK, progress: { downloaded: 4 * 1024 * 1024, total: 16 * 1024 * 1024 } });
     const versions = Array.from(host.querySelectorAll("dl dd")).map((d) => d.textContent);
     expect(versions).toEqual(["0.4.0", "0.6.0"]);
-    expect(text()).toContain("To get a new version, click Download.");
-    expect(buttons()).toEqual(["Later", "Download"]);
+    expect(text()).toContain("Downloading…");
+    const bar = host.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute("aria-valuenow")).toBe("25");
+    expect(bar?.hasAttribute("data-indeterminate")).toBe(false);
+    expect(text()).toContain("4.0 MB of 16.0 MB");
 
     // Both sections, newest first, as headings and lists rather than raw markdown.
     const releases = Array.from(host.querySelectorAll("h3")).map((h) => h.textContent);
@@ -114,26 +120,16 @@ describe("UpdateManager", () => {
     expect(host.querySelector("li code")?.textContent).toBe("limiter");
     expect(text()).not.toContain("## [");
 
-    click("Download");
-    expect(onInstall).toHaveBeenCalledTimes(1);
-    click("Later");
+    // The download is the app's, not the window's: it can be closed over it.
+    expect(buttons()).toEqual(["Close"]);
+    expect(host.querySelector('[aria-label="Close"]')).not.toBeNull();
+    click("Close");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("says when there are no notes for the version on offer", () => {
-    mount({ phase: "available", check: { ...CHECK, changes: [] } });
+    mount({ phase: "downloading", check: { ...CHECK, changes: [] }, progress: null });
     expect(text()).toContain("No release notes for this version.");
-  });
-
-  it("shows a download as a bar with the bytes beside it and no way to close", () => {
-    mount({ phase: "downloading", check: CHECK, progress: { downloaded: 4 * 1024 * 1024, total: 16 * 1024 * 1024 } });
-    expect(text()).toContain("Downloading…");
-    const bar = host.querySelector('[role="progressbar"]');
-    expect(bar?.getAttribute("aria-valuenow")).toBe("25");
-    expect(bar?.hasAttribute("data-indeterminate")).toBe(false);
-    expect(text()).toContain("4.0 MB of 16.0 MB");
-    expect(buttons()).toEqual([]);
-    expect(host.querySelector('[aria-label="Close"]')).toBeNull();
   });
 
   it("shows a download whose size is unknown as a moving bar with the bytes so far", () => {
@@ -151,11 +147,22 @@ describe("UpdateManager", () => {
     const bar = host.querySelector('[role="progressbar"]');
     expect(bar?.hasAttribute("data-indeterminate")).toBe(true);
     expect(bar?.hasAttribute("aria-valuenow")).toBe(false);
-    expect(buttons()).toEqual([]);
-    expect(host.querySelector('[aria-label="Close"]')).toBeNull();
+    expect(buttons()).toEqual(["Close"]);
   });
 
-  it("a failed install says so, keeps the notes, and offers the download again", () => {
+  it("an update in place says the next launch runs it, and offers to restart now", () => {
+    mount({ phase: "ready", check: CHECK, ready: { version: "0.6.0", installed: true } });
+    expect(text()).toContain("The latest version has been downloaded. It will be used the next time rbxport opens.");
+    expect(host.querySelector('[role="progressbar"]')).toBeNull();
+    expect(host.querySelectorAll("h3")).toHaveLength(2);
+    expect(buttons()).toEqual(["Later", "Restart Now"]);
+    click("Restart Now");
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    click("Later");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed download says so, keeps the notes, and offers the download again", () => {
     mount({ phase: "failed", message: "The update could not be installed.", check: CHECK });
     const alert = host.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain("An error occurred. Please try later.");
@@ -163,7 +170,7 @@ describe("UpdateManager", () => {
     expect(host.querySelectorAll("h3")).toHaveLength(2);
     expect(buttons()).toEqual(["Close", "Try Again"]);
     click("Try Again");
-    expect(onInstall).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onCheck).not.toHaveBeenCalled();
   });
 
@@ -176,24 +183,26 @@ describe("UpdateManager", () => {
     expect(buttons()).toEqual(["Close", "Check Again"]);
     click("Check Again");
     expect(onCheck).toHaveBeenCalledTimes(1);
-    expect(onInstall).not.toHaveBeenCalled();
+    expect(onRetry).not.toHaveBeenCalled();
     click("Close");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("Escape closes the window except while a download or install is running", () => {
-    mount({ phase: "available", check: CHECK });
+  it("Escape closes the window in every phase, the download going on behind it", () => {
+    mount({ phase: "downloading", check: CHECK, progress: null });
     escape();
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    mount({ phase: "downloading", check: CHECK, progress: null });
-    escape();
     mount({ phase: "installing", check: CHECK });
     escape();
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    mount({ phase: "ready", check: CHECK, ready: { version: "0.6.0", installed: false } });
+    escape();
+    expect(onClose).toHaveBeenCalledTimes(3);
 
     mount({ phase: "failed", message: "", check: CHECK });
     escape();
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(4);
   });
 });

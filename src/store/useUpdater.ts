@@ -1,20 +1,23 @@
 /**
  * Software updates, as the Update Manager window sees them.
  *
- * One state machine: idle → checking → up to date | available → downloading
- * → installing, with failed reachable from any of the working states. The
- * backend does the checking, downloading and installing; this holds where it
- * has got to and whether the window is showing.
+ * One state machine: idle → checking → up to date | downloading →
+ * installing → ready, with failed reachable from any of the working states.
+ * The backend does the checking, downloading and installing; this holds
+ * where it has got to and whether the window is showing.
  *
- * A check the app starts on its own only opens the window when there is
- * something to offer: nobody wants "you're up to date" every morning. A
- * check somebody asked for opens it at once and reports either way.
+ * An update is taken without asking. A check the app starts on its own
+ * downloads what it finds and puts it in place with nothing shown: the next
+ * launch is the new version, and a download that fails is left for the next
+ * launch to try again. A check somebody asked for opens the window at once
+ * and shows the same work as it happens, ending with the offer to restart
+ * into the new version now rather than later.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { UpdateFrequency } from "@/lib/preferences";
-import type { UpdateCheck, UpdateProgress } from "@/ipc/types";
+import type { UpdateCheck, UpdateProgress, UpdateReady } from "@/ipc/types";
 
 /** How long after launch the automatic check runs: after the library, not before it. */
 const AUTO_CHECK_AFTER_MS = 15_000;
@@ -23,9 +26,10 @@ export type UpdaterState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "upToDate"; currentVersion: string }
-  | { phase: "available"; check: UpdateCheck }
   | { phase: "downloading"; check: UpdateCheck; progress: UpdateProgress | null }
   | { phase: "installing"; check: UpdateCheck }
+  /** Downloaded and, where the platform allows, already in place. */
+  | { phase: "ready"; check: UpdateCheck; ready: UpdateReady }
   | { phase: "failed"; message: string; check: UpdateCheck | null };
 
 export interface Updater {
@@ -34,13 +38,15 @@ export interface Updater {
   open: boolean;
   /** Ask the server. `manual` opens the window whatever the answer. */
   check: (manual: boolean) => void;
-  /** Download and install what the last check found. */
-  install: () => void;
+  /** Download what the last check found, after a download that failed. */
+  retry: () => void;
+  /** Restart into the downloaded update now rather than at the next launch. */
+  restart: () => void;
   /** Close the window; a download in progress keeps going. */
   dismiss: () => void;
 }
 
-/** Why an install that returned failed, in the words the window shows. */
+/** Why a call that failed did, in the words the window shows. */
 function reason(error: unknown): string {
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message;
@@ -94,7 +100,31 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
   const sequence = useRef(0);
   const checkedOnStart = useRef(false);
 
+  // The download, and its end: in place, staged, or failed. The backend
+  // answers at once when the version is already downloaded this run.
+  const download = useCallback((found: UpdateCheck, mine: number) => {
+    setState({ phase: "downloading", check: found, progress: null });
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        const ready = await backend.downloadUpdate();
+        if (mine !== sequence.current) return;
+        setState({ phase: "ready", check: found, ready });
+      } catch (error) {
+        if (mine !== sequence.current) return;
+        setState({ phase: "failed", message: reason(error), check: found });
+      }
+    })();
+  }, []);
+
   const check = useCallback((manual: boolean) => {
+    const current = latest.current;
+    // Work already under way, or done: a request to look again is a request
+    // to see it, not to start over.
+    if (current.phase === "downloading" || current.phase === "installing" || current.phase === "ready") {
+      if (manual) setOpen(true);
+      return;
+    }
     const mine = ++sequence.current;
     setState({ phase: "checking" });
     if (manual) setOpen(true);
@@ -105,9 +135,10 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         if (mine !== sequence.current) return;
         if (found.version === null) {
           setState({ phase: "upToDate", currentVersion: found.currentVersion });
+        } else if (found.ready) {
+          setState({ phase: "ready", check: found, ready: found.ready });
         } else {
-          setState({ phase: "available", check: found });
-          setOpen(true);
+          download(found, mine);
         }
       } catch (error) {
         if (mine !== sequence.current) return;
@@ -117,19 +148,23 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         if (manual) setOpen(true);
       }
     })();
-  }, []);
+  }, [download]);
 
-  const install = useCallback(() => {
+  const retry = useCallback(() => {
     const current = latest.current;
-    if (current.phase !== "available" && current.phase !== "failed") return;
+    if (current.phase !== "failed" || !current.check) return;
+    download(current.check, sequence.current);
+  }, [download]);
+
+  const restart = useCallback(() => {
+    const current = latest.current;
+    if (current.phase !== "ready") return;
     const found = current.check;
-    if (!found) return;
-    setState({ phase: "downloading", check: found, progress: null });
     void (async () => {
       try {
         const backend = await getBackend();
-        // A success never returns: the app restarts. Returning is failure.
-        await backend.installUpdate();
+        // A success never returns: the process ends. Returning is failure.
+        await backend.restartToUpdate();
         setState({ phase: "failed", message: "The update did not restart the app.", check: found });
       } catch (error) {
         setState({ phase: "failed", message: reason(error), check: found });
@@ -172,5 +207,5 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
 
   const dismiss = useCallback(() => setOpen(false), []);
 
-  return { state, open, check, install, dismiss };
+  return { state, open, check, retry, restart, dismiss };
 }

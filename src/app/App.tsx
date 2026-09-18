@@ -1704,7 +1704,8 @@ export function App() {
         <UpdateManager
           state={updater.state}
           onCheck={() => updater.check(true)}
-          onInstall={updater.install}
+          onRetry={updater.retry}
+          onRestart={updater.restart}
           onClose={updater.dismiss}
         />
       ) : null}

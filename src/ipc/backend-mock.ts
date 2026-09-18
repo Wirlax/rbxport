@@ -13,7 +13,7 @@ import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
-  PreferencesRequest, UpdateCheck, UpdateProgress,
+  PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -1110,6 +1110,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   /** Who is told how the pretend download is going. */
   const updateProgressListeners = new Set<(progress: UpdateProgress) => void>();
+  let updateReady: UpdateReady | null = null;
 
   const tick = (): Tick => ({
     a: { ...deckA },
@@ -1629,9 +1630,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // Settings behave in a browser.
     // A browser has nothing to update, so this offers a pretend version two
     // releases on, with a changelog shaped like the real one, and its
-    // download runs at a believable pace so the bar can be watched.
+    // download runs at a believable pace so the bar can be watched. Once
+    // downloaded it stays downloaded, as the shell's does.
     checkForUpdate: () =>
       wait<UpdateCheck>({
+        ready: updateReady,
         currentVersion: "0.4.0",
         version: "0.6.0",
         date: "2026-09-12T18:00:00Z",
@@ -1653,8 +1656,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           },
         ],
       }),
-    installUpdate: () =>
-      new Promise<void>((_resolve, reject) => {
+    downloadUpdate: () =>
+      new Promise<UpdateReady>((resolve) => {
+        if (updateReady) {
+          resolve(updateReady);
+          return;
+        }
         const total = 16_342_693;
         let downloaded = 0;
         const tick = () => {
@@ -1663,14 +1670,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           if (downloaded < total) {
             setTimeout(tick, 100);
           } else {
-            // A real install restarts the app; a browser cannot, so the
-            // manager is told what it would be told if the install failed
-            // after the download — which is the only way it ever hears back.
-            setTimeout(() => reject(new Error("A browser cannot install an update.")), 800);
+            // The swap on disk takes a moment on a real machine too.
+            setTimeout(() => {
+              updateReady = { version: "0.6.0", installed: true };
+              resolve(updateReady);
+            }, 800);
           }
         };
         setTimeout(tick, 300);
       }),
+    // A real restart never comes back; a browser cannot restart, so the
+    // manager is told what it would be told if the restart had failed —
+    // which is the only way it ever hears back.
+    restartToUpdate: () => wait(undefined).then(() => Promise.reject(new Error("A browser cannot restart into an update."))),
     onUpdateProgress: (listener) => {
       updateProgressListeners.add(listener);
       return () => {

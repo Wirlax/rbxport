@@ -1,4 +1,5 @@
-//! Software updates: what is new, how big it is, and putting it in place.
+//! Software updates: what is new, fetching it, and putting it in place
+//! without asking.
 //!
 //! The release workflow publishes `latest.json` to the download bucket in
 //! the updater's own format — version, date, a signed URL per platform, and
@@ -7,22 +8,38 @@
 //! public key in `tauri.conf.json`; this module turns the result into what
 //! the interface shows and does what it asks.
 //!
+//! An update is taken in the background: the app checks on its own, and
+//! what it finds is downloaded and put in place with nothing shown, so the
+//! next launch is the new version. How "in place" happens depends on what
+//! the plugin can do while the app runs:
+//!
+//! - macOS and a Linux `AppImage`: the bundle on disk is swapped straight
+//!   after the download. The running process is not touched; the next
+//!   launch runs the new one.
+//! - Windows: the NSIS installer has to close the app to write over it, so
+//!   the download is staged on disk and the installer runs silently when
+//!   the app quits ([`on_exit`]). Restart Now runs it at once instead.
+//! - A Linux package (`.deb`, `.rpm`): installing needs a password prompt,
+//!   which is not quiet, so the download is staged and installed only from
+//!   the Update Manager's Restart Now.
+//!
 //! What has changed is worked out here, not in the interface: the notes are
 //! the entire changelog, and the part that matters is the sections newer
 //! than the version running and no newer than the one on offer — a user
 //! two releases behind should read both.
 //!
-//! The download runs on a blocking worker and reports through one event,
-//! `update:progress`, at most about ten times a second: a chunk arrives
-//! every few kilobytes, and an event per chunk would be IPC for nothing.
+//! The download reports through one event, `update:progress`, at most about
+//! ten times a second: a chunk arrives every few kilobytes, and an event per
+//! chunk would be IPC for nothing.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use semver::Version;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -33,18 +50,59 @@ pub const PROGRESS_EVENT: &str = "update:progress";
 /// The least time between two progress events.
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
-/// The update the last check found, held for the install that may follow.
-///
-/// The plugin's `Update` carries the URL, the signature and the headers the
-/// check was made with; the install must use that same one rather than
-/// check again, or the version installed could be a different one from the
-/// version shown.
+/// Where a downloaded update stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Placement {
+    /// On disk in the app's place; a restart runs it.
+    Installed,
+    /// An installer at this path, to run when the app quits (Windows) or on
+    /// request (a Linux package).
+    Staged(PathBuf),
+}
+
+/// One update as the check found it and as far as it has got.
+struct Pending {
+    /// The plugin's `Update` carries the URL, the signature and the headers
+    /// the check was made with; the download must use that same one rather
+    /// than check again, or the version taken could be a different one from
+    /// the version shown.
+    update: Update,
+    placement: Option<Placement>,
+}
+
+/// The update the last check found, held across the download and whatever
+/// follows it.
 #[derive(Default)]
 pub struct Updates {
-    pending: Mutex<Option<Update>>,
-    /// One download at a time: a second "Install" while the first runs
-    /// would fetch the installer twice and run it twice.
+    pending: Mutex<Option<Pending>>,
+    /// One download at a time: a second request while the first runs would
+    /// fetch the installer twice and put it in place twice.
     busy: AtomicBool,
+}
+
+impl Updates {
+    /// Where a staged installer is kept between the download and the quit.
+    fn staging_dir(app: &AppHandle) -> Option<PathBuf> {
+        app.path().app_cache_dir().ok().map(|dir| dir.join("update"))
+    }
+
+    /// Clears what an earlier run staged and did not use — a crash, or an
+    /// installer the quit already ran. The next check downloads afresh, which
+    /// is the safe side: the signature was checked on the bytes that came
+    /// down, not on a file that has sat in a cache since.
+    pub fn clear_stale(app: &AppHandle) {
+        if let Some(dir) = Self::staging_dir(app) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// Whether the bundle this process runs from can be swapped on disk while
+/// it runs, so an update is in place the moment it is downloaded.
+fn swaps_in_place() -> bool {
+    use tauri::utils::config::BundleType;
+    use tauri::utils::platform::bundle_type;
+    matches!(bundle_type(), Some(BundleType::App | BundleType::AppImage))
 }
 
 /// One release's entry in the changelog.
@@ -69,6 +127,19 @@ pub struct UpdateCheckDto {
     pub date: Option<String>,
     /// The changelog sections between the two versions, newest first.
     pub changes: Vec<ChangeDto>,
+    /// The version on offer is already downloaded this run: in place, or
+    /// staged for the quit. Nothing to fetch again.
+    pub ready: Option<UpdateReadyDto>,
+}
+
+/// A downloaded update, and whether it is already in the app's place.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReadyDto {
+    pub version: String,
+    /// `true` when the next launch runs it as things stand; `false` when
+    /// an installer still has to run, at the quit or on request.
+    pub installed: bool,
 }
 
 /// How far a download has got.
@@ -104,7 +175,7 @@ pub async fn check_for_update(
 
     let Some(update) = found else {
         *updates.pending.lock() = None;
-        return Ok(UpdateCheckDto { current_version, version: None, date: None, changes: Vec::new() });
+        return Ok(UpdateCheckDto { current_version, version: None, date: None, changes: Vec::new(), ready: None });
     };
 
     let changes = match (Version::parse(&update.current_version), Version::parse(&update.version)) {
@@ -118,39 +189,54 @@ pub async fn check_for_update(
     let date = update.date.and_then(|d| {
         d.format(&time::format_description::well_known::Rfc3339).ok()
     });
-    let dto = UpdateCheckDto {
-        current_version,
-        version: Some(update.version.clone()),
-        date,
-        changes,
-    };
-    *updates.pending.lock() = Some(update);
+    // A check that finds the version already taken this run — a manual check
+    // after the automatic one did its work — keeps that rather than fetching
+    // it again.
+    let mut pending = updates.pending.lock();
+    let placement = pending
+        .as_ref()
+        .filter(|p| p.update.version == update.version)
+        .and_then(|p| p.placement.clone());
+    let ready = placement.as_ref().map(|p| UpdateReadyDto {
+        version: update.version.clone(),
+        installed: *p == Placement::Installed,
+    });
+    let dto = UpdateCheckDto { current_version, version: Some(update.version.clone()), date, changes, ready };
+    *pending = Some(Pending { update, placement });
     Ok(dto)
 }
 
-/// Downloads the update the last check found, installs it and restarts.
+/// Downloads the update the last check found and puts it in place.
 ///
-/// Progress goes out as `update:progress`. On macOS the app bundle is
-/// replaced in place and the app restarts itself; on Windows the installer
-/// is run and it is the one that closes the app, so this command does not
-/// return there.
+/// Progress goes out as `update:progress`. Where the bundle can be swapped
+/// while the app runs (macOS, an `AppImage`) the download is installed at
+/// once and the next launch runs it; elsewhere the installer is staged on
+/// disk for [`on_exit`] or [`restart_to_update`]. Returns what happened, or
+/// what already had when the same version was downloaded earlier this run.
 #[tauri::command]
-pub async fn install_update(
+pub async fn download_update(
     app: AppHandle,
     updates: tauri::State<'_, std::sync::Arc<Updates>>,
-) -> AppResult<()> {
+) -> AppResult<UpdateReadyDto> {
     if cfg!(debug_assertions) {
         return Err(AppError::new(
             ErrorKind::Internal,
             "A development build cannot be updated in place.",
         ));
     }
-    let Some(update) = updates.pending.lock().clone() else {
-        return Err(AppError::new(
-            ErrorKind::NotFound,
-            "There is no update to install — check for updates first.",
-        ));
+    let (update, placement) = {
+        let pending = updates.pending.lock();
+        let Some(pending) = pending.as_ref() else {
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "There is no update to download — check for updates first.",
+            ));
+        };
+        (pending.update.clone(), pending.placement.clone())
     };
+    if let Some(placement) = placement {
+        return Ok(UpdateReadyDto { version: update.version, installed: placement == Placement::Installed });
+    }
     if updates.busy.swap(true, Ordering::SeqCst) {
         return Err(AppError::new(ErrorKind::Internal, "The update is already downloading."));
     }
@@ -161,8 +247,8 @@ pub async fn install_update(
     let downloaded = AtomicU64::new(0);
     // `None` until the first chunk, so the first event goes out at once.
     let mut last_sent: Option<Instant> = None;
-    let result = update
-        .download_and_install(
+    let bytes = update
+        .download(
             |chunk, total| {
                 let so_far = downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
                 let now = Instant::now();
@@ -180,12 +266,117 @@ pub async fn install_update(
             },
         )
         .await;
+    let placed = match bytes {
+        Ok(bytes) => place(&app, &update, bytes).await,
+        Err(e) => Err(updater_error("The update could not be downloaded.", e)),
+    };
     updates.busy.store(false, Ordering::SeqCst);
-    result.map_err(|e| updater_error("The update could not be installed.", e))?;
+    let placement = placed?;
 
-    // On Windows the installer has already asked this process to exit by
-    // now; on macOS the new bundle is in place and only a restart runs it.
-    app.restart();
+    let installed = placement == Placement::Installed;
+    if let Some(pending) = updates.pending.lock().as_mut() {
+        if pending.update.version == update.version {
+            pending.placement = Some(placement);
+        }
+    }
+    Ok(UpdateReadyDto { version: update.version, installed })
+}
+
+/// Puts downloaded bytes where the next launch, the quit or a request finds
+/// them. The install itself is file I/O the plugin does synchronously, so
+/// it runs on a blocking worker rather than the async runtime.
+async fn place(app: &AppHandle, update: &Update, bytes: Vec<u8>) -> AppResult<Placement> {
+    if swaps_in_place() {
+        let update = update.clone();
+        tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+            .await
+            .map_err(|e| updater_error("The update could not be installed.", e))?
+            .map_err(|e| updater_error("The update could not be installed.", e))?;
+        return Ok(Placement::Installed);
+    }
+    let dir = Updates::staging_dir(app)
+        .ok_or_else(|| AppError::new(ErrorKind::Internal, "There is nowhere to keep the update."))?;
+    // A fresh directory: whatever an earlier download of another version
+    // left is not what the quit should run.
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| updater_error("The update could not be kept.", e))?;
+    let path = dir.join(format!("{}.update", update.version));
+    std::fs::write(&path, &bytes).map_err(|e| updater_error("The update could not be kept.", e))?;
+    Ok(Placement::Staged(path))
+}
+
+/// Runs the update that is ready: restarts into an installed one, or runs a
+/// staged installer, which relaunches the app itself when it is done.
+///
+/// A success never returns — the process ends either way. Returning is
+/// failure, and the interface treats it as one.
+#[tauri::command]
+pub async fn restart_to_update(
+    app: AppHandle,
+    updates: tauri::State<'_, std::sync::Arc<Updates>>,
+) -> AppResult<()> {
+    let (update, placement) = {
+        let pending = updates.pending.lock();
+        let Some(pending) = pending.as_ref() else {
+            return Err(AppError::new(ErrorKind::NotFound, "There is no update to restart into."));
+        };
+        match pending.placement.clone() {
+            Some(placement) => (pending.update.clone(), placement),
+            None => {
+                return Err(AppError::new(ErrorKind::NotFound, "The update has not been downloaded yet."));
+            }
+        }
+    };
+    match placement {
+        Placement::Installed => app.restart(),
+        Placement::Staged(path) => {
+            // Taken out first: `install` ends the process on Windows, and the
+            // quit that follows must not run the same installer again.
+            if let Some(pending) = updates.pending.lock().as_mut() {
+                pending.placement = None;
+            }
+            let bytes = std::fs::read(&path).map_err(|e| updater_error("The update could not be read back.", e))?;
+            // On Windows this spawns the installer and ends the process; a
+            // Linux package is installed in place and the process is still
+            // here, so a restart runs it.
+            tauri::async_runtime::spawn_blocking(move || update.install(bytes))
+                .await
+                .map_err(|e| updater_error("The update could not be installed.", e))?
+                .map_err(|e| updater_error("The update could not be installed.", e))?;
+            app.restart()
+        }
+    }
+}
+
+/// The quit: a staged installer runs now, silently, and does not bring the
+/// app back — the person closed it. Only Windows stages an installer the
+/// quit can run; a Linux package would prompt for a password, and stays for
+/// [`restart_to_update`].
+pub fn on_exit(app: &AppHandle) {
+    if !cfg!(windows) {
+        return;
+    }
+    let Some(updates) = app.try_state::<std::sync::Arc<Updates>>() else { return };
+    let staged = {
+        let mut pending = updates.pending.lock();
+        match pending.as_mut() {
+            Some(p) => match p.placement.take() {
+                Some(Placement::Staged(path)) => Some((p.update.clone(), path)),
+                _ => None,
+            },
+            None => None,
+        }
+    };
+    let Some((update, path)) = staged else { return };
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            // `install` spawns the installer and ends this process itself.
+            if let Err(e) = update.restart_after_install(false).install(bytes) {
+                tracing::warn!(error = %e, "the staged update could not be installed at quit");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "the staged update could not be read back at quit"),
+    }
 }
 
 /// The changelog sections newer than `current` and no newer than `target`,

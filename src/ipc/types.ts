@@ -438,14 +438,23 @@ export interface Backend {
    *
    * `version` is null when this build is the newest; otherwise `changes`
    * holds the changelog between the two, newest first, and the update is
-   * held for `installUpdate`.
+   * held for `downloadUpdate`. `ready` says when that version was already
+   * downloaded this run, so there is nothing to fetch again.
    */
   checkForUpdate(): Promise<UpdateCheck>;
   /**
-   * Downloads and installs what the last check found, then restarts. It
-   * resolves only if the install failed — a success restarts the app.
+   * Downloads what the last check found and puts it in place: swapped on
+   * disk where the app can be while it runs (macOS, an AppImage), so the
+   * next launch is the new version; staged for the quit on Windows. Resolves
+   * to what happened.
    */
-  installUpdate(): Promise<void>;
+  downloadUpdate(): Promise<UpdateReady>;
+  /**
+   * Runs the downloaded update now: a restart into one that is in place, or
+   * the staged installer, which brings the app back itself. Resolves only
+   * if that failed — a success ends the process.
+   */
+  restartToUpdate(): Promise<void>;
   /** The download's progress, about ten times a second while it runs. */
   onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
   /** The master limiter as it stands. */
@@ -678,6 +687,18 @@ export interface UpdateCheck {
   date: string | null;
   /** The changelog between the two versions, newest first. */
   changes: UpdateChange[];
+  /** Set when the version on offer is already downloaded this run. */
+  ready: UpdateReady | null;
+}
+
+/** A downloaded update, and whether it is already in the app's place. */
+export interface UpdateReady {
+  version: string;
+  /**
+   * true when the next launch runs it as things stand; false when an
+   * installer still has to run, at the quit or from Restart Now.
+   */
+  installed: boolean;
 }
 
 export interface UpdateProgress {

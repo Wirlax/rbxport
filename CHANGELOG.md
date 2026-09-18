@@ -7,6 +7,13 @@ the version numbers [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Updates install themselves. A new version found by the start-up check is
+  downloaded and put in place in the background, with nothing to click, and
+  is the one that runs the next time rbxport opens. On Windows the installer
+  runs silently when rbxport quits. Help › Check for Updates… still shows
+  what is happening and what changed, and offers Restart Now.
+
 ### Added
 - A Linux build. Each release now ships an AppImage, which the app can
   update itself from, and a .deb, beside the macOS disk image and the

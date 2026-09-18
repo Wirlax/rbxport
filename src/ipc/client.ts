@@ -7,7 +7,7 @@
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SyncDeviceReport, SyncProgress, UpdateCheck,
-  UpdateProgress, XmlImportReport,
+  UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
@@ -174,7 +174,8 @@ async function realBackend(): Promise<Backend> {
     audioDevices: () => invoke<AudioDevices>("audio_devices"),
     setAudioDevice: (device) => invoke<void>("set_audio_device", { device }),
     checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
-    installUpdate: () => invoke<void>("install_update"),
+    downloadUpdate: () => invoke<UpdateReady>("download_update"),
+    restartToUpdate: () => invoke<void>("restart_to_update"),
     onUpdateProgress: (listener) => subscribe<UpdateProgress>("update:progress", listener),
     masterLimiter: () => invoke<Limiter>("master_limiter"),
     setMasterLimiter: (limiter) => invoke<Limiter>("set_master_limiter", { limiter }),

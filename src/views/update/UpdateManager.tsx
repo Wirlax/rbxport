@@ -3,15 +3,19 @@
  *
  * rekordbox's is a window of its own with a title bar and a row of buttons
  * at the foot; the strings here are its own, from `german.lang`: "Update
- * Manager", "The current version", "The latest version", "To get a new
- * version, click Download.", "Downloading", "The latest version has been
- * downloaded.", "Update", "An error occurred. Please try later."
+ * Manager", "The current version", "The latest version", "Downloading",
+ * "The latest version has been downloaded.", "An error occurred. Please try
+ * later."
  *
- * Between the versions and the buttons sits what changed: every changelog
- * section between the version running and the one on offer, so somebody
- * two releases behind reads both. The download's progress is a bar with
- * the bytes beside it, and the install that follows has no progress to
- * give, so its bar just moves.
+ * Nothing here asks whether to download: an update found is taken, and the
+ * window shows the download happening when somebody asked to look. Between
+ * the versions and the buttons sits what changed: every changelog section
+ * between the version running and the one on offer, so somebody two
+ * releases behind reads both. The download's progress is a bar with the
+ * bytes beside it; the install that follows has no progress to give, so its
+ * bar just moves. Once the update is in place the window says the next
+ * launch runs it, and offers to restart now instead. The window can be
+ * closed at any point; the work goes on behind it.
  */
 import { useEffect, useRef } from "react";
 
@@ -22,7 +26,10 @@ import styles from "./UpdateManager.module.css";
 export interface UpdateManagerProps {
   state: UpdaterState;
   onCheck: () => void;
-  onInstall: () => void;
+  /** Download again after a download that failed. */
+  onRetry: () => void;
+  /** Restart into the downloaded update now. */
+  onRestart: () => void;
   onClose: () => void;
 }
 
@@ -101,28 +108,27 @@ function Progress({ downloaded, total }: { downloaded: number; total: number | n
   );
 }
 
-export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateManagerProps) {
+export function UpdateManager({ state, onCheck, onRetry, onRestart, onClose }: UpdateManagerProps) {
   const panel = useRef<HTMLDivElement>(null);
 
-  const check = state.phase === "available" || state.phase === "downloading" ||
-    state.phase === "installing" || (state.phase === "failed" && state.check)
+  const check = state.phase === "downloading" || state.phase === "installing" ||
+    state.phase === "ready" || (state.phase === "failed" && state.check)
     ? state.check
     : null;
-  const busy = state.phase === "downloading" || state.phase === "installing";
 
-  // Escape closes as the close button does, so it is held back while the
-  // close button is: a download or install runs on with the window open.
+  // Escape closes as the close button does. A download or install runs on
+  // behind a closed window: it is the app's work, not the window's.
   useEffect(() => {
     panel.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onClose();
+      if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, busy]);
+  }, [onClose]);
 
   return (
-    <div className={styles.backdrop} onMouseDown={busy ? undefined : onClose} role="presentation">
+    <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
       <div
         ref={panel}
         className={styles.window}
@@ -133,11 +139,9 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
         tabIndex={-1}
       >
         <header className={styles.titlebar}>
-          {!busy ? (
-            <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-              ✕
-            </button>
-          ) : null}
+          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
           Update Manager
         </header>
 
@@ -156,9 +160,7 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
                 <dt>The latest version</dt>
                 <dd>{check.version}</dd>
               </dl>
-              {state.phase === "available" ? (
-                <p className={styles.status}>To get a new version, click Download.</p>
-              ) : state.phase === "downloading" ? (
+              {state.phase === "downloading" ? (
                 <>
                   <p className={styles.status}>Downloading…</p>
                   <Progress downloaded={state.progress?.downloaded ?? 0} total={state.progress?.total ?? null} />
@@ -168,6 +170,10 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
                   <p className={styles.status}>The latest version has been downloaded. Installing…</p>
                   <Progress downloaded={0} total={null} />
                 </>
+              ) : state.phase === "ready" ? (
+                <p className={styles.status}>
+                  The latest version has been downloaded. It will be used the next time rbxport opens.
+                </p>
               ) : (
                 <p className={`${styles.status} ${styles.failed}`} role="alert">
                   An error occurred. Please try later.
@@ -195,11 +201,11 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
         </div>
 
         <footer className={styles.buttons}>
-          {state.phase === "available" ? (
+          {state.phase === "ready" ? (
             <>
               <button type="button" className={styles.button} onClick={onClose}>Later</button>
-              <button type="button" className={`${styles.button} ${styles.primary}`} onClick={onInstall}>
-                Download
+              <button type="button" className={`${styles.button} ${styles.primary}`} onClick={onRestart}>
+                Restart Now
               </button>
             </>
           ) : state.phase === "failed" ? (
@@ -208,12 +214,14 @@ export function UpdateManager({ state, onCheck, onInstall, onClose }: UpdateMana
               <button
                 type="button"
                 className={`${styles.button} ${styles.primary}`}
-                onClick={state.check ? onInstall : onCheck}
+                onClick={state.check ? onRetry : onCheck}
               >
                 {state.check ? "Try Again" : "Check Again"}
               </button>
             </>
-          ) : busy ? null : (
+          ) : state.phase === "downloading" || state.phase === "installing" ? (
+            <button type="button" className={styles.button} onClick={onClose}>Close</button>
+          ) : (
             <button type="button" className={`${styles.button} ${styles.primary}`} onClick={onClose}>
               OK
             </button>
