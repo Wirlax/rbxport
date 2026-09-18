@@ -166,6 +166,7 @@ async function realBackend(): Promise<Backend> {
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
     onMenu: (listener) => subscribe<string>("menu", listener),
+    onDevicesChanged: (listener) => subscribe("devices:changed", () => listener()),
     linkStatus: () => invoke<LinkStatus>("link_status"),
     linkPeers: () => invoke<LinkPeerSeen[]>("link_peers"),
     onLinkPeers: (listener) => subscribe<LinkPeerSeen[]>("link:peers", listener),

@@ -6,9 +6,15 @@
 //!   so it is cheap enough to run whenever the panel is opened.
 //! - [`inspect`] reads a stick to see what export it holds. That is disk I/O
 //!   over USB, so it happens per device, on request, never in a loop.
+//!
+//! A third, [`MountWatcher`], notices a volume arriving or leaving so the
+//! panel can refresh itself without waiting for focus or a click.
 
 pub mod settings;
 pub mod explorer;
+pub mod mounts;
+
+pub use mounts::MountWatcher;
 
 use std::path::{Path, PathBuf};
 

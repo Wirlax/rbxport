@@ -1043,6 +1043,21 @@ export function App() {
     })();
   }, []);
 
+  // A stick plugged in or pulled out: the shell says so, and the list follows.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onDevicesChanged(refreshDevices);
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [refreshDevices]);
+
   // Devices join the tree as nodes so the Devices section renders through the
   // same path as every other section, and the Explorer's folders after them.
   const explorer = useExplorer();

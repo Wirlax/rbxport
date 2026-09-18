@@ -274,6 +274,11 @@ export interface Backend {
 
   /** The volumes an export could be written to, and what is on each. */
   listDevices(): Promise<Device[]>;
+  /**
+   * Called when a volume is mounted or unmounted, so the panel can refresh
+   * without waiting for focus or a click. Returns its own unsubscribe.
+   */
+  onDevicesChanged(listener: () => void): () => void;
 
   /**
    * Native menu clicks, as the item's id.

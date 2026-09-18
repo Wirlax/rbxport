@@ -1424,6 +1424,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // A browser has no native menu bar. The mock exposes the listener so a
     // test can fire an item the way the shell would; this is the mock, which
     // exists to be driven, rather than a seam in the app.
+    // The fake volumes never come or go.
+    onDevicesChanged: () => () => undefined,
+
     onMenu: (listener) => {
       const w = window as unknown as { __menu?: (id: string) => void };
       w.__menu = listener;

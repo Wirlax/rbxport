@@ -78,8 +78,20 @@ pub fn sample(system: &mut System) -> Diagnostics {
 /// `/dev/fd` is this process's own descriptor table on macOS and the BSDs.
 /// Reading it opens one itself, which is not counted.
 fn open_files() -> Option<u32> {
-    let entries = std::fs::read_dir("/dev/fd").ok()?.count();
+    let entries = descriptors()?.len();
     u32::try_from(entries.saturating_sub(1)).ok()
+}
+
+/// The descriptor numbers open right now, from `/dev/fd`. One of them is the
+/// directory handle doing the listing, which [`open_files`] leaves out.
+fn descriptors() -> Option<Vec<u32>> {
+    let entries = std::fs::read_dir("/dev/fd").ok()?;
+    Some(
+        entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().to_str().and_then(|name| name.parse().ok()))
+            .collect(),
+    )
 }
 
 /// Threads in this process.
@@ -175,12 +187,19 @@ mod tests {
         );
     }
 
+    /// Checked by identity rather than by a before-and-after count: the other
+    /// tests in this binary open and close files on their own threads, and a
+    /// count taken across one of their closes came out level once in six runs.
     #[test]
     fn it_counts_the_descriptors_a_process_holds() {
-        let before = open_files().expect("descriptors are countable here");
+        use std::os::fd::AsRawFd;
+
         let held = std::fs::File::open("/dev/null").expect("open /dev/null");
-        let after = open_files().expect("descriptors are countable here");
-        assert!(after > before, "{before} then {after}");
+        let number = u32::try_from(held.as_raw_fd()).expect("a real descriptor is not negative");
+        let open = descriptors().expect("descriptors are listable here");
+        assert!(open.contains(&number), "descriptor {number} is missing from {open:?}");
+        let counted = open_files().expect("descriptors are countable here");
+        assert!(counted >= 1, "the held descriptor counts");
         drop(held);
     }
 
