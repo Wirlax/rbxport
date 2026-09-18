@@ -689,6 +689,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       });
       return cuesChanged(track, id);
     },
+    convertMemoryCuesToHot: (track) => {
+      const cues = cuesOf(track);
+      const taken = new Set(cues.map((c) => c.letter));
+      const free = [..."ABCDEFGHIJKLMNOP"].filter((letter) => !taken.has(letter));
+      const memory = cues.filter((c) => c.memory).sort((a, b) => a.positionMs - b.positionMs);
+      let made = 0;
+      for (const cue of memory) {
+        const letter = free.shift();
+        if (letter === undefined) break;
+        cues.push({
+          id: `cue-${nextCueId++}`, positionMs: cue.positionMs, outMs: cue.outMs, letter, memory: false,
+          colour: DEFAULT_CUE_COLOUR,
+        });
+        made += 1;
+      }
+      return cuesChanged(track, made);
+    },
     moveCue: (cue, positionMs) => {
       const found = findCue(cue);
       if (!found) return notFound(`no cue ${cue}`);

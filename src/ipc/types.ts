@@ -894,6 +894,11 @@ export interface Edits {
   addLoop(track: string, kind: CueKind, inMs: number, outMs: number, beats?: number): Promise<string>;
   moveCue(cue: string, positionMs: number): Promise<void>;
   deleteCue(cue: string): Promise<void>;
+  /**
+   * Convert Memory Cues to Hot Cues: each memory cue, by position, into the
+   * next free slot from A. Resolves to how many were made.
+   */
+  convertMemoryCuesToHot(track: string): Promise<number>;
 }
 
 /** One of the folders the Explorer starts from. */

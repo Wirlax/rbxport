@@ -12,6 +12,7 @@
 export type TrackAction =
   | "analyse"
   | "resetPlayCount"
+  | "convertMemoryCues"
   | "removeFromPlaylist"
   | "removeFromCollection"
   | "showInformation"
@@ -99,7 +100,7 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Auto Load Hot Cue", action: null, submenu: true },
   { label: "Reset DJ Play Count", action: "resetPlayCount" },
   { label: "Add New Analysis Data", action: null },
-  { label: "Convert Memory Cues to Hot Cues", action: null },
+  { label: "Convert Memory Cues to Hot Cues", action: "convertMemoryCues" },
   SEPARATOR,
   { label: "Remove from Playlist", action: "removeFromPlaylist", needs: "playlist" },
   { label: "Remove from Collection", action: "removeFromCollection" },
@@ -240,6 +241,7 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
 const WRITES: ReadonlySet<string> = new Set([
   "analyse",
   "resetPlayCount",
+  "convertMemoryCues",
   "removeFromPlaylist",
   "removeFromCollection",
   "createPlaylist",

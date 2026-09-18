@@ -209,6 +209,49 @@ pub async fn delete_cue<R: tauri::Runtime>(
     edit_cues(app, state, "delete_cue", CueEdit::Delete { cue }).await.map(|_| ())
 }
 
+/// Convert Memory Cues to Hot Cues: each memory cue of the track, in order
+/// of position, becomes a hot cue in the next free slot from A, loops
+/// staying loops. The memory cues are kept [ASSUME: whether rekordbox keeps
+/// or removes them has not been recorded]. Resolves to how many were made;
+/// none when every slot is taken or there is nothing to convert.
+#[tauri::command]
+pub async fn convert_memory_cues_to_hot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<u32> {
+    let library = state.library()?;
+    let Some(row) = library.row_of(&track) else {
+        return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
+    };
+    let cues = library.cues_of(row);
+    let plan = conversion_plan(&cues);
+    let mut made = 0;
+    for (kind, position_ms, out_ms) in plan {
+        let edit = if out_ms > position_ms {
+            CueEdit::AddLoop { track: track.clone(), kind: CueKind::Hot(kind), in_ms: position_ms, out_ms, beats: 0 }
+        } else {
+            CueEdit::Add { track: track.clone(), kind: CueKind::Hot(kind), position_ms }
+        };
+        edit_cues(app.clone(), state.clone(), "convert_memory_cues_to_hot", edit).await?;
+        made += 1;
+    }
+    Ok(made)
+}
+
+/// Which hot cue each memory cue becomes: `(letter, in, out)`, memory cues
+/// by position into the free letters in order.
+fn conversion_plan(cues: &[Cue]) -> Vec<(char, u32, u32)> {
+    let taken: Vec<char> = cues.iter().filter_map(Cue::hot_letter).collect();
+    let mut free = ('A'..='P').filter(|letter| !taken.contains(letter));
+    let mut memory: Vec<&Cue> = cues.iter().filter(|c| c.is_memory()).collect();
+    memory.sort_by_key(|c| c.position_ms);
+    memory
+        .into_iter()
+        .filter_map(|cue| free.next().map(|letter| (letter, cue.position_ms, cue.out_ms)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     // Every test builds its own library in a tempdir, the way the writer's
@@ -418,5 +461,17 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::ReadOnly);
+    }
+
+    #[test]
+    fn memory_cues_take_the_free_hot_slots_in_order_of_position() {
+        let cue = |id: u32, kind: u8, position_ms: u32, out_ms: u32| Cue { id, position_ms, out_ms, kind, colour: 0 };
+        // B is taken; a loop and two plain memory cues, out of order.
+        let cues = vec![cue(1, 2, 5_000, 0), cue(2, 0, 30_000, 0), cue(3, 0, 10_000, 14_000), cue(4, 0, 1_000, 0)];
+        assert_eq!(conversion_plan(&cues), vec![('A', 1_000, 0), ('C', 10_000, 14_000), ('D', 30_000, 0)]);
+        // Sixteen slots: the seventeenth memory cue has nowhere to go.
+        let many: Vec<Cue> = (0..17).map(|i| cue(i, 0, i * 1000, 0)).collect();
+        assert_eq!(conversion_plan(&many).len(), 16);
+        assert!(conversion_plan(&[cue(1, 1, 0, 0)]).is_empty());
     }
 }

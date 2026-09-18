@@ -265,6 +265,7 @@ async function realBackend(): Promise<Backend> {
         invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
       moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
+      convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
       setTrackField: (track, field, value) =>
         invoke<number>("set_track_field", { track, field, value }),
     },

@@ -878,6 +878,25 @@ export function App() {
     [write],
   );
 
+  const convertMemoryCues = useCallback(
+    (row: RowDto) => {
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          const made = await backend.edits.convertMemoryCuesToHot(row.id);
+          report(
+            made === 0
+              ? "No memory cue to convert, or every hot cue slot is taken."
+              : `${made} memory cue${made === 1 ? "" : "s"} converted to hot cues.`,
+          );
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "The cues could not be converted.");
+        }
+      })();
+    },
+    [report, refuse],
+  );
+
   // Asked first, as rekordbox asks: the tracks leave every playlist as well
   // as the collection, and there is no undo in the window.
   const removeFromCollection = useCallback(
@@ -1417,6 +1436,7 @@ export function App() {
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
           onResetPlayCount={resetPlayCount}
+          onConvertMemoryCues={convertMemoryCues}
           onRemoveFromCollection={removeFromCollection}
           readOnly={readOnly}
           trafficLight={trafficLight}

@@ -579,6 +579,8 @@ export interface TrackTableProps {
   onShowInFinder?: (row: RowDto) => void;
   onRemoveFromPlaylist?: (ids: readonly string[]) => void;
   onResetPlayCount?: (ids: readonly string[]) => void;
+  /** Convert Memory Cues to Hot Cues, on the row under the pointer. */
+  onConvertMemoryCues?: (row: RowDto) => void;
   onRemoveFromCollection?: (ids: readonly string[]) => void;
   /** rekordbox is running, so every write is refused rather than raced. */
   readOnly?: boolean;
@@ -630,7 +632,8 @@ export function TrackTable({
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
-  onShowInformation, onShowInFinder, onRemoveFromPlaylist, onResetPlayCount, onRemoveFromCollection, readOnly = false,
+  onShowInformation, onShowInFinder, onRemoveFromPlaylist, onResetPlayCount, onRemoveFromCollection,
+  onConvertMemoryCues, readOnly = false,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
@@ -1279,6 +1282,9 @@ export function TrackTable({
                 break;
               case "resetPlayCount":
                 onResetPlayCount?.(ids);
+                break;
+              case "convertMemoryCues":
+                onConvertMemoryCues?.(trackMenu.row);
                 break;
               case "removeFromCollection":
                 onRemoveFromCollection?.(ids);
