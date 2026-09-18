@@ -457,12 +457,14 @@ impl Pdb<'_> {
     pub fn playlist_nodes(&self, table: &TableRef) -> Vec<PlaylistNode> {
         self.rows(table)
             .into_iter()
+            // Five words before the name; see `rows::playlist_row` for the
+            // row rekordbox writes.
             .map(|row| PlaylistNode {
                 parent_id: self.u4_at(row, 0),
-                sort_order: self.u4_at(row, 4),
-                id: self.u4_at(row, 8),
-                is_folder: self.u4_at(row, 12) != 0,
-                name: self.string_at(row.offset + 16),
+                sort_order: self.u4_at(row, 8),
+                id: self.u4_at(row, 12),
+                is_folder: self.u4_at(row, 16) != 0,
+                name: self.string_at(row.offset + rows::PLAYLIST_NAME_AT),
             })
             .collect()
     }

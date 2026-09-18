@@ -198,15 +198,33 @@ pub fn album_row(id: u32, artist_id: u32, name: &str) -> Vec<u8> {
 }
 
 /// `playlist_tree`: parent, sort order, id, folder flag, then the name.
+/// `playlist_tree`: parent, a word rekordbox leaves at zero, sort order, id,
+/// folder flag, then the name at offset 20.
+///
+/// The row rekordbox 7.2.11 writes for a playlist called NP3-TEST-MP3 with
+/// id 1 at the root [OBS 2026-09-17]:
+///
+/// ```text
+///   00 00 00 00  00 00 00 00  00 00 00 00  01 00 00 00  00 00 00 00  1b "NP3-TEST-MP3"
+///   parent       (zero)       sort order   id           folder       name
+/// ```
+///
+/// Five words, not four: the zero word between the parent and the sort
+/// order is in every rekordbox row, and a player reads the name from
+/// offset 20. rekordcrate calls it `unknown`.
 pub fn playlist_row(id: u32, parent_id: u32, sort_order: u32, is_folder: bool, name: &str) -> Vec<u8> {
-    let mut row = Vec::with_capacity(16 + name.len() + 2);
+    let mut row = Vec::with_capacity(PLAYLIST_NAME_AT + name.len() + 2);
     row.extend_from_slice(&parent_id.to_le_bytes());
+    row.extend_from_slice(&0_u32.to_le_bytes());
     row.extend_from_slice(&sort_order.to_le_bytes());
     row.extend_from_slice(&id.to_le_bytes());
     row.extend_from_slice(&u32::from(is_folder).to_le_bytes());
     row.extend_from_slice(&device_sql_string(name));
     row
 }
+
+/// Where the name starts in a `playlist_tree` row.
+pub const PLAYLIST_NAME_AT: usize = 20;
 
 /// `playlist_entries`: position, track, playlist.
 pub fn playlist_entry_row(entry_index: u32, track_id: u32, playlist_id: u32) -> Vec<u8> {

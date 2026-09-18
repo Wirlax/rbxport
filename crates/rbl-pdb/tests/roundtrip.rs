@@ -331,3 +331,29 @@ fn many_tracks_span_pages_and_all_survive() {
     assert_eq!(rows[249].title, "Track number 250");
     assert_eq!(rows[249].tempo_x100, 12_250);
 }
+
+/// The playlist row rekordbox 7.2.11 wrote for NP3-TEST-MP3 [OBS 2026-09-17],
+/// read back as a player would, and re-encoded to the same bytes.
+#[test]
+fn rekordbox_playlist_rows_read_and_write_the_same() {
+    let real: Vec<u8> = vec![
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x1b, b'N', b'P', b'3', b'-', b'T', b'E', b'S', b'T', b'-', b'M', b'P',
+        b'3',
+    ];
+    let ours = rbl_pdb::rows::playlist_row(1, 0, 0, false, "NP3-TEST-MP3");
+    assert_eq!(ours, real, "the row a player reads must be rekordbox's");
+
+    let mut file = rbl_pdb::build::FileBuilder::new(4096);
+    file.add_table(7, &[real]);
+    let bytes = file.finish();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+    let table = pdb.table(rbl_pdb::PageType::PlaylistTree).expect("playlist table");
+    let nodes = pdb.playlist_nodes(table);
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0].id, 1);
+    assert_eq!(nodes[0].parent_id, 0);
+    assert!(!nodes[0].is_folder);
+    assert_eq!(nodes[0].name, "NP3-TEST-MP3");
+}
+
