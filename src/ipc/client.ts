@@ -280,6 +280,8 @@ async function realBackend(): Promise<Backend> {
     writeDeviceDefaults: (path, defaults) => invoke<DeviceSettings>("write_device_defaults", { path, defaults }),
     saveDeviceSettings: (path, settings) =>
       invoke<DeviceSettings>("save_device_settings", { path, settings }),
+    ensureDeviceLibrary: (path, defaults) =>
+      invoke<DeviceSettings>("ensure_device_library", { path, defaults: defaults ?? null }),
     explorerRoots: () => invoke<ExplorerRoot[]>("explorer_roots"),
     explorerChildren: (path) => invoke<ExplorerChildren>("explorer_children", { path }),
     onLibraryChanged: (listener) => {

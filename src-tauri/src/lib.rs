@@ -493,6 +493,7 @@ pub fn run() {
             device_settings::device_settings,
             device_settings::write_device_defaults,
             device_settings::save_device_settings,
+            device_settings::ensure_device_library,
             explorer::explorer_roots,
             explorer::explorer_children,
             // The information panel: one track's full record, the lookup

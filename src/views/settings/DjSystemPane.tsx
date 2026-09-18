@@ -21,7 +21,7 @@ import { displayName, isFixed } from "@/lib/deviceSettings";
 import { usePreferencesContext } from "@/store/usePreferences";
 import { ListPairTab } from "@/views/devices/ListPairTab";
 import styles from "./Preferences.module.css";
-import { Radios, Section, Select, Sub } from "./controls";
+import { Note, Radios, Section, Select, Sub, Toggle } from "./controls";
 
 export type DjSystemTab = "general" | "category" | "sort" | "column";
 
@@ -134,6 +134,18 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
           ]}
           onChange={(keyDisplay) => set({ keyDisplay })}
         />
+      </Section>
+      <Section title="USB drives">
+        <Toggle
+          label="Automatically create music database folders on USB drives."
+          checked={dj.createDatabaseFolders}
+          onChange={(createDatabaseFolders) => set({ createDatabaseFolders })}
+        />
+        <Note>
+          A drive with no database is given one when it is opened under
+          Devices, as rekordbox does when a drive is connected, so its
+          settings can be changed before anything is exported to it.
+        </Note>
       </Section>
     </>
   );

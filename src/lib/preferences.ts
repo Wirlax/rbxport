@@ -147,6 +147,12 @@ export interface DjSystemPreferences {
   /** `menuItem` of the sort option shown beside the track name; null for none. */
   subColumn: number | null;
   /**
+   * Whether a drive with no database is given one when it is opened in
+   * Devices, as rekordbox does the moment a drive is connected. Off, the
+   * settings tabs stay disabled until something is exported to it.
+   */
+  createDatabaseFolders: boolean;
+  /**
    * The OS name of the network interface PRO DJ LINK runs on (`en0`,
    * `Ethernet 2`), or null to take the one the players are reached through.
    */
@@ -237,6 +243,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     categories: null,
     sorts: null,
     subColumn: null,
+    createDatabaseFolders: true,
     linkInterface: null,
   },
   advanced: {
@@ -385,6 +392,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       subColumn: typeof dj.subColumn === "number" && Number.isInteger(dj.subColumn)
         ? dj.subColumn
         : null,
+      createDatabaseFolders: bool(dj.createDatabaseFolders, d.djSystem.createDatabaseFolders),
       linkInterface: typeof dj.linkInterface === "string" && dj.linkInterface !== "" ? dj.linkInterface : null,
     },
     advanced: {

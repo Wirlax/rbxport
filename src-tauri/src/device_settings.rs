@@ -290,6 +290,39 @@ fn bad_value(field: &str, value: &str) -> AppError {
     AppError::new(ErrorKind::Malformed, format!("{field}: {value:?} is not a choice."))
 }
 
+/// Gives a stick that holds no database the folders rekordbox creates the
+/// moment a drive is connected, then reads its settings.
+///
+/// The DJ System pane's "create music database folders" switch decides
+/// whether the device panel asks for this; the panel asks when it opens a
+/// device whose settings came back without a Device Library. The empty
+/// database starts from `defaults` (the pane's choices) so the Category,
+/// Sort, Column and Color tabs have rows to edit before any export. A
+/// stick that already has a database is read and left as it is.
+#[tauri::command]
+pub async fn ensure_device_library(
+    path: String,
+    defaults: Option<StickDefaultsDto>,
+) -> AppResult<DeviceSettingsDto> {
+    crate::commands::blocking("ensure_device_library", move || {
+        let mount = Path::new(&path);
+        if !mount.is_dir() {
+            return Err(AppError::new(
+                ErrorKind::NotFound,
+                "That device is no longer connected. It may have been unplugged or renamed.",
+            ));
+        }
+        let library = defaults.as_ref().map(library_defaults);
+        rbl_export::create_library(mount, library.as_ref())
+            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        if let Some(defaults) = &defaults {
+            write_dev_defaults(mount, defaults)?;
+        }
+        Ok(to_dto(&rbl_devices::settings::read(mount)))
+    })
+    .await
+}
+
 /// Reads a stick's settings. Never fails on a stick that holds nothing:
 /// every part is optional and the tabs say what is missing.
 #[tauri::command]

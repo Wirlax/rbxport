@@ -1722,6 +1722,30 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The mock's sticks carry their settings from the start, so there is
     // nothing to give; what the stick holds comes back.
     writeDeviceDefaults: (path) => wait(copySettings(settingsOf(path))),
+    ensureDeviceLibrary: (path, defaults) => {
+      const current = settingsOf(path);
+      if (current.hasDeviceLibrary) return wait(copySettings(current));
+      // The empty database a blank stick gets: the reference rows, the
+      // pane's display choices, nothing exported yet.
+      const next: DeviceSettings = {
+        ...current,
+        hasDeviceLibrary: true,
+        hasOneLibrary: true,
+        hasLibrarySettings: true,
+        hasDevSetting: true,
+        waveformColor: defaults?.waveformColor ?? current.waveformColor,
+        waveformPosition: defaults?.waveformPosition ?? current.waveformPosition,
+        overviewWaveform: defaults?.overviewWaveform ?? current.overviewWaveform,
+        keyDisplay: defaults?.keyDisplay ?? current.keyDisplay,
+        categories: defaults?.categories ?? current.categories,
+        sorts: defaults?.sorts ?? current.sorts,
+        subColumn: defaults?.subColumn ?? current.subColumn,
+      };
+      deviceSettings.set(path, next);
+      const device = devices.find((d) => d.path === path);
+      if (device && device.export === null) device.export = { tracks: 0, playlists: 0, ours: true, written: "" };
+      return wait(copySettings(next));
+    },
     saveDeviceSettings: (path, settings) => {
       const current = settingsOf(path);
       // A stick without a library keeps its reference rows: nothing to

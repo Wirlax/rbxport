@@ -66,6 +66,12 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ advanced: { checkUpdates: false } }).advanced.checkUpdates).toBe(false);
   });
 
+  it("creates database folders on a blank drive unless the store plainly says not to", () => {
+    expect(sanitisePreferences({ djSystem: {} }).djSystem.createDatabaseFolders).toBe(true);
+    expect(sanitisePreferences({ djSystem: { createDatabaseFolders: "no" } }).djSystem.createDatabaseFolders).toBe(true);
+    expect(sanitisePreferences({ djSystem: { createDatabaseFolders: false } }).djSystem.createDatabaseFolders).toBe(false);
+  });
+
   it("keeps stored rows when every one is a row", () => {
     const rows = [{ id: 1, menuItem: 1, name: "GENRE", seq: 1, visible: true }];
     expect(sanitisePreferences({ djSystem: { categories: rows } }).djSystem.categories).toEqual(rows);

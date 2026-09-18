@@ -1574,6 +1574,8 @@ export function App() {
             onRefresh={refreshDevices}
             onError={refuse}
             busy={syncing}
+            createFrom={stickDefaults.createDatabaseFolders ? stickDefaults : undefined}
+            onCreated={refreshDevices}
           />
         ) : (
         <TrackTable

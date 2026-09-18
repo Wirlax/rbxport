@@ -563,6 +563,12 @@ export interface Backend {
   writeDeviceDefaults(path: string, defaults: StickDefaults): Promise<DeviceSettings>;
   /** Writes them back and resolves to what the stick now holds. */
   saveDeviceSettings(path: string, settings: DeviceSettings): Promise<DeviceSettings>;
+  /**
+   * Gives a stick with no database the folders rekordbox creates on connect
+   * (an empty database from `defaults`), and reads its settings back. A
+   * stick that has one is only read.
+   */
+  ensureDeviceLibrary(path: string, defaults: StickDefaults | undefined): Promise<DeviceSettings>;
 
   /**
    * The Explorer.
