@@ -867,6 +867,36 @@ export function App() {
     query === "" &&
     spec.filter === undefined;
 
+  const resetPlayCount = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.resetPlayCount([...ids]);
+        return `DJ Play Count reset on ${ids.length} track${ids.length === 1 ? "" : "s"}.`;
+      });
+    },
+    [write],
+  );
+
+  // Asked first, as rekordbox asks: the tracks leave every playlist as well
+  // as the collection, and there is no undo in the window.
+  const removeFromCollection = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      void (async () => {
+        const backend = await getBackend();
+        const count = `${ids.length} track${ids.length === 1 ? "" : "s"}`;
+        const sure = await backend.confirm(`Remove ${count} from the collection? The files stay where they are.`);
+        if (!sure) return;
+        write(async (b) => {
+          await b.edits.removeFromCollection([...ids]);
+          return `Removed ${count} from the collection.`;
+        });
+      })();
+    },
+    [write],
+  );
+
   const removeFromPlaylist = useCallback(
     (ids: readonly string[]) => {
       const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
@@ -1105,6 +1135,24 @@ export function App() {
     () => devices.find((device) => deviceId(device) === selectedNode?.id) ?? null,
     [devices, selectedNode],
   );
+
+  // A long export says where it is, track by track, in the status bar.
+  useEffect(() => {
+    if (!syncing) return undefined;
+    let stop: (() => void) | undefined;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onExportProgress(({ done, total, title }) => {
+        report(`Writing ${done + 1} of ${total}: ${title}`);
+      });
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [syncing, report]);
 
   const syncToDevice = useCallback(
     async (playlistId: string) => {
@@ -1368,6 +1416,8 @@ export function App() {
           }}
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
+          onResetPlayCount={resetPlayCount}
+          onRemoveFromCollection={removeFromCollection}
           readOnly={readOnly}
           trafficLight={trafficLight}
           onTrafficLight={setTrafficLight}

@@ -595,6 +595,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       membership.set(playlist, current);
       return bump();
     },
+    resetPlayCount: () => bump(),
+    // The mock's rows are addressed by index, so a removal only takes the
+    // tracks out of every playlist; the collection keeps its count.
+    removeFromCollection: (tracks) => {
+      for (const [playlist, members] of membership) {
+        membership.set(playlist, members.filter((t) => !tracks.includes(t)));
+      }
+      return bump();
+    },
     reorderPlaylist: (playlist, tracks) => {
       const current = membersOf(playlist);
       // Mirrors the backend: tracks not named keep their place after the rest,
@@ -1217,6 +1226,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
+    onExportProgress: () => () => undefined,
+    // A browser cannot ask; the answer is yes, so the flow can be driven.
+    confirm: () => Promise.resolve(true),
 
     // A deck that keeps time but makes no sound. The audio engine is Rust and
     // is not here, so this counts frames and emits the same ticks the engine

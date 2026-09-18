@@ -95,6 +95,16 @@ pub struct SourcePlaylist {
     pub track_indices: Vec<usize>,
 }
 
+/// Where an export has got to, reported after each track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportProgress {
+    /// Tracks dealt with so far, copied, reused or skipped.
+    pub done: usize,
+    pub total: usize,
+    /// The track just dealt with.
+    pub title: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExportReport {
     pub tracks: usize,
@@ -326,7 +336,7 @@ pub fn export_with(
     playlists: &[SourcePlaylist],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<ExportReport> {
-    export_full(destination, tracks, playlists, &[], defaults)
+    export_full(destination, tracks, playlists, &[], defaults, &mut |_| {})
 }
 
 /// [`export_with`], with the library's My Tags listed on the stick as well.
@@ -342,6 +352,7 @@ pub fn export_full(
     playlists: &[SourcePlaylist],
     my_tags: &[SourceMyTag],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+    progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
     if tracks.is_empty() {
         return Err(ExportError::Empty);
@@ -391,6 +402,9 @@ pub fn export_full(
     };
 
     for (index, track) in tracks.iter().enumerate() {
+        // Reported before the track is dealt with, so a skip reports too:
+        // whatever happens below, the count moves on by one.
+        progress(&ExportProgress { done: index, total: tracks.len(), title: track.title.clone() });
         let export_id = ids.get(index).copied().unwrap_or(0);
         let place = layout(track, export_id);
         let source = track.source_path.to_string_lossy().into_owned();

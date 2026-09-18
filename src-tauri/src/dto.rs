@@ -250,6 +250,15 @@ pub struct ExportReportDto {
     pub verified: bool,
 }
 
+/// Where an export has got to, sent after each track as `export:progress`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportProgressDto {
+    pub done: u32,
+    pub total: u32,
+    pub title: String,
+}
+
 /// One phrase of the song structure, as the phrase strip needs it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

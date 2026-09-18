@@ -274,8 +274,10 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     ];
     let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
-    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None).unwrap();
+    let mut seen: Vec<(usize, usize)> = Vec::new();
+    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, &mut |p| seen.push((p.done, p.total))).unwrap();
     assert_eq!(report.tracks, 3);
+    assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)], "progress is reported per track");
     assert_eq!(report.artwork_files, 4, "one image, written under its four names");
     for name in ["a1.jpg", "a1_m.jpg", "b1.jpg", "b1_m.jpg"] {
         let file = dest.path().join("PIONEER/Artwork/00001").join(name);
@@ -312,6 +314,6 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     assert_eq!(path, "/PIONEER/Artwork/00001/a1.jpg");
 
     // A second export finds the artwork in place and writes none again.
-    let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None).unwrap();
+    let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None, &mut |_| {}).unwrap();
     assert_eq!(again.artwork_files, 0);
 }

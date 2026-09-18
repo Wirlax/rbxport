@@ -7,7 +7,7 @@
 import type {
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   PreferencesRequest, UpdateCheck, UpdateProgress,
-  ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
+  ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
   LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
   TreeNode, ViewHandle,
@@ -115,6 +115,11 @@ async function realBackend(): Promise<Backend> {
     },
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
+    onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
+    confirm: async (message) => {
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      return ask(message, { kind: "warning" });
+    },
     deckLoad: (deck, trackId) => invoke<void>("deck_load", { deck, track: trackId }),
     deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
     deckPlay: (deck) => invoke<void>("deck_play", { deck }),
@@ -248,6 +253,8 @@ async function realBackend(): Promise<Backend> {
         invoke<number>("add_tracks_to_playlist", { playlist, tracks }),
       removeTracksFromPlaylist: (playlist, tracks) =>
         invoke<number>("remove_tracks_from_playlist", { playlist, tracks }),
+      resetPlayCount: (tracks) => invoke<number>("reset_play_count", { tracks }),
+      removeFromCollection: (tracks) => invoke<number>("remove_from_collection", { tracks }),
       reorderPlaylist: (playlist, tracks) =>
         invoke<number>("reorder_playlist", { playlist, tracks }),
       setTrackRating: (track, stars) => invoke<number>("set_track_rating", { track, stars }),

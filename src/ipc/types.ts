@@ -285,6 +285,10 @@ export interface Backend {
    */
   trackVocals(trackId: string): Promise<Uint8Array>;
 
+  /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
+  onExportProgress(listener: (progress: ExportProgress) => void): () => void;
+  /** A yes-or-no question in the platform's own dialog; false when dismissed. */
+  confirm(message: string): Promise<boolean>;
   /** The volumes an export could be written to, and what is on each. */
   listDevices(): Promise<Device[]>;
   /**
@@ -792,6 +796,13 @@ export interface LinkStatus {
   masterBpm: number;
 }
 
+/** Where an export has got to, after each track. */
+export interface ExportProgress {
+  done: number;
+  total: number;
+  title: string;
+}
+
 /** What analysing one track found, now written to the library. */
 export interface AnalysisResult {
   trackId: string;
@@ -852,6 +863,10 @@ export interface Edits {
   deletePlaylist(id: string): Promise<number>;
   addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
   removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  /** Reset DJ Play Count: back to zero on each track. */
+  resetPlayCount(tracks: string[]): Promise<number>;
+  /** Remove from Collection: the tracks leave the library and every playlist. The files stay. */
+  removeFromCollection(tracks: string[]): Promise<number>;
   reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;
   setTrackRating(track: string, stars: number): Promise<number>;
   setTrackComment(track: string, comment: string): Promise<number>;

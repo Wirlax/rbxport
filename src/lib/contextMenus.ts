@@ -11,7 +11,9 @@
 /** What an entry does, or `null` for one that is only drawn. */
 export type TrackAction =
   | "analyse"
+  | "resetPlayCount"
   | "removeFromPlaylist"
+  | "removeFromCollection"
   | "showInformation"
   | "showInFinder"
   | "loadPlayer1"
@@ -95,12 +97,12 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Export Track", action: null, submenu: true },
   SEPARATOR,
   { label: "Auto Load Hot Cue", action: null, submenu: true },
-  { label: "Reset DJ Play Count", action: null },
+  { label: "Reset DJ Play Count", action: "resetPlayCount" },
   { label: "Add New Analysis Data", action: null },
   { label: "Convert Memory Cues to Hot Cues", action: null },
   SEPARATOR,
   { label: "Remove from Playlist", action: "removeFromPlaylist", needs: "playlist" },
-  { label: "Remove from Collection", action: null },
+  { label: "Remove from Collection", action: "removeFromCollection" },
   { label: "Remove from History", action: null },
   SEPARATOR,
   { label: "Show information", action: "showInformation" },
@@ -237,7 +239,9 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
 /** Writes to the shared library, so rekordbox running is a refusal. */
 const WRITES: ReadonlySet<string> = new Set([
   "analyse",
+  "resetPlayCount",
   "removeFromPlaylist",
+  "removeFromCollection",
   "createPlaylist",
   "createFolder",
   "rename",

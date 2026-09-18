@@ -18,6 +18,7 @@ use crate::dto::{
     ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     CountedDto, FilterValuesDto, TagCategoryDto,
+    ExportProgressDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -620,6 +621,7 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
+    let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
         let playlists = library.playlists();
         let Some(index) = playlist
@@ -706,12 +708,23 @@ pub async fn export_playlist<R: tauri::Runtime>(
             track_indices: (0..tracks.len()).collect(),
         };
         let library_defaults = defaults.as_ref().map(crate::device_settings::library_defaults);
+        // Per track, as `sync:progress` would be per stick: the status bar
+        // follows a long export rather than showing a busy flag alone.
+        let total = tracks.len();
+        let mut on_progress = |p: &rbl_export::ExportProgress| {
+            let _ = tauri::Emitter::emit(
+                &progress_app,
+                "export:progress",
+                ExportProgressDto { done: u32::try_from(p.done).unwrap_or(u32::MAX), total: u32::try_from(total).unwrap_or(u32::MAX), title: p.title.clone() },
+            );
+        };
         let report = rbl_export::export_full(
             std::path::Path::new(&destination),
             &tracks,
             std::slice::from_ref(&source_playlist),
             &source_my_tags,
             library_defaults.as_ref(),
+            &mut on_progress,
         )
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         if let Some(defaults) = &defaults {
@@ -1624,6 +1637,39 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
 ) -> AppResult<u32> {
     edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, move |w| {
         w.remove_tracks(&playlist, &tracks).map(|_| ())
+    })
+    .await
+}
+
+/// Reset DJ Play Count: the tracks' counts go back to zero.
+#[tauri::command]
+pub async fn reset_play_count<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "reset_play_count", Touched::Tracks, move |w| {
+        for track in &tracks {
+            w.set_field(track, rbl_db::write::TrackField::PlayCount, "0")?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Remove from Collection: the tracks leave the library and every playlist
+/// they were in. The files stay where they are, as rekordbox leaves them.
+#[tauri::command]
+pub async fn remove_from_collection<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "remove_from_collection", Touched::Tracks, move |w| {
+        for track in &tracks {
+            w.delete_track(track)?;
+        }
+        Ok(())
     })
     .await
 }
