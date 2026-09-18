@@ -1244,6 +1244,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
     onExportProgress: () => () => undefined,
+    // Two backups, as a session that has edited twice would have.
+    listBackups: () =>
+      wait([
+        { path: "/mock/backups/master-2026-09-17-09-12-04-000--00-00.db", name: "master-2026-09-17-09-12-04-000--00-00.db", bytes: 41_943_040 },
+        { path: "/mock/backups/master-2026-09-16-18-40-51-000--00-00.db", name: "master-2026-09-16-18-40-51-000--00-00.db", bytes: 41_811_968 },
+      ]),
+    backUpLibrary: () => wait("/mock/backups/master-2026-09-17-21-00-00-000--00-00.db"),
+    restoreBackup: () => bump(),
     // A browser cannot ask; the answer is yes, so the flow can be driven.
     confirm: () => Promise.resolve(true),
 

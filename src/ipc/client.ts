@@ -5,6 +5,7 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
+  Backup,
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
@@ -116,6 +117,9 @@ async function realBackend(): Promise<Backend> {
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
+    listBackups: () => invoke<Backup[]>("list_backups"),
+    backUpLibrary: () => invoke<string>("back_up_library"),
+    restoreBackup: (path) => invoke<number>("restore_backup", { path }),
     confirm: async (message) => {
       const { ask } = await import("@tauri-apps/plugin-dialog");
       return ask(message, { kind: "warning" });

@@ -1133,7 +1133,9 @@ impl Writer {
     ///
     /// `sqlite3_backup` is not an option at all — `SQLCipher` refuses it on an
     /// encrypted database.
-    fn back_up(&mut self) -> Result<()> {
+    ///
+    /// Returns the copy.
+    fn back_up(&mut self) -> Result<PathBuf> {
         std::fs::create_dir_all(&self.backup_dir)
             .map_err(|e| DbError::Open(format!("{}: {e}", self.backup_dir.display())))?;
         let stamp = time::now().replace([' ', ':', '+', '.'], "-");
@@ -1161,7 +1163,13 @@ impl Writer {
 
         prune_backups(&self.backup_dir, BACKUPS_KEPT);
         tracing::info!(path = %target.display(), "backed up the library before writing");
-        Ok(())
+        Ok(target)
+    }
+
+    /// Copies the library aside on request — Preferences › Advanced ›
+    /// Database management — and says where the copy went.
+    pub fn back_up_now(&mut self) -> Result<PathBuf> {
+        self.back_up()
     }
 
     /// Finds an id no row in `table` is using.
@@ -1350,9 +1358,11 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Keeps the newest `keep` backups and removes the rest.
-fn prune_backups(dir: &Path, keep: usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+/// The backups in a directory, oldest first: the name carries the
+/// timestamp, so sorting by name sorts by age.
+#[must_use]
+pub fn backups_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut backups: Vec<PathBuf> = entries
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())
@@ -1363,8 +1373,49 @@ fn prune_backups(dir: &Path, keep: usize) {
                 && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("db"))
         })
         .collect();
-    // The name carries the timestamp, so sorting by name sorts by age.
     backups.sort();
+    backups
+}
+
+/// Puts a backup back as the library.
+///
+/// The live file and its WAL and shared-memory sidecars are replaced by
+/// the backup's, so the database reopens exactly as it was copied. Refused
+/// while rekordbox holds the installed library, and for a file that is not
+/// one of this app's backups. The caller reopens every handle it holds:
+/// one on the old inode would answer with the old rows for ever.
+pub fn restore_backup(location: &crate::LibraryLocation, backup: &Path) -> Result<()> {
+    if location.is_real_install && is_rekordbox_running() {
+        return Err(DbError::WriteRefused(
+            "rekordbox is running. Quit it before restoring a backup.".to_owned(),
+        ));
+    }
+    let is_ours = backup
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("master-") && Path::new(n).extension().is_some_and(|e| e.eq_ignore_ascii_case("db")));
+    if !is_ours || !backup.is_file() {
+        return Err(DbError::WriteRefused(format!("{} is not a backup of the library", backup.display())));
+    }
+    let live = &location.master_db;
+    for suffix in ["-wal", "-shm"] {
+        let stale = with_suffix(live, suffix);
+        if stale.exists() {
+            std::fs::remove_file(&stale)?;
+        }
+        let from = with_suffix(backup, suffix);
+        if from.exists() {
+            std::fs::copy(&from, with_suffix(live, suffix))?;
+        }
+    }
+    std::fs::copy(backup, live)?;
+    tracing::info!(path = %backup.display(), "restored the library from a backup");
+    Ok(())
+}
+
+/// Keeps the newest `keep` backups and removes the rest.
+fn prune_backups(dir: &Path, keep: usize) {
+    let backups = backups_in(dir);
     let excess = backups.len().saturating_sub(keep);
     for path in backups.into_iter().take(excess) {
         // The sidecars go with it, or the directory fills with orphans.

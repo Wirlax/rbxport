@@ -84,6 +84,17 @@ impl AppState {
         }
     }
 
+    /// Where this session's backups go.
+    pub fn backup_dir(&self) -> &std::path::Path {
+        &self.backup_dir
+    }
+
+    /// Lets go of the read-only handle, for when the file underneath it is
+    /// about to be replaced. The next read opens a fresh one.
+    pub fn drop_reader(&self) {
+        *self.reader.lock() = None;
+    }
+
     /// Where the loaded library is.
     pub fn location(&self) -> AppResult<rbl_db::LibraryLocation> {
         self.inner

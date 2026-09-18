@@ -1857,7 +1857,7 @@ export const Player = memo(function Player({
               waveformClick: viewPrefs.waveformClick,
             })}
             label="Player menu"
-            context={{ inPlaylist: false, hasFile: true, readOnly: false }}
+            context={{ inPlaylist: false, hasFile: true, readOnly }}
             onChoose={chooseFromDeckMenu}
             onClose={() => setDeckMenuAt(null)}
           />

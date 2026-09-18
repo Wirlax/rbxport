@@ -285,6 +285,12 @@ export interface Backend {
    */
   trackVocals(trackId: string): Promise<Uint8Array>;
 
+  /** The backups this app has taken, newest first. */
+  listBackups(): Promise<Backup[]>;
+  /** Copies the library aside now; resolves to where the copy went. */
+  backUpLibrary(): Promise<string>;
+  /** Puts a backup back as the library and re-reads it. Refused while rekordbox runs. */
+  restoreBackup(path: string): Promise<number>;
   /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
   /** A yes-or-no question in the platform's own dialog; false when dismissed. */
@@ -794,6 +800,14 @@ export interface LinkStatus {
   master: boolean;
   /** The master tempo we would drive, in BPM; shown whether or not we are master. */
   masterBpm: number;
+}
+
+/** One backup of the library. */
+export interface Backup {
+  path: string;
+  /** The file's name, which carries when it was taken. */
+  name: string;
+  bytes: number;
 }
 
 /** Where an export has got to, after each track. */

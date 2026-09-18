@@ -215,9 +215,11 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
     "Change waveform color", "Analyze Track", "Beat Count Display", "Export Track", "Export Loop As WAV",
     "Active Loop Playback", "Click on the waveform for PLAY and CUE",
   ]);
-  for (const greyed of ["Analyze Track", "Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
+  for (const greyed of ["Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
     await expect(menu.getByRole("menuitem", { name: greyed })).toBeDisabled();
   }
+  // Analysis writes to the library, which the mock holds read-only here.
+  await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeDisabled();
 
   // The submenu ticks what is in force, and choosing changes the preference.
   await menu.getByRole("menuitem", { name: "Change waveform color" }).hover();

@@ -1381,3 +1381,37 @@ fn an_analysis_is_registered_on_the_track_with_the_usual_bookkeeping() {
     assert_eq!((analysed, key.as_str(), length), (105, "12", 300));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), 1);
 }
+
+#[test]
+fn a_backup_is_listed_and_can_be_put_back() {
+    use rbl_db::write::{backups_in, restore_backup};
+    let mut f = fixture();
+    let dir = f._dir.path().to_path_buf();
+    let backups = dir.join("backups");
+    assert!(backups_in(&backups).is_empty());
+
+    // Taken on request, before any write.
+    let copy = f.writer.back_up_now().unwrap();
+    assert_eq!(backups_in(&backups), vec![copy.clone()]);
+
+    // A write after it, then the backup put back: the write is gone.
+    let id = f.writer.create_playlist("After the backup", ROOT).unwrap();
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdPlaylist WHERE Name = 'After the backup'"), 1);
+    let location = f.writer.library().location().clone();
+    // The writer's handle goes; the directory stays.
+    let Fixture { _dir: keep, writer } = f;
+    drop(writer);
+    restore_backup(&location, &copy).unwrap();
+    let db = Library::open(location.clone(), OpenMode::ReadOnly).unwrap();
+    let after: i64 = db
+        .connection()
+        .query_row("SELECT COUNT(*) FROM djmdPlaylist WHERE ID = ?1", [&id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(after, 0, "the playlist made after the backup is gone");
+
+    // Only this app's backups are accepted.
+    let stray = dir.join("notes.db");
+    std::fs::write(&stray, b"x").unwrap();
+    assert!(matches!(restore_backup(&location, &stray), Err(DbError::WriteRefused(_))));
+    drop(keep);
+}

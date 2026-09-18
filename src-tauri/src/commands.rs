@@ -19,6 +19,7 @@ use crate::dto::{
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     CountedDto, FilterValuesDto, TagCategoryDto,
     ExportProgressDto,
+    BackupDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -1639,6 +1640,56 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
         w.remove_tracks(&playlist, &tracks).map(|_| ())
     })
     .await
+}
+
+/// The backups this app has taken, newest first.
+#[tauri::command]
+pub async fn list_backups(state: State<'_, Arc<AppState>>) -> AppResult<Vec<BackupDto>> {
+    let dir = state.backup_dir().to_path_buf();
+    blocking("list_backups", move || {
+        let mut backups: Vec<BackupDto> = rbl_db::write::backups_in(&dir)
+            .into_iter()
+            .map(|path| BackupDto {
+                name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                bytes: std::fs::metadata(&path).map_or(0, |m| m.len()),
+                path: path.to_string_lossy().into_owned(),
+            })
+            .collect();
+        backups.reverse();
+        Ok(backups)
+    })
+    .await
+}
+
+/// Copies the library aside now, and says where.
+#[tauri::command]
+pub async fn back_up_library(state: State<'_, Arc<AppState>>) -> AppResult<String> {
+    let state = Arc::clone(&state);
+    blocking("back_up_library", move || {
+        let path = state.write(rbl_db::write::Writer::back_up_now).map_err(write_error)?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+}
+
+/// Puts a backup back as the library and re-reads it.
+#[tauri::command]
+pub async fn restore_backup<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<u32> {
+    let state = Arc::clone(&state);
+    let restoring = Arc::clone(&state);
+    blocking("restore_backup", move || {
+        let location = restoring.location()?;
+        // Every handle on the old file goes first; the reload below opens
+        // the restored one.
+        restoring.drop_reader();
+        rbl_db::write::restore_backup(&location, std::path::Path::new(&path)).map_err(write_error)
+    })
+    .await?;
+    reload(app, state).await
 }
 
 /// Reset DJ Play Count: the tracks' counts go back to zero.

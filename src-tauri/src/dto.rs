@@ -250,6 +250,16 @@ pub struct ExportReportDto {
     pub verified: bool,
 }
 
+/// One backup of the library, for Preferences › Advanced › Database.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupDto {
+    pub path: String,
+    /// The file's name, which carries when it was taken.
+    pub name: String,
+    pub bytes: u64,
+}
+
 /// Where an export has got to, sent after each track as `export:progress`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
