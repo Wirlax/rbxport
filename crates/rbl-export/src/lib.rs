@@ -959,31 +959,54 @@ fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {
     ExportError::OneLibrary(error.to_string())
 }
 
-/// Copies a file's bytes and nothing else.
+/// Copies a file's bytes and nothing else, reading the next chunk while the
+/// last one is being written.
 ///
 /// `std::fs::copy` on macOS carries extended attributes along, and on a
-/// FAT stick each of those becomes an AppleDouble `._` file: one more
-/// directory entry per track and per analysis file, on a filesystem where
-/// creating an entry costs tens of milliseconds. The export measured at
-/// 11.6 MB/s on a stick that takes 48 MB/s [OBS 2026-09-17]; a plain read
-/// and write with a 1 MiB buffer leaves only the data to write.
+/// FAT stick each of those becomes an AppleDouble `._` file, so only the
+/// data goes. The read and the write are on different devices — the export
+/// measured 11.6 MB/s from an SD card into a stick that takes 48 MB/s [OBS
+/// 2026-09-17] — so they overlap: a reader fills a short queue of chunks
+/// and the writer drains it, and a track costs the slower of the two
+/// rather than their sum.
 fn copy_data(from: &Path, to: &Path) -> std::io::Result<u64> {
     use std::io::{Read, Write};
     let mut source = std::fs::File::open(from)?;
     let mut target = std::fs::File::create(to)?;
-    let mut buffer = vec![0_u8; COPY_BUFFER];
-    let mut total: u64 = 0;
-    loop {
-        let read = source.read(&mut buffer)?;
-        if read == 0 {
-            break;
+    let (send, receive) = std::sync::mpsc::sync_channel::<Vec<u8>>(COPY_QUEUE);
+    let writer = std::thread::spawn(move || -> std::io::Result<u64> {
+        let mut total: u64 = 0;
+        for chunk in receive {
+            target.write_all(&chunk)?;
+            total += chunk.len() as u64;
         }
-        target.write_all(&buffer[..read])?;
-        total += read as u64;
-    }
-    target.flush()?;
-    Ok(total)
+        target.flush()?;
+        Ok(total)
+    });
+    let read_result = (|| -> std::io::Result<()> {
+        loop {
+            let mut buffer = vec![0_u8; COPY_BUFFER];
+            let read = source.read(&mut buffer)?;
+            if read == 0 {
+                return Ok(());
+            }
+            buffer.truncate(read);
+            if send.send(buffer).is_err() {
+                // The writer stopped early; its error is the one to report.
+                return Ok(());
+            }
+        }
+    })();
+    drop(send);
+    let written = writer
+        .join()
+        .map_err(|_| std::io::Error::other("the copy's writer thread panicked"))??;
+    read_result?;
+    Ok(written)
 }
+
+/// Chunks the reader may run ahead of the writer by.
+const COPY_QUEUE: usize = 4;
 
 /// One megabyte: large enough that a 13 MB track is a dozen writes, small
 /// enough not to matter on a laptop.
