@@ -139,6 +139,8 @@ const ID_ATTEMPTS: usize = 64;
 /// so the set of legal names is spelled out rather than trusted.
 const WRITABLE_COLUMNS: &[&str] = &[
     "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL",
+    // The tempo, which a grid edit changes with the `.DAT`'s grid.
+    "BPM",
     // The information panel's Info tab.
     "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM", "ImagePath",
     "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
@@ -982,6 +984,22 @@ impl Writer {
         // else across 38,681 rows [OBS]; the multiples of 51 are the XML
         // export's scale, not the database's.
         self.touch_content(content, "Rating", &Value::Integer(i64::from(stars)))
+    }
+
+    /// Sets a track's tempo, BPM x100, as a grid edit that changed the tempo
+    /// records it. [`Writer::set_bpm`] is the other way round: a BPM typed
+    /// over, which retimes the grid to match.
+    ///
+    /// The same column [`Writer::register_analysis`] writes, and the same
+    /// value: `djmdContent.BPM` is the grid's tempo x100 on every one of
+    /// the reference library's analysed rows [OBS]. The grid itself lives
+    /// in the `.DAT`, which the caller rewrites first; this keeps the row in
+    /// step with it. Zero is refused — a track with a grid has a tempo.
+    pub fn set_bpm_x100(&mut self, content: &str, bpm_x100: u32) -> Result<Changed> {
+        if bpm_x100 == 0 {
+            return Err(DbError::WriteRefused("a grid's tempo cannot be zero".to_owned()));
+        }
+        self.touch_content(content, "BPM", &Value::Integer(i64::from(bpm_x100)))
     }
 
     /// Sets a track's comment.

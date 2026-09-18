@@ -1365,6 +1365,25 @@ fn an_analysis_path_is_derived_from_the_uuid_and_kept_once_set() {
 }
 
 #[test]
+fn setting_the_bpm_writes_the_column_a_grid_edit_keeps_in_step() {
+    let mut f = fixture();
+    let track = track_id(1);
+    let changed = f.writer.set_bpm_x100(&track, 12_850).unwrap();
+    assert_eq!(changed.rows, 1);
+    let (bpm, usn): (i64, i64) = f
+        .conn()
+        .query_row("SELECT BPM, rb_local_usn FROM djmdContent WHERE ID = ?1", params![track], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((bpm, usn), (12_850, changed.usn));
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), changed.usn);
+
+    // Zero is not a tempo a grid can have, and nothing moves.
+    let refused = f.writer.set_bpm_x100(&track, 0).unwrap_err();
+    assert!(matches!(refused, DbError::WriteRefused(_)), "{refused}");
+    assert_eq!(f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'"), changed.usn);
+}
+
+#[test]
 fn registering_an_analysis_sets_bpm_key_path_and_analysed_in_one_usn() {
     let mut f = fixture();
     let track = track_id(1);
