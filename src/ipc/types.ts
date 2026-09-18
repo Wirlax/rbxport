@@ -953,6 +953,10 @@ export interface Edits {
   removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;
   /** Reset DJ Play Count: back to zero on each track. */
   resetPlayCount(tracks: string[]): Promise<number>;
+  /** A play: the track goes on today's history session and its count goes up. */
+  recordPlay(track: string): Promise<number>;
+  /** Remove from History: the tracks' plays leave the session. */
+  removeFromHistory(history: string, tracks: string[]): Promise<number>;
   /** Remove from Collection: the tracks leave the library and every playlist. The files stay. */
   removeFromCollection(tracks: string[]): Promise<number>;
   reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;

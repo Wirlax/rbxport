@@ -867,6 +867,18 @@ export function App() {
     query === "" &&
     spec.filter === undefined;
 
+  const removeFromHistory = useCallback(
+    (ids: readonly string[]) => {
+      const history = spec.source.kind === "history" ? spec.source.id : null;
+      if (history === null || ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.removeFromHistory(history, [...ids]);
+        return `Removed ${ids.length} play${ids.length === 1 ? "" : "s"} from the history.`;
+      });
+    },
+    [write, spec],
+  );
+
   const resetPlayCount = useCallback(
     (ids: readonly string[]) => {
       if (ids.length === 0) return;
@@ -1503,6 +1515,7 @@ export function App() {
           }}
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
+          onRemoveFromHistory={removeFromHistory}
           onResetPlayCount={resetPlayCount}
           onConvertMemoryCues={convertMemoryCues}
           onRemoveFromCollection={removeFromCollection}

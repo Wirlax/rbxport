@@ -591,6 +591,7 @@ export interface TrackTableProps {
   onShowInformation?: (row: RowDto) => void;
   onShowInFinder?: (row: RowDto) => void;
   onRemoveFromPlaylist?: (ids: readonly string[]) => void;
+  onRemoveFromHistory?: (ids: readonly string[]) => void;
   onResetPlayCount?: (ids: readonly string[]) => void;
   /** Convert Memory Cues to Hot Cues, on the row under the pointer. */
   onConvertMemoryCues?: (row: RowDto) => void;
@@ -645,8 +646,8 @@ export function TrackTable({
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
-  onShowInformation, onShowInFinder, onRemoveFromPlaylist, onResetPlayCount, onRemoveFromCollection,
-  onConvertMemoryCues, readOnly = false,
+  onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
+  onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
@@ -1275,6 +1276,7 @@ export function TrackTable({
           label="Track"
           context={{
             inPlaylist: spec.source.kind === "playlist",
+            inHistory: spec.source.kind === "history",
             hasFile: true,
             readOnly,
           }}
@@ -1292,6 +1294,9 @@ export function TrackTable({
                 break;
               case "removeFromPlaylist":
                 onRemoveFromPlaylist?.(ids);
+                break;
+              case "removeFromHistory":
+                onRemoveFromHistory?.(ids);
                 break;
               case "resetPlayCount":
                 onResetPlayCount?.(ids);

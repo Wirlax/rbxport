@@ -1539,3 +1539,48 @@ fn artwork_is_filed_in_the_share_tree_and_cleared_to_empty() {
     assert_eq!(cleared, "");
     assert!(filed.is_file(), "the file stays where it is");
 }
+
+#[test]
+fn a_play_goes_on_todays_session_and_can_be_taken_off_again() {
+    let mut f = fixture();
+    let today = rbl_core::time::local_date();
+    f.writer.record_play(&track_id(3)).unwrap();
+    f.writer.record_play(&track_id(4)).unwrap();
+    f.writer.record_play(&track_id(3)).unwrap();
+
+    let session: String = f.one(
+        "SELECT ID FROM djmdHistory WHERE Name = ?1 AND Attribute = 0 AND rb_local_deleted = 0",
+        &[&format!("HISTORY {today}")],
+    );
+    let (month_id, created): (String, String) = f
+        .conn()
+        .query_row("SELECT ParentID, DateCreated FROM djmdHistory WHERE ID = ?1", [&session], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert!(created.starts_with(&today) && created.len() == 19, "{created}");
+    let (month_name, year_id): (String, String) = f
+        .conn()
+        .query_row("SELECT Name, ParentID FROM djmdHistory WHERE ID = ?1 AND Attribute = 1", [&month_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    let year_name: String = f.one("SELECT Name FROM djmdHistory WHERE ID = ?1 AND Attribute = 1 AND ParentID = 'root'", &[&year_id]);
+    assert_eq!(year_name, &today[..4]);
+    assert_eq!(month_name, today[5..7].trim_start_matches('0'));
+    // A year already there is reused: the fixture's 2026 folder, when today is in it.
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdHistory WHERE Attribute = 1 AND ParentID = 'root' AND rb_local_deleted = 0"), if today.starts_with("2026") { 1 } else { 2 });
+
+    let plays: Vec<(String, i64)> = {
+        let mut stmt = f.conn().prepare("SELECT ContentID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo").unwrap();
+        stmt.query_map([&session], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    assert_eq!(plays, vec![(track_id(3), 1), (track_id(4), 2), (track_id(3), 3)]);
+    let count: i64 = f.one("SELECT DJPlayCount FROM djmdContent WHERE ID = ?1", &[&track_id(3)]);
+    assert_eq!(count, 2);
+
+    let changed = f.writer.remove_from_history(&session, &[track_id(3)]).unwrap();
+    assert_eq!(changed.rows, 2);
+    let left: Vec<(String, i64)> = {
+        let mut stmt = f.conn().prepare("SELECT ContentID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo").unwrap();
+        stmt.query_map([&session], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    assert_eq!(left, vec![(track_id(4), 1)], "the gap closes");
+    assert!(matches!(f.writer.record_play("no-such-track"), Err(DbError::WriteRefused(_))));
+}

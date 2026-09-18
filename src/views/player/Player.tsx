@@ -432,6 +432,9 @@ const WAVE_INSET = { top: 11, bottom: 2 };
 /** Hot cue slots, as the pad row lays them out. */
 const PADS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 
+/** Seconds of a track sounding before its play goes on the history. */
+const PLAY_RECORD_SECONDS = 60;
+
 /**
  * The key that sets each pad, for its tooltip: the Export preset binds `1`,
  * `2` and `3` to `Set Hot Cue A` to `C` and nothing to the rest.
@@ -879,6 +882,31 @@ export const Player = memo(function Player({
     if (!playback.loop) return;
     playback.setLoopActive(!playback.loop.active);
   }, [playback]);
+  // A play is recorded after a minute of the track sounding, once per load,
+  // when Preferences › Advanced › History says so and the library can be
+  // written. rekordbox's own threshold is not recorded; a minute is what
+  // tells a track played from one auditioned [ASSUME].
+  const playedSeconds = useRef(0);
+  const recordedFor = useRef<string | null>(null);
+  const recordHistory = advancedPrefs.recordHistory;
+  useEffect(() => {
+    playedSeconds.current = 0;
+    recordedFor.current = null;
+  }, [track?.id]);
+  useEffect(() => {
+    if (!playback.playing || !track || !recordHistory || readOnly) return undefined;
+    const id = track.id;
+    const timer = globalThis.setInterval(() => {
+      playedSeconds.current += 1;
+      if (playedSeconds.current < PLAY_RECORD_SECONDS || recordedFor.current === id) return;
+      recordedFor.current = id;
+      void getBackend()
+        .then((backend) => backend.edits.recordPlay(id))
+        .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The play could not be recorded."));
+    }, 1000);
+    return () => globalThis.clearInterval(timer);
+  }, [playback.playing, track, recordHistory, readOnly, onError]);
+
   /** A list row: a cue is a jump, a memory loop is the loop itself. */
   const callCue = useCallback(
     (cue: Cue) => {

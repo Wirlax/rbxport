@@ -45,6 +45,14 @@ pub fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// The moment now where the machine is, `YYYY-MM-DD HH:MM:SS`, which is how
+/// `djmdHistory.DateCreated` reads: local time, no offset, no milliseconds
+/// (transcribed from the reference library into the fixture).
+#[must_use]
+pub fn local_stamp() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 /// Civil date from a count of days since 1970-01-01.
 ///
 /// Hinnant's algorithm: shift the era so March is the first month, which makes

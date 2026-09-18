@@ -885,6 +885,103 @@ impl Writer {
         }
     }
 
+    // --------------------------------------------------------------- history
+
+    /// Records a play: the track goes on the end of today's history session
+    /// and its `DJPlayCount` goes up by one.
+    ///
+    /// The session is `HISTORY yyyy-mm-dd` in local time, filed under a
+    /// month folder named by the month's number inside a year folder named
+    /// by the year — the tree rekordbox keeps, as the fixture transcribes it
+    /// from the reference library. Folders and the session are made when
+    /// missing, appended by `Seq` like a playlist. `DateCreated` is the
+    /// local time without an offset, as the transcribed rows have it
+    /// [ASSUME: the seconds are rekordbox's own; the transcription carries
+    /// them]. A track played twice is listed twice, which is what a history
+    /// is.
+    pub fn record_play(&mut self, content: &str) -> Result<Changed> {
+        self.prepare()?;
+        let today = time::local_date();
+        let (year, month) = {
+            let mut parts = today.split('-');
+            let year = parts.next().unwrap_or("1970").to_owned();
+            let month = parts.next().and_then(|m| m.parse::<u32>().ok()).unwrap_or(1).to_string();
+            (year, month)
+        };
+        let session_name = format!("HISTORY {today}");
+        // Ids for whatever has to be made, found before the transaction.
+        let candidates = [
+            self.unused_id("djmdHistory")?,
+            self.unused_id("djmdHistory")?,
+            self.unused_id("djmdHistory")?,
+        ];
+        let play_id = self.rng.uuid4();
+        let play_uuid = self.rng.uuid4();
+        let node_uuids = [self.rng.uuid4(), self.rng.uuid4(), self.rng.uuid4()];
+        let stamp = time::now();
+        let created = time::local_stamp();
+
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !content_exists(&tx, content)? {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        }
+        let year_id = history_node(&tx, &year, ROOT, 1, &candidates[0], &node_uuids[0], &created, &stamp)?;
+        let month_id = history_node(&tx, &month, &year_id, 1, &candidates[1], &node_uuids[1], &created, &stamp)?;
+        let session_id = history_node(&tx, &session_name, &month_id, 0, &candidates[2], &node_uuids[2], &created, &stamp)?;
+
+        let track_no: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(TrackNo), 0) + 1 FROM djmdSongHistory
+             WHERE HistoryID = ?1 AND rb_local_deleted = 0",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        let usn = next_usn(&tx);
+        tx.execute(
+            "INSERT INTO djmdSongHistory
+                (ID, HistoryID, ContentID, TrackNo, UUID,
+                 rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                 usn, rb_local_usn, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+            params![play_id, session_id, content, track_no, play_uuid, usn, stamp],
+        )?;
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdContent SET DJPlayCount = COALESCE(DJPlayCount, 0) + 1,
+                rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, content],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Remove from History: the tracks' plays leave the session, which closes
+    /// its gaps as a playlist does.
+    pub fn remove_from_history(&mut self, history: &str, contents: &[String]) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut rows = 0;
+        let mut usn = 0;
+        for content in contents {
+            usn = next_usn(&tx);
+            rows += tx.execute(
+                "UPDATE djmdSongHistory SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+                 WHERE HistoryID = ?3 AND ContentID = ?4 AND rb_local_deleted = 0",
+                params![usn, stamp, history, content],
+            )?;
+        }
+        if rows > 0 {
+            usn = renumber_history(&tx, history, &stamp)?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Add Artwork and Delete Artwork on the information panel.
     ///
     /// An image is copied into the share tree where rekordbox files an
@@ -1446,6 +1543,84 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(suffix);
     PathBuf::from(name)
+}
+
+/// Whether a track is in the library.
+fn content_exists(conn: &Connection, id: &str) -> Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+        params![id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+/// A history folder or session by name under a parent, made when missing
+/// with `id`, appended by `Seq`.
+#[allow(clippy::too_many_arguments, reason = "one row's columns, given rather than guessed")]
+fn history_node(
+    conn: &Connection,
+    name: &str,
+    parent: &str,
+    attribute: i64,
+    id: &str,
+    uuid: &str,
+    created: &str,
+    stamp: &str,
+) -> Result<String> {
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT ID FROM djmdHistory
+             WHERE Name = ?1 AND ParentID = ?2 AND Attribute = ?3 AND rb_local_deleted = 0
+             ORDER BY Seq LIMIT 1",
+            params![name, parent, attribute],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(found) = existing {
+        return Ok(found);
+    }
+    let seq: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(Seq), 0) + 1 FROM djmdHistory WHERE ParentID = ?1 AND rb_local_deleted = 0",
+        params![parent],
+        |r| r.get(0),
+    )?;
+    let usn = next_usn(conn);
+    conn.execute(
+        "INSERT INTO djmdHistory
+            (ID, Seq, Name, Attribute, ParentID, DateCreated, UUID,
+             rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+             usn, rb_local_usn, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 0, 0, NULL, ?8, ?9, ?9)",
+        params![id, seq, name, attribute, parent, created, uuid, usn, stamp],
+    )?;
+    Ok(id.to_owned())
+}
+
+/// `renumber`, for a history session.
+fn renumber_history(conn: &Connection, history: &str, stamp: &str) -> Result<i64> {
+    let mut stmt = conn.prepare(
+        "SELECT ID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0
+         ORDER BY TrackNo",
+    )?;
+    let rows: Vec<(String, i64)> = stmt
+        .query_map(params![history], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    drop(stmt);
+    let mut usn = next_usn(conn);
+    for (index, (id, current)) in rows.iter().enumerate() {
+        let wanted = i64::try_from(index + 1).unwrap_or(i64::MAX);
+        if *current == wanted {
+            continue;
+        }
+        usn = next_usn(conn);
+        conn.execute(
+            "UPDATE djmdSongHistory SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3 WHERE ID = ?4",
+            params![wanted, usn, stamp, id],
+        )?;
+    }
+    Ok(usn)
 }
 
 /// The grid at a new tempo: the same beats, numbered as they were, spaced

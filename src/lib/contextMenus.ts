@@ -14,6 +14,7 @@ export type TrackAction =
   | "resetPlayCount"
   | "convertMemoryCues"
   | "removeFromPlaylist"
+  | "removeFromHistory"
   | "removeFromCollection"
   | "showInformation"
   | "showInFinder"
@@ -57,7 +58,7 @@ export interface MenuEntry<A> {
    */
   items?: readonly MenuRow<A>[];
   /** A rule beyond "we have it": no playlist to remove from, and so on. */
-  needs?: "playlist" | "file";
+  needs?: "playlist" | "history" | "file";
   /** In a submenu of choices, the one in force: drawn with a tick. */
   checked?: boolean;
 }
@@ -106,7 +107,7 @@ export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   SEPARATOR,
   { label: "Remove from Playlist", action: "removeFromPlaylist", needs: "playlist" },
   { label: "Remove from Collection", action: "removeFromCollection" },
-  { label: "Remove from History", action: null },
+  { label: "Remove from History", action: "removeFromHistory", needs: "history" },
   SEPARATOR,
   { label: "Show information", action: "showInformation" },
   { label: "Show in Finder", action: "showInFinder", needs: "file" },
@@ -172,6 +173,8 @@ export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder"): readonl
 export interface MenuContext {
   /** The view is a playlist, so a track can be taken out of it. */
   inPlaylist: boolean;
+  /** The view is a history session, so a play can be taken off it. */
+  inHistory?: boolean;
   /** The track's file is known, so the OS can be asked to show it. */
   hasFile: boolean;
   /** The library is open read-only, because rekordbox is running. */
@@ -253,6 +256,7 @@ const WRITES: ReadonlySet<string> = new Set([
   "resetPlayCount",
   "convertMemoryCues",
   "removeFromPlaylist",
+  "removeFromHistory",
   "removeFromCollection",
   "createPlaylist",
   "createFolder",
@@ -271,6 +275,7 @@ export function enabled<A extends string>(
   if (entry.action === null) return false;
   if (context.readOnly && WRITES.has(entry.action)) return false;
   if (entry.needs === "playlist") return context.inPlaylist;
+  if (entry.needs === "history") return context.inHistory === true;
   if (entry.needs === "file") return context.hasFile;
   return true;
 }

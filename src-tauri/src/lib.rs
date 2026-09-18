@@ -475,6 +475,8 @@ pub fn run() {
             commands::back_up_library,
             commands::restore_backup,
             commands::reset_play_count,
+            commands::record_play,
+            commands::remove_from_history,
             commands::remove_from_collection,
             commands::reorder_playlist,
             commands::set_track_rating,

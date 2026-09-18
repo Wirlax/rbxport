@@ -35,6 +35,9 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - The BPM is typed over in the list and the Info tab, and the beat grid is
   retimed to it so the CDJ agrees with the column.
 - Add Artwork and Delete Artwork on the Info tab's Artwork page.
+- A track played for a minute goes on today's history session and its DJ
+  Play Count goes up, as rekordbox records it; Remove from History takes a
+  play off again. Preferences › Advanced › Browse turns the recording off.
 
 ### Fixed
 - A cloud-synced track whose file is not where the library says is exported

@@ -596,6 +596,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return bump();
     },
     resetPlayCount: () => bump(),
+    // The mock keeps no history sessions of its own to add to or take from.
+    recordPlay: () => wait(generation),
+    removeFromHistory: () => bump(),
     // The mock's rows are addressed by index, so a removal only takes the
     // tracks out of every playlist; the collection keeps its count.
     removeFromCollection: (tracks) => {

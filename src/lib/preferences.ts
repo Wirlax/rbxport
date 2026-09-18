@@ -165,6 +165,8 @@ export interface AdvancedPreferences {
   quantizeBeat: QuantizeBeat;
   /** Ask the download server for a newer version when the app starts. */
   checkUpdates: boolean;
+  /** A track played for a minute goes on today's history and its count goes up. */
+  recordHistory: boolean;
 }
 
 export interface Preferences {
@@ -233,6 +235,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
     checkUpdates: true,
+    recordHistory: true,
   },
 };
 
@@ -352,6 +355,7 @@ export function sanitisePreferences(value: unknown): Preferences {
     },
     advanced: {
       relocateFolders: strings(advanced.relocateFolders),
+      recordHistory: bool(advanced.recordHistory, d.advanced.recordHistory),
       protectLibrary: bool(advanced.protectLibrary, d.advanced.protectLibrary),
       doubleClickToEdit: bool(advanced.doubleClickToEdit, d.advanced.doubleClickToEdit),
       syncType: oneOf(advanced.syncType, SYNC_TYPES, d.advanced.syncType),

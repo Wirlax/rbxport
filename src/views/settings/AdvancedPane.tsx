@@ -71,6 +71,17 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
   if (tab === "others") {
     return (
       <>
+        <Section title="History">
+          <Toggle
+            label="Record play history"
+            checked={advanced.recordHistory}
+            onChange={(recordHistory) => set({ recordHistory })}
+          />
+          <Note>
+            A track played for a minute goes on today&rsquo;s history session
+            and its DJ Play Count goes up, as rekordbox records it.
+          </Note>
+        </Section>
         <Section title="QUANTIZE BEAT VALUE">
           <Select
             label="Quantize beat value"

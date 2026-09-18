@@ -1941,6 +1941,31 @@ pub async fn restore_backup<R: tauri::Runtime>(
     reload(app, state).await
 }
 
+/// A play: the track goes on today's history session and its play count
+/// goes up. What the player asks for after a minute of a track.
+#[tauri::command]
+pub async fn record_play<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+) -> AppResult<u32> {
+    edit(app, state, "record_play", Touched::Tracks, move |w| w.record_play(&track).map(|_| ())).await
+}
+
+/// Remove from History: the tracks' plays leave the session.
+#[tauri::command]
+pub async fn remove_from_history<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    history: String,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "remove_from_history", Touched::Tracks, move |w| {
+        w.remove_from_history(&history, &tracks).map(|_| ())
+    })
+    .await
+}
+
 /// Reset DJ Play Count: the tracks' counts go back to zero.
 #[tauri::command]
 pub async fn reset_play_count<R: tauri::Runtime>(

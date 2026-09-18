@@ -306,6 +306,8 @@ async function realBackend(): Promise<Backend> {
       removeTracksFromPlaylist: (playlist, tracks) =>
         invoke<number>("remove_tracks_from_playlist", { playlist, tracks }),
       resetPlayCount: (tracks) => invoke<number>("reset_play_count", { tracks }),
+      recordPlay: (track) => invoke<number>("record_play", { track }),
+      removeFromHistory: (history, tracks) => invoke<number>("remove_from_history", { history, tracks }),
       removeFromCollection: (tracks) => invoke<number>("remove_from_collection", { tracks }),
       reorderPlaylist: (playlist, tracks) =>
         invoke<number>("reorder_playlist", { playlist, tracks }),
