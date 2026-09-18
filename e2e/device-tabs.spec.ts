@@ -137,7 +137,23 @@ test("Color renames a comment on Enter", async ({ page }) => {
   await expect(panel.getByLabel("Color comment 3")).toHaveValue("Peak time");
 });
 
+test("a stick with no library is given one when it is opened", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
+  await page.getByRole("treeitem", { name: /DJ STICK/ }).click();
+  const panel = page.getByRole("region", { name: "Device DJ STICK" });
+  // The DJ System switch is on by default, so the blank stick gets its
+  // database folders as rekordbox creates them on connect, and the tabs edit.
+  await expect(panel.getByLabel("Device Name")).toBeEnabled();
+  await panel.getByRole("tab", { name: "Category" }).click();
+  await expect(panel.getByRole("listbox", { name: "Inactive Categories" }).getByRole("option", { name: "GENRE" })).not.toHaveAttribute("aria-disabled", "true");
+});
+
 test("a stick with no library shows the rows but will not edit them", async ({ page }) => {
+  // With the switch off nothing is created, and the rows stay read-only.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("rbl.preferences", JSON.stringify({ djSystem: { createDatabaseFolders: false } }));
+  });
   await page.goto("/");
   await page.getByRole("tablist", { name: "Library sources" }).getByRole("tab", { name: "Devices" }).click();
   await page.getByRole("treeitem", { name: /DJ STICK/ }).click();

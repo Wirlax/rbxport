@@ -34,6 +34,7 @@ const stick = (name: string): Device => ({
   totalBytes: 32 * 1024 ** 3,
   freeBytes: 24 * 1024 ** 3,
   removable: true,
+  volumeId: "dev:1",
   export: null,
 });
 const DEVICES = [stick("USB A"), stick("USB B")];
