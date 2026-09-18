@@ -7,6 +7,11 @@ the version numbers [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- A Linux build. Each release now ships an AppImage, which the app can
+  update itself from, and a .deb, beside the macOS disk image and the
+  Windows installer.
+
 ### Changed
 - Analyze reads the whole track instead of the first three minutes. The beat
   grid it reports stays on the beat to the last bar, a tempo change part-way

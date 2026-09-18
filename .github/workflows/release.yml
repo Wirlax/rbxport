@@ -1,7 +1,7 @@
 name: Release
 
-# A tag is the release. `v1.2.3` builds macOS and Windows, signs them where the
-# signing secrets exist, and publishes the installers to the R2 bucket as
+# A tag is the release. `v1.2.3` builds macOS, Windows and Linux, signs the
+# first two where the signing secrets exist, and publishes the installers to the R2 bucket as
 # `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
 # name — plus `latest.json`, so a page can find the newest version without
 # a folder listing.
@@ -39,9 +39,11 @@ env:
 
 jobs:
   build:
-    # Native on both, deliberately. macOS signing and notarisation need a real
-    # macOS with Xcode's notarytool, and neither target cross-compiles from the
-    # other; the fleet has a host for each.
+    # Native on all three, deliberately. macOS signing and notarisation need a
+    # real macOS with Xcode's notarytool, the Windows installer needs the MSVC
+    # toolchain, and a Linux AppImage links against the host's GTK and
+    # WebKit; none cross-compiles from another, and the fleet has a host for
+    # each.
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +66,15 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
             slug: windows-x86_64
+          - host: [self-hosted, linux, x64]
+            target: x86_64-unknown-linux-gnu
+            # `appimage` is the one Linux bundle the updater can swap itself
+            # for, and the bundler writes its `.sig` beside it; `deb` is for
+            # a package manager and for whoever would rather not run a file.
+            # Neither is OS-signed: Linux has no equivalent of Developer ID
+            # or Authenticode, so the updater signature is the only one.
+            bundles: appimage,deb
+            slug: linux-x86_64
     runs-on: ${{ matrix.host }}
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
@@ -87,6 +98,17 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Install the Linux build dependencies
+        # The same list as CI's Linux job, which is what proves the workspace
+        # compiles there: the webview and tray libraries the Tauri shell
+        # links against, patchelf for the AppImage's rewritten library paths,
+        # and ALSA for rbl-deck's cpal.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+
       # setup-node, never the host's node: the arc hosts have node under nvm or
       # in a location the runner's environment does not see.
       - uses: pnpm/action-setup@v4
@@ -108,7 +130,7 @@ jobs:
       # rustup-less Rust in ~/.cargo/bin, which is exactly the shape that
       # action cannot work with.
       - name: Ensure rustup
-        if: runner.os == 'macOS'
+        if: runner.os != 'Windows'
         run: |
           if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -396,6 +418,12 @@ jobs:
           # rebooted unattended). Plain files instead; the step below
           # removes them once the installer is signed.
           AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
+          # The AppImage bundler downloads linuxdeploy, itself an AppImage,
+          # and runs it. An AppImage mounts itself with FUSE, which a VM's
+          # kernel or a distribution without libfuse2 may not offer; with
+          # this set it unpacks to a temp directory and runs from there
+          # instead, on any host.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           # `--verbose` is for the bundlers' own scripts: without it the DMG
           # step's `bundle_dmg.sh` fails with "failed to run" and not a word
@@ -422,18 +450,21 @@ jobs:
           # two of them sitting in the bundle directory.
           # The updater's payloads come along: on macOS the app as a
           # tarball (the DMG is for people, the tarball is what the app
-          # swaps itself for), on Windows the same setup .exe — and the
-          # `.sig` the bundler wrote beside each.
+          # swaps itself for), on Windows the same setup .exe, on Linux the
+          # AppImage (the .deb is for people) — and the `.sig` the bundler
+          # wrote beside each.
           find "${CARGO_TARGET_DIR:-target}" src-tauri/target -type f ! -name 'rw.*' \
             \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
                -o -path '*/bundle/nsis/*-setup.exe.sig' \
-               -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \) \
+               -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \
+               -o -path '*/bundle/appimage/*.AppImage' -o -path '*/bundle/appimage/*.AppImage.sig' \
+               -o -path '*/bundle/deb/*.deb' -o -path '*/bundle/deb/*.deb.sig' \) \
             -exec cp {} out/ \; 2>/dev/null || true
 
           # Renamed here, not at upload time, so the artifact and the object in
           # the bucket carry the same name. The bundlers produce
-          # `rbxport_0.1.0_universal.dmg` and
-          # `rbxport_0.1.0_x64-setup.exe`; what gets published is
+          # `rbxport_0.1.0_universal.dmg`, `rbxport_0.1.0_x64-setup.exe` and
+          # `rbxport_0.1.0_amd64.AppImage`; what gets published is
           # `rbxport-<semver>-<platform>[-setup].<ext>`, which is the
           # one shape a person can read, type and grep. Bare semver, because
           # the leading `v` belongs to the tag and nothing else.
@@ -444,6 +475,10 @@ jobs:
               *.app.tar.gz.sig) want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
               *-setup.exe)      want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe" ;;
               *-setup.exe.sig)  want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+              *.AppImage)       want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.AppImage" ;;
+              *.AppImage.sig)   want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.AppImage.sig" ;;
+              *.deb)            want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.deb" ;;
+              *.deb.sig)        want="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.deb.sig" ;;
               *) echo "::error::unexpected bundle $f"; exit 1 ;;
             esac
             [ "$f" = "$want" ] || mv "$f" "$want"
@@ -458,6 +493,7 @@ jobs:
           case "${{ matrix.slug }}" in
             darwin-*)  sig="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.app.tar.gz.sig" ;;
             windows-*) sig="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}-setup.exe.sig" ;;
+            linux-*)   sig="out/rbxport-${RELEASE_VERSION}-${{ matrix.slug }}.AppImage.sig" ;;
           esac
           if [ ! -s "$sig" ]; then
             echo "::error::no updater signature at $sig — was the updater artifact bundled and TAURI_SIGNING_PRIVATE_KEY set?"
@@ -662,29 +698,43 @@ jobs:
           # refuses a `platforms` entry without a signature, and a DMG has
           # none. A universal macOS build runs as one of two arches, so the
           # same tarball is listed under both; `darwin-universal` is not a
-          # key the updater ever looks for.
+          # key the updater ever looks for. The updater looks for
+          # `{os}-{arch}-{installer}` before `{os}-{arch}`, so on Linux the
+          # AppImage sits under the plain key and the .deb, when the
+          # bundler signed it, under `linux-x86_64-deb`: an app installed
+          # from the package takes the package, one run as an AppImage takes
+          # the AppImage.
           test -s CHANGELOG.md
           node -e '
             const fs = require("fs");
             const [, version, base] = process.argv;
             const files = fs.readdirSync("out");
             const url = (file) => (base ? base + "/" + file : undefined);
-            const signed = (payload) => {
+            const signed = (payload, optional = false) => {
               const file = files.find(payload);
               if (!file) return null;
               const sig = file + ".sig";
-              if (!files.includes(sig)) throw new Error("no updater signature beside " + file);
+              if (!files.includes(sig)) {
+                if (optional) return null;
+                throw new Error("no updater signature beside " + file);
+              }
               return { url: url(file), signature: fs.readFileSync("out/" + sig, "utf8").trim() };
             };
             const mac = signed((f) => f.endsWith(".app.tar.gz"));
             const win = signed((f) => f.endsWith("-setup.exe"));
+            const linux = signed((f) => f.endsWith(".AppImage"));
+            const deb = signed((f) => f.endsWith(".deb"), true);
             const platforms = {};
             if (mac) { platforms["darwin-aarch64"] = mac; platforms["darwin-x86_64"] = mac; }
             if (win) platforms["windows-x86_64"] = win;
+            if (linux) platforms["linux-x86_64"] = linux;
+            if (deb) platforms["linux-x86_64-deb"] = deb;
             const downloads = {};
             for (const [slug, match] of [
               ["darwin-universal", (f) => f.endsWith(".dmg")],
               ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
+              ["linux-x86_64", (f) => f.endsWith(".AppImage")],
+              ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
             ]) {
               const file = files.find(match);
               if (file) downloads[slug] = { file, url: url(file) };
