@@ -73,6 +73,7 @@ async function realBackend(): Promise<Backend> {
     },
     trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
     trackPhrases: (trackId) => invoke<Phrase[]>("track_phrases", { track: trackId }),
+    editPhrase: (trackId, beat, action) => invoke<boolean>("edit_phrase", { trackId, beat, action }),
     trackVocals: async (trackId) => {
       const bytes = await invoke<ArrayBuffer | number[] | Uint8Array>("track_vocals", {
         track: trackId,

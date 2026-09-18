@@ -53,6 +53,7 @@ import {
   type BeatGrid as BeatGridData,
   type CuePanel,
   type PadMode,
+  beatAtMs,
   beatLoopRange,
 } from "@/lib/player";
 import { type DeckLoop, usePlayback } from "@/store/usePlayback";
@@ -639,6 +640,9 @@ export const Player = memo(function Player({
   const drawn = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
 
+  // Bumped when the track's analysis is rewritten — a phrase edit, or a
+  // re-analysis — so the strip is read again.
+  const [phraseRevision, setPhraseRevision] = useState(0);
   useEffect(() => {
     if (!track) {
       setPhrases([]);
@@ -654,7 +658,35 @@ export const Player = memo(function Player({
     return () => {
       live = false;
     };
+  }, [track, phraseRevision]);
+  useEffect(() => {
+    if (!track) return undefined;
+    let live = true;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onAnalysisChanged((changed) => {
+        if (changed === track.id) setPhraseRevision((r) => r + 1);
+      });
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
   }, [track]);
+
+  /** PHRASE EDIT: CUT or CLEAR at the beat under the head. */
+  const editPhrase = useCallback(
+    (action: "cut" | "clear") => {
+      if (!track || playback.idle || grid.times.length === 0) return;
+      const beat = beatAtMs(grid, playback.positionNow() * 1000);
+      void getBackend()
+        .then((backend) => backend.editPhrase(track.id, beat, action))
+        .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The phrase could not be edited."));
+    },
+    [track, playback, grid, onError],
+  );
 
   // Falls back to the track's own length before the file's metadata has
   // loaded, so nothing jumps when it arrives.
@@ -1747,11 +1779,23 @@ export const Player = memo(function Player({
                 <span className={styles.sectionLabel}>PHRASE EDIT</span>
                 <div className={styles.editButtons}>
                   <div className={styles.editPair}>
-                    <button type="button" className={styles.wideButton} aria-label={PHRASE_EDITS[0].label} disabled>
+                    <button
+                      type="button"
+                      className={styles.wideButton}
+                      aria-label={PHRASE_EDITS[0].label}
+                      disabled={readOnly || phrases.length === 0}
+                      onClick={() => editPhrase("cut")}
+                    >
                       {PHRASE_EDITS[0].text}
                     </button>
                     <span className={styles.phraseField} aria-hidden />
-                    <button type="button" className={styles.wideButton} aria-label={PHRASE_EDITS[1].label} disabled>
+                    <button
+                      type="button"
+                      className={styles.wideButton}
+                      aria-label={PHRASE_EDITS[1].label}
+                      disabled={readOnly || phrases.length === 0}
+                      onClick={() => editPhrase("clear")}
+                    >
                       {PHRASE_EDITS[1].text}
                     </button>
                   </div>

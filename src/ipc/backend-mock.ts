@@ -1609,6 +1609,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No picker in a browser, so nothing can be chosen to import or written.
     importFiles: () => wait(null),
     importXml: () => wait(null),
+    // The mock's phrases are drawn from a table, not a file: nothing to cut.
+    editPhrase: () => wait(false),
     exportPlaylistFile: () => wait(null),
     exportXml: () => wait(null),
 

@@ -38,7 +38,7 @@ pub enum AnlzError {
 
 pub type Result<T> = std::result::Result<T, AnlzError>;
 
-pub use phrase::{Mood, Phrase, SongStructure};
+pub use phrase::{Mood, Phrase, PhraseEdit, SongStructure};
 pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
 pub use encode::{author, AnalysisFiles, BandColumn, Existing};
 pub use write::AnlzBuilder;

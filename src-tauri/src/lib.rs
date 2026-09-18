@@ -400,6 +400,7 @@ pub fn run() {
             commands::view_ids_in_range,
             commands::track_waveform,
             analysis::analyse_track,
+            analysis::edit_phrase,
             commands::reload_library,
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.

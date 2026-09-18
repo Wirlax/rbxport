@@ -702,3 +702,15 @@ export function beatLoopRange(
   const end = onBeat && Number.isInteger(beats) && target < times.length ? (times[target] ?? start) : start + beats * period;
   return end > start ? [start, end] : null;
 }
+
+/**
+ * The beat the head is on, 1-based on the grid as `PQTZ` numbers them: the
+ * last beat at or before `ms`, or the first when the head is before it.
+ */
+export function beatAtMs(grid: BeatGrid, ms: number): number {
+  const { times } = grid;
+  if (times.length === 0) return 1;
+  const at = lowerBound(times, ms);
+  const exact = times[at] === ms;
+  return Math.max(1, exact ? at + 1 : at);
+}

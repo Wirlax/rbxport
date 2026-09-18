@@ -254,7 +254,105 @@ impl Section {
     }
 }
 
+/// An edit to the phrases, from the GRID panel's PHRASE EDIT buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhraseEdit {
+    /// CUT: the phrase under `beat` is split there. The new phrase carries
+    /// the old one's kind and flags, so it draws under the same label.
+    Cut { beat: u16 },
+    /// CLEAR: the phrase under `beat` is taken out; the one before it runs
+    /// on to where it ended.
+    Clear { beat: u16 },
+}
+
+impl Section {
+    /// The `PSSI` with an edit applied, written unmasked as rekordbox 7
+    /// writes its own; `None` for any other tag, a tag that does not read,
+    /// or an edit that changes nothing (a cut on a phrase's first beat, a
+    /// clear with no phrase under the beat).
+    ///
+    /// Each entry is carried byte for byte and only its index and beat
+    /// rewritten, so the fields nobody has named keep whatever they held;
+    /// a cut phrase's lighting hints are copied into both halves [ASSUME].
+    #[must_use]
+    pub fn with_phrase_edit(&self, edit: PhraseEdit) -> Option<Section> {
+        if self.tag != FourCc::new(b"PSSI") {
+            return None;
+        }
+        let mut raw = Vec::with_capacity(self.header.len() + self.payload.len());
+        raw.extend_from_slice(&self.header);
+        raw.extend_from_slice(&self.payload);
+        let entry_bytes = be32(&raw, 0) as usize;
+        let len_entries = be16(&raw, 4);
+        if entry_bytes < MIN_ENTRY_BYTES {
+            return None;
+        }
+        let mut body = raw.get(6..)?.to_vec();
+        if Mood::from_u16(be16(&body, 0)).is_none() {
+            unmask(&mut body, len_entries);
+            Mood::from_u16(be16(&body, 0))?;
+        }
+        let preamble = body.get(..BODY_PREAMBLE)?.to_vec();
+        let count = (len_entries as usize).min(body.get(BODY_PREAMBLE..)?.len() / entry_bytes);
+        let mut entries: Vec<Vec<u8>> = body
+            .get(BODY_PREAMBLE..)?
+            .chunks_exact(entry_bytes)
+            .take(count)
+            .map(<[u8]>::to_vec)
+            .collect();
+
+        let at = match edit {
+            PhraseEdit::Cut { beat } | PhraseEdit::Clear { beat } => {
+                entries.iter().rposition(|entry| be16(entry, 2) <= beat)?
+            }
+        };
+        match edit {
+            PhraseEdit::Cut { beat } => {
+                let first = entries.get(at)?;
+                if be16(first, 2) == beat {
+                    return None;
+                }
+                let mut second = first.clone();
+                second.get_mut(2..4)?.copy_from_slice(&beat.to_be_bytes());
+                entries.insert(at + 1, second);
+            }
+            PhraseEdit::Clear { .. } => {
+                entries.remove(at);
+            }
+        }
+        for (i, entry) in entries.iter_mut().enumerate() {
+            let index = u16::try_from(i + 1).unwrap_or(u16::MAX);
+            if let Some(slot) = entry.get_mut(0..2) {
+                slot.copy_from_slice(&index.to_be_bytes());
+            }
+        }
+
+        let mut out = Vec::with_capacity(raw.len() + entry_bytes);
+        out.extend_from_slice(raw.get(..4)?);
+        out.extend_from_slice(&u16::try_from(entries.len()).unwrap_or(u16::MAX).to_be_bytes());
+        out.extend_from_slice(&preamble);
+        for entry in &entries {
+            out.extend_from_slice(entry);
+        }
+        // The same split as the file had: 20 header bytes in an export, 32
+        // in rekordbox 7's own, and the fields sit the same either way.
+        let split = self.header.len().min(out.len());
+        Some(Section::new(b"PSSI", out.get(..split)?.to_vec(), out.get(split..)?.to_vec()))
+    }
+}
+
 impl crate::Anlz {
+    /// The file with its phrases edited, every other section as it was;
+    /// `None` when there is no `PSSI` or the edit changes nothing.
+    #[must_use]
+    pub fn with_phrase_edit(&self, edit: PhraseEdit) -> Option<Vec<u8>> {
+        let at = self.sections.iter().position(|s| s.tag == FourCc::new(b"PSSI"))?;
+        let edited = self.sections.get(at)?.with_phrase_edit(edit)?;
+        let mut sections = self.sections.clone();
+        *sections.get_mut(at)? = edited;
+        Some(crate::write::render(&self.header_extra, &sections))
+    }
+
     /// The song structure, if the file carries one.
     #[must_use]
     pub fn song_structure(&self) -> Option<SongStructure> {
@@ -265,5 +363,66 @@ impl crate::Anlz {
     #[must_use]
     pub fn phrases(&self) -> Option<Vec<Phrase>> {
         self.song_structure().map(|s| s.phrases)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod edit_tests {
+    use super::*;
+
+    /// A rekordbox 7 style PSSI: 20 header bytes, three mid-mood phrases.
+    fn pssi(masked: bool) -> Section {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&24_u32.to_be_bytes());
+        raw.extend_from_slice(&3_u16.to_be_bytes());
+        let mut body = Vec::new();
+        body.extend_from_slice(&2_u16.to_be_bytes()); // mood mid
+        body.extend_from_slice(&[0; 6]);
+        body.extend_from_slice(&64_u16.to_be_bytes()); // end beat
+        body.extend_from_slice(&[0, 0, 0, 0]); // unknown, bank, unknown
+        for (index, beat, kind) in [(1_u16, 1_u16, 1_u16), (2, 17, 2), (3, 33, 3)] {
+            let mut entry = vec![0_u8; 24];
+            entry[0..2].copy_from_slice(&index.to_be_bytes());
+            entry[2..4].copy_from_slice(&beat.to_be_bytes());
+            entry[4..6].copy_from_slice(&kind.to_be_bytes());
+            entry[0x0c..0x0e].copy_from_slice(&(beat + 4).to_be_bytes()); // a hint
+            body.extend_from_slice(&entry);
+        }
+        if masked {
+            unmask(&mut body, 3); // XOR is its own inverse
+        }
+        raw.extend_from_slice(&body);
+        Section::new(b"PSSI", raw[..20].to_vec(), raw[20..].to_vec())
+    }
+
+    fn beats(section: &Section) -> Vec<(u16, u16, u16)> {
+        section.as_song_structure().unwrap().phrases.iter().map(|p| (p.index, p.beat, p.kind)).collect()
+    }
+
+    #[test]
+    fn a_cut_splits_the_phrase_under_the_beat_and_a_clear_takes_it_out() {
+        let original = pssi(false);
+        assert_eq!(beats(&original), vec![(1, 1, 1), (2, 17, 2), (3, 33, 3)]);
+
+        let cut = original.with_phrase_edit(PhraseEdit::Cut { beat: 25 }).unwrap();
+        assert_eq!(beats(&cut), vec![(1, 1, 1), (2, 17, 2), (3, 25, 2), (4, 33, 3)]);
+        assert_eq!(cut.header.len(), 20, "the split is kept");
+        // The copied half keeps the kind and the hint bytes of the phrase it came from.
+        let raw: Vec<u8> = [cut.header.clone(), cut.payload.clone()].concat();
+        assert_eq!(&raw[20 + 2 * 24 + 0x0c..20 + 2 * 24 + 0x0e], &21_u16.to_be_bytes());
+        assert!(original.with_phrase_edit(PhraseEdit::Cut { beat: 17 }).is_none(), "a cut on a first beat is nothing");
+        assert!(original.with_phrase_edit(PhraseEdit::Cut { beat: 0 }).is_none(), "before the first phrase");
+
+        let cleared = original.with_phrase_edit(PhraseEdit::Clear { beat: 20 }).unwrap();
+        assert_eq!(beats(&cleared), vec![(1, 1, 1), (2, 33, 3)]);
+        let structure = cleared.as_song_structure().unwrap();
+        assert_eq!((structure.mood, structure.end_beat), (Mood::Mid, 64));
+
+        // A masked file edits the same and comes back unmasked.
+        let edited = pssi(true).with_phrase_edit(PhraseEdit::Cut { beat: 25 }).unwrap();
+        assert_eq!(beats(&edited), beats(&cut));
+        assert_eq!(be16(&[edited.header.clone(), edited.payload.clone()].concat(), 6), 2, "the mood reads plainly");
+        assert!(Section::new(b"PQTZ", vec![], vec![]).with_phrase_edit(PhraseEdit::Clear { beat: 1 }).is_none());
     }
 }

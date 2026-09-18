@@ -294,6 +294,12 @@ export interface Backend {
 
   /** A track's phrase structure, empty when it has no `PSSI` tag. */
   trackPhrases(trackId: string): Promise<Phrase[]>;
+  /**
+   * PHRASE EDIT: `cut` splits the phrase under `beat` (1-based, on the
+   * track's grid), `clear` takes it out. Resolves to whether anything
+   * changed; `onAnalysisChanged` says so as well.
+   */
+  editPhrase(trackId: string, beat: number, action: "cut" | "clear"): Promise<boolean>;
 
   /**
    * Per-column vocal presence, empty when the track has no `PVDI` tag.

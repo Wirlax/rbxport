@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  beatAtMs,
   beatLoopRange,
   BEATS_PER_BAR,
   DETAIL_BARS,
@@ -722,5 +723,17 @@ describe("beatLoopRange", () => {
   it("has nothing to count on without a grid", () => {
     expect(beatLoopRange({ times: new Uint32Array(), numbers: new Uint8Array() }, null, 100, 4)).toBeNull();
     expect(beatLoopRange(grid, grid, 1000, 0)).toBeNull();
+  });
+});
+
+describe("beatAtMs", () => {
+  const grid = { times: new Uint32Array([1000, 1500, 2000]), numbers: new Uint8Array([1, 2, 3]) };
+  it("is the last beat at or before the head, 1-based", () => {
+    expect(beatAtMs(grid, 1000)).toBe(1);
+    expect(beatAtMs(grid, 1700)).toBe(2);
+    expect(beatAtMs(grid, 2000)).toBe(3);
+    expect(beatAtMs(grid, 9000)).toBe(3);
+    expect(beatAtMs(grid, 10)).toBe(1);
+    expect(beatAtMs({ times: new Uint32Array(), numbers: new Uint8Array() }, 500)).toBe(1);
   });
 });

@@ -176,6 +176,58 @@ fn analyse_and_save(
     })
 }
 
+/// PHRASE EDIT: CUT splits the phrase under `beat`, CLEAR takes it out.
+/// The track's EXT file is rewritten in place with its other sections as
+/// they were; nothing in the database changes. Resolves to whether anything
+/// changed — a cut on a phrase's first beat, or no phrase under the beat,
+/// is nothing.
+#[tauri::command]
+pub async fn edit_phrase<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track_id: String,
+    beat: u16,
+    action: String,
+) -> AppResult<bool> {
+    let library = state.library()?;
+    let share = state.share_root();
+    let state = Arc::clone(&state);
+    let edit = match action.as_str() {
+        "cut" => rbl_anlz::PhraseEdit::Cut { beat },
+        "clear" => rbl_anlz::PhraseEdit::Clear { beat },
+        other => return Err(AppError::new(ErrorKind::Malformed, format!("{other:?} is not a phrase edit."))),
+    };
+    let reported = track_id.clone();
+    let changed = blocking("edit_phrase", move || {
+        if library_locked(&state) {
+            return Err(AppError::new(ErrorKind::ReadOnly, "rekordbox is running. Quit it before editing phrases."));
+        }
+        let Some(row) = library.row_of(&track_id) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
+        };
+        let relative = library.analysis_path.get(row as usize);
+        if relative.is_empty() {
+            return Err(AppError::new(ErrorKind::NotFound, "That track has no analysis."));
+        }
+        let ext = rbl_anlz::sibling(&rbl_anlz::resolve(&share, relative), "EXT");
+        let file = rbl_anlz::Anlz::read(&ext).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That track's analysis file could not be read.").with_detail(e.to_string())
+        })?;
+        let Some(bytes) = file.with_phrase_edit(edit) else { return Ok(false) };
+        let staged = ext.with_extension("tmp");
+        // perf-ok: runs inside the command's spawn_blocking closure
+        std::fs::write(&staged, bytes).and_then(|()| std::fs::rename(&staged, &ext)).map_err(|e| {
+            AppError::new(ErrorKind::Internal, "The analysis file could not be written.").with_detail(e.to_string())
+        })?;
+        Ok(true)
+    })
+    .await?;
+    if changed {
+        let _ = tauri::Emitter::emit(&app, "analysis:changed", &reported);
+    }
+    Ok(changed)
+}
+
 /// Whether the library cannot be written right now: rekordbox holds the
 /// installed library's file. A fixture is never held.
 fn library_locked(state: &AppState) -> bool {
