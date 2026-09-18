@@ -5,6 +5,37 @@ the git tags; a tag is what the release workflow builds and publishes. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the version numbers [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Analyze Track writes its result to the library: the beat grid and every
+  waveform go into the analysis files beside rekordbox's own, and the BPM,
+  key, length and analysis path onto the track. It is back in the track and
+  player menus and on `A`; a track rekordbox analysed keeps its phrases.
+- Intelligent playlists open, sort, search and export as the tracks their
+  rule admits, with their own icon in the tree.
+- A stick carries the tracks' artwork and the library's My Tags, and is
+  dated the day it was made where the machine is.
+- Loops on the player: AU loops the chosen number of beats from the head,
+  snapped to the grid when Q is on; MA takes IN and OUT by hand, and
+  RELOOP/EXIT either way. The seam is the audio's own join.
+- File › Import rekordbox xml… brings a rekordbox XML collection in — the
+  files, the playlist tree, and each new track's rating, comment and cues —
+  and Export Collection in xml format… writes one.
+- The track menu's Reset DJ Play Count, Remove from Collection (which asks
+  first) and Convert Memory Cues to Hot Cues are live, and the tree menu's
+  Export a playlist to a file writes an m3u8 or a tab-separated txt.
+- Preferences › Advanced › Database backs the library up on request, lists
+  the backups, and puts one back.
+- An export says which track it is on, and a stick plugged in or pulled out
+  is noticed within two seconds.
+
+### Fixed
+- A cloud-synced track whose file is not where the library says is exported
+  from its local copy rather than skipped.
+- The LINK strip stays hidden while nothing is on the network, even when
+  LINK cannot be turned on, and the Connect button keeps its space.
+
 ## [0.7.0] — 2026-09-16
 
 ### Added
