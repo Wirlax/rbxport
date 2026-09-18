@@ -228,6 +228,14 @@ export interface Backend {
   onCuesChanged(listener: (trackId: string) => void): () => void;
 
   /**
+   * Fires after a grid edit, undo or redo with the id of the track whose
+   * grid changed. A deck showing that track refetches its beats and its
+   * grid state. A tempo change also announces `onLibraryChanged`, because
+   * the row's BPM column changed with it.
+   */
+  onGridChanged(listener: (trackId: string) => void): () => void;
+
+  /**
    * Tracks whose file has gone. The count is exact; the list is a first page,
    * because a library can lose thousands when a drive is unplugged and a list
    * that long is neither useful nor small enough for the IPC cap.
@@ -249,6 +257,13 @@ export interface Backend {
    * and `beatsIn` slices the window being drawn.
    */
   trackBeats(trackId: string): Promise<Uint8Array>;
+
+  /**
+   * The GRID panel's view of a track's grid: its tempo, how many beats,
+   * whether there is anything to undo or redo, and whether it is locked.
+   * Rejects as `notFound` for a track with no grid.
+   */
+  gridState(trackId: string): Promise<GridState>;
 
   /** A track's cue points, ordered by position. */
   trackCues(trackId: string): Promise<Cue[]>;
@@ -1080,6 +1095,56 @@ export interface Edits {
    * next free slot from A. Resolves to how many were made.
    */
   convertMemoryCuesToHot(track: string): Promise<number>;
+
+  /**
+   * The beat grid. Like the cues, these change one track's analysis and say
+   * so through `onGridChanged`; an edit that changes the tempo also writes
+   * the row's BPM and reloads the library.
+   *
+   * `fromMs` applies the edit from the beat nearest that time on — the CUT
+   * point, or the playhead for the from-here buttons — and `deck` names the
+   * deck the track is loaded on, so its metronome follows the new grid.
+   * Every one resolves to the grid's state afterwards.
+   */
+  gridEdit(track: string, edit: GridEdit, options?: GridEditOptions): Promise<GridState>;
+  gridUndo(track: string, deck?: DeckId): Promise<GridState>;
+  gridRedo(track: string, deck?: DeckId): Promise<GridState>;
+  /** Locks or unlocks the grid against editing. */
+  gridLock(track: string, on: boolean): Promise<GridState>;
+}
+
+/** One change to a beat grid, as `rbl_anlz::grid::Edit` spells them. */
+export type GridEdit =
+  /** Shift every beat by `ms`; positive is later. */
+  | { kind: "nudge"; ms: number }
+  /** Twice the tempo: a beat between every pair. */
+  | { kind: "double" }
+  /** Half the tempo: every other beat dropped. */
+  | { kind: "halve" }
+  /** Make the beat nearest `timeMs` the downbeat. */
+  | { kind: "downbeat"; timeMs: number }
+  /** Re-space the grid at `bpmX100`, a beat held at `anchorMs`. */
+  | { kind: "tempo"; bpmX100: number; anchorMs: number }
+  /** Change the tempo by hundredths of a BPM, the first beat held. */
+  | { kind: "stretch"; byX100: number }
+  /** Move the grid so the beat nearest `timeMs` lands on it. */
+  | { kind: "align"; timeMs: number };
+
+export interface GridEditOptions {
+  /** Apply from the beat nearest this time on; omitted, the whole grid. */
+  fromMs?: number;
+  /** The deck the track is loaded on, whose metronome follows. */
+  deck?: DeckId;
+}
+
+/** What the GRID panel shows and enables. */
+export interface GridState {
+  /** The grid's tempo x100, from its first beat. */
+  bpmX100: number;
+  beats: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  locked: boolean;
 }
 
 /** One of the folders the Explorer starts from. */

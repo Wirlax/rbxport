@@ -11,12 +11,13 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
-  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
+import { applyEditFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 import { referenceDeviceSettings } from "./mock-device-settings";
@@ -866,6 +867,96 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       list.splice(list.indexOf(found.cue), 1);
       return cuesChanged(found.track, undefined);
     },
+    gridEdit: (track, edit, options) => {
+      const held = gridOf(track);
+      if (!held) return notFound("That track has no beat grid to edit.");
+      if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
+      const next = applyEditFrom(held.beats, options?.fromMs ?? null, edit);
+      if (next.length === 0) return failed("malformed", "That edit would leave the track without a beat.");
+      if (sameGrid(next, held.beats)) return wait(gridStateOf(held));
+      held.undo.push(held.beats);
+      held.redo = [];
+      held.beats = next;
+      return gridChanged(track, held);
+    },
+    gridUndo: (track) => {
+      const held = gridOf(track);
+      if (!held) return notFound("That track has no beat grid to edit.");
+      const previous = held.undo.pop();
+      if (!previous) return notFound("Nothing to undo.");
+      held.redo.push(held.beats);
+      held.beats = previous;
+      return gridChanged(track, held);
+    },
+    gridRedo: (track) => {
+      const held = gridOf(track);
+      if (!held) return notFound("That track has no beat grid to edit.");
+      const next = held.redo.pop();
+      if (!next) return notFound("Nothing to redo.");
+      held.undo.push(held.beats);
+      held.beats = next;
+      return gridChanged(track, held);
+    },
+    gridLock: (track, on) => {
+      const held = gridOf(track);
+      if (!held) return notFound("That track has no beat grid to edit.");
+      held.locked = on;
+      return wait(gridStateOf(held));
+    },
+  };
+
+  /*
+   * Grids, per track: a steady grid at the row's own BPM, made on first ask
+   * and held from then on so an edit sticks, with the session's undo and
+   * redo stacks and the lock beside it — what the real backend keeps in
+   * `GridEditor`. The listeners hear which track changed; a tempo change
+   * also bumps the generation, because the row's BPM column changed.
+   */
+  interface HeldGrid {
+    beats: EditableBeat[];
+    undo: EditableBeat[][];
+    redo: EditableBeat[][];
+    locked: boolean;
+  }
+  const gridStore = new Map<string, HeldGrid>();
+  const gridListeners = new Set<(trackId: string) => void>();
+  const analysisListeners = new Set<(trackId: string) => void>();
+  const gridOf = (trackId: string): HeldGrid | null => {
+    const held = gridStore.get(trackId);
+    if (held) return held;
+    const row = all[Number.parseInt(trackId, 10) - 100000];
+    if (!row || row.analysed === 0 || row.bpmX100 === 0) return null;
+    const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
+    const count = Math.min(Math.floor((row.durationSec * 1000) / beatMs) + 1, 65536);
+    const beats: EditableBeat[] = [];
+    for (let n = 0; n < count; n++) {
+      beats.push({ number: (n % 4) + 1, tempoX100: row.bpmX100, timeMs: Math.round(n * beatMs) });
+    }
+    const made = { beats, undo: [], redo: [], locked: false };
+    gridStore.set(trackId, made);
+    return made;
+  };
+  const sameGrid = (a: readonly EditableBeat[], b: readonly EditableBeat[]) =>
+    a.length === b.length
+    && a.every((beat, i) => beat.timeMs === b[i]?.timeMs && beat.number === b[i]?.number && beat.tempoX100 === b[i]?.tempoX100);
+  const gridStateOf = (held: HeldGrid): GridState => ({
+    bpmX100: tempoX100(held.beats),
+    beats: held.beats.length,
+    canUndo: held.undo.length > 0,
+    canRedo: held.redo.length > 0,
+    locked: held.locked,
+  });
+  const gridChanged = async (trackId: string, held: HeldGrid): Promise<GridState> => {
+    const row = all[Number.parseInt(trackId, 10) - 100000];
+    const bpm = tempoX100(held.beats);
+    for (const listener of gridListeners) listener(trackId);
+    if (row && row.bpmX100 !== bpm) {
+      row.bpmX100 = bpm;
+      const d = details.get(trackId);
+      if (d) d.bpmX100 = bpm;
+      await bump();
+    }
+    return wait(gridStateOf(held));
   };
 
   /**
@@ -1285,22 +1376,26 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     edits,
 
-    // A steady grid at the track's own BPM, so the detail waveform has beats
-    // to draw without an analysis file behind it. Encoded as the backend
-    // encodes it: five bytes a beat, milliseconds then the beat's number.
+    // The track's grid as the store holds it — a steady grid at the row's
+    // own BPM until the GRID panel edits it — so the detail waveform has
+    // beats to draw without an analysis file behind it. Encoded as the
+    // backend encodes it: five bytes a beat, milliseconds then the beat's
+    // number.
     trackBeats: (trackId) => {
-      const index = Number.parseInt(trackId, 10) - 100000;
-      const row = all[index];
-      if (!row || row.analysed === 0 || row.bpmX100 === 0) return wait(new Uint8Array());
-      const beatMs = (60 / (row.bpmX100 / 100)) * 1000;
-      const count = Math.min(Math.floor((row.durationSec * 1000) / beatMs) + 1, 65536);
-      const bytes = new Uint8Array(count * 5);
+      const held = gridOf(trackId);
+      if (!held) return wait(new Uint8Array());
+      const bytes = new Uint8Array(held.beats.length * 5);
       const view = new DataView(bytes.buffer);
-      for (let n = 0; n < count; n++) {
-        view.setUint32(n * 5, Math.round(n * beatMs), true);
-        view.setUint8(n * 5 + 4, (n % 4) + 1);
-      }
+      held.beats.forEach((beat, n) => {
+        view.setUint32(n * 5, beat.timeMs, true);
+        view.setUint8(n * 5 + 4, beat.number);
+      });
       return wait(bytes);
+    },
+    gridState: (trackId) => {
+      const held = gridOf(trackId);
+      if (!held) return notFound("That track has no beat grid.");
+      return wait(gridStateOf(held));
     },
 
     // The memory cue and the row's own hot cues, so the player's markers and
@@ -1721,7 +1816,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // queue's progress, cancellation and failure handling unobservable.
       return new Promise((resolve) =>
         setTimeout(
-          () => resolve({
+          () => {
+            // As the shell says it: a deck showing the track redraws.
+            for (const listener of analysisListeners) listener(trackId);
+            resolve({
             trackId,
             bpmX100: row.bpmX100 || 12_800,
             key: row.key || "Am",
@@ -1730,7 +1828,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             durationSec: row.durationSec,
             elapsedMs: ANALYSIS_MS,
             analysisPath: `/PIONEER/USBANLZ/P${String(index % 1000).padStart(3, "0")}/${index.toString(16).toUpperCase().padStart(8, "0")}/ANLZ0000.DAT`,
-          }),
+            });
+          },
           ANALYSIS_MS,
         ),
       );
@@ -1797,9 +1896,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The device tabs. Held per stick so a change survives switching tabs
     // and devices, the way a written file would.
     deviceSettings: (path) => wait(copySettings(settingsOf(path))),
-    // The mock's sticks carry their settings from the start, so there is
-    // nothing to give; what the stick holds comes back.
-    writeDeviceDefaults: (path) => wait(copySettings(settingsOf(path))),
     ensureDeviceLibrary: (path, defaults) => {
       const current = settingsOf(path);
       if (current.hasDeviceLibrary) return wait(copySettings(current));
@@ -1824,6 +1920,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (device && device.export === null) device.export = { tracks: 0, playlists: 0, ours: true, written: "" };
       return wait(copySettings(next));
     },
+    // The mock's sticks carry their settings from the start, so there is
+    // nothing to give; what the stick holds comes back.
+    writeDeviceDefaults: (path) => wait(copySettings(settingsOf(path))),
     saveDeviceSettings: (path, settings) => {
       const current = settingsOf(path);
       // A stick without a library keeps its reference rows: nothing to
@@ -1848,7 +1947,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     reloadLibrary: () => bump(),
     // The mock's analysis rewrites no files, so nothing redraws.
-    onAnalysisChanged: () => () => undefined,
 
     filterValues: (spec) => {
       if (!ready) return notReady();
@@ -1894,6 +1992,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     onCuesChanged: (listener) => {
       cueListeners.add(listener);
       return () => cueListeners.delete(listener);
+    },
+    onGridChanged: (listener) => {
+      gridListeners.add(listener);
+      return () => gridListeners.delete(listener);
+    },
+    onAnalysisChanged: (listener) => {
+      analysisListeners.add(listener);
+      return () => analysisListeners.delete(listener);
     },
     // The fake disk above. Copies, as with the tree: the map is the mock's.
     explorerRoots: () => wait(EXPLORER_ROOTS.map((root) => ({ ...root }))),

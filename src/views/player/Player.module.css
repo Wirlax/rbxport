@@ -1186,3 +1186,19 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
 /* A track being dragged over the deck is not marked on the sleeve: rekordbox
    draws nothing there, and the row travelling with the hand is the whole of
    the feedback. `data-droppable` stays on the deck for the drop itself. */
+
+/* The CUT point of the GRID panel: a dashed line the full height of the
+   band in the downbeat head's red, so it reads as the grid's and not as a
+   cue. Our own mark: rekordbox draws no such line [OBS]. */
+.cutMark {
+  position: absolute;
+  top: var(--s-beat-marker-top);
+  bottom: var(--s-beat-marker-bottom);
+  width: 0;
+  border-left: 1px dashed var(--c-downbeat-head);
+  pointer-events: none;
+}
+
+/* The BPM field while TAP is being pressed: the taps' tempo, lit the way a
+   pressed pad is, until they stop and the grid takes it. */
+.bpmField[data-tapping] { color: var(--c-pad-set); }

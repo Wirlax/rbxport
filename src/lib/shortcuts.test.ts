@@ -279,3 +279,40 @@ describe("the Keyboard pane's bindings", () => {
     }
   });
 });
+
+describe("the GRID panel's keys", () => {
+  it("opens the panel and shifts the grid with the modifier held, as the Export preset binds them", () => {
+    expect(actionFor({ key: "g", metaKey: true }, MAC)).toBe("adjustGrid");
+    expect(actionFor({ key: "g", ctrlKey: true }, WIN)).toBe("adjustGrid");
+    expect(actionFor({ key: "ArrowLeft", metaKey: true }, MAC)).toBe("shiftGridLeft");
+    expect(actionFor({ key: "ArrowRight", metaKey: true }, MAC)).toBe("shiftGridRight");
+    expect(actionFor({ key: "ArrowRight", ctrlKey: true }, WIN)).toBe("shiftGridRight");
+  });
+
+  it("leaves the bare arrows to the deck's jumps and the browser's cursor", () => {
+    expect(actionFor({ key: "ArrowLeft" }, MAC)).toBe("jumpBack");
+    expect(actionFor({ key: "ArrowRight" }, MAC)).toBe("jumpForward");
+    // With shift it is Player B's shift, as the preset binds it.
+    expect(matchBinding({ key: "ArrowLeft", metaKey: true, shiftKey: true }, MAC)).toMatchObject({
+      action: "shiftGridLeft", deck: "b",
+    });
+    expect(matchBinding({ key: "g", metaKey: true, shiftKey: true }, MAC)).toBeNull();
+  });
+
+  it("puts the nearest beat under the playhead on option + command + backslash, by key or by code", () => {
+    expect(actionFor({ key: "\\", metaKey: true, altKey: true }, MAC)).toBe("shiftGridToCenter");
+    // Option rewrites the character on some layouts; the physical key still says.
+    expect(actionFor({ key: "«", code: "Backslash", metaKey: true, altKey: true }, MAC)).toBe("shiftGridToCenter");
+    expect(actionFor({ key: "\\", ctrlKey: true, altKey: true }, WIN)).toBe("shiftGridToCenter");
+    expect(actionFor({ key: "\\", metaKey: true }, MAC)).toBeNull();
+    // Without the command it is the loop's doubling, from the same preset.
+    expect(actionFor({ key: "\\", altKey: true }, MAC)).toBe("loopDouble");
+  });
+
+  it("lists the four under Player A with rekordbox's command ids", () => {
+    const ids = BINDINGS.filter((b) => b.group === "Player A").map((b) => b.command);
+    for (const id of ["303e", "3043", "3044", "3045"]) expect(ids).toContain(id);
+    expect(describeChord({ key: "\\", metaKey: true, altKey: true }, MAC)).toBe("option + command + \\");
+    expect(describeChord({ key: "ArrowLeft", metaKey: true }, WIN)).toBe("ctrl + cursor left");
+  });
+});

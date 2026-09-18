@@ -10,6 +10,7 @@ pub mod analysis;
 pub mod commands;
 pub mod cues;
 pub mod details;
+pub mod grid;
 mod diagnostics;
 mod explorer;
 mod link;
@@ -337,6 +338,7 @@ pub fn run() {
         .plugin(window_geometry())
         .manage(Arc::new(AppState::new()))
         .manage(Arc::new(crate::player::Player::default()))
+        .manage(Arc::new(crate::grid::GridEditor::default()))
         .manage(Arc::new(crate::update::Updates::default()))
         .setup(|app| {
             spawn_library_load(app.handle().clone());
@@ -456,6 +458,13 @@ pub fn run() {
             commands::set_eq_curve,
             commands::deck_state,
             commands::track_cues,
+            // The GRID panel: every one rewrites the track's analysis files
+            // and is refused while rekordbox runs, like the edits above.
+            grid::grid_state,
+            grid::grid_edit,
+            grid::grid_undo,
+            grid::grid_redo,
+            grid::grid_lock,
             commands::track_phrases,
             commands::track_vocals,
             commands::missing_tracks,

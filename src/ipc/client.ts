@@ -6,7 +6,7 @@
  */
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
-  Diagnostics, Duplicates, Limiter, PreferencesRequest, SyncDeviceReport, SyncProgress, UpdateCheck,
+  Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
@@ -69,6 +69,7 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
+    gridState: (trackId) => invoke<GridState>("grid_state", { track: trackId }),
     trackCues: (trackId) => invoke<Cue[]>("track_cues", { track: trackId }),
     trackPhrases: (trackId) => invoke<Phrase[]>("track_phrases", { track: trackId }),
     editPhrase: (trackId, beat, action) => invoke<boolean>("edit_phrase", { trackId, beat, action }),
@@ -210,6 +211,7 @@ async function realBackend(): Promise<Backend> {
     onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
+    onGridChanged: (listener) => subscribe<string>("grid:changed", listener),
     onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
@@ -329,6 +331,13 @@ async function realBackend(): Promise<Backend> {
         invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
       moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
+      gridEdit: (track, edit, options) =>
+        invoke<GridState>("grid_edit", {
+          track, edit, fromMs: options?.fromMs ?? null, deck: options?.deck ?? null,
+        }),
+      gridUndo: (track, deck) => invoke<GridState>("grid_undo", { track, deck: deck ?? null }),
+      gridRedo: (track, deck) => invoke<GridState>("grid_redo", { track, deck: deck ?? null }),
+      gridLock: (track, on) => invoke<GridState>("grid_lock", { track, on }),
       convertMemoryCuesToHot: (track) => invoke<number>("convert_memory_cues_to_hot", { track }),
       setTrackField: (track, field, value) =>
         invoke<number>("set_track_field", { track, field, value }),

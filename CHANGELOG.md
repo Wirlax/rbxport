@@ -11,6 +11,17 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - A Linux build. Each release now ships an AppImage, which the app can
   update itself from, and a .deb, beside the macOS disk image and the
   Windows installer.
+- The GRID panel edits the beat grid and saves it to the library: set the
+  beat marker, tap the tempo, shift the grid a millisecond either way,
+  widen or narrow it by 0.01 BPM, double or halve it, snap the nearest beat
+  to the playhead for the whole grid or from the playhead on, undo and
+  redo, and lock the grid against edits. CUT sets the point from which the
+  other edits apply, so a tempo change part-way through a DJ edit can be
+  gridded without moving the beats before it. The keys are rekordbox's:
+  command + G opens the panel, command + cursor left/right shift the grid,
+  option + command + \ snaps to the playhead. The metronome follows the
+  edited grid, and the first time a track's analysis files are rewritten
+  the originals are kept under the app's backups.
 
 ### Changed
 - Analyze reads the whole track instead of the first three minutes. The beat

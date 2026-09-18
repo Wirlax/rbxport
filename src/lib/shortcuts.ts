@@ -89,7 +89,15 @@ export type Action =
   // mutes it.
   | "volumeUp"
   | "volumeDown"
-  | "mute";
+  | "mute"
+  // The GRID panel: `Adjust BPM/BeatGrid` (`command + G`) opens it, the
+  // modified arrows are `Shift Beatgrid left/right`, and `Shift Beatgrid to
+  // the center` (`option + command + \`) puts the nearest beat under the
+  // playhead, which is the centre of the detail waveform.
+  | "adjustGrid"
+  | "shiftGridLeft"
+  | "shiftGridRight"
+  | "shiftGridToCenter";
 
 /**
  * The pad a hot cue action names, and whether it clears rather than sets.
@@ -404,6 +412,10 @@ const PLAYER_A: readonly Omit<Binding, "id" | "group" | "deck">[] = [
   { label: "Tempo Reset", chord: { key: "F3" }, action: "tempoReset", command: "304e" },
   { label: "BPM +", chord: { key: "F7" }, action: "bpmUp", command: "3051" },
   { label: "BPM -", chord: { key: "F6" }, action: "bpmDown", command: "3052" },
+  { label: "Adjust BPM/BeatGrid", chord: { key: "g", metaKey: true }, action: "adjustGrid", command: "303e" },
+  { label: "Shift Beatgrid left", chord: { key: "ArrowLeft", metaKey: true }, action: "shiftGridLeft", command: "3044" },
+  { label: "Shift Beatgrid right", chord: { key: "ArrowRight", metaKey: true }, action: "shiftGridRight", command: "3043" },
+  { label: "Shift Beatgrid to the center", chord: { key: "\\", metaKey: true, altKey: true }, action: "shiftGridToCenter", command: "3045" },
 ];
 
 /** Player B's row for one of Player A's: shift, and the `31xx` command. */
@@ -438,9 +450,11 @@ export const BINDINGS: readonly Binding[] = [
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
   { id: "loadPlayer1.shift", group: "Browse", label: "Load on Player 1", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer1", alias: true },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),
-  // The preset gives Player B no clears for its pads, and the metronome's
-  // sound is the engine's: neither row exists there.
-  ...PLAYER_A.filter((row) => row.action !== "metronomeSound" && hotCuePad(row.action ?? "cue")?.clear !== true)
+  // The preset gives Player B no clears for its pads, no `Adjust
+  // BPM/BeatGrid`, and the metronome's sound is the engine's: none of those
+  // rows exists there.
+  ...PLAYER_A.filter((row) =>
+    row.action !== "metronomeSound" && row.action !== "adjustGrid" && hotCuePad(row.action ?? "cue")?.clear !== true)
     .map(playerB),
   { id: "volumeUp", group: "General", label: "Volume", chord: { key: "F12", metaKey: true }, action: "volumeUp", command: "3003" },
   { id: "volumeDown", group: "General", label: "Volume Down", chord: { key: "F11", metaKey: true }, action: "volumeDown", command: "3004" },
