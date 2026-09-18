@@ -772,7 +772,6 @@ fn source_track(
         file_size: library.file_size.get(i).copied().unwrap_or(0),
         year: library.year.get(i).copied().unwrap_or(0),
         analysis: read_analysis(share, library.analysis_path.get(i)),
-        ..rbl_export::SourceTrack::default()
     }
 }
 

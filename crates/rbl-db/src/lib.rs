@@ -272,6 +272,35 @@ impl Library {
     }
 }
 
+/// Where a track whose `FolderPath` starts with `/contents_<id>/` really
+/// is: rekordbox's Cloud Library Sync keeps those under
+/// `<DropboxSharingPath>/rekordbox/`, and `DropboxSharingPath` is a value
+/// in `rekordbox3.settings` [OBS 7.2.11]. `None` when there is no such
+/// setting, in which case such a track has no file this machine can see.
+#[must_use]
+pub fn cloud_contents_root() -> Option<PathBuf> {
+    let settings = std::fs::read_to_string(rbl_core::paths::rekordbox_settings_dir()?.join("rekordbox3.settings")).ok()?;
+    let marker = "<VALUE name=\"DropboxSharingPath\" val=\"";
+    let start = settings.find(marker)? + marker.len();
+    let end = settings[start..].find('"')? + start;
+    let value = settings[start..end].replace("&amp;", "&");
+    if value.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(value).join("rekordbox"))
+}
+
+/// A library `FolderPath` as a path on this machine: a cloud-library path
+/// (`/contents_<id>/…`) placed under the cloud root when one is known,
+/// anything else as it is.
+#[must_use]
+pub fn resolve_folder_path(folder_path: &str, cloud_root: Option<&Path>) -> String {
+    match (folder_path.strip_prefix("/contents_"), cloud_root) {
+        (Some(_), Some(root)) => root.join(folder_path.trim_start_matches('/')).to_string_lossy().into_owned(),
+        _ => folder_path.to_owned(),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -309,33 +338,3 @@ mod tests {
         assert!(write_refusal_reason(false, true, true).is_none());
     }
 }
-
-/// Where a track whose `FolderPath` starts with `/contents_<id>/` really
-/// is: rekordbox's Cloud Library Sync keeps those under
-/// `<DropboxSharingPath>/rekordbox/`, and `DropboxSharingPath` is a value
-/// in `rekordbox3.settings` [OBS 7.2.11]. `None` when there is no such
-/// setting, in which case such a track has no file this machine can see.
-#[must_use]
-pub fn cloud_contents_root() -> Option<PathBuf> {
-    let settings = std::fs::read_to_string(rbl_core::paths::rekordbox_settings_dir()?.join("rekordbox3.settings")).ok()?;
-    let marker = "<VALUE name=\"DropboxSharingPath\" val=\"";
-    let start = settings.find(marker)? + marker.len();
-    let end = settings[start..].find('"')? + start;
-    let value = settings[start..end].replace("&amp;", "&");
-    if value.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(value).join("rekordbox"))
-}
-
-/// A library `FolderPath` as a path on this machine: a cloud-library path
-/// (`/contents_<id>/…`) placed under the cloud root when one is known,
-/// anything else as it is.
-#[must_use]
-pub fn resolve_folder_path(folder_path: &str, cloud_root: Option<&Path>) -> String {
-    match (folder_path.strip_prefix("/contents_"), cloud_root) {
-        (Some(_), Some(root)) => root.join(folder_path.trim_start_matches('/')).to_string_lossy().into_owned(),
-        _ => folder_path.to_owned(),
-    }
-}
-
