@@ -723,8 +723,9 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
     file.add_table(16, &constant(reference::COLUMNS));
     file.add_table(17, &constant(reference::HISTORY_PLAYLISTS));
     file.add_table(18, &constant(reference::HISTORY_ENTRIES));
-    let today = rbl_core::time::now();
-    let history = reference::history_row(today.get(..10).unwrap_or("")).map_or_else(Vec::new, |row| vec![row]);
+    // The local day, as rekordbox dates the export where the machine is.
+    let today = rbl_core::time::local_date();
+    let history = reference::history_row(&today).map_or_else(Vec::new, |row| vec![row]);
     file.add_table(19, &history);
     file.finish()
 }
@@ -947,10 +948,9 @@ fn write_one_library(
         }
     }
 
-    // The date only, and the local one: rekordbox's own export carries the
-    // day the person exported on, not the UTC day. The device name is the
-    // one the stick has been given, and empty until then: rekordbox writes
-    // it empty on a fresh export [OBS 7.2.11].
+    // The date only, which is what rekordbox's own export carries. The
+    // device name is the one the stick has been given, and empty until
+    // then: rekordbox writes it empty on a fresh export [OBS 7.2.11].
     let created = rbl_core::time::local_date();
     builder.finish(&settings.device_name, &created).map_err(|e| one_library_error(&e))
 }
