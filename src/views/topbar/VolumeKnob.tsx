@@ -5,28 +5,29 @@
  * Dragged rather than clicked — a knob is a knob — and vertical, which is what
  * every mixer does: sideways on a control 18pt across is unusable.
  *
- * The scale is `volume.ts`'s: 0 at seven o'clock, 10 at five o'clock a
- * decibel under full, and past a detent 11 at six o'clock, full. While the
+ * The scale is `volume.ts`'s: 0 at half past seven, 10 at half past four a
+ * decibel under full, and past a notch 11 at five o'clock, full. While the
  * knob turns its reading is shown beside it. Reaching 10 the knob holds
- * there; keep pulling for a moment and it lets go to 11.
+ * there; keep pulling, through the notch, and it lets go to 11.
  */
 import { useCallback, useRef, useState } from "react";
 
 import { gainToKnob, KNOB_FULL, KNOB_TOP, knobLabel, knobToGain } from "@/lib/volume";
 import styles from "./TopBar.module.css";
 
-/** Degrees the travel sweeps, from seven o'clock to five. */
-const SWEEP = 300;
+/** Degrees the travel sweeps, from half past seven to half past four. */
+const SWEEP = 270;
 /** Where that sweep starts, measured clockwise from twelve o'clock. */
-const START = -150;
-/** Where 11 sits: six o'clock. */
-const FULL_ANGLE = 180;
+const START = -135;
+/** Where 11 sits: five o'clock, a notch past the end of the travel. */
+const FULL_ANGLE = 150;
 /** Pixels of drag for the whole travel. A short throw is a twitchy knob. */
 const THROW = 120;
-/** How long the knob holds at 10 before a pull past it reaches 11. */
-const DETENT_MS = 500;
-/** How far past 10 the pointer has to go, once the hold is over. */
-const DETENT_PX = 12;
+/**
+ * The notch: how far past 10 the pull has to go, with the knob held at 10,
+ * before it lets go to 11: over half the travel again.
+ */
+const NOTCH_PX = 70;
 
 export interface VolumeKnobProps {
   /** The engine's gain, 0 to 1. */
@@ -56,7 +57,7 @@ function arc(from: number, to: number, radius: number): string {
 
 export function VolumeKnob({ level, onChange }: VolumeKnobProps) {
   const reading = gainToKnob(Number.isFinite(level) ? level : 0);
-  const grab = useRef<{ y: number; from: number; heldSince: number | null } | null>(null);
+  const grab = useRef<{ y: number; from: number } | null>(null);
   const [turning, setTurning] = useState<number | null>(null);
 
   const move = useCallback(
@@ -67,14 +68,11 @@ export function VolumeKnob({ level, onChange }: VolumeKnobProps) {
       const pulled = held.from + ((held.y - event.clientY) / THROW) * KNOB_TOP;
       let next: number;
       if (pulled < KNOB_TOP) {
-        held.heldSince = null;
         next = Math.max(pulled, 0);
       } else {
-        // The detent: 10 holds while the pull goes on, then lets go to 11.
-        const now = performance.now();
-        if (held.heldSince === null) held.heldSince = now;
+        // The notch: 10 holds while the pull goes on past it, then 11.
         const past = ((pulled - KNOB_TOP) / KNOB_TOP) * THROW;
-        next = now - held.heldSince >= DETENT_MS && past >= DETENT_PX ? KNOB_FULL : KNOB_TOP;
+        next = past >= NOTCH_PX ? KNOB_FULL : KNOB_TOP;
       }
       setTurning(next);
       onChange?.(knobToGain(next));
@@ -97,7 +95,7 @@ export function VolumeKnob({ level, onChange }: VolumeKnobProps) {
       tabIndex={0}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
-        grab.current = { y: event.clientY, from: reading, heldSince: null };
+        grab.current = { y: event.clientY, from: reading };
         setTurning(reading);
       }}
       onPointerMove={move}
