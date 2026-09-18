@@ -172,6 +172,7 @@ export function AudioPane({ limiter, onLimiterChange, reduction, peakLeft = 0, p
           holding it down: two stereo meters, then two reduction meters, each
           with its figure. */}
       <div className={styles.meters} role="group" aria-label="Master output">
+        <span className={styles.meterCaption}>Output</span>
         {([["L", peakLeft], ["R", peakRight]] as const).map(([channel, peak]) => (
           <div key={channel} className={styles.meterRow}>
             <span className={styles.meterLabel}>{channel}</span>
@@ -190,6 +191,7 @@ export function AudioPane({ limiter, onLimiterChange, reduction, peakLeft = 0, p
         ))}
       </div>
       <div className={styles.meters} role="group" aria-label="Limiter reduction">
+        <span className={styles.meterCaption}>Reduction</span>
         {(["L", "R"] as const).map((channel) => (
           <div key={channel} className={styles.meterRow}>
             <span className={styles.meterLabel}>{channel}</span>

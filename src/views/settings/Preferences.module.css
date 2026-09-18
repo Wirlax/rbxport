@@ -549,6 +549,7 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
   gap: 4px;
   margin: 0 0 10px calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
 }
+.meterCaption { color: var(--c-text-dim); font-size: var(--f-size-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .meterRow { display: flex; align-items: center; gap: 8px; }
 .meterLabel { width: 12px; color: var(--c-device-label); font-size: var(--f-size-xs); font-weight: 700; }
 .meterBar {

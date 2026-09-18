@@ -206,7 +206,8 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
   await open(page);
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "About" }).click();
-  await expect(dialog.getByRole("heading", { name: "rbxport" })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "About" })).toBeVisible();
+  await expect(dialog.getByText("Made with ❤️ in California")).toBeVisible();
   await expect(dialog.getByTestId("about-version")).toHaveText("0.4.0");
   await expect(dialog).toContainText("@TRIODEOfficial");
   // The update check is said once, under Advanced › Others, not in two places.

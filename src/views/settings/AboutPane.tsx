@@ -40,7 +40,7 @@ export function AboutPane() {
 
   return (
     <>
-      <Section title="rbxport">
+      <Section title="About">
         <div className={styles.aboutHead}>
           <span className={styles.aboutName}>rbxport</span>
           <span className={styles.aboutVersion}>
