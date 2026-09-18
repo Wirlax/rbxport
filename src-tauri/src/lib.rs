@@ -464,6 +464,7 @@ pub fn run() {
             commands::delete_playlist,
             commands::add_tracks_to_playlist,
             commands::remove_tracks_from_playlist,
+            commands::export_playlist_file,
             commands::import_xml,
             commands::export_xml,
             commands::list_backups,

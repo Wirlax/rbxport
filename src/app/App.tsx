@@ -1243,6 +1243,23 @@ export function App() {
     [selectedDevice, tree, report, refuse, stickDefaults],
   );
 
+  const exportPlaylistFile = useCallback((node: TreeNode, format: "m3u8" | "txt") => {
+    void (async () => {
+      const backend = await getBackend();
+      report(`Choosing where to write ${node.name}…`);
+      try {
+        const written = await backend.exportPlaylistFile(node.id, node.name, format);
+        if (written === null) {
+          setNote(null);
+          return;
+        }
+        report(`Wrote ${node.name} as ${format}: ${written} track${written === 1 ? "" : "s"}.`);
+      } catch (e) {
+        refuse(e instanceof Error ? e.message : "That file could not be written.");
+      }
+    })();
+  }, [report, refuse]);
+
   const exportPlaylist = useCallback((node: TreeNode) => {
     void (async () => {
       const backend = await getBackend();
@@ -1444,6 +1461,7 @@ export function App() {
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
           onExport={exportPlaylist}
+          onExportFile={exportPlaylistFile}
           onCreatePlaylist={createPlaylistIn}
           onCreateFolder={createFolderIn}
           onDeleteNode={deleteNode}
@@ -1544,6 +1562,7 @@ export function App() {
               dragging: draggedTracks !== null,
               onDropTracks: addDraggedTo,
               onExport: exportPlaylist,
+              onExportFile: exportPlaylistFile,
               onCreatePlaylist: createPlaylistIn,
               onCreateFolder: createFolderIn,
               onDeleteNode: deleteNode,

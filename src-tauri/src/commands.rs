@@ -1692,6 +1692,83 @@ pub async fn import_xml<R: tauri::Runtime>(
     Ok(report)
 }
 
+/// Export a playlist to a file: `m3u8`, which any player reads, or the
+/// tab-separated `txt` rekordbox writes. An intelligent playlist is what
+/// its rule admits now. Resolves to how many tracks were written.
+#[tauri::command]
+pub async fn export_playlist_file(
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    path: String,
+    format: String,
+) -> AppResult<u32> {
+    let library = state.library()?;
+    blocking("export_playlist_file", move || {
+        let playlists = library.playlists();
+        let Some(index) = playlist.parse::<u64>().ok().and_then(|numeric| playlists.index_of(numeric)) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+        };
+        let source = if playlists.is_smart(index) {
+            rbl_index::TrackSource::SmartPlaylist(index)
+        } else {
+            rbl_index::TrackSource::Playlist(index)
+        };
+        let rows = library.source_rows_unlocked(&playlists, &source);
+        drop(playlists);
+        let text = match format.as_str() {
+            "txt" => playlist_txt(&library, &rows),
+            _ => playlist_m3u8(&library, &rows),
+        };
+        std::fs::write(&path, text).map_err(|e| {
+            AppError::new(ErrorKind::Internal, "The playlist file could not be written.").with_detail(e.to_string())
+        })?;
+        Ok(u32::try_from(rows.len()).unwrap_or(u32::MAX))
+    })
+    .await
+}
+
+/// An extended M3U: a line of length and title, then the file, per track.
+fn playlist_m3u8(library: &rbl_index::Library, rows: &[u32]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("#EXTM3U\n");
+    for &row in rows {
+        let i = row as usize;
+        let artist = library.artist_name(row);
+        let title = library.title.get(i);
+        let name = if artist.is_empty() { title.to_owned() } else { format!("{artist} - {title}") };
+        let _ = writeln!(out, "#EXTINF:{},{name}\n{}", library.length_sec.get(i).copied().unwrap_or(0), library.folder_path.get(i));
+    }
+    out
+}
+
+/// rekordbox's tab-separated listing: a header, then one line per track in
+/// the playlist's order, times as `m:ss`.
+fn playlist_txt(library: &rbl_index::Library, rows: &[u32]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("#\tTrack Title\tArtist\tAlbum\tGenre\tBPM\tRating\tTime\tKey\tDate Added\n");
+    let clean = |text: &str| text.replace(['\t', '\n', '\r'], " ");
+    for (n, &row) in rows.iter().enumerate() {
+        let i = row as usize;
+        let secs = library.length_sec.get(i).copied().unwrap_or(0);
+        let bpm = f64::from(library.bpm_x100.get(i).copied().unwrap_or(0)) / 100.0;
+        let _ = writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}\t{bpm:.2}\t{}\t{}:{:02}\t{}\t{}",
+            n + 1,
+            clean(library.title.get(i)),
+            clean(library.artist_name(row)),
+            clean(library.album_name(row)),
+            clean(library.genre_name(row)),
+            library.rating.get(i).copied().unwrap_or(0),
+            secs / 60,
+            secs % 60,
+            clean(library.key_name(row)),
+            clean(library.date_added.get(i)),
+        );
+    }
+    out
+}
+
 /// Writes the collection as rekordbox's XML to `path`; resolves to how many
 /// tracks it holds.
 #[tauri::command]

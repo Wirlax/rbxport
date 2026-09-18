@@ -255,6 +255,12 @@ export interface Backend {
    */
   importFiles(): Promise<ImportReport | null>;
   /**
+   * Export a playlist to a file, where the platform's save dialog says:
+   * `m3u8`, or rekordbox's tab-separated `txt`. Resolves to how many tracks,
+   * or null when cancelled.
+   */
+  exportPlaylistFile(playlistId: string, name: string, format: "m3u8" | "txt"): Promise<number | null>;
+  /**
    * Imports a rekordbox XML collection chosen in the platform's file
    * dialog: its files into the library, its playlists, and the cues of each
    * track that landed. Null when the dialog is cancelled.

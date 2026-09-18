@@ -96,6 +96,16 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
+    exportPlaylistFile: async (playlistId, name, format) => {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const picked = await save({
+        title: `Export ${name} as ${format}`,
+        defaultPath: `${name}.${format}`,
+        filters: [{ name: format === "txt" ? "Text" : "M3U playlist", extensions: [format] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<number>("export_playlist_file", { playlist: playlistId, path: picked, format });
+    },
     importXml: async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({

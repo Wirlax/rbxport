@@ -241,6 +241,8 @@ export interface TreeViewProps {
   onSelect: (node: TreeNode) => void;
   /** Write a playlist to a stick. */
   onExport?: (node: TreeNode) => void;
+  /** Export a playlist to a file: an m3u8 or rekordbox's tab-separated txt. */
+  onExportFile?: (node: TreeNode, format: "m3u8" | "txt") => void;
   /** Create, delete and rename, which the shell owns because they write. */
   onCreatePlaylist?: (parent: TreeNode) => void;
   onCreateFolder?: (parent: TreeNode) => void;
@@ -269,7 +271,7 @@ export interface TreeViewProps {
 }
 
 export function TreeView({
-  nodes, selectedId, onSelect, dragging, onDropTracks, onExport,
+  nodes, selectedId, onSelect, dragging, onDropTracks, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false,
 }: TreeViewProps) {
@@ -440,6 +442,12 @@ export function TreeView({
             switch (action) {
               case "export":
                 onExport?.(menu.node);
+                break;
+              case "exportM3u8":
+                onExportFile?.(menu.node, "m3u8");
+                break;
+              case "exportTxt":
+                onExportFile?.(menu.node, "txt");
                 break;
               case "createPlaylist":
                 onCreatePlaylist?.(menu.node);

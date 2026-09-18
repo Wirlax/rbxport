@@ -22,6 +22,8 @@ export type TrackAction =
 
 export type TreeAction =
   | "export"
+  | "exportM3u8"
+  | "exportTxt"
   | "createPlaylist"
   | "createFolder"
   | "rename"
@@ -150,7 +152,15 @@ export function treeMenu(kind: "playlist" | "smartPlaylist" | "folder"): readonl
     { label: folder ? "Rename Folder" : "Rename Playlist", action: "rename" },
     { label: folder ? "Delete Folder" : "Delete Playlist", action: "delete" },
     SEPARATOR,
-    { label: "Export a playlist to a file", action: null, submenu: true },
+    {
+      label: "Export a playlist to a file",
+      action: null,
+      submenu: true,
+      items: [
+        { label: "m3u8", action: "exportM3u8" },
+        { label: "txt", action: "exportTxt" },
+      ],
+    },
     SEPARATOR,
     { label: "Collaborative playlist", action: null, submenu: true },
     SEPARATOR,
