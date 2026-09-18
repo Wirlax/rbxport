@@ -599,31 +599,24 @@ pub fn export_full(
         report.playlists += 1;
     }
 
-    let mut file = FileBuilder::new(PAGE_SIZE);
-    file.add_table(0, &track_rows);
-    file.add_table(1, &genres.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>());
-    file.add_table(2, &artists.entries().map(|(id, n)| artist_row(id, n)).collect::<Vec<_>>());
-    file.add_table(3, &albums.entries().map(|(id, n)| album_row(id, 0, n)).collect::<Vec<_>>());
-    file.add_table(4, &labels.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>());
-    file.add_table(5, &keys.entries().map(|(id, n)| key_row(id, n)).collect::<Vec<_>>());
-    file.add_table(
-        6,
-        &COLORS
-            .iter()
-            .enumerate()
-            .map(|(i, name)| color_row(u16::try_from(i).unwrap_or(0) + 1, name))
-            .collect::<Vec<_>>(),
-    );
-    file.add_table(7, &playlist_rows);
-    file.add_table(8, &entry_rows);
     // The artwork table names the small image of each; a player derives the
     // others from the same name [ASSUME: what the `artwork` row of a
     // rekordbox export names, of the four files it writes per image].
     let artwork_paths: Vec<(u32, String)> =
         artwork.entries().map(|(id, _)| (id, artwork_path(id, "a", false))).collect();
-    file.add_table(13, &artwork_paths.iter().map(|(id, path)| artwork_row(*id, path)).collect::<Vec<_>>());
+    let artwork_rows: Vec<Vec<u8>> = artwork_paths.iter().map(|(id, path)| artwork_row(*id, path)).collect();
 
-    let pdb = file.finish();
+    let pdb = build_pdb(&PdbTables {
+        tracks: &track_rows,
+        genres: &genres.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>(),
+        artists: &artists.entries().map(|(id, n)| artist_row(id, n)).collect::<Vec<_>>(),
+        albums: &albums.entries().map(|(id, n)| album_row(id, 0, n)).collect::<Vec<_>>(),
+        labels: &labels.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>(),
+        keys: &keys.entries().map(|(id, n)| key_row(id, n)).collect::<Vec<_>>(),
+        playlists: &playlist_rows,
+        entries: &entry_rows,
+        artwork: &artwork_rows,
+    });
     report.pdb_bytes = pdb.len();
     std::fs::write(db_dir.join("export.pdb"), &pdb)?;
 
@@ -645,6 +638,98 @@ pub fn export_full(
     .save(destination)?;
 
     Ok(report)
+}
+
+/// The rows of the tables an export fills from the library; every other
+/// table rekordbox writes is the same on every stick.
+struct PdbTables<'a> {
+    tracks: &'a [Vec<u8>],
+    genres: &'a [Vec<u8>],
+    artists: &'a [Vec<u8>],
+    albums: &'a [Vec<u8>],
+    labels: &'a [Vec<u8>],
+    keys: &'a [Vec<u8>],
+    playlists: &'a [Vec<u8>],
+    entries: &'a [Vec<u8>],
+    /// Empty on a stick with no artwork, and on a blank one.
+    artwork: &'a [Vec<u8>],
+}
+
+/// Builds `export.pdb` with the twenty tables rekordbox writes, in its
+/// order: the eight the library fills, the eight colours, the artwork
+/// (type 13) among six that are always empty (types 9 to 15), the browse column
+/// names and the History menu's two tables (`rbl_pdb::reference`), and the
+/// one `history` row that carries the export's date [OBS 7.2.11]. A player
+/// looks the table list up by type, so the empty ones have to be there.
+fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
+    use rbl_pdb::reference;
+    let mut file = FileBuilder::new(PAGE_SIZE);
+    file.add_table(0, tables.tracks);
+    file.add_table(1, tables.genres);
+    file.add_table(2, tables.artists);
+    file.add_table(3, tables.albums);
+    file.add_table(4, tables.labels);
+    file.add_table(5, tables.keys);
+    file.add_table(
+        6,
+        &COLORS
+            .iter()
+            .enumerate()
+            .map(|(i, name)| color_row(u16::try_from(i).unwrap_or(0) + 1, name))
+            .collect::<Vec<_>>(),
+    );
+    file.add_table(7, tables.playlists);
+    file.add_table(8, tables.entries);
+    for page_type in 9..=15 {
+        // The artwork table names the small image of each; a player derives
+        // the others from the same name [ASSUME: what the `artwork` row of a
+        // rekordbox export names, of the four files it writes per image].
+        file.add_table(page_type, if page_type == 13 { tables.artwork } else { &[] });
+    }
+    let constant = |rows: &[&[u8]]| rows.iter().map(|row| row.to_vec()).collect::<Vec<_>>();
+    file.add_table(16, &constant(reference::COLUMNS));
+    file.add_table(17, &constant(reference::HISTORY_PLAYLISTS));
+    file.add_table(18, &constant(reference::HISTORY_ENTRIES));
+    let today = rbl_core::time::now();
+    let history = reference::history_row(today.get(..10).unwrap_or("")).map_or_else(Vec::new, |row| vec![row]);
+    file.add_table(19, &history);
+    file.finish()
+}
+
+/// Writes the database folders an empty stick gets, as rekordbox does the
+/// moment a drive is connected: `PIONEER/rekordbox/export.pdb` with the
+/// twenty tables and no tracks, `exportLibrary.db` holding `defaults` (or
+/// the reference rows), and the `USBANLZ` and `Contents` directories. With
+/// these in place the device's settings can be edited before anything is
+/// exported. A stick that already has a database is left alone.
+pub fn create_library(
+    destination: &Path,
+    defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+) -> Result<bool> {
+    if destination.exists() && !destination.is_dir() {
+        return Err(ExportError::NotADirectory(destination.to_owned()));
+    }
+    let db_dir = destination.join("PIONEER/rekordbox");
+    if db_dir.join("export.pdb").is_file() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(destination.join("Contents"))?;
+    std::fs::create_dir_all(destination.join("PIONEER/USBANLZ"))?;
+    std::fs::create_dir_all(&db_dir)?;
+    let pdb = build_pdb(&PdbTables {
+        tracks: &[],
+        genres: &[],
+        artists: &[],
+        albums: &[],
+        labels: &[],
+        keys: &[],
+        playlists: &[],
+        entries: &[],
+        artwork: &[],
+    });
+    std::fs::write(db_dir.join("export.pdb"), pdb)?;
+    write_one_library(&db_dir, &[], &[], &[], &[], &[], defaults)?;
+    Ok(true)
 }
 
 /// The subset of a track `exportLibrary.db` needs.

@@ -11,6 +11,7 @@
 //! validated against a real rekordbox-authored export.
 
 pub mod build;
+pub mod reference;
 pub mod rows;
 
 use std::collections::BTreeMap;

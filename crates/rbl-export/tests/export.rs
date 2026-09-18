@@ -251,6 +251,46 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
 }
 
 #[test]
+fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
+    let stick = tempfile::tempdir().unwrap();
+    assert!(rbl_export::create_library(stick.path(), None).expect("create"), "a blank stick gets a database");
+    assert!(stick.path().join("PIONEER/rekordbox/export.pdb").is_file());
+    assert!(stick.path().join("PIONEER/rekordbox/exportLibrary.db").is_file());
+    assert!(stick.path().join("PIONEER/USBANLZ").is_dir());
+    assert!(stick.path().join("Contents").is_dir());
+
+    let bytes = std::fs::read(stick.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+    // The twenty tables rekordbox writes, in its order, with the constant
+    // rows in place and nothing in the ones the library fills.
+    let types: Vec<u32> = pdb.tables.iter().map(|t| match t.page_type {
+        rbl_pdb::PageType::Other(v) => v,
+        known => (0..20).find(|&v| rbl_pdb::PageType::name(known) == rbl_pdb::PageType::name(match v {
+            0 => rbl_pdb::PageType::Tracks, 1 => rbl_pdb::PageType::Genres, 2 => rbl_pdb::PageType::Artists,
+            3 => rbl_pdb::PageType::Albums, 4 => rbl_pdb::PageType::Labels, 5 => rbl_pdb::PageType::Keys,
+            6 => rbl_pdb::PageType::Colors, 7 => rbl_pdb::PageType::PlaylistTree, 8 => rbl_pdb::PageType::PlaylistEntries,
+            13 => rbl_pdb::PageType::Artwork, 16 => rbl_pdb::PageType::Columns, 17 => rbl_pdb::PageType::HistoryPlaylists,
+            18 => rbl_pdb::PageType::HistoryEntries, 19 => rbl_pdb::PageType::History, other => rbl_pdb::PageType::Other(other),
+        })).unwrap_or(u32::MAX),
+    }).collect();
+    assert_eq!(types, (0..20).collect::<Vec<u32>>());
+    let census = pdb.census();
+    assert_eq!(census.get("tracks"), Some(&0));
+    assert_eq!(census.get("colors"), Some(&8));
+    assert_eq!(census.get("columns"), Some(&27));
+    assert_eq!(census.get("history_playlists"), Some(&22));
+    assert_eq!(census.get("history_entries"), Some(&17));
+    assert_eq!(census.get("history"), Some(&1));
+
+    // Its settings can be read and written like any stick's.
+    let settings = rbl_onelibrary::settings::StickSettings::read(&stick.path().join("PIONEER/rekordbox/exportLibrary.db")).expect("settings");
+    assert_eq!(settings.categories.len(), 22);
+
+    // Asking again leaves what is there.
+    assert!(!rbl_export::create_library(stick.path(), None).expect("second"));
+}
+
+#[test]
 fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     use rbl_export::{export_full, SourceMyTag};
 
@@ -273,7 +313,7 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
         SourceMyTag { id: 11, seq: 1, name: "Peak".into(), attribute: 0, parent: 1 },
         SourceMyTag { id: 12, seq: 2, name: "Warm-up".into(), attribute: 0, parent: 1 },
     ];
-    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0, 1, 2] }];
+    let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
     let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, &mut |p| seen.push((p.done, p.total))).unwrap();
