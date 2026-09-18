@@ -208,6 +208,16 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
   await dialog.getByRole("tab", { name: "About" }).click();
   await expect(dialog.getByRole("heading", { name: "About" })).toBeVisible();
   await expect(dialog.getByText("Made with ❤️ in California")).toBeVisible();
+  // The ask sits at the foot of the pane, just above where it was made.
+  const support = dialog.getByRole("button", { name: "Support this app" });
+  await expect(support).toBeVisible();
+  const [supportBox, madeBox, paneBox] = await Promise.all([
+    support.boundingBox(),
+    dialog.getByText("Made with ❤️ in California").boundingBox(),
+    dialog.getByRole("tabpanel").boundingBox(),
+  ]);
+  expect(supportBox!.y + supportBox!.height).toBeLessThanOrEqual(madeBox!.y);
+  expect(madeBox!.y + madeBox!.height).toBeGreaterThan(paneBox!.y + paneBox!.height * 0.8);
   await expect(dialog.getByTestId("about-version")).toHaveText("0.4.0");
   await expect(dialog).toContainText("@TRIODEOfficial");
   // The update check is said once, under Advanced › Others, not in two places.
@@ -215,7 +225,7 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
 
   await dialog.getByRole("tab", { name: "Advanced" }).click();
   await dialog.getByRole("tab", { name: "Others" }).click();
-  const auto = dialog.getByRole("switch", { name: /Check for a new version/ });
+  const auto = dialog.getByRole("switch", { name: /Keep rbxport up to date/ });
   await expect(auto).toBeChecked();
   await auto.click();
   await expect(auto).not.toBeChecked();
