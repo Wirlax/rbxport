@@ -28,6 +28,8 @@ export interface MemoryCueDeck {
   /** The playhead, in seconds, read at the moment a button goes down. */
   positionSeconds: () => number;
   seek: (seconds: number) => void;
+  /** Sets the deck's loop, for a memory loop called: it plays as a loop. */
+  setLoop?: ((inSeconds: number, outSeconds: number) => void) | undefined;
   /** Where CUE returns to, in seconds; what MEMORY stores. */
   cuePoint: number;
   setCuePoint: (seconds: number) => void;
@@ -52,7 +54,7 @@ export interface MemoryCueActions {
 }
 
 export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
-  const { trackId, cues, positionSeconds, seek, cuePoint, setCuePoint, readOnly, onError } = deck;
+  const { trackId, cues, positionSeconds, seek, setLoop, cuePoint, setCuePoint, readOnly, onError } = deck;
   const canEdit = trackId !== null && !readOnly;
   const write = useCueWriter(onError);
 
@@ -70,16 +72,21 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
   /**
    * Calling a memory cue moves the playhead there and makes it the cue
    * point, as a CDJ's CUE/LOOP CALL does [REF]: the point is called, not
-   * merely visited, so CUE returns to it afterwards.
+   * merely visited, so CUE returns to it afterwards. A memory loop is
+   * called as the loop: the deck goes round it from its in point.
    */
   const call = useCallback(
     (cue: Cue | null) => {
       if (!cue) return;
       const seconds = cue.positionMs / 1000;
-      seek(seconds);
+      if (cue.outMs > cue.positionMs && setLoop) {
+        setLoop(seconds, cue.outMs / 1000);
+      } else {
+        seek(seconds);
+      }
       setCuePoint(seconds);
     },
-    [seek, setCuePoint],
+    [seek, setLoop, setCuePoint],
   );
 
   const callPrevious = useCallback(() => {

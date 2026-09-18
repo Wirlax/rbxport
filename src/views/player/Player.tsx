@@ -55,7 +55,7 @@ import {
   type PadMode,
   beatLoopRange,
 } from "@/lib/player";
-import { usePlayback } from "@/store/usePlayback";
+import { type DeckLoop, usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
 import { ContextMenu } from "@/components/ContextMenu";
 import { deckMenu, type DeckAction } from "@/lib/contextMenus";
@@ -256,7 +256,7 @@ export function cueStyle(
  * Exported for the simple player's overview, which is the same strip.
  */
 export const CueMarkers = memo(function CueMarkers({
-  cues, totalMs, band = "overview", window,
+  cues, totalMs, band = "overview", window, loop = null,
 }: {
   cues: readonly Cue[];
   totalMs: number;
@@ -271,6 +271,8 @@ export const CueMarkers = memo(function CueMarkers({
   band?: "overview" | "detail";
   /** The slice of the track being shown, for the zoomed detail waveform. */
   window?: { from: number; to: number };
+  /** The deck's own loop, drawn as a band; lit while it plays. */
+  loop?: DeckLoop | null;
 }) {
   const tip = useTooltip();
   const hotCueColor = usePreferences().view.hotCueColor;
@@ -278,8 +280,28 @@ export const CueMarkers = memo(function CueMarkers({
   const from = window?.from ?? 0;
   const to = window?.to ?? 1;
   const span = Math.max(to - from, 1e-6);
+  // A band from one point to another, clipped to the window; null when none
+  // of it is in view.
+  const bandStyle = (inMs: number, outMs: number) => {
+    const a = Math.max(inMs / totalMs, from);
+    const b = Math.min(outMs / totalMs, to);
+    if (b <= a) return null;
+    return { left: `${((a - from) / span) * 100}%`, width: `${((b - a) / span) * 100}%` };
+  };
+  const deckLoop = loop ? bandStyle(loop.inSeconds * 1000, loop.outSeconds * 1000) : null;
   return (
     <>
+      {/* Memory loops as bands under their heads, and the deck's loop over
+          them, lit while it plays — the stored ones read as places to go,
+          the live one as where the deck is going round. */}
+      {cues.map((cue) => {
+        if (!cue.memory || cue.outMs <= cue.positionMs) return null;
+        const style = bandStyle(cue.positionMs, cue.outMs);
+        return style ? <span key={`loop-${cue.id || cue.positionMs}`} className={styles.loopBand} style={style} aria-hidden /> : null;
+      })}
+      {deckLoop ? (
+        <span className={styles.loopBand} data-active={loop?.active || undefined} style={deckLoop} aria-hidden />
+      ) : null}
       {cues.map((cue) => {
         const at = cue.positionMs / totalMs;
         // A cue outside the window is not drawn at the edge — a marker pinned
@@ -818,7 +840,7 @@ export const Player = memo(function Player({
   const positionSeconds = useCallback(() => positionRef.current, [positionRef]);
   const memory = useMemoryCues({
     trackId: playback.idle ? null : track?.id ?? null,
-    cues, positionSeconds, seek, cuePoint, setCuePoint, readOnly, onError,
+    cues, positionSeconds, seek, setLoop: playback.setLoop, cuePoint, setCuePoint, readOnly, onError,
   });
   const hot = useHotCues({
     trackId: playback.idle ? null : track?.id ?? null,
@@ -857,6 +879,17 @@ export const Player = memo(function Player({
     if (!playback.loop) return;
     playback.setLoopActive(!playback.loop.active);
   }, [playback]);
+  /** A list row: a cue is a jump, a memory loop is the loop itself. */
+  const callCue = useCallback(
+    (cue: Cue) => {
+      if (cue.outMs > cue.positionMs) {
+        playback.setLoop(cue.positionMs / 1000, cue.outMs / 1000);
+      } else {
+        playback.seek(cue.positionMs / 1000);
+      }
+    },
+    [playback],
+  );
 
   // What the other deck reads when its BEAT SYNC is pressed. A ref holding a
   // closure over the current render, registered once: the shell keeps the
@@ -1408,7 +1441,7 @@ export const Player = memo(function Player({
                   half={viewPrefs.overviewWaveform === "half"}
                 />
               ) : null}
-              <CueMarkers cues={cues} totalMs={total * 1000} />
+              <CueMarkers cues={cues} totalMs={total * 1000} loop={playback.loop} />
               <span
                 ref={overviewHead}
                 className={styles.playhead}
@@ -1596,7 +1629,7 @@ export const Player = memo(function Player({
                 window={window}
                 everyBeat={showsEveryBeat(bars)}
               />
-              <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} />
+              <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
             </div>
             {/* Bars elapsed, printed to the left of the playhead. Its text and
                 its position are both the frame loop's, so React renders it
@@ -2054,11 +2087,11 @@ export const Player = memo(function Player({
                 tabIndex={0}
                 className={styles.cueRow}
                 data-loop={cue.outMs > 0 ? "" : undefined}
-                onClick={() => playback.seek(cue.positionMs / 1000)}
+                onClick={() => callCue(cue)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    playback.seek(cue.positionMs / 1000);
+                    callCue(cue);
                   }
                 }}
               >
