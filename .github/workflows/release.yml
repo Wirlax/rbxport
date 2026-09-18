@@ -99,15 +99,20 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install the Linux build dependencies
-        # The same list as CI's Linux job, which is what proves the workspace
-        # compiles there: the webview and tray libraries the Tauri shell
-        # links against, patchelf for the AppImage's rewritten library paths,
-        # and ALSA for rbl-deck's cpal.
+        # CI's Linux list, which is what proves the workspace compiles there
+        # — the webview and tray libraries the Tauri shell links against,
+        # patchelf for the AppImage's rewritten library paths, ALSA for
+        # rbl-deck's cpal — plus what bundling needs on top of compiling:
+        # xdg-utils, because the AppImage bundler copies /usr/bin/xdg-open
+        # into the image for the opener plugin and fails outright without
+        # it (the first Linux dispatch, on a VM without a desktop, died on
+        # exactly that line after the .deb had already been written), and
+        # file, which linuxdeploy calls to classify what it bundles.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+            librsvg2-dev patchelf libgtk-3-dev libasound2-dev xdg-utils file
 
       # setup-node, never the host's node: the arc hosts have node under nvm or
       # in a location the runner's environment does not see.
