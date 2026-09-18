@@ -632,13 +632,16 @@ fn a_deck_played_fast_covers_more_of_the_track_in_the_same_time() {
             h.engine.play(Deck::A);
 
             // A fixed number of output frames, and where the playhead
-            // reached. Pulled at about the rate a device would: drained faster
+            // reached. Pulled at a third of a device's rate: drained faster
             // than the decode thread can stretch, the ring empties and the
             // playhead measures how fast the test ran rather than the deck.
+            // At the device's own rate that happened about one run in three
+            // with the rest of this suite running alongside; the ratio does
+            // not depend on the pull rate, only on the ring never running dry.
             let pulls = 60;
             for _ in 0..pulls {
                 h.sink.pull(512);
-                std::thread::sleep(Duration::from_millis(12));
+                std::thread::sleep(Duration::from_millis(36));
             }
             let covered = h.position(Deck::A) as f64;
             let out = f64::from(pulls * 512);
