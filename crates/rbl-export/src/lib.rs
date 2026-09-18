@@ -963,7 +963,7 @@ fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {
 /// last one is being written.
 ///
 /// `std::fs::copy` on macOS carries extended attributes along, and on a
-/// FAT stick each of those becomes an AppleDouble `._` file, so only the
+/// FAT stick each of those becomes an `AppleDouble` `._` file, so only the
 /// data goes. The read and the write are on different devices — the export
 /// measured 11.6 MB/s from an SD card into a stick that takes 48 MB/s [OBS
 /// 2026-09-17] — so they overlap: a reader fills a short queue of chunks
