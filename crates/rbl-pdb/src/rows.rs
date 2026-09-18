@@ -167,9 +167,11 @@ pub fn key_row(id: u32, name: &str) -> Vec<u8> {
     row
 }
 
-/// `colors`: five pad bytes, u2 id, one pad byte, then the name.
+/// `colors`: four zero bytes, a byte rekordbox writes as `01`, the u2 id,
+/// one pad byte, then the name [OBS 7.2.11: `00 00 00 00 01 01 00 00 0b "Pink"`].
 pub fn color_row(id: u16, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; 8];
+    row[4] = 0x01;
     put_u2(&mut row, 5, id);
     row.extend_from_slice(&device_sql_string(name));
     row
@@ -187,15 +189,32 @@ pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
 }
 
 /// `albums`: like artists, with an artist reference and a wider prefix.
+///
+/// The row rekordbox 7.2.11 writes for album 1, "Freak EP", by no artist
+/// [OBS 2026-09-17]:
+///
+/// ```text
+///   80 00  00 00  00 00 00 00  00 00 00 00  01 00 00 00  00 00 00 00  03  16  13 "Freak EP"
+///   type   shift  (zero)       artist       id           (zero)       03  ofs name
+/// ```
+///
+/// The id is the fourth word and the artist the third; an earlier version
+/// of this writer had them the other way round, which a player reads as
+/// every album having id 0.
 pub fn album_row(id: u32, artist_id: u32, name: &str) -> Vec<u8> {
-    let mut row = vec![0_u8; 0x16];
+    let mut row = vec![0_u8; ALBUM_NAME_AT];
     put_u2(&mut row, 0x00, 0x80);
-    put_u4(&mut row, 0x0c, artist_id);
-    put_u4(&mut row, 0x10, id);
-    row[0x15] = 0x16; // the name follows immediately
+    put_u4(&mut row, 0x08, artist_id);
+    put_u4(&mut row, 0x0c, id);
+    row[0x14] = 0x03; // constant rekordbox writes
+    row[0x15] = u8::try_from(ALBUM_NAME_AT).unwrap_or(0x16); // the name follows immediately
     row.extend_from_slice(&device_sql_string(name));
     row
 }
+
+/// Where an `albums` row's id sits, and where its name starts.
+pub const ALBUM_ID_AT: usize = 0x0c;
+pub const ALBUM_NAME_AT: usize = 0x16;
 
 /// `playlist_tree`: parent, sort order, id, folder flag, then the name.
 /// `playlist_tree`: parent, a word rekordbox leaves at zero, sort order, id,

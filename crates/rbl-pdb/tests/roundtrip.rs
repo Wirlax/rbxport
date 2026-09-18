@@ -357,3 +357,28 @@ fn rekordbox_playlist_rows_read_and_write_the_same() {
     assert_eq!(nodes[0].name, "NP3-TEST-MP3");
 }
 
+/// The album and colour rows rekordbox 7.2.11 wrote [OBS 2026-09-17], read
+/// back with the album's id where a player looks for it.
+#[test]
+fn rekordbox_album_and_colour_rows_read_and_write_the_same() {
+    let album: Vec<u8> = vec![
+        0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x03, 0x16, 0x13, b'F', b'r', b'e', b'a', b'k', b' ', b'E', b'P',
+    ];
+    assert_eq!(rbl_pdb::rows::album_row(1, 0, "Freak EP"), album);
+    let pink: Vec<u8> = vec![0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x0b, b'P', b'i', b'n', b'k'];
+    assert_eq!(rbl_pdb::rows::color_row(1, "Pink"), pink);
+
+    let mut file = rbl_pdb::build::FileBuilder::new(4096);
+    file.add_table(3, &[album]);
+    file.add_table(6, &[pink]);
+    let bytes = file.finish();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).expect("parses");
+    let albums = pdb.named_rows(pdb.table(rbl_pdb::PageType::Albums).expect("albums"));
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].id, 1);
+    assert_eq!(albums[0].name, "Freak EP");
+    let colours = pdb.named_rows(pdb.table(rbl_pdb::PageType::Colors).expect("colours"));
+    assert_eq!((colours[0].id, colours[0].name.as_str()), (1, "Pink"));
+}
+

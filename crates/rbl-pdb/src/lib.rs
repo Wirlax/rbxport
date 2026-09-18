@@ -397,7 +397,7 @@ impl Pdb<'_> {
                 .map(|row| {
                     let ofs = usize::from(self.u1_at(row, 0x15));
                     NamedRow {
-                        id: self.u4_at(row, 0x10),
+                        id: self.u4_at(row, rows::ALBUM_ID_AT),
                         name: if ofs == 0 { String::new() } else { self.string_at(row.offset + ofs) },
                     }
                 })
