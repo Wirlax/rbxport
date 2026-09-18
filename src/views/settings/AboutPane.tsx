@@ -15,6 +15,9 @@ export const ABOUT_LINKS: readonly { label: string; url: string }[] = [
   { label: "Twitch", url: "https://twitch.tv/triodeofficial" },
 ];
 
+/** Where "Support this app" goes: the page that takes a contribution. */
+export const SUPPORT_URL = "https://github.com/sponsors/chrisle";
+
 export function AboutPane() {
   const [version, setVersion] = useState<string | null>(null);
 
@@ -73,7 +76,14 @@ export function AboutPane() {
           any feature that writes to it.
         </p>
       </Section>
-      <p className={styles.aboutFoot}>Made with ❤️ in California</p>
+      {/* At the foot of the window, however short the sections above are:
+          the ask, and where it was made. */}
+      <div className={styles.aboutFoot}>
+        <button type="button" className={styles.aboutSupport} onClick={() => open(SUPPORT_URL)}>
+          Support this app
+        </button>
+        <p className={styles.aboutMade}>Made with ❤️ in California</p>
+      </div>
     </>
   );
 }

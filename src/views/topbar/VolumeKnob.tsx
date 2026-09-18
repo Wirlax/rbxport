@@ -5,8 +5,8 @@
  * Dragged rather than clicked — a knob is a knob — and vertical, which is what
  * every mixer does: sideways on a control 18pt across is unusable.
  *
- * The scale is `volume.ts`'s: 0 at half past seven, 10 at half past four a
- * decibel under full, and past a notch 11 at five o'clock, full. While the
+ * The scale is `volume.ts`'s: 0 at half past seven, 10 at five o'clock a
+ * decibel under full, and past a notch 11 at half past five, full. While the
  * knob turns its reading is shown beside it. Reaching 10 the knob holds
  * there; keep pulling, through the notch, and it lets go to 11.
  */
@@ -15,19 +15,19 @@ import { useCallback, useRef, useState } from "react";
 import { gainToKnob, KNOB_FULL, KNOB_TOP, knobLabel, knobToGain } from "@/lib/volume";
 import styles from "./TopBar.module.css";
 
-/** Degrees the travel sweeps, from half past seven to half past four. */
-const SWEEP = 270;
+/** Degrees the travel sweeps, from half past seven to five o'clock. */
+const SWEEP = 285;
 /** Where that sweep starts, measured clockwise from twelve o'clock. */
 const START = -135;
-/** Where 11 sits: five o'clock, a notch past the end of the travel. */
-const FULL_ANGLE = 150;
+/** Where 11 sits: half past five, a notch past the end of the travel. */
+const FULL_ANGLE = 165;
 /** Pixels of drag for the whole travel. A short throw is a twitchy knob. */
 const THROW = 120;
 /**
  * The notch: how far past 10 the pull has to go, with the knob held at 10,
- * before it lets go to 11: over half the travel again.
+ * before it lets go to 11: most of the travel again.
  */
-const NOTCH_PX = 70;
+const NOTCH_PX = 85;
 
 export interface VolumeKnobProps {
   /** The engine's gain, 0 to 1. */

@@ -540,7 +540,27 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
   cursor: default;
 }
 .aboutLink:hover { background: var(--c-pad-active); color: var(--c-icon-on); }
-.aboutFoot { margin: 16px 0 0; text-align: center; color: var(--c-text-dim); }
+/* `margin-top: auto` in the sections column puts the foot at the bottom of
+   the window when the sections are short, and after them when they are not. */
+.aboutFoot {
+  margin-top: auto;
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.aboutSupport {
+  border: 1px solid var(--c-accent);
+  border-radius: 2px;
+  padding: 6px 18px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  cursor: pointer;
+}
+.aboutSupport:hover { background: var(--c-accent); color: var(--c-icon-on); }
+.aboutMade { margin: 0; color: var(--c-text-dim); }
 
 /* The Audio pane's meters: a channel letter, the bar, and its figure. */
 .meters {
