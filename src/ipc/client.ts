@@ -165,6 +165,8 @@ async function realBackend(): Promise<Backend> {
     onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
     onLibraryError: (listener) => subscribe<string>("library:error", listener),
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
+    onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),
+    reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
     onDevicesChanged: (listener) => subscribe("devices:changed", () => listener()),
     linkStatus: () => invoke<LinkStatus>("link_status"),

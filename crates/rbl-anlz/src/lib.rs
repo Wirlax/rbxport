@@ -14,6 +14,7 @@
 //! derived from those. Re-emitting a parsed file therefore reproduces it byte
 //! for byte, including tags we cannot author ourselves.
 
+pub mod encode;
 pub mod grid;
 pub mod phrase;
 pub mod vocal;
@@ -39,6 +40,7 @@ pub type Result<T> = std::result::Result<T, AnlzError>;
 
 pub use phrase::{Mood, Phrase, SongStructure};
 pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
+pub use encode::{author, AnalysisFiles, BandColumn, Existing};
 pub use write::AnlzBuilder;
 
 /// Bytes of section framing before the tag-specific header fields.

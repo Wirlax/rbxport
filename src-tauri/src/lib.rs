@@ -6,6 +6,7 @@
 //! against the real one.
 
 mod windowfit;
+pub mod analysis;
 pub mod commands;
 pub mod cues;
 pub mod details;
@@ -398,7 +399,8 @@ pub fn run() {
             commands::fetch_rows,
             commands::view_ids_in_range,
             commands::track_waveform,
-            commands::analyse_track,
+            analysis::analyse_track,
+            commands::reload_library,
             // Editing. Every one of these is refused while rekordbox is
             // running, re-checked immediately before the transaction.
             commands::link_status,

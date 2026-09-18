@@ -215,7 +215,7 @@ describe("the Keyboard pane's bindings", () => {
   it("lists only chords the map actually answers to, under the deck and the browser", () => {
     // The menu accelerators are the shell's, and A is the track list's own
     // key for analysis; neither goes through the map.
-    const mapped = BINDINGS.filter((b) => b.group !== "Menu" && b.label !== "Analyze Track");
+    const mapped = BINDINGS.filter((b) => b.group !== "Menu");
     for (const binding of mapped) {
       const chord = { ...binding.chord, metaKey: binding.chord.metaKey ?? false };
       expect(actionFor(chord, mac), binding.label).not.toBeNull();

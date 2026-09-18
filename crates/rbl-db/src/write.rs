@@ -43,12 +43,23 @@
 //! still is not — what RGB an index past the default means is unknown — so
 //! that alone is refused.
 //!
+//! # Analysis
+//!
+//! [`Writer::set_analysis`] registers an analysis this app made: the BPM,
+//! the key, where the files went, and the length. `Analysed` is a bitfield
+//! whose bits are not all explained (`analysed_bits`): 105 on 37,652 of the
+//! reference library's 38,681 tracks, and that value comes with `PSSI`,
+//! which this app cannot produce. So a track analysed here for the first
+//! time is marked 1 — the value rekordbox itself leaves on a track with a
+//! grid and waveforms and nothing more [ASSUME] — and a track rekordbox had
+//! already analysed keeps the value it had, since its `PSSI` is carried
+//! through the rewritten files.
+//!
 //! # What this deliberately will not do
 //!
-//! Analysis registration (`Analysed`, `AnalysisUpdated`), custom cue
-//! colours, and `contentCue`/`contentFile` are **not implemented**. Their
-//! values are still unexplained, and a wrong one in a 38,681-track collection
-//! is not recoverable by undo. See [`Unsupported`].
+//! Custom cue colours and `contentCue`/`contentFile` are **not
+//! implemented**. Their values are still unexplained, and a wrong one in a
+//! 38,681-track collection is not recoverable by undo. See [`Unsupported`].
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +72,24 @@ use crate::{is_rekordbox_running, DbError, Library, OpenMode, Result};
 
 /// Tables whose `rb_local_usn` participates in the shared counter.
 const USN_TABLES: &[&str] = &["djmdContent", "djmdPlaylist", "djmdSongPlaylist"];
+
+/// `djmdContent.Analysed` for a track analysed here and never by rekordbox:
+/// the value observed on rekordbox's own tracks that carry a grid and
+/// waveforms but no phrases [ASSUME — see the module doc].
+pub const ANALYSED_BY_THIS_APP: i64 = 1;
+
+/// What [`Writer::set_analysis`] registers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisWrite<'a> {
+    /// BPM x100, as the column holds it.
+    pub bpm_x100: u32,
+    /// The key's `ScaleName`; `None` or an unknown name leaves the key alone.
+    pub key: Option<&'a str>,
+    /// Share-relative, `/PIONEER/USBANLZ/…/ANLZ0000.DAT`.
+    pub analysis_path: &'a str,
+    /// Whole seconds; `None` keeps what the row had.
+    pub length_sec: Option<u32>,
+}
 
 /// `djmdPlaylist.Attribute`: an ordinary playlist.
 pub const ATTRIBUTE_PLAYLIST: i64 = 0;
@@ -149,11 +178,6 @@ impl TrackField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Unsupported {
-    /// Whether `Analysed`'s bits track which tags a track carries was tested
-    /// and is unconfirmed — see `analysed_bits`. What the test does establish
-    /// is enough to refuse on: 105, the value on 37,652 of 38,681 tracks,
-    /// comes with PSSI, and our phrase detector produces none.
-    AnalysisRegistration,
     /// What RGB a `ColorTableIndex` past the default means is unknown.
     CueColour,
     /// Nothing is known about what rekordbox does with these.
@@ -164,8 +188,6 @@ impl Unsupported {
     #[must_use]
     pub const fn reason(self) -> &'static str {
         match self {
-            Self::AnalysisRegistration =>
-                "registering analysis needs the Analysed bitfield explained by a diff recording",
             Self::CueColour =>
                 "setting a cue's colour needs the ColorTableIndex palette explained by a diff recording",
             Self::ContentCueOrFile =>
@@ -1017,6 +1039,58 @@ impl Writer {
              WHERE ID = ?4 AND rb_local_deleted = 0"
         );
         let rows = tx.execute(&sql, params![value, usn, stamp, id])?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Registers an analysis this app made for a track.
+    ///
+    /// One transaction: `BPM`, `KeyID` when the key is one the library
+    /// names (an unknown name leaves the key as it was rather than creating
+    /// a `djmdKey` row, whose `Seq` is unexplained), `AnalysisDataPath`,
+    /// `Length`, `Analysed` and `AnalysisUpdated`, with the usual
+    /// bookkeeping. The files themselves are the caller's to have written
+    /// first: a row that names files that are not there is worse than files
+    /// nothing names.
+    pub fn set_analysis(&mut self, content: &str, analysis: &AnalysisWrite<'_>) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let key_id: Option<String> = match analysis.key.map(str::trim).filter(|k| !k.is_empty()) {
+            Some(name) => tx
+                .query_row(
+                    "SELECT ID FROM djmdKey WHERE ScaleName = ?1 AND rb_local_deleted = 0",
+                    params![name],
+                    |r| r.get(0),
+                )
+                .optional()?,
+            None => None,
+        };
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdContent SET
+                BPM = ?1,
+                KeyID = COALESCE(?2, KeyID),
+                AnalysisDataPath = ?3,
+                Length = COALESCE(?4, Length),
+                Analysed = CASE WHEN COALESCE(Analysed, 0) = 0 THEN ?5 ELSE Analysed END,
+                AnalysisUpdated = ?6,
+                rb_local_usn = ?7,
+                updated_at = ?6
+             WHERE ID = ?8 AND rb_local_deleted = 0",
+            params![
+                i64::from(analysis.bpm_x100),
+                key_id,
+                analysis.analysis_path,
+                analysis.length_sec.map(i64::from),
+                ANALYSED_BY_THIS_APP,
+                stamp,
+                usn,
+                content
+            ],
+        )?;
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })

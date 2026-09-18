@@ -540,6 +540,16 @@ export class WaveformCache {
     return this.#entries.size;
   }
 
+  /** Drops every rendering of one track: its analysis was rewritten. */
+  forget(trackId: string): void {
+    const marker = `:${trackId}:`;
+    for (const [key, entry] of this.#entries) {
+      if (!key.includes(marker)) continue;
+      if ("close" in entry.bitmap) entry.bitmap.close();
+      this.#entries.delete(key);
+    }
+  }
+
   clear(): void {
     for (const entry of this.#entries.values()) {
       if ("close" in entry.bitmap) entry.bitmap.close();

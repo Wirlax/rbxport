@@ -1491,7 +1491,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             trackId,
             bpmX100: row.bpmX100 || 12_800,
             key: row.key || "Am",
+            beats: Math.round((row.durationSec * (row.bpmX100 || 12_800)) / 6000),
+            peak: 0.9,
+            durationSec: row.durationSec,
             elapsedMs: ANALYSIS_MS,
+            analysisPath: `/PIONEER/USBANLZ/P${String(index % 1000).padStart(3, "0")}/${index.toString(16).toUpperCase().padStart(8, "0")}/ANLZ0000.DAT`,
           }),
           ANALYSIS_MS,
         ),
@@ -1556,6 +1560,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    reloadLibrary: () => bump(),
+    // The mock's analysis rewrites no files, so nothing redraws.
+    onAnalysisChanged: () => () => undefined,
 
     filterValues: (spec) => {
       if (!ready) return notReady();

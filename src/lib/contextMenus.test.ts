@@ -148,8 +148,9 @@ describe("enabled", () => {
     expect(enabled(entry("Get Info from iTunes"), OPEN)).toBe(false);
   });
 
-  it("greys Analyze Track: the engine is there, the result is not offered", () => {
-    expect(enabled(entry("Analyze Track"), OPEN)).toBe(false);
+  it("offers Analyze Track, and greys it while rekordbox holds the library", () => {
+    expect(enabled(entry("Analyze Track"), OPEN)).toBe(true);
+    expect(enabled(entry("Analyze Track"), { ...OPEN, readOnly: true })).toBe(false);
   });
 
   it("draws no cloud entry in the track menu either", () => {
@@ -185,7 +186,9 @@ describe("deckMenu", () => {
     ]);
     const context = { inPlaylist: false, hasFile: true, readOnly: false };
     const live = entriesOf(deckMenu(state)).filter((e) => enabled(e, context)).map((e) => e.label);
-    expect(live).toEqual(["Change waveform color", "Beat Count Display", "Click on the waveform for PLAY and CUE"]);
+    expect(live).toEqual([
+      "Change waveform color", "Analyze Track", "Beat Count Display", "Click on the waveform for PLAY and CUE",
+    ]);
   });
 
   it("ticks the choice in force in each submenu", () => {
@@ -199,8 +202,8 @@ describe("deckMenu", () => {
       .toEqual(["Disable"]);
   });
 
-  it("greys Analyze Track, loaded or not: the engine is there, the result is not offered", () => {
+  it("offers Analyze Track for the loaded track", () => {
     const entry = entriesOf(deckMenu(state)).find((e) => e.label === "Analyze Track");
-    expect(entry?.action).toBeNull();
+    expect(entry?.action).toBe("analyse");
   });
 });

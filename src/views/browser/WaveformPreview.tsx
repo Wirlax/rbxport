@@ -15,6 +15,11 @@ import { usePreferences } from "@/store/usePreferences";
 
 /** Shared across every row: bounded, and released when entries fall out. */
 const cache = new WaveformCache(500);
+// A re-analysed track's renderings are stale; its rows draw afresh when they
+// next settle. One subscription for the module rather than one per row.
+void getBackend().then((backend) => {
+  backend.onAnalysisChanged((trackId) => cache.forget(trackId));
+});
 
 /**
  * In-flight renders, shared rather than skipped.

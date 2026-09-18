@@ -65,12 +65,21 @@ export interface WaveformDetailProps {
   inset?: { top: number; bottom: number };
 }
 
+/** Drops a track's bytes: its analysis was rewritten. */
+function forget(trackId: string): void {
+  for (const key of [...bytesByTrack.keys()]) {
+    if (key.startsWith(`${trackId}:`)) bytesByTrack.delete(key);
+  }
+}
+
 export const WaveformDetail = memo(function WaveformDetail({
   trackId, progress, span = 0.08, width, height, half = false, detail = false,
   inset = { top: 0, bottom: 0 },
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<Uint8Array | null>(null);
+  // Bumped when the track is re-analysed, so the bytes are fetched again.
+  const [revision, setRevision] = useState(0);
   // View › Color › Waveform color: each palette reads its own tags.
   const palette = usePreferences().view.waveformColor;
 
@@ -83,7 +92,25 @@ export const WaveformDetail = memo(function WaveformDetail({
     return () => {
       live = false;
     };
-  }, [trackId, detail, palette]);
+  }, [trackId, detail, palette, revision]);
+
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onAnalysisChanged((changed) => {
+        if (changed !== trackId) return;
+        forget(trackId);
+        setRevision((r) => r + 1);
+      });
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [trackId]);
 
   // A layout effect, so the redraw lands before the frame that shows it. The
   // strip that holds this is slid by a transform written in the parent's own

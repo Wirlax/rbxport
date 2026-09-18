@@ -52,7 +52,7 @@ import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { FilterValues, LinkPeerSeen, LinkStatus } from "@/ipc/types";
+import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 
 /**
@@ -328,10 +328,22 @@ export function App() {
       live = false;
     };
   }, []);
-  // An analysed track's waveform and key change, so its row is stale.
+  // An analysed track's BPM, key and waveform change: its row is drawn from
+  // the answer at once, and the library is re-read once the run is over so
+  // every view holds what was written.
   const analysis = useAnalysis(
-    useCallback((id: string) => {
-      setPendingEdits((edits) => new Map(edits).set(id, { analysed: 1 }));
+    useCallback((id: string, result: AnalysisResult) => {
+      setPendingEdits((edits) =>
+        new Map(edits).set(id, {
+          analysed: 1,
+          bpmX100: result.bpmX100,
+          key: result.key,
+          durationSec: result.durationSec,
+        }),
+      );
+    }, []),
+    useCallback(() => {
+      void getBackend().then((backend) => backend.reloadLibrary());
     }, []),
   );
   // What is in flight out of the browser: a playlist takes the ids, a deck
@@ -887,15 +899,28 @@ export function App() {
     };
   }, [note]);
 
+  // Analysis writes the result to the library, so it is refused the way any
+  // other write is while rekordbox holds the file or the library is protected.
+  const ANALYSIS_REFUSED = "The library is read-only, so nothing can be analysed.";
   /** Queues whatever is selected in the browser. */
   const analyseSelection = useCallback(() => {
     if (selectedTracks.length === 0) return;
+    if (readOnly) {
+      refuse(ANALYSIS_REFUSED);
+      return;
+    }
     analysis.add(selectedTracks);
-  }, [analysis, selectedTracks]);
+  }, [analysis, selectedTracks, readOnly, refuse]);
   /** Queues one track: the deck's own, from its menu. */
   const analyseOne = useCallback(
-    (id: string, title: string) => analysis.add([{ id, title }]),
-    [analysis],
+    (id: string, title: string) => {
+      if (readOnly) {
+        refuse(ANALYSIS_REFUSED);
+        return;
+      }
+      analysis.add([{ id, title }]);
+    },
+    [analysis, readOnly, refuse],
   );
 
   const importFromMenu = useCallback(async () => {
@@ -998,6 +1023,10 @@ export function App() {
             setQuery("");
           }
           break;
+        case "analyseSelection":
+          event.preventDefault();
+          analyseSelection();
+          break;
         default:
           // Movement and selection live in the table; it listens for itself.
           return;
@@ -1007,7 +1036,7 @@ export function App() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [platform, query, runMenu]);
+  }, [platform, query, runMenu, analyseSelection]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {

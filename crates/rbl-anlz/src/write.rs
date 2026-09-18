@@ -131,8 +131,14 @@ impl AnlzBuilder {
 
     /// An empty cue list, which is what the share tree holds.
     pub fn empty_cue_list(&mut self, extended: bool) -> &mut Self {
+        self.empty_cue_list_of(extended, 0)
+    }
+
+    /// An empty cue list of one type: 0 the memory cues, 1 the hot cues. A
+    /// real file carries one of each.
+    pub fn empty_cue_list_of(&mut self, extended: bool, list_type: u32) -> &mut Self {
         let mut header = Vec::with_capacity(12);
-        header.extend_from_slice(&be32(0)); // list type
+        header.extend_from_slice(&be32(list_type));
         header.extend_from_slice(&be16(0));
         header.extend_from_slice(&be16(0)); // zero entries
         header.extend_from_slice(&be32(0));

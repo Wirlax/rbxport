@@ -187,6 +187,17 @@ export interface Backend {
    * Returns an unsubscribe function.
    */
   onLibraryChanged(listener: (generation: number) => void): () => void;
+  /**
+   * Re-reads the library on request. What the analysis queue asks for once
+   * it has drained: the rows drawn from each answer are then replaced by
+   * the library's own, in one reload rather than one per track.
+   */
+  reloadLibrary(): Promise<number>;
+  /**
+   * A track's analysis files were rewritten, so a deck showing it redraws
+   * its waveform. Returns its own unsubscribe.
+   */
+  onAnalysisChanged(listener: (trackId: string) => void): () => void;
 
   /**
    * Fires when the backend has finished loading the library.
@@ -781,13 +792,19 @@ export interface LinkStatus {
   masterBpm: number;
 }
 
-/** What analysing one track found. */
+/** What analysing one track found, now written to the library. */
 export interface AnalysisResult {
   trackId: string;
   bpmX100: number;
   key: string;
+  beats: number;
+  /** Peak sample magnitude, 0 to 1. */
+  peak: number;
+  durationSec: number;
   /** How long the analysis took, for the progress readout. */
   elapsedMs: number;
+  /** Where the analysis files went, share-relative. */
+  analysisPath: string;
 }
 
 /** What an import batch did. */

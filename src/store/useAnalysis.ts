@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import type { AnalysisResult } from "@/ipc/types";
 import {
   cancel as cancelQueue,
   emptyQueue,
@@ -31,10 +32,25 @@ export interface Analysis {
   clear: () => void;
 }
 
-export function useAnalysis(onAnalysed?: (trackId: string) => void): Analysis {
+export function useAnalysis(
+  onAnalysed?: (trackId: string, result: AnalysisResult) => void,
+  /** Called once when a run ends, whether it finished, failed or was stopped. */
+  onDrained?: () => void,
+): Analysis {
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The effect below must not start a second track while one is in flight.
   const inFlight = useRef(false);
+  // Whether a run has been going, so the drain fires once at its end.
+  const ran = useRef(false);
+  const running = isRunning(state);
+  useEffect(() => {
+    if (running) {
+      ran.current = true;
+    } else if (ran.current) {
+      ran.current = false;
+      onDrained?.();
+    }
+  }, [running, onDrained]);
 
   useEffect(() => {
     if (inFlight.current) return;
@@ -50,9 +66,9 @@ export function useAnalysis(onAnalysed?: (trackId: string) => void): Analysis {
     void (async () => {
       try {
         const backend = await getBackend();
-        await backend.analyseTrack(track.id);
+        const result = await backend.analyseTrack(track.id);
         setState((s) => succeed(s));
-        onAnalysed?.(track.id);
+        onAnalysed?.(track.id, result);
       } catch (e) {
         setState((s) => fail(s, e instanceof Error ? e.message : String(e)));
       } finally {
@@ -67,7 +83,7 @@ export function useAnalysis(onAnalysed?: (trackId: string) => void): Analysis {
 
   // Memoised as a whole: see the note in `useColumns`.
   return useMemo(
-    () => ({ state, running: isRunning(state), total: total(state), add, cancel, clear }),
-    [state, add, cancel, clear],
+    () => ({ state, running, total: total(state), add, cancel, clear }),
+    [state, running, add, cancel, clear],
   );
 }

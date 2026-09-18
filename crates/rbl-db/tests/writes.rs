@@ -833,11 +833,7 @@ fn a_refused_action_leaves_nothing_behind() {
 
 #[test]
 fn the_unsupported_edits_are_refused_with_a_reason() {
-    for action in [
-        Unsupported::AnalysisRegistration,
-        Unsupported::CueColour,
-        Unsupported::ContentCueOrFile,
-    ] {
+    for action in [Unsupported::CueColour, Unsupported::ContentCueOrFile] {
         let error = Writer::refuse(action);
         let DbError::WriteRefused(reason) = error else {
             panic!("{action:?} should be a refusal");
@@ -1333,4 +1329,55 @@ fn an_intelligent_playlist_takes_no_tracks_by_hand() {
     let kept: String = f.one("SELECT SmartList FROM djmdPlaylist WHERE ID = ?1", &[&id]);
     assert!(kept.contains("PropertyName"));
     f.writer.delete_playlist(&id).unwrap();
+}
+
+#[test]
+fn an_analysis_is_registered_on_the_track_with_the_usual_bookkeeping() {
+    use rbl_db::write::{AnalysisWrite, ANALYSED_BY_THIS_APP};
+    let mut f = fixture();
+    let stamp = rbl_core::time::now();
+    f.conn()
+        .execute(
+            "INSERT INTO djmdKey (ID, ScaleName, Seq, created_at, updated_at) VALUES ('12', 'Fm', 7, ?1, ?1)",
+            [&stamp],
+        )
+        .unwrap();
+    // A track rekordbox never analysed, and one it did.
+    f.conn().execute("UPDATE djmdContent SET Analysed = 0, KeyID = NULL WHERE ID = ?1", [track_id(0)]).unwrap();
+    let before: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+
+    let changed = f
+        .writer
+        .set_analysis(
+            &track_id(0),
+            &AnalysisWrite { bpm_x100: 12_850, key: Some("Fm"), analysis_path: "/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT", length_sec: Some(312) },
+        )
+        .unwrap();
+    assert_eq!(changed.rows, 1);
+    assert!(changed.usn > before);
+    let (bpm, key, path, length, analysed, updated): (i64, String, String, i64, i64, String) = f
+        .conn()
+        .query_row(
+            "SELECT BPM, KeyID, AnalysisDataPath, Length, Analysed, AnalysisUpdated FROM djmdContent WHERE ID = ?1",
+            [track_id(0)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap();
+    assert_eq!((bpm, key.as_str(), path.as_str(), length, analysed), (12_850, "12", "/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT", 312, ANALYSED_BY_THIS_APP));
+    assert!(updated.ends_with("+00:00"), "{updated}");
+    let counter: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    assert_eq!(counter, changed.usn);
+
+    // rekordbox's own value on an analysed track is kept, and an unknown key
+    // name leaves the key as it was rather than inventing a djmdKey row.
+    f.conn().execute("UPDATE djmdContent SET KeyID = '12' WHERE ID = ?1", [track_id(1)]).unwrap();
+    f.writer
+        .set_analysis(&track_id(1), &AnalysisWrite { bpm_x100: 12_000, key: Some("H#m"), analysis_path: "/PIONEER/USBANLZ/P001/00000002/ANLZ0000.DAT", length_sec: None })
+        .unwrap();
+    let (analysed, key, length): (i64, String, i64) = f
+        .conn()
+        .query_row("SELECT Analysed, KeyID, Length FROM djmdContent WHERE ID = ?1", [track_id(1)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!((analysed, key.as_str(), length), (105, "12", 300));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), 1);
 }

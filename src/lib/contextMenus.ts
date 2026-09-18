@@ -73,14 +73,15 @@ export type MenuRow<A> = MenuEntry<A> | typeof SEPARATOR;
  *
  * The cloud entries are gone rather than greyed: there is no cloud library
  * behind this app to sync with, so drawing the row promises a feature that is
- * not coming. `Analyze Track` is greyed deliberately — the engine is still
- * there, but analysis is not trustworthy enough to offer yet.
+ * not coming. `Analyze Track` writes the result to the library — the grid,
+ * the waveforms, the BPM and the key — so it is a write, greyed while
+ * rekordbox holds the file.
  */
 export const TRACK_MENU: readonly MenuRow<TrackAction>[] = [
   { label: "Load", action: null, submenu: true },
   SEPARATOR,
   { label: "Import To Collection", action: null },
-  { label: "Analyze Track", action: null },
+  { label: "Analyze Track", action: "analyse" },
   { label: "Analysis Lock", action: null, submenu: true },
   SEPARATOR,
   // Its submenu is the playlist tree, and there is no submenu here yet, so it
@@ -179,9 +180,8 @@ export interface DeckMenuState {
  * single track added to a stick, which the export cannot yet do without
  * rewriting the stick; Export Loop As WAV and Active Loop Playback need
  * loops, which are not built. All three are drawn greyed, as rekordbox
- * greys Export Loop As WAV with nothing to export. Analyze Track is greyed
- * for the reason `TRACK_MENU` gives: the engine is there, the result is not
- * trustworthy enough to offer.
+ * greys Export Loop As WAV with nothing to export. Analyze Track analyses the
+ * loaded track and writes the result, as it does from the track list.
  */
 export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
   const tick = (on: boolean) => ({ checked: on });
@@ -195,7 +195,7 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
         { label: "3Band", action: "waveform3band", ...tick(state.waveformColor === "3band") },
       ],
     },
-    { label: "Analyze Track", action: null },
+    { label: "Analyze Track", action: "analyse" },
     SEPARATOR,
     {
       label: "Beat Count Display",
@@ -236,6 +236,7 @@ export function deckMenu(state: DeckMenuState): readonly MenuRow<DeckAction>[] {
 
 /** Writes to the shared library, so rekordbox running is a refusal. */
 const WRITES: ReadonlySet<string> = new Set([
+  "analyse",
   "removeFromPlaylist",
   "createPlaylist",
   "createFolder",

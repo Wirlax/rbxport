@@ -11,6 +11,8 @@
 export type Action =
   | "focusSearch"
   | "clearSearch"
+  // A: the selected tracks go to the analyser, as rekordbox's Browse preset binds it.
+  | "analyseSelection"
   | "selectAll"
   | "clearSelection"
   | "moveUp"
@@ -186,6 +188,8 @@ export function actionFor(chord: KeyChord, platform: Platform): Action | null {
         return "nextMemoryCue";
       case "x":
         return "deleteMemoryCue";
+      case "a":
+        return "analyseSelection";
       case "1":
         return "hotCueA";
       case "2":
