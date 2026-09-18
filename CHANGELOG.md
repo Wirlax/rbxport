@@ -34,6 +34,7 @@ the version numbers [Semantic Versioning](https://semver.org/).
   is noticed within two seconds.
 - The BPM is typed over in the list and the Info tab, and the beat grid is
   retimed to it so the CDJ agrees with the column.
+- Add Artwork and Delete Artwork on the Info tab's Artwork page.
 
 ### Fixed
 - A cloud-synced track whose file is not where the library says is exported
@@ -41,6 +42,8 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - The LINK strip stays hidden while nothing is on the network, even when
   LINK cannot be turned on, and the Connect button keeps its space.
 - A click that selects a row no longer opens the cell's editor as well.
+- A stick's DEVSETTING.DAT is written when the device panel opens on it, as
+  rekordbox does, rather than on every export.
 
 ## [0.7.0] — 2026-09-16
 
