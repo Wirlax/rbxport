@@ -16,7 +16,7 @@ export const ABOUT_LINKS: readonly { label: string; url: string }[] = [
 ];
 
 /** Where "Support this app" goes: the page that takes a contribution. */
-export const SUPPORT_URL = "https://github.com/sponsors/chrisle";
+export const SUPPORT_URL = "https://paypal.me/chrisle";
 
 export function AboutPane() {
   const [version, setVersion] = useState<string | null>(null);
