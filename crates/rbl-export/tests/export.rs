@@ -291,6 +291,62 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
 }
 
 #[test]
+fn directory_names_are_cut_where_rekordbox_cuts_them_and_the_file_name_is_not() {
+    let source = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let long_album = "Disco Lines & Tinashe - No Broke Boys (DANSYN Remix) (Extended Edition)";
+    let mut t = track(source.path(), 1, "No Broke Boys", "Disco Lines & Tinashe");
+    t.album = long_album.to_owned();
+    t.file_size = 12_965_026;
+    let report = rbl_export::export(dir.path(), &[t], &[]).expect("export");
+    assert_eq!(report.tracks, 1);
+    let album_dir = std::fs::read_dir(dir.path().join("Contents/Disco Lines & Tinashe"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(album_dir, "Disco Lines & Tinashe - No Broke Boys (DANSYN Re");
+    assert_eq!(album_dir.chars().count(), 48);
+
+    // The database carries the library's file size, not the copy's.
+    let bytes = std::fs::read(dir.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let rows = pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap());
+    assert_eq!(rows[0].file_size, 12_965_026);
+    // No AppleDouble sidecar beside the copy: only the bytes were copied.
+    let names: Vec<String> = std::fs::read_dir(dir.path().join("Contents/Disco Lines & Tinashe").join(&album_dir))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.starts_with("._")), "{names:?}");
+}
+
+#[test]
+fn my_settings_are_copied_from_rekordbox_and_a_sticks_own_are_kept() {
+    let source = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    for name in rbl_export::MY_SETTINGS_FILES {
+        std::fs::write(source.path().join(name), format!("from rekordbox: {name}")).unwrap();
+    }
+    std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
+    std::fs::write(stick.path().join("PIONEER/MYSETTING.DAT"), b"set on a player").unwrap();
+    let written = rbl_export::copy_my_settings(stick.path(), source.path()).expect("copy");
+    assert_eq!(written, 3, "the one the stick had is kept");
+    assert_eq!(std::fs::read(stick.path().join("PIONEER/MYSETTING.DAT")).unwrap(), b"set on a player");
+    assert_eq!(
+        std::fs::read_to_string(stick.path().join("PIONEER/djprofile.nxs")).unwrap(),
+        "from rekordbox: djprofile.nxs"
+    );
+    // A machine without rekordbox has nothing to give and that is fine.
+    let empty = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    assert_eq!(rbl_export::copy_my_settings(other.path(), empty.path()).unwrap(), 0);
+}
+
+#[test]
 fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     use rbl_export::{export_full, SourceMyTag};
 

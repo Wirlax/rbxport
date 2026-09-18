@@ -74,6 +74,12 @@ pub struct Library {
     pub color: Vec<u8>,
     pub play_count: Vec<u16>,
     pub analysed: Vec<u8>,
+    /// `BitRate`, `SampleRate` and `FileSize` as the library records them;
+    /// an export writes these into the stick's database rather than
+    /// re-reading every file for them.
+    pub bitrate: Vec<u32>,
+    pub sample_rate: Vec<u32>,
+    pub file_size: Vec<u64>,
     /// `djmdContent.ReleaseYear`; 0 when unknown. Two bytes a row, for the
     /// intelligent playlists that ask for a year.
     pub year: Vec<u16>,

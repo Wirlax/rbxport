@@ -68,6 +68,10 @@ pub struct SourceTrack {
     pub year: u16,
     pub bitrate: u32,
     pub sample_rate: u32,
+    /// `djmdContent.FileSize`, what rekordbox writes into the stick's
+    /// database whether or not the file on disk still measures that; 0
+    /// means unknown, and the copied file's size is written instead.
+    pub file_size: u64,
     /// Analysis to copy alongside, as (extension, bytes).
     pub analysis: Vec<(String, Vec<u8>)>,
     /// The track's artwork, where the library keeps it; `None` for none.
@@ -133,6 +137,25 @@ pub struct ExportReport {
 /// The eight colour labels rekordbox writes to every export.
 const COLORS: [&str; 8] =
     ["Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple"];
+
+/// The longest directory name rekordbox writes under `Contents/`: an artist
+/// or album longer than this is cut, not the file name [OBS 7.2.11, four
+/// albums cut at exactly 48 on the reference export].
+const DIR_NAME_MAX: usize = 48;
+
+/// A directory component under `Contents/`: FAT-safe and cut to rekordbox's
+/// length, trailing spaces and dots dropped after the cut too.
+fn dir_name(name: &str) -> String {
+    let safe = fat_safe(name);
+    if safe.chars().count() <= DIR_NAME_MAX {
+        return safe;
+    }
+    let mut cut: String = safe.chars().take(DIR_NAME_MAX).collect();
+    while cut.ends_with('.') || cut.ends_with(' ') {
+        cut.pop();
+    }
+    if cut.is_empty() { "Unknown".to_owned() } else { cut }
+}
 
 /// Makes a name safe for FAT32, which is what a DJ stick is formatted as.
 fn fat_safe(name: &str) -> String {
@@ -212,8 +235,8 @@ fn layout(track: &SourceTrack, export_id: u32) -> Layout {
         .file_name()
         .map_or_else(|| format!("track-{export_id}.mp3"), |n| n.to_string_lossy().into_owned());
     let file_name = fat_safe(&on_disk);
-    let artist_dir = fat_safe(if track.artist.is_empty() { "UnknownArtist" } else { &track.artist });
-    let album_dir = fat_safe(if track.album.is_empty() { "UnknownAlbum" } else { &track.album });
+    let artist_dir = dir_name(if track.artist.is_empty() { "UnknownArtist" } else { &track.artist });
+    let album_dir = dir_name(if track.album.is_empty() { "UnknownAlbum" } else { &track.album });
     Layout {
         audio: format!("/Contents/{artist_dir}/{album_dir}/{file_name}"),
         // The two levels are how rekordbox spreads analysis across the tree
@@ -442,7 +465,7 @@ pub fn export_full(
             if let Some(parent) = audio_dest.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            match std::fs::copy(&track.source_path, &audio_dest) {
+            match copy_data(&track.source_path, &audio_dest) {
                 Ok(bytes) => report.bytes_copied += bytes,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     report.skipped.push(track.title.clone());
@@ -554,7 +577,12 @@ pub fn export_full(
             year: track.year,
             bitrate: track.bitrate,
             sample_rate: track.sample_rate,
-            file_size: u32::try_from(size.min(u64::from(u32::MAX))).unwrap_or(0),
+            // The library's figure when it has one, as rekordbox writes it,
+            // even where the file has since changed by a few bytes of tags.
+            file_size: u32::try_from(
+                (if track.file_size > 0 { track.file_size } else { size }).min(u64::from(u32::MAX)),
+            )
+            .unwrap_or(0),
             track_number: export_id,
             title: track.title.clone(),
             filename: place.file_name,
@@ -623,6 +651,11 @@ pub fn export_full(
     // A player never opens this; rekordbox does, to read the stick back.
     write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, &artwork_paths, my_tags, defaults)?;
     report.one_library = true;
+
+    // The DJ's My Settings, as rekordbox puts them on every stick it writes.
+    if let Some(source) = rbl_core::paths::rekordbox_settings_dir() {
+        copy_my_settings(destination, &source)?;
+    }
 
     // Last, so a run that fails part way leaves the older record standing and
     // the next attempt re-copies rather than trusting a half-written stick.
@@ -915,18 +948,72 @@ fn write_one_library(
     }
 
     // The date only, and the local one: rekordbox's own export carries the
-    // day the person exported on, not the UTC day.
+    // day the person exported on, not the UTC day. The device name is the
+    // one the stick has been given, and empty until then: rekordbox writes
+    // it empty on a fresh export [OBS 7.2.11].
     let created = rbl_core::time::local_date();
-    let device_name = if settings.device_name.is_empty() {
-        "RBXPORT"
-    } else {
-        settings.device_name.as_str()
-    };
-    builder.finish(device_name, &created).map_err(|e| one_library_error(&e))
+    builder.finish(&settings.device_name, &created).map_err(|e| one_library_error(&e))
 }
 
 fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {
     ExportError::OneLibrary(error.to_string())
+}
+
+/// Copies a file's bytes and nothing else.
+///
+/// `std::fs::copy` on macOS carries extended attributes along, and on a
+/// FAT stick each of those becomes an AppleDouble `._` file: one more
+/// directory entry per track and per analysis file, on a filesystem where
+/// creating an entry costs tens of milliseconds. The export measured at
+/// 11.6 MB/s on a stick that takes 48 MB/s [OBS 2026-09-17]; a plain read
+/// and write with a 1 MiB buffer leaves only the data to write.
+fn copy_data(from: &Path, to: &Path) -> std::io::Result<u64> {
+    use std::io::{Read, Write};
+    let mut source = std::fs::File::open(from)?;
+    let mut target = std::fs::File::create(to)?;
+    let mut buffer = vec![0_u8; COPY_BUFFER];
+    let mut total: u64 = 0;
+    loop {
+        let read = source.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        target.write_all(&buffer[..read])?;
+        total += read as u64;
+    }
+    target.flush()?;
+    Ok(total)
+}
+
+/// One megabyte: large enough that a 13 MB track is a dozen writes, small
+/// enough not to matter on a laptop.
+const COPY_BUFFER: usize = 1 << 20;
+
+/// The files rekordbox copies from its own settings directory to every
+/// stick it exports to: the player and mixer "My Settings" and the DJ
+/// profile [OBS 7.2.11, byte-identical to the files in
+/// `rbl_core::paths::rekordbox_settings_dir`].
+pub const MY_SETTINGS_FILES: [&str; 4] = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT", "djprofile.nxs"];
+
+/// Puts the My Settings files from `source` on the stick, as rekordbox
+/// does on export. A file the stick already has is kept: it is the DJ's
+/// own, set on a player. Returns how many were written; `source` absent or
+/// empty writes none, which is not an error — a machine without rekordbox
+/// has none to give.
+pub fn copy_my_settings(destination: &Path, source: &Path) -> Result<usize> {
+    let pioneer = destination.join("PIONEER");
+    let mut written = 0;
+    for name in MY_SETTINGS_FILES {
+        let from = source.join(name);
+        let to = pioneer.join(name);
+        if !from.is_file() || to.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(&pioneer)?;
+        copy_data(&from, &to)?;
+        written += 1;
+    }
+    Ok(written)
 }
 
 /// Errors that mean the media was unplugged mid-write.

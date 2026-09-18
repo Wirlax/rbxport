@@ -767,6 +767,9 @@ fn source_track(
         duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0)).unwrap_or(u16::MAX),
         rating: library.rating.get(i).copied().unwrap_or(0),
         color_id: library.color.get(i).copied().unwrap_or(0),
+        bitrate: library.bitrate.get(i).copied().unwrap_or(0),
+        sample_rate: library.sample_rate.get(i).copied().unwrap_or(0),
+        file_size: library.file_size.get(i).copied().unwrap_or(0),
         analysis: read_analysis(share, library.analysis_path.get(i)),
         ..rbl_export::SourceTrack::default()
     }
