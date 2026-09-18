@@ -349,6 +349,44 @@ fn segments_generate_beats_and_shift_by_half_a_beat() {
 }
 
 #[test]
+fn a_change_on_a_beat_starts_with_it_and_drops_the_old_grid_s_same_hit() {
+    // The old grid's beat falls 2 ms before the change, on the same hit as
+    // the new grid's first beat: rekordbox's hand grids keep the new one.
+    let a = Segment { from_secs: 0.0, to_secs: 10.002, period_secs: 0.5, phase_secs: 0.0 };
+    let b = Segment { from_secs: 10.002, to_secs: 20.0, period_secs: 0.4, phase_secs: 10.002 };
+    assert_eq!(a.beats(), 21, "the old grid alone still counts its beat at 10.000 s");
+    assert!((b.start_secs() - 10.002).abs() < 1e-9, "a segment starting on its own beat starts with it");
+    let beats = beats_of(&[a, b], 0);
+    assert_eq!(beats[19].time_ms, 9_500);
+    assert_eq!(beats[20].time_ms, 10_002, "the old grid's 10.000 s beat is dropped for the new grid's");
+    assert_eq!(beats[20].tempo_x100, 15_000);
+    // The count carries on across the join.
+    assert_eq!(beats[20].beat_number, 1);
+    // A change more than half a period after the old grid's last beat
+    // keeps that beat.
+    let c = Segment { from_secs: 0.0, to_secs: 10.3, period_secs: 0.5, phase_secs: 0.0 };
+    let d = Segment { from_secs: 10.3, to_secs: 20.0, period_secs: 0.4, phase_secs: 10.3 };
+    let kept = beats_of(&[c, d], 0);
+    assert_eq!(kept[20].time_ms, 10_000);
+    assert_eq!(kept[21].time_ms, 10_300);
+}
+
+#[test]
+fn a_steady_tempo_near_a_whole_number_is_that_whole_number() {
+    // Dance music is produced at whole tempos; a fit that comes out at
+    // 137.96 is 138. The clicks here really are at 137.96, so the beats
+    // are allowed to lean a few milliseconds either way at the ends.
+    let audio = click_track(137.96, 120.0, 0.2);
+    let result = analyse(&audio, SR).tempo;
+    assert!((result.bpm - 138.0).abs() < 1e-6, "expected exactly 138, got {}", result.bpm);
+    assert!(result.beats.iter().all(|b| b.tempo_x100 == 13_800));
+    // And one well away from a whole number is left where it was measured.
+    let audio = click_track(127.6, 120.0, 0.2);
+    let result = analyse(&audio, SR).tempo;
+    assert!((result.bpm - 127.6).abs() < 0.05, "expected about 127.6, got {}", result.bpm);
+}
+
+#[test]
 fn the_envelope_is_timestamped_at_the_frame_centre() {
     let audio = click_track(120.0, 5.0, 0.0);
     let envelope = onset_envelope(&audio, SR);

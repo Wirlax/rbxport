@@ -74,12 +74,14 @@ pub fn analyse(samples: &[f32], sample_rate: u32) -> Analysis {
 #[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
 pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions) -> Analysis {
     let onsets = onset::onset_envelope(samples, sample_rate);
+    // The kick band, for placing a tempo change where the kick arrives.
+    let kicks = onset::onset_envelope_band(samples, sample_rate, onset::Band::LOW);
     // The kick attacks, when the fit is to place beats on them.
     let attacks = match options.tempo.placement {
         tempo::Placement::Attack => Some(attack::AttackMap::new(samples, sample_rate, options.attacks)),
         tempo::Placement::Envelope => None,
     };
-    let mut tempo = tempo::detect_tempo_with(&onsets, attacks.as_ref(), options.tempo);
+    let mut tempo = tempo::detect_tempo_with(&onsets, Some(&kicks), attacks.as_ref(), options.tempo);
     // The grid comes back numbered from its first beat, and possibly on the
     // off-beat. The downbeat stage looks at the music's structure and says
     // both; the grid is moved if it has to be and renumbered so that 1 is
@@ -99,32 +101,22 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
         tempo.first_beat_secs = tempo.segments.first().map_or(0.0, tempo::Segment::start_secs);
     }
     // The beat nearest the chosen downbeat is beat 1, and the count runs
-    // on from there through every segment. Then each segment long enough
-    // to have phrases of its own is asked again, on its own beats only: a
-    // DJ edit's two halves are two pieces of music, and a bar count carried
-    // across a tempo change that landed a beat off would misnumber the
-    // whole second half.
-    let mut beats = tempo::beats_of(&tempo.segments, phase_for(&tempo.segments, grid.downbeat_secs));
-    let mut offset = 0usize;
-    for segment in &tempo.segments {
-        let count = segment.beats();
-        if count >= downbeat::MIN_BEATS_FOR_OWN_PHASE && tempo.segments.len() > 1 {
-            let own: Vec<f64> = beats[offset..offset + count].iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
-            let own_grid = downbeat::grid_phase(samples, sample_rate, &own);
-            // A half-beat verdict is only taken from the whole track above;
-            // here only the bar position is used.
-            let downbeat = own
-                .iter()
-                .enumerate()
-                .min_by(|a, b| (a.1 - own_grid.downbeat_secs).abs().partial_cmp(&(b.1 - own_grid.downbeat_secs).abs()).unwrap_or(std::cmp::Ordering::Equal))
-                .map_or(0, |(i, _)| i);
-            for (i, beat) in beats[offset..offset + count].iter_mut().enumerate() {
-                beat.beat_number = u16::try_from((i + 4 - downbeat % 4) % 4 + 1).unwrap_or(1);
-            }
+    // on from there through every segment, across every tempo change, as
+    // rekordbox numbers a hand grid: on all ten changes in the multi-tempo
+    // playlist the new tempo's first beat carries the number after the old
+    // tempo's last, whatever the music does there. So beat 1 is decided on
+    // the first tempo's own beats when it has phrases of its own: the
+    // later tempos' downbeats are wherever the carried count puts them,
+    // and a track-wide vote they outnumber would move the first tempo's
+    // beat 1 onto theirs.
+    let downbeat_secs = match tempo.segments.first() {
+        Some(first) if tempo.segments.len() > 1 && first.beats() >= downbeat::MIN_BEATS_FOR_OWN_PHASE => {
+            let own: Vec<f64> = tempo::beats_of(&tempo.segments[..1], 0).iter().map(|b| f64::from(b.time_ms) / 1000.0).collect();
+            downbeat::grid_phase(samples, sample_rate, &own).downbeat_secs
         }
-        offset += count;
-    }
-    tempo.beats = beats;
+        _ => grid.downbeat_secs,
+    };
+    tempo.beats = tempo::beats_of(&tempo.segments, phase_for(&tempo.segments, downbeat_secs));
     // The key rules may read the bass on or between beats and after phrase
     // starts, so they are given the grid.
     let key_grid = key::KeyGrid {
