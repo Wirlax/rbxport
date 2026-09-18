@@ -25,7 +25,8 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-pref-label);
 }
-.window:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
+/* Focused on open so Escape closes it; a window is not a control, so no ring. */
+.window:focus-visible { outline: none; }
 /* As a window of its own the shell draws the chrome, and this fills it. */
 .window[data-windowed] {
   width: 100vw;
