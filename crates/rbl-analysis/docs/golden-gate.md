@@ -50,16 +50,18 @@ placed at the right beat for the numbering after it to match.
 |---|---|---|
 | bpm | 146 | **155 / 155** |
 | downbeat | 27 | **142 / 155** |
-| grid | 26 | **141 / 155** |
+| grid | 26 | **142 / 155** |
 | key | 27 | **141 / 155** |
 
-The target is 99 %, at most one miss per metric. Beats are placed on the
-kick's attack: the offset from rekordbox 7's grids is 0.0 ms at the median
-and at the 90th percentile. Every downbeat and grid miss but two is one
-of the eleven rekordbox 6 grids below, whose beats sit 25 ms after the
-kick, −25 to −27 ms from ours, just past the tolerance. On the 142 tracks
+The target is 99 %, at most one miss per metric. Every BPM is a whole
+number, as every one of rekordbox's is. Beats are placed on the kick's
+attack: the offset from rekordbox 7's grids is 0.0 ms at the median and
+at the 90th percentile. Every downbeat and grid miss but two is one of
+the eleven rekordbox 6 grids below, whose beats sit 25 ms after the kick,
+−25 to −27 ms from ours, just past the tolerance. On the 142 tracks
 rekordbox 7 analysed itself: BPM 142 / 142, downbeat 141 / 142, grid
-141 / 142.
+142 / 142. Analysis takes 506 ms per track at the mean, 460 before the
+kick band was added.
 
 ## The misses
 
@@ -77,16 +79,16 @@ the LAME tag's CRC, the encoder version, the ID3 version, or anything in
 gives exactly our timeline (gapless off) or exactly 1105 samples earlier
 (gapless on), never later.
 
-**Two DJ edits, both gridded by hand.** `Go Back [136-174]`: 136 BPM until
-bar 61, rising until bar 82.2, then 174; the hand grid holds 136 through the
-rise and switches at bar 82.25. The bar-by-bar walk cannot follow the rise
-because it begins in a breakdown with no kick to track, so the cut goes
-where the new beat is at full strength — the same millisecond as the hand
-grid — but our 136 line is 0.05 BPM off across an intro with no kicks and
-our beat 1 is one beat before the hand grid's. `Bring Me Back to Life
-[138-150]`: the hand grid is anchored where the kicks state the tempo and
-holds 138 until 105 s; the 150 beat is audible, quietly, from 64 s and our
-switch goes there.
+**One DJ edit, gridded by hand.** `Go Back [136-174]`: 136 BPM until bar
+61, rising until bar 82.2, then 174. The hand grid holds 136 through the
+rise, nudged half a beat somewhere in it, and switches at bar 82.25. The
+bar-by-bar walk cannot follow the rise because it begins in a breakdown
+with no kick to track, so ours holds 136 straight and cuts where the kick
+states 174 — 2 ms from the hand grid, numbered as it numbers — and matches
+89 % of its beats, all but the nudged bars of the rise. (`Bring Me Back
+to Life [138-150]`, the other DJ edit, passes since the cut goes where the
+kick arrives at full level: its 150 kick pattern plays at half level under
+the 138 breakdown from 76 s, stops for two bars, and drops at 105.158 s.)
 
 **BATTERY OPERATED.** Half a beat off. Chris re-gridded it in rekordbox
 twice (its first beat moved 19 ms, to 51 ms) and confirmed the corrected

@@ -64,19 +64,36 @@ anything rekordbox changed.
 
 First run, 2026-09-17. BPM 9 / 9, key 9 / 9, downbeat 7 / 9, grid 1 / 9.
 The bpm and key are right on every edit; what this playlist tests is
-where the tempo change is placed, and that is where the misses are.
+where the tempo change is placed, and that is where the misses were.
+
+Second measurement, later the same day, read-only (`golden cache
+RBX-BPM-MULTIBPM-TEST` into `RB_LITE_GOLDEN=target/multibpm-gold`, then
+`golden score`): BPM 9 / 9, key 9 / 9, downbeat 7 / 9, grid 4 / 9. The
+change went in with the cut placed where the kick states the new tempo
+at full level ([beat.md](beat.md), step 6), runs of fewer than three
+settled windows absorbed, the count carried across joins, a new segment
+starting with the beat it was cut on, and every steady tempo a whole
+number. Seven of the ten changes are now within 3 ms of the hand grid.
 
 | track | grid | what differs |
 |---|---|---|
-| Go Back [136-174] | 48 % | our 174 starts one beat late (143.685 s against 143.342 s), so every beat after the change is numbered one off |
-| Bring Me Back to Life [138-150] | 27 % | our 150 starts at 76.8 s; the hand grid holds 138 until 105.2 s |
-| Castles In The Sky (TRIODE Festival Edit) | 99.7 % | the one constant-tempo track; passes |
-| Around the World [134-150] | 0 % | beat 1 one beat off through the whole track (our beat 1 on rekordbox's beat 2); the change itself lands within 1.6 s |
-| It Feels So Good [150-134] | 88 % | our 134 starts at 97.2 s; the hand grid holds 150 until 125.9 s |
-| Cannonball [136-150-136] | 51 % | the 128 stretch at 56.5 s is missed (we hold 136 to 86.0 s, then 128 for four beats and a 134 bar); the return to 136 comes at 232.6 s against 217.2 s |
-| Sao Paulo | 50 % | the 160 stretch is found (133.1 s against 133.5 s) but numbered a beat off, and held 6.7 s too long |
-| Castles In The Sky (EDCLV23 Closer) [138-160] | 60 % | a spurious 162.6 stretch from 27.9 s to 149.8 s where the hand grid holds 138; the real change at 233.26 s is placed exactly |
+| Go Back [136-174] | 89 % | the cut is at 143.340 s against 143.342 s and numbered as the hand grid numbers; the hand grid nudges its 136 by half a beat somewhere in the rise (bars 61–82) and ours holds it straight |
+| Bring Me Back to Life [138-150] | 100 % | 105.156 s against 105.158 s |
+| Castles In The Sky (TRIODE Festival Edit) | 100 % | the one constant-tempo track |
+| Around the World [134-150] | 0 % | beat 1 one beat off through the whole track (our beat 1 on rekordbox's beat 2), a downbeat-stage miss on the 134 section; the change itself is at 171.813 s against 171.815 s |
+| It Feels So Good [150-134] | 100 % | 125.899 s against 125.900 s |
+| Cannonball [136-150-136] | 16 % | the return to 136 at 217.186 s against 217.187 s; but the hand grid cuts to 128 at 56.489 s and to 145 at 86.032 s at the impacts that end each section, with no kick at the new tempo for twenty seconds after either, and ours cuts at 67.3 s (where the onsets change sides) and at 109.95 s (where the 145 kick arrives), so the count is off from 56 s to 217 s |
+| Sao Paulo | 62 % | the 160 stretch is at 133.523 s against 133.524 s; the hand grid returns to 128 at 157.524 s at the impact that ends the 160 section, with the 128 kick arriving at 196 s, and ours cuts there |
+| Castles In The Sky (EDCLV23 Closer) [138-160] | 100 % | the spurious 162.6 stretch is gone (one window at 1.19 had been assigned to the 160 cluster at 1.16) and the change is at 233.260 s exactly |
 | BATTERY OPERATED | 0 % | half a beat off, as on the golden gate (the ambiguous track) |
+
+The three remaining cut misses are one kind: the hand grid switches at
+the impact that ends the old section, and the new tempo's kick comes
+much later. Onsets alone cannot tell that impact from the one that
+starts a breakdown in the middle of a section (Bring Me Back to Life at
+60 s, which the hand grid holds through), so the rule stays "where the
+kick states the tempo". The registered copies in the library are from
+the first run; `run` (rekordbox quit) refreshes them.
 
 ### What rekordbox did with the copies
 

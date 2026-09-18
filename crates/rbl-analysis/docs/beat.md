@@ -115,11 +115,48 @@ one bar at a time:
 - repeat until a bar comes out at the new settled tempo, then run steps
   1–4 on the settled stretch after it.
 
-A rise or fall that is gradual and not linear is followed a bar at a time;
-a DJ edit where the new beat arrives under a breakdown gets its cut at the
-first bar where the kick is found at the new tempo. The beat count carries
-on 1–4 across every cut, as rekordbox writes it, and each beat carries the
-tempo of its bar, which rekordbox's grid format allows.
+A rise or fall that is gradual and not linear is followed a bar at a time.
+The beat count carries on 1–4 across every cut, as rekordbox writes it,
+and each beat carries the tempo of its bar, which rekordbox's grid format
+allows.
+
+A DJ edit, where the walk finds no ramp, is a cut. The next track comes in
+under the last one's breakdown bars before it drops — an impact on a
+downbeat, an arp in eighths, claps on two and four, a snare roll into the
+drop, its own kick at half level — and the hand grids hold the old tempo
+until the kick states the new one at full level. So the kick is read on
+every beat of the new grid, from the old tempo's last settled window to
+the end of the new tempo's settled stretch: the kick band (spectral flux
+under 200 Hz, from the audio low-passed and decimated by 32, scaled so
+its strong hits read as one) where the stretch has one, the click attack
+where it does not. Its runs — stretches of bars that read it — are found
+at its gaps, and a run weaker than 0.55 of the strongest, or shorter than
+two bars, is not the beat yet: the incoming kick pattern under a
+breakdown sits at 0.49 of its eventual level, a kick returning after a
+breakdown at 0.58 of the level it reaches a minute later. The cut goes in
+the first bar of the first run that is the beat: not a fill into the bar
+after it (twice as much kick), starting on the beat, carrying the rest of
+the mix (full-band flux at 0.7 of its settled level), and read better by
+the new grid than by the old one carried on. Within that bar the cut is
+the first beat whose kick is half the bar's strongest, with the mix on it
+and, where the section's kicks have a click, with the click: the beat
+before a drop is a pickup, a kick roll into a drop is thumps without
+clicks. Where no run qualifies — the new tempo's stretch is a breakdown
+with no kick of its own — the cut goes where the onsets stop following
+the old grid and start following the new, the earliest such beat.
+
+Measured on the multi-tempo playlist ([multibpm.md](multibpm.md)): seven
+of the ten hand-gridded changes are placed within 3 ms; the three that
+are not are where the hand grid switches at the impact that ends a
+section, with the new tempo's kick arriving twenty seconds later.
+
+## 7. A whole number
+
+A steady tempo within 0.1 BPM of a whole number is that whole number: the
+line is fixed at that period and re-phased through the same kicks, so it
+turns about their centre. Every golden track is at a whole tempo and the
+fit lands within 0.04 of it on all of them. The bars of a walked change
+keep their measured tempo.
 
 ## Output
 
@@ -130,6 +167,9 @@ tempo of its bar, which rekordbox's grid format allows.
   any beat's time. A bar-by-bar transition is a run of one-bar segments.
 - `beats` — every beat's time in ms, its tempo ×100, and its number in the
   bar. Numbering is 1–4 from the first beat here; [downbeat.md](downbeat.md)
-  fixes it.
+  fixes it on the first tempo's music, and the count carries on across
+  every change as rekordbox numbers a hand grid. An old-tempo beat within
+  half a period before a change is the same hit as the new tempo's first
+  beat and is dropped.
 - `confidence` — how far the winning tempo stood above the best candidate
   that is not a simple ratio of it.

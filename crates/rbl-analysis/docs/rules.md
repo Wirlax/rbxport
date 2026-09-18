@@ -21,12 +21,22 @@ and [key.md](key.md).
 - **Drum & bass is counted at the fast tempo** (174, not 87). When two
   octaves are both plausible, the faster one wins if it carries the most
   rhythm at its rate.
+- **A steady tempo is a whole number of BPM.** Dance music is produced at
+  whole tempos; a fitted line within a tenth of a whole number is snapped
+  to it and re-phased through the same kicks. The bars of a gradual change
+  keep the tempo they were measured at.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
-  across the join, as rekordbox writes it.
+  across the join, as rekordbox writes it — whatever the new music does
+  on that beat. Beat 1 is decided on the first tempo's own music, and the
+  count runs on from there; an old-tempo beat within half a period of the
+  new tempo's first beat is the same hit, and the new tempo keeps it.
 - **A grid is set where the kick drums state the tempo reliably.** Through
   a stretch where they do not — a breakdown, a new tempo that is only
-  hinted at by percussion — the grid holds the tempo it had and switches
-  where the new tempo is settled and the kicks are reliable again.
+  hinted at by percussion: a single impact on a phrase's downbeat, an arp
+  in eighths, claps on two and four, a snare roll into the drop, the kick
+  itself at half level — the grid holds the tempo it had and switches
+  where the new tempo is settled and the kicks are reliable again, at full
+  level and with the rest of the mix.
 - **A gradual tempo change between two settled tempos is gridded bar by
   bar.** Each bar's first downbeat is found by bisection: it lies between
   where the old tempo and the new tempo would put it, and the kick is
