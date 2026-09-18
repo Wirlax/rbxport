@@ -20,6 +20,7 @@ pub use manifest::{track_key, Manifest, ManifestTrack};
 
 use rbl_pdb::build::FileBuilder;
 use rbl_pdb::rows::{
+    artwork_row,
     album_row, artist_row, color_row, key_row, playlist_entry_row, playlist_row,
     simple_named_row, track_row, TrackInput,
 };
@@ -69,6 +70,21 @@ pub struct SourceTrack {
     pub sample_rate: u32,
     /// Analysis to copy alongside, as (extension, bytes).
     pub analysis: Vec<(String, Vec<u8>)>,
+    /// The track's artwork, where the library keeps it; `None` for none.
+    pub artwork: Option<PathBuf>,
+    /// The library's ids of the My Tags on the track.
+    pub my_tags: Vec<u64>,
+}
+
+/// One My Tag of the library, to be listed on the stick: a category
+/// (`attribute` 1, `parent` 0) or a tag under one (`attribute` 0).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceMyTag {
+    pub id: u64,
+    pub seq: u32,
+    pub name: String,
+    pub attribute: u8,
+    pub parent: u64,
 }
 
 /// A playlist to include.
@@ -85,6 +101,8 @@ pub struct ExportReport {
     pub playlists: usize,
     pub bytes_copied: u64,
     pub analysis_files: usize,
+    /// Artwork files written this run; four per image, as rekordbox writes.
+    pub artwork_files: usize,
     pub pdb_bytes: usize,
     /// Tracks skipped because their audio was missing or unreadable.
     pub skipped: Vec<String>,
@@ -302,11 +320,27 @@ pub fn export(
 /// starts from in place of the reference rows: the Preferences window's
 /// DJ System choices. A stick that already has a library keeps its own
 /// settings, and `defaults` is not looked at.
-#[allow(clippy::too_many_lines, reason = "one linear pipeline; splitting it would hide the order writes happen in")]
 pub fn export_with(
     destination: &Path,
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
+    defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+) -> Result<ExportReport> {
+    export_full(destination, tracks, playlists, &[], defaults)
+}
+
+/// [`export_with`], with the library's My Tags listed on the stick as well.
+///
+/// The categories and tags go to `exportLibrary.db` whole, as rekordbox
+/// writes them (every live row of `djmdMyTag`, 99 on the reference library),
+/// and each track's memberships with them; `export.pdb` has no My Tag
+/// table, so a player filters by them only through the library file.
+#[allow(clippy::too_many_lines, reason = "one linear pipeline; splitting it would hide the order writes happen in")]
+pub fn export_full(
+    destination: &Path,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    my_tags: &[SourceMyTag],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<ExportReport> {
     if tracks.is_empty() {
@@ -338,6 +372,9 @@ pub fn export_with(
     let mut genres = Intern::default();
     let mut labels = Intern::default();
     let mut keys = Intern::default();
+    // Artwork by where it comes from: two tracks of one album share one
+    // image, and the stick carries it once.
+    let mut artwork = Intern::default();
 
     let mut track_rows: Vec<Vec<u8>> = Vec::with_capacity(tracks.len());
     let mut one_library_tracks: Vec<OneLibraryTrack> = Vec::with_capacity(tracks.len());
@@ -437,6 +474,17 @@ pub fn export_with(
             String::new()
         };
 
+        // The artwork, written once per image: a second track of the same
+        // album finds its id already taken and its files already there.
+        let artwork_id = match track.artwork.as_deref().filter(|p| p.is_file()) {
+            Some(image) => {
+                let id = artwork.id(&image.to_string_lossy());
+                report.artwork_files += write_artwork(destination, id, image)?;
+                id
+            }
+            None => 0,
+        };
+
         recorded.push(ManifestTrack {
             export_id,
             library_id: track.id,
@@ -446,6 +494,7 @@ pub fn export_with(
             size,
             modified,
             analysis: analysis_hash,
+            artwork: if artwork_id == 0 { String::new() } else { artwork_path(artwork_id, "a", false) },
         });
 
         // The same facts the pdb row carries, kept for exportLibrary.db.
@@ -468,10 +517,13 @@ pub fn export_with(
             audio_path: place.audio.clone(),
             file_name: place.file_name.clone(),
             analysis_path: analyze_path.clone(),
+            image_id: artwork_id,
+            my_tags: track.my_tags.clone(),
         });
 
         track_rows.push(track_row(&TrackInput {
             id: export_id,
+            artwork_id,
             artist_id: interns.artists.id(&track.artist),
             album_id: interns.albums.id(&track.album),
             genre_id: interns.genres.id(&track.genre),
@@ -546,13 +598,19 @@ pub fn export_with(
     );
     file.add_table(7, &playlist_rows);
     file.add_table(8, &entry_rows);
+    // The artwork table names the small image of each; a player derives the
+    // others from the same name [ASSUME: what the `artwork` row of a
+    // rekordbox export names, of the four files it writes per image].
+    let artwork_paths: Vec<(u32, String)> =
+        artwork.entries().map(|(id, _)| (id, artwork_path(id, "a", false))).collect();
+    file.add_table(13, &artwork_paths.iter().map(|(id, path)| artwork_row(*id, path)).collect::<Vec<_>>());
 
     let pdb = file.finish();
     report.pdb_bytes = pdb.len();
     std::fs::write(db_dir.join("export.pdb"), &pdb)?;
 
     // A player never opens this; rekordbox does, to read the stick back.
-    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, defaults)?;
+    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, &artwork_paths, my_tags, defaults)?;
     report.one_library = true;
 
     // Last, so a run that fails part way leaves the older record standing and
@@ -585,14 +643,67 @@ struct OneLibraryTrack {
     audio_path: String,
     file_name: String,
     analysis_path: String,
+    /// The artwork's id in the `artwork` table and the `image` table; 0 none.
+    image_id: u32,
+    my_tags: Vec<u64>,
+}
+
+/// Where an image's files go on the stick, and what the databases name.
+///
+/// rekordbox writes four files per image — `a<id>.jpg`, `a<id>_m.jpg`,
+/// `b<id>.jpg` and `b<id>_m.jpg` — a thousand images to a five-digit folder
+/// [OBS, 2026-09-17 parity test]. Which size each is, and whether the
+/// stick's copies are re-encoded from the library's, is not settled (they
+/// did not match the library's files byte for byte), so every one is the
+/// library's image as it is: a player that wants the small one gets a
+/// larger one to scale [ASSUME].
+fn artwork_path(id: u32, prefix: &str, medium: bool) -> String {
+    let folder = (id.saturating_sub(1)) / 1000 + 1;
+    let suffix = if medium { "_m" } else { "" };
+    format!("/PIONEER/Artwork/{folder:05}/{prefix}{id}{suffix}.jpg")
+}
+
+/// The four names an image is written under.
+fn artwork_names(id: u32) -> [String; 4] {
+    [
+        artwork_path(id, "a", false),
+        artwork_path(id, "a", true),
+        artwork_path(id, "b", false),
+        artwork_path(id, "b", true),
+    ]
+}
+
+/// Copies an image to its four places, skipping any already there at the
+/// same size. Returns how many files were written.
+fn write_artwork(destination: &Path, id: u32, image: &Path) -> Result<usize> {
+    let size = std::fs::metadata(image)?.len();
+    let mut written = 0;
+    for name in artwork_names(id) {
+        let target = under(destination, &name);
+        if std::fs::metadata(&target).is_ok_and(|m| m.len() == size) {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        match std::fs::copy(image, &target) {
+            Ok(_) => written += 1,
+            Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(written)
 }
 
 /// Writes `exportLibrary.db` beside `export.pdb`.
+#[allow(clippy::too_many_arguments, reason = "the stick's tables, each from its own source")]
 fn write_one_library(
     db_dir: &Path,
     tracks: &[OneLibraryTrack],
     playlists: &[SourcePlaylist],
     export_ids: &[Option<u32>],
+    artwork_paths: &[(u32, String)],
+    my_tags: &[SourceMyTag],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<()> {
     use rbl_onelibrary::build::{Builder, LookupTable, Track};
@@ -616,6 +727,30 @@ fn write_one_library(
         std::fs::remove_file(&path)?;
     }
     let mut builder = Builder::create_with(&path, &settings).map_err(|e| one_library_error(&e))?;
+
+    for (id, image) in artwork_paths {
+        builder.add_image(i64::from(*id), image).map_err(|e| one_library_error(&e))?;
+    }
+    // Every tag the library has, whether or not a track here carries it,
+    // which is what rekordbox lists; then only the memberships of tags that
+    // exist, so a stale membership cannot point at nothing.
+    let mut known_tags: BTreeSet<u64> = BTreeSet::new();
+    for tag in my_tags {
+        let id = i64::try_from(tag.id).unwrap_or(0);
+        if id == 0 {
+            continue;
+        }
+        builder
+            .add_my_tag(
+                id,
+                i64::from(tag.seq),
+                &tag.name,
+                i64::from(tag.attribute),
+                i64::try_from(tag.parent).unwrap_or(0),
+            )
+            .map_err(|e| one_library_error(&e))?;
+        known_tags.insert(tag.id);
+    }
 
     for track in tracks {
         let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(|e| one_library_error(&e))?;
@@ -644,8 +779,17 @@ fn write_one_library(
                 rating: i64::from(track.rating) * 51,
                 comment: track.comment.clone(),
                 date_added: track.date_added.clone(),
+                image_id: (track.image_id != 0).then_some(i64::from(track.image_id)),
             })
             .map_err(|e| one_library_error(&e))?;
+        for tag in &track.my_tags {
+            if !known_tags.contains(tag) {
+                continue;
+            }
+            builder
+                .tag_track(i64::try_from(*tag).unwrap_or(0), i64::from(track.export_id))
+                .map_err(|e| one_library_error(&e))?;
+        }
     }
 
     for (i, playlist) in playlists.iter().enumerate() {

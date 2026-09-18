@@ -248,3 +248,70 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
     assert_eq!(kept.sub_column, Some(5));
     assert!(kept.categories.iter().find(|c| c.name == "GENRE").unwrap().visible);
 }
+
+#[test]
+fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
+    use rbl_export::{export_full, SourceMyTag};
+
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let image = src.path().join("cover.jpg");
+    std::fs::write(&image, b"\xff\xd8not really a jpeg\xff\xd9").unwrap();
+    let mut tracks = vec![
+        track(src.path(), 1, "All U Need", "TRIODE"),
+        track(src.path(), 2, "The Abyss", "ARTBAT"),
+        track(src.path(), 3, "No Cover", "Nobody"),
+    ];
+    // Two tracks of one album share the image; the third has none.
+    tracks[0].artwork = Some(image.clone());
+    tracks[1].artwork = Some(image.clone());
+    tracks[0].my_tags = vec![11, 12];
+    tracks[1].my_tags = vec![12, 99]; // 99 is not a tag the library has
+    let my_tags = vec![
+        SourceMyTag { id: 1, seq: 1, name: "Genre".into(), attribute: 1, parent: 0 },
+        SourceMyTag { id: 11, seq: 1, name: "Peak".into(), attribute: 0, parent: 1 },
+        SourceMyTag { id: 12, seq: 2, name: "Warm-up".into(), attribute: 0, parent: 1 },
+    ];
+    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0, 1, 2] }];
+
+    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None).unwrap();
+    assert_eq!(report.tracks, 3);
+    assert_eq!(report.artwork_files, 4, "one image, written under its four names");
+    for name in ["a1.jpg", "a1_m.jpg", "b1.jpg", "b1_m.jpg"] {
+        let file = dest.path().join("PIONEER/Artwork/00001").join(name);
+        assert_eq!(std::fs::read(&file).unwrap(), std::fs::read(&image).unwrap(), "{name}");
+    }
+
+    // The pdb names the image and the tracks point at it.
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let artwork = pdb.table(rbl_pdb::PageType::Artwork).expect("an artwork table");
+    let rows = pdb.named_rows(artwork);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].id, rows[0].name.as_str()), (1, "/PIONEER/Artwork/00001/a1.jpg"));
+    let mut by_title: Vec<(String, u32)> = pdb
+        .track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap())
+        .into_iter()
+        .map(|t| (t.title, t.artwork_id))
+        .collect();
+    by_title.sort();
+    assert_eq!(by_title, vec![("All U Need".to_string(), 1), ("No Cover".to_string(), 0), ("The Abyss".to_string(), 1)]);
+
+    // And exportLibrary.db carries the image, every tag, and the memberships
+    // of the tags that exist.
+    let lib = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    assert_eq!(lib.count("image").unwrap(), 1);
+    assert_eq!(lib.count("myTag").unwrap(), 3);
+    assert_eq!(lib.count("myTag_content").unwrap(), 3);
+    let with_image: i64 = lib
+        .connection()
+        .query_row("SELECT COUNT(*) FROM content WHERE image_id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(with_image, 2);
+    let path: String = lib.connection().query_row("SELECT path FROM image WHERE image_id = 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(path, "/PIONEER/Artwork/00001/a1.jpg");
+
+    // A second export finds the artwork in place and writes none again.
+    let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None).unwrap();
+    assert_eq!(again.artwork_files, 0);
+}

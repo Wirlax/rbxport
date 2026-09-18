@@ -12,6 +12,7 @@
 //!   user's library even by mistake.
 
 pub mod details;
+pub mod export_info;
 pub mod fixture;
 pub mod import;
 pub mod key;

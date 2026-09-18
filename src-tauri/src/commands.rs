@@ -607,6 +607,7 @@ pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResul
 /// `exportExt.pdb` and `exportLibrary.db`. Never re-analyses: an export moves
 /// what the library already knows.
 #[tauri::command]
+#[allow(clippy::too_many_lines, reason = "one linear pipeline: gather, export, write the defaults, verify")]
 pub async fn export_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -618,6 +619,7 @@ pub async fn export_playlist<R: tauri::Runtime>(
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
+    let state = Arc::clone(&state);
     let report = blocking("export_playlist", move || {
         let playlists = library.playlists();
         let Some(index) = playlist
@@ -645,15 +647,42 @@ pub async fn export_playlist<R: tauri::Runtime>(
             ));
         }
 
+        // What the index does not hold: the My Tags, and the other places a
+        // cloud-synced file may be. One read for the whole playlist.
+        let ids: Vec<String> = rows.iter().map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string()).collect();
+        let (my_tags, extras) = state
+            .read_db(|db| {
+                let conn = db.connection();
+                Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::track_extras(conn, &ids)?))
+            })
+            .map_err(write_error)?;
+        let source_my_tags: Vec<rbl_export::SourceMyTag> = my_tags
+            .iter()
+            .map(|tag| rbl_export::SourceMyTag {
+                id: tag.id.parse().unwrap_or(0),
+                seq: u32::try_from(tag.seq.max(0)).unwrap_or(u32::MAX),
+                name: tag.name.clone(),
+                attribute: u8::try_from(tag.attribute.clamp(0, 255)).unwrap_or(0),
+                parent: tag.parent.parse().unwrap_or(0),
+            })
+            .collect();
+
         let mut tracks = Vec::with_capacity(rows.len());
-        for &row in &rows {
+        for (&row, id_text) in rows.iter().zip(&ids) {
             let i = row as usize;
             let analysis = read_analysis(&share, library.analysis_path.get(i));
+            let extra = extras.get(id_text).cloned().unwrap_or_default();
+            // The library's own image, share-relative like the analysis.
+            let artwork = Some(library.artwork_path.get(i))
+                .filter(|p| !p.is_empty())
+                .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
             tracks.push(rbl_export::SourceTrack {
                 // The content id is how a second export to the same stick
                 // recognises a track it has already written.
                 id: library.ids.get(i).copied().unwrap_or(0),
-                source_path: std::path::PathBuf::from(library.folder_path.get(i)),
+                source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),
+                artwork,
+                my_tags: extra.my_tags.iter().filter_map(|t| t.parse().ok()).collect(),
                 title: library.title.get(i).to_owned(),
                 artist: library.artist_name(row).to_owned(),
                 album: library.album_name(row).to_owned(),
@@ -677,10 +706,11 @@ pub async fn export_playlist<R: tauri::Runtime>(
             track_indices: (0..tracks.len()).collect(),
         };
         let library_defaults = defaults.as_ref().map(crate::device_settings::library_defaults);
-        let report = rbl_export::export_with(
+        let report = rbl_export::export_full(
             std::path::Path::new(&destination),
             &tracks,
             std::slice::from_ref(&source_playlist),
+            &source_my_tags,
             library_defaults.as_ref(),
         )
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
@@ -739,6 +769,26 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
             .collect())
     })
     .await
+}
+
+/// Where a track's audio is read from.
+///
+/// `FolderPath` when the file is there. A cloud-synced track's `FolderPath`
+/// can name a copy that is not (the Dropbox one, on a machine where the
+/// folder is not synced down), so the other paths the row names —
+/// `rb_LocalFolderPath`, then `OrgFolderPath` — are tried in turn, and
+/// the first that exists is the source. None existing leaves `FolderPath`,
+/// so the export reports the track as skipped under the name the row gives.
+fn source_audio(folder_path: &str, alternates: &[String]) -> std::path::PathBuf {
+    let first = std::path::PathBuf::from(folder_path);
+    if first.is_file() {
+        return first;
+    }
+    alternates
+        .iter()
+        .map(std::path::PathBuf::from)
+        .find(|p| p.is_file())
+        .unwrap_or(first)
 }
 
 /// Reads a track's analysis files, so the export re-emits rather than

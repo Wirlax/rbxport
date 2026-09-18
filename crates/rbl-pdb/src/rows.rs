@@ -153,6 +153,12 @@ pub fn simple_named_row(id: u32, name: &str) -> Vec<u8> {
     row
 }
 
+/// `artwork`: u4 id then the media-relative path of the image, e.g.
+/// `/PIONEER/Artwork/00001/a1.jpg` — the same shape as a genre row.
+pub fn artwork_row(id: u32, path: &str) -> Vec<u8> {
+    simple_named_row(id, path)
+}
+
 /// `keys`: the id appears twice.
 pub fn key_row(id: u32, name: &str) -> Vec<u8> {
     let mut row = id.to_le_bytes().to_vec();

@@ -50,6 +50,10 @@ pub struct ManifestTrack {
     pub modified: i64,
     /// Hash of the analysis bytes, so re-analysis is noticed.
     pub analysis: u64,
+    /// The artwork's small file on the stick, relative to the root; empty
+    /// when the track has none. Absent from older manifests.
+    #[serde(default)]
+    pub artwork: String,
 }
 
 impl ManifestTrack {
@@ -159,6 +163,7 @@ mod tests {
                 size: 1234,
                 modified: 99,
                 analysis: 5,
+                artwork: String::new(),
             }],
         };
         manifest.save(dir.path()).unwrap();

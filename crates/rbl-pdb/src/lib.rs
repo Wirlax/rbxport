@@ -359,7 +359,8 @@ impl Pdb<'_> {
     /// Decodes a name table, dispatching on its layout.
     pub fn named_rows(&self, table: &TableRef) -> Vec<NamedRow> {
         match table.page_type {
-            PageType::Genres | PageType::Labels => self.simple_named(table, 0, 4),
+            // Artwork rows name a path where a genre names a genre.
+            PageType::Genres | PageType::Labels | PageType::Artwork => self.simple_named(table, 0, 4),
             // Keys carry the id twice.
             PageType::Keys => self.simple_named(table, 0, 8),
             // Colors: five pad bytes, u2 id, one pad byte, then the name.

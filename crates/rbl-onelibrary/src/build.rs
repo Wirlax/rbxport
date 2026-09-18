@@ -183,6 +183,8 @@ pub struct Track {
     pub rating: i64,
     pub comment: String,
     pub date_added: String,
+    /// The `image` row of the track's artwork; `None` for none.
+    pub image_id: Option<i64>,
 }
 
 /// Builds an `exportLibrary.db`.
@@ -313,9 +315,9 @@ impl Builder {
                 (content_id, title, titleForSearch, bpmx100, length, trackNo,
                  artist_id_artist, album_id, genre_id, label_id, key_id, color_id,
                  djComment, rating, dateAdded, path, fileName, fileSize,
-                 analysisDataFilePath, djPlayCount, hasModified)
+                 analysisDataFilePath, djPlayCount, hasModified, image_id)
              VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                     ?12, ?13, ?14, ?15, ?16, ?17, ?18, 0, 0)",
+                     ?12, ?13, ?14, ?15, ?16, ?17, ?18, 0, 0, ?19)",
             params![
                 track.content_id,
                 track.title,
@@ -335,6 +337,8 @@ impl Builder {
                 track.file_name,
                 track.file_size,
                 track.analysis_path,
+            
+                track.image_id,
             ],
         )?;
         self.tracks += 1;
@@ -361,6 +365,37 @@ impl Builder {
             "INSERT INTO playlist_content (playlist_id, content_id, sequenceNo)
              VALUES (?1, ?2, ?3)",
             params![playlist, content, seq],
+        )?;
+        Ok(())
+    }
+
+    /// Adds an artwork row: the stick-relative path of the image, e.g.
+    /// `/PIONEER/Artwork/00001/a1.jpg`, under the id the pdb's `artwork`
+    /// table uses for it.
+    pub fn add_image(&mut self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO image (image_id, path) VALUES (?1, ?2)",
+            params![id, path],
+        )?;
+        Ok(())
+    }
+
+    /// Adds a My Tag row: a category (`attribute` 1, parent 0) or a tag
+    /// under one (`attribute` 0), under the library's own id for it.
+    pub fn add_my_tag(&mut self, id: i64, seq: i64, name: &str, attribute: i64, parent: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO myTag (myTag_id, sequenceNo, name, attribute, myTag_id_parent)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, seq, name, attribute, parent],
+        )?;
+        Ok(())
+    }
+
+    /// Marks a track with a My Tag.
+    pub fn tag_track(&mut self, my_tag: i64, content: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO myTag_content (myTag_id, content_id) VALUES (?1, ?2)",
+            params![my_tag, content],
         )?;
         Ok(())
     }
