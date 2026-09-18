@@ -118,6 +118,11 @@ pub fn onset_envelope(samples: &[f32], sample_rate: u32) -> OnsetEnvelope {
 }
 
 /// Computes the spectral-flux onset envelope over one band.
+///
+/// A band that ends far below Nyquist is taken from the audio low-passed
+/// and decimated first, and costs a fraction of the full band: the kick
+/// band's long frame over the whole signal was four times the price of the
+/// full band, for bins a decimated signal resolves just as well.
 pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> OnsetEnvelope {
     let rate = f64::from(sample_rate) / HOP as f64;
     let frame = band.frame.max(HOP);
@@ -125,7 +130,91 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
     if samples.len() < frame || sample_rate == 0 {
         return OnsetEnvelope { values: Vec::new(), rate, origin_secs };
     }
+    let decimation = decimation_for(band, sample_rate, frame);
+    let mut values = if decimation > 1 {
+        let reduced = low_pass_and_decimate(samples, sample_rate, band.high_hz, decimation);
+        spectral_flux(&reduced, sample_rate / decimation as u32, frame / decimation, HOP / decimation, band)
+    } else {
+        spectral_flux(samples, sample_rate, frame, HOP, band)
+    };
+    normalise(&mut values);
+    if decimation > 1 {
+        scale_to_strong_peaks(&mut values);
+    }
+    OnsetEnvelope { values, rate, origin_secs }
+}
 
+/// The share of an envelope's peaks that read at or above one after
+/// `scale_to_strong_peaks`.
+const STRONG_PEAKS: f64 = 0.02;
+
+/// Rescales an envelope so that its strong peaks, not its single highest,
+/// read as one: the `STRONG_PEAKS` share of its local maxima sit at one or
+/// above, and the few above are left there, not clipped, so that every
+/// ratio between two hits survives. Peak scaling leaves a track whose one
+/// sub-bass boom is ten times any kick with every kick at a tenth, and a
+/// level a later stage compares against a floor cannot be read off that.
+/// The full band keeps peak scaling: the tempo stage's weights were tuned
+/// on it.
+fn scale_to_strong_peaks(values: &mut [f32]) {
+    let mut peaks: Vec<f32> = values
+        .windows(3)
+        .filter_map(|w| (w[1] > 0.0 && w[1] > w[0] && w[1] >= w[2]).then_some(w[1]))
+        .collect();
+    if peaks.len() < 16 {
+        return;
+    }
+    peaks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let at = ((peaks.len() as f64 * (1.0 - STRONG_PEAKS)) as usize).min(peaks.len() - 1);
+    let strong = peaks[at];
+    if strong <= 0.0 {
+        return;
+    }
+    for value in values.iter_mut() {
+        *value /= strong;
+    }
+}
+
+/// The power of two the audio may be decimated by for a band: the band's
+/// top stays at most a quarter of the reduced rate, so the anti-alias
+/// low-pass has two octaves to fall in, and the frame and hop stay whole
+/// and the frame at least 64 samples. 32 for the kick band at 44.1 kHz,
+/// 1 for any band that reaches Nyquist.
+fn decimation_for(band: Band, sample_rate: u32, frame: usize) -> usize {
+    if !band.high_hz.is_finite() || band.high_hz <= 0.0 {
+        return 1;
+    }
+    let mut d = 1usize;
+    while d < 64
+        && f64::from(sample_rate) / (d * 2) as f64 >= 4.0 * f64::from(band.high_hz)
+        && frame % (d * 2) == 0
+        && HOP % (d * 2) == 0
+        && frame / (d * 2) >= 64
+    {
+        d *= 2;
+    }
+    d
+}
+
+/// The audio low-passed at `high_hz` (two second-order sections, 24 dB per
+/// octave) with every `decimation`th sample kept.
+fn low_pass_and_decimate(samples: &[f32], sample_rate: u32, high_hz: f32, decimation: usize) -> Vec<f32> {
+    let mut first = crate::attack::Biquad::low_pass(high_hz, sample_rate);
+    let mut second = first;
+    samples
+        .iter()
+        .map(|&x| second.run(first.run(x)))
+        .enumerate()
+        .filter_map(|(i, y)| (i % decimation == 0).then_some(y))
+        .collect()
+}
+
+/// Spectral flux inside `band`: one value per `hop` samples of audio at
+/// `sample_rate`, each from a frame of `frame` samples. Not normalised.
+fn spectral_flux(samples: &[f32], sample_rate: u32, frame: usize, hop: usize, band: Band) -> Vec<f32> {
+    if samples.len() < frame || sample_rate == 0 || hop == 0 {
+        return Vec::new();
+    }
     let mut planner = RealFftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(frame);
     let mut input = fft.make_input_vec();
@@ -150,12 +239,12 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
         usize::MAX
     };
 
-    let frames = (samples.len().saturating_sub(frame)) / HOP + 1;
+    let frames = (samples.len().saturating_sub(frame)) / hop + 1;
     let mut values = Vec::with_capacity(frames);
     let mut previous = vec![0.0_f32; output.len()];
 
     for index in 0..frames {
-        let start = index * HOP;
+        let start = index * hop;
         let Some(chunk) = samples.get(start..start + frame) else { break };
         for (i, slot) in input.iter_mut().enumerate() {
             *slot = chunk.get(i).copied().unwrap_or(0.0) * window.get(i).copied().unwrap_or(0.0);
@@ -181,9 +270,7 @@ pub fn onset_envelope_band(samples: &[f32], sample_rate: u32, band: Band) -> Ons
         }
         values.push(flux);
     }
-
-    normalise(&mut values);
-    OnsetEnvelope { values, rate, origin_secs }
+    values
 }
 
 /// Subtracts a local mean and clips at zero, which removes slow loudness drift

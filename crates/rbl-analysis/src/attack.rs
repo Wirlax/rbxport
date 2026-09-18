@@ -157,7 +157,7 @@ fn band_pass(samples: &[f32], sample_rate: u32, low_hz: f32, high_hz: f32) -> Ve
 
 /// One biquad section with its state.
 #[derive(Debug, Clone, Copy)]
-struct Biquad {
+pub(crate) struct Biquad {
     b0: f32,
     b1: f32,
     b2: f32,
@@ -184,7 +184,7 @@ impl Biquad {
     }
 
     /// RBJ cookbook low-pass, Q = 1/√2.
-    fn low_pass(hz: f32, sample_rate: u32) -> Self {
+    pub(crate) fn low_pass(hz: f32, sample_rate: u32) -> Self {
         let w = 2.0 * std::f32::consts::PI * hz / sample_rate as f32;
         let alpha = w.sin() / (2.0 * std::f32::consts::FRAC_1_SQRT_2.recip());
         let c = w.cos();
@@ -192,7 +192,7 @@ impl Biquad {
         Self::from_coefficients(half, 1.0 - c, half, 1.0 + alpha, -2.0 * c, 1.0 - alpha)
     }
 
-    fn run(&mut self, x: f32) -> f32 {
+    pub(crate) fn run(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x;
