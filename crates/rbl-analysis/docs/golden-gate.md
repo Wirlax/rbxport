@@ -90,17 +90,24 @@ to Life [138-150]`, the other DJ edit, passes since the cut goes where the
 kick arrives at full level: its 150 kick pattern plays at half level under
 the 138 breakdown from 76 s, stops for two bars, and drops at 105.158 s.)
 
-**BATTERY OPERATED.** Half a beat off. Chris re-gridded it in rekordbox
-twice (its first beat moved 19 ms, to 51 ms) and confirmed the corrected
-grid; ours sits on its midpoints. Both of our judges lean the wrong way
-here, weakly: the phrase-structure novelty prefers our half by 10 %, and
-the line fitted through the kick attacks on our half collects 4 % more
-kick than the one on rekordbox's. Each judge is wrong on about one track
-in 155 on rekordbox's own grids (the novelty on 2, the kick on 5); this is
-the track where they coincide. Letting the kick break a thin novelty
-margin was measured at every threshold and changed nothing; locking the
-grid to the kick outright fixed this track and broke five others where an
-off-beat clap has the sharper transient.
+**BATTERY OPERATED.** Not ambiguous after all: two grids. The hand grid
+is one 130 line from 0.051 s to 146.359 s and another 130 line from
+147.029 s, 208 ms (0.45 beat) later than the first would put it — the same
+tempo, so the runs printer shows one run. Between them, from bar 65
+(118.2 s), the kick stops and an eighth-note bass slows under a filter to
+an eighth of 1.4 s at 2:22, then silence, then 130 again at 2:27.0. A
+single line can only sit on one half; ours sat on the second in the
+golden cache and on the first in the multibpm rig, and either way half
+the track was on the midpoints. The judges "leaning the wrong way"
+recorded here before were measuring that. The gap stage
+([beat.md](beat.md), step 7) now fits the halves on their own, judges
+each on the kick band, cuts at 147.029 s, and walks the slowdown beat by
+beat (25 beats, 130 → 22 BPM). Downbeat passes at −2 ms and the second
+half matches the hand grid in time and number (the count carried across
+the ramp puts beat 3 at the cut, as the hand grid has it). The grid metric
+still fails, on purpose, at 91 %: the hand grid holds 130 through the
+slowdown (62 beats) where ours follows the bass (25 beats). Re-gridding
+the original with the slowdown would settle it.
 
 **Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 2 others.
 

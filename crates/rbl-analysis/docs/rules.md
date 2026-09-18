@@ -37,6 +37,18 @@ and [key.md](key.md).
   itself at half level — the grid holds the tempo it had and switches
   where the new tempo is settled and the kicks are reliable again, at full
   level and with the rest of the mix.
+- **Where the music comes back at the same tempo on another phase, the
+  grid cuts there.** A line through both halves of such a track is on one
+  of them or on neither. Each half is put on its own kicks, and the cut
+  goes at the first bar of hits on the new line; the old line holds up to
+  it. A stretch that comes back on its own grid holds the line across
+  whatever the breakdown did.
+- **A slowdown or speed-up the line has lost is followed beat by beat
+  where it leads somewhere.** With no kick to follow, the hits that
+  remain (a bass line in eighths under a tape-stop) are walked from the
+  last supported beat, each becoming a beat of its own length, up to the
+  cut. Where the music comes back on the grid it left, the ramp is a
+  breakdown and the grid holds.
 - **A gradual tempo change between two settled tempos is gridded bar by
   bar.** Each bar's first downbeat is found by bisection: it lies between
   where the old tempo and the new tempo would put it, and the kick is

@@ -94,6 +94,11 @@ starts a breakdown in the middle of a section (Bring Me Back to Life at
 60 s, which the hand grid holds through), so the rule stays "where the
 kick states the tempo". The registered copies in the library are from
 the first run; `run` (rekordbox quit) refreshes them.
+BATTERY OPERATED was not ambiguous: its hand grid is two 130 lines 208 ms
+apart, joined by a slowdown with no kick ([golden-gate.md](golden-gate.md)).
+The gap stage built on it cuts where the hand grid does and grids the
+slowdown; the copy in the results playlist was registered before that and
+shows the old grid until `analyse` is run again.
 
 ### What rekordbox did with the copies
 

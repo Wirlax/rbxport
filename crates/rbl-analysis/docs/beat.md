@@ -13,6 +13,10 @@ flowchart TD
     Q -- no --> Z([grid])
     Q -- yes --> F[6. Grid the change bar by bar,<br/>then the settled stretch after it]
     F --> Q
+    Q -- no --> G{7. Does a line lose its hits<br/>for two bars, and do they<br/>come back somewhere else?}
+    G -- no --> Z
+    G -- yes --> H[Cut where they come back;<br/>walk a ramp through the gap<br/>if the hits drift]
+    H --> Z
 ```
 
 ## 1. Detect the BPM
@@ -158,13 +162,59 @@ turns about their centre. Every golden track is at a whole tempo and the
 fit lands within 0.04 of it on all of them. The bars of a walked change
 keep their measured tempo.
 
+## 7. Gaps
+
+A line fitted through a stretch is only right where its hits are on it.
+After the segments are fitted, each line is checked beat by beat for a
+hit (a peak of the onset envelope within a tenth of a beat). Two bars or
+more without one is a gap, and what comes after the gap decides what
+happens to it:
+
+- **The line resumes on its own grid** (two bars of hits on it again): it
+  holds across the gap, whatever the breakdown did, as the hand grids
+  hold. Nothing changes.
+- **The music comes back at the same tempo on another phase.** The
+  stretches before and after the gap are fitted on their own, and each is
+  put on its kicks by the kick band's own onset envelope (the attack
+  judge inside the fit is wrong on one stretch in thirty, and two halves
+  it put on different halves of the beat would read as a phase change).
+  When both halves say where their kicks are, their lines differ by more
+  than a tenth of a beat, and the new line collects half again as much
+  kick after the gap as the old one carried on, the grid cuts: at the
+  first bar of hits on the new line, the old line dropping its beat
+  within half a beat of the cut. A stretch after the gap shorter than 64
+  beats — an outro's last bars — is never believed to have a phase of its
+  own.
+- **The hits through the gap drift** — an eighth-note bass under a
+  tape-stop, slowing bar after bar with no kick to follow. From the last
+  supported beat before the gap the hits are walked on the full-band
+  envelope: each next beat is looked for from three quarters of the last
+  period to five quarters of where the last two periods put it (the
+  eighth note between two beats stays outside that window), the strongest
+  peak for its distance from the prediction wins, a hit must be a quarter
+  of the mean of the last four, and the period may change by up to 30 %
+  a beat. Eight beats going one way, with the period at least 5 % from
+  the line's, are a ramp, and each walked beat becomes a segment of its
+  own length, up to the cut; the stretch from the last walked beat to the
+  cut is whole beats at the pace the ramp was going. A ramp is only
+  gridded where it leads somewhere: through a gap whose line comes back
+  on its own grid it is a breakdown, and the line holds.
+
+`BATTERY OPERATED` is the case this was built on: 130 BPM to bar 65, then
+the kick stops and the bass slows from an eighth of 231 ms to one of 1.4 s
+by 2:22, silence, and 130 again from 2:27.0 on a phase 208 ms from the
+old line's. The hand grid holds 130 through the slowdown and re-phases
+at 2:27.0; ours holds to bar 65, follows the bass beat by beat down to
+22 BPM, and cuts at the same millisecond.
+
 ## Output
 
 `TempoResult`:
 
 - `bpm` — the tempo the track starts at, which is what a library shows.
 - `segments` — one per tempo: where it starts and ends, the period, and
-  any beat's time. A bar-by-bar transition is a run of one-bar segments.
+  any beat's time. A bar-by-bar transition is a run of one-bar segments;
+  a walked ramp a run of one-beat segments.
 - `beats` — every beat's time in ms, its tempo ×100, and its number in the
   bar. Numbering is 1–4 from the first beat here; [downbeat.md](downbeat.md)
   fixes it on the first tempo's music, and the count carries on across

@@ -294,15 +294,46 @@ impl Reader<'_> {
 }
 
 /// Estimates tempo with the candidate stage under the caller's control,
-/// placing each beat on the kick's attack when an attack map is given, and
-/// placing a tempo change where the kick band, when one is given, says the
-/// new tempo's beat has arrived.
+/// placing each beat on the kick's attack when an attack map is given, and,
+/// when the kick band's envelope is given, placing a tempo change where it
+/// says the new tempo's beat has arrived and judging which half of the
+/// beat a stretch's kicks are on.
 #[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
 pub fn detect_tempo_with(
     onsets: &OnsetEnvelope,
     kicks: Option<&OnsetEnvelope>,
     attacks: Option<&AttackMap>,
     options: TempoOptions,
+) -> TempoResult {
+    detect_tempo_traced(onsets, kicks, attacks, options, None)
+}
+
+/// What the gap stage decided at one gap, for measurement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GapDecision {
+    /// The last beat with a hit before the gap, in seconds.
+    pub last_supported_secs: f64,
+    /// Where the old line has two bars of hits again, if it does.
+    pub resumes_secs: Option<f64>,
+    /// Whether the stretch after the gap sits on another phase, and by
+    /// how much, in ms.
+    pub moved: bool,
+    pub shift_ms: f64,
+    /// Beats the ramp walk placed, and how far its period got from the
+    /// line's, as a fraction.
+    pub walked: usize,
+    pub departure: f64,
+    /// Where the grid was cut, if it was.
+    pub cut_secs: Option<f64>,
+}
+
+/// [`detect_tempo_with`], recording what the gap stage decided.
+pub fn detect_tempo_traced(
+    onsets: &OnsetEnvelope,
+    kicks: Option<&OnsetEnvelope>,
+    attacks: Option<&AttackMap>,
+    options: TempoOptions,
+    trace: Option<&mut Vec<GapDecision>>,
 ) -> TempoResult {
     if onsets.len() < 64 || onsets.rate <= 0.0 {
         return TempoResult::empty();
@@ -330,7 +361,7 @@ pub fn detect_tempo_with(
     let confidence = if own > 0.0 { ((own - rival) / own).clamp(0.0, 1.0) } else { 0.0 };
 
     // The whole track at the winning tempo, then split where it changes.
-    let segments = segment(reader, best.bpm, options);
+    let segments = segment(reader, best.bpm, options, trace);
     let beats = beats_of(&segments, 0);
     let (bpm, first_beat_secs) = segments.first().map_or((0.0, 0.0), |s| (s.bpm(), s.start_secs()));
     TempoResult { bpm, confidence, first_beat_secs, segments, beats }
@@ -1026,7 +1057,7 @@ fn run_bounds(labels: &[f64]) -> Vec<(usize, usize)> {
 }
 
 /// Splits the track where the tempo changes and fits each stretch.
-fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions) -> Vec<Segment> {
+fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&mut Vec<GapDecision>>) -> Vec<Segment> {
     let (values, rate, origin_secs) = (reader.values, reader.rate, reader.origin_secs);
     let n = values.len();
     let window = ((options.segment_window_secs * rate) as usize).max(64);
@@ -1125,7 +1156,7 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions) -> Vec<Segment> 
         from_sample = bars.last().map_or(cut, |&(_, end)| end);
         pending = Some(next_fit);
     }
-    segments
+    split_gaps(reader, &segments, options, trace)
 }
 
 /// The tempo of one window as a ratio to `bpm`, or None when the window has
@@ -1470,6 +1501,490 @@ fn kick_runs(beats: &[(f64, Evidence)], ks: usize) -> Vec<(usize, usize, f64)> {
     runs
 }
 
+// ---------------------------------------------------------------- gaps
+
+/// Beats in a row a line must go without a hit before the stretch is a
+/// gap: two bars. A fill or a bar's drop-out is not one.
+const GAP_BEATS: usize = 8;
+/// Beats in a row with a hit before a gap that the walk into it may start
+/// from: a bar.
+const SUPPORTED_RUN: usize = 4;
+/// The hits after a gap may sit this far from the old line, as a fraction
+/// of a beat, and still be its grid; further, and the music has come back
+/// on a new phase.
+const PHASE_TOLERANCE: f64 = 0.1;
+/// Below this share of the envelope's peak a hit is nothing, whatever the
+/// beats around it.
+const HIT_FLOOR: f64 = 0.02;
+/// A line resumes on hits at least this share of its own floor: the bars
+/// where a track comes back are quiet, a bass alone under a filter, but
+/// they are not the noise between a slowing bass's notes.
+const RESUME_FRACTION: f64 = 0.4;
+/// A hit through a ramp must be at least this share of the mean of the
+/// hits before it: the bass under a filter sweep fades, it does not stop.
+const RAMP_FADE: f64 = 0.25;
+/// Hits the ramp keeps in its running mean.
+const RAMP_MEMORY: usize = 4;
+/// From one beat to the next a ramp's period may change by this much
+/// either way; a bigger jump is a cut, and the walk stops before it.
+const RAMP_RATIO: (f64, f64) = (0.8, 1.3);
+/// The next beat is looked for from three quarters of the last period to
+/// five quarters of where the last two periods put it: the ramp may keep
+/// steepening, or stop. The eighth note between two beats sits at half a
+/// period and stays outside the window.
+const RAMP_WINDOW: (f64, f64) = (0.75, 1.25);
+/// A ramp is believed at this many beats, and when its period has moved
+/// from the line's by at least `RAMP_DEPARTURE`.
+const RAMP_MIN_BEATS: usize = 8;
+const RAMP_DEPARTURE: f64 = 0.05;
+
+/// The hit at every beat of `f` in `from..to`: the beat's envelope sample
+/// and the highest peak within a tenth of a beat of it — a peak, not the
+/// tail of one just outside the reach — with its height, zero where there
+/// is none.
+fn beat_hits(values: &[f64], f: Fit, from: usize, to: usize) -> Vec<(f64, f64, f64)> {
+    if f.period < 2.0 || to <= from {
+        return Vec::new();
+    }
+    let reach = (f.period * 0.1).max(1.0);
+    let first = ((from as f64 - f.phase) / f.period).ceil() as i64;
+    let last = ((to as f64 - 1.0 - f.phase) / f.period).floor() as i64;
+    (first..=last)
+        .map(|k| {
+            let at = f.phase + k as f64 * f.period;
+            let (hit, height) = peaks_in(values, at - reach, at + reach, HIT_FLOOR)
+                .into_iter()
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((at, 0.0));
+            (at, hit, height)
+        })
+        .collect()
+}
+
+/// A line stands on the kicks of a stretch when it collects this many
+/// times the kick of the same line moved half a beat.
+const KICK_MARGIN: f64 = 1.5;
+
+/// The kick the beats of `f` collect in `from..to`: the highest kick-band
+/// peak within a tenth of a beat of each, summed. Zero without a kick
+/// envelope.
+fn kick_support(reader: Reader<'_>, f: Fit, from: f64, to: f64) -> f64 {
+    let Some(kicks) = reader.kicks else { return 0.0 };
+    if f.period < 2.0 || kicks.rate <= 0.0 || kicks.values.is_empty() {
+        return 0.0;
+    }
+    let reach_secs = f.period * 0.1 / reader.rate;
+    let first = ((from - f.phase) / f.period).ceil() as i64;
+    let last = ((to - f.phase) / f.period).floor() as i64;
+    (first..=last)
+        .map(|k| {
+            let secs = reader.origin_secs + (f.phase + k as f64 * f.period) / reader.rate;
+            let x = (secs - kicks.origin_secs) * kicks.rate;
+            let lo = ((x - reach_secs * kicks.rate).floor().max(0.0)) as usize;
+            let hi = ((x + reach_secs * kicks.rate).ceil() as usize).min(kicks.values.len().saturating_sub(1));
+            (lo..=hi).map(|i| f64::from(kicks.values[i])).fold(0.0, f64::max)
+        })
+        .sum()
+}
+
+/// `f` or `f` moved half a beat, whichever stands on the kicks of
+/// `from..to` by `KICK_MARGIN`; `f` as it is without a kick envelope; and
+/// nothing when neither wins — a quiet intro, a break — because a stretch
+/// whose kicks cannot say which half of the beat they are on cannot say
+/// that its grid differs from the rest of the track's.
+fn on_the_kicks(reader: Reader<'_>, f: Fit, from: f64, to: f64) -> Option<Fit> {
+    if reader.kicks.is_none() {
+        return Some(f);
+    }
+    let moved = Fit { phase: f.phase + f.period / 2.0, ..f };
+    let (here, there) = (kick_support(reader, f, from, to), kick_support(reader, moved, from, to));
+    if there > here * KICK_MARGIN {
+        Some(moved)
+    } else if here > there * KICK_MARGIN {
+        Some(f)
+    } else {
+        None
+    }
+}
+
+/// A stretch this many beats long is fitted for its own period, and can
+/// be believed to have a phase of its own. A shorter one takes its phase
+/// from its own fit and its period from the line through the whole
+/// segment, which more beats fixed better; and a shorter one after a gap
+/// — an outro's last bars — holds the line rather than moving it.
+const MIN_STRETCH_BEATS: usize = 64;
+
+/// The two halves of a gap, each on its own kicks, and how far apart their
+/// lines are modulo a beat. `None` when either half cannot say where its
+/// kicks are, when the fit after the gap is at another tempo, or when
+/// the stretch after the gap is too short to be believed.
+fn judge_gap(reader: Reader<'_>, f: Fit, from: f64, after: f64, to: f64, probe: f64, options: TempoOptions) -> Option<(Fit, Fit, f64)> {
+    let (rate, period) = (reader.rate, f.period);
+    let same_tempo = move |b: &Fit| (b.period - period).abs() <= period * options.segment_threshold;
+    let nearest = |g: Fit, x: f64| g.phase + ((x - g.phase) / g.period).round() * g.period;
+    let own_period = |g: Fit, from: f64, to: f64| -> Fit {
+        if (to - from) / g.period >= MIN_STRETCH_BEATS as f64 {
+            g
+        } else {
+            Fit { period, phase: nearest(g, f64::midpoint(from, to)) }
+        }
+    };
+    if (to - after) / period < MIN_STRETCH_BEATS as f64 {
+        return None;
+    }
+    let bpm_here = rate * 60.0 / period;
+    let before = fit(reader, bpm_here, from as usize, after as usize, options)
+        .filter(same_tempo)
+        .map_or(f, |g| own_period(g, from, after));
+    let before = on_the_kicks(reader, before, from, after)?;
+    let refit = fit(reader, bpm_here, after as usize, to as usize, options)
+        .filter(same_tempo)
+        .map(|g| own_period(g, after, to))
+        .and_then(|b| on_the_kicks(reader, b, after, to))?;
+    let d = nearest(refit, probe) - nearest(before, probe);
+    Some((before, refit, d - (d / period).round() * period))
+}
+
+/// A stretch where a line has no hits: the index of the last beat of the
+/// last supported run before it, and of the first beat of the first
+/// supported run after it, when the line resumes.
+#[derive(Debug, Clone, Copy)]
+struct Gap {
+    last_supported: usize,
+    resumes: Option<usize>,
+}
+
+/// The first gap in `supported` at or after `from`.
+fn first_gap(supported: &[bool], from: usize) -> Option<Gap> {
+    let run_ends_at = |i: usize| (0..SUPPORTED_RUN).all(|d| i >= d && supported[i - d]);
+    // A line resumes with as long a run of hits as the gap that lost it:
+    // through a ramp the drifting hits land on any line a bar at a time.
+    let run_starts_at = |i: usize| (0..GAP_BEATS).all(|d| supported.get(i + d).copied().unwrap_or(false));
+    let mut i = from;
+    while i < supported.len() {
+        if supported[i] {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < supported.len() && !supported[i] {
+            i += 1;
+        }
+        if i - start < GAP_BEATS {
+            continue;
+        }
+        let Some(last_supported) = (from..start).rev().find(|&j| run_ends_at(j)) else { continue };
+        let resumes = (i..supported.len()).find(|&j| run_starts_at(j));
+        return Some(Gap { last_supported, resumes });
+    }
+    None
+}
+
+/// Every local maximum of the envelope in `lo..=hi` at least `floor` high,
+/// with its position sharpened by a parabola.
+fn peaks_in(values: &[f64], lo: f64, hi: f64, floor: f64) -> Vec<(f64, f64)> {
+    let lo = lo.floor().max(1.0) as usize;
+    let hi = (hi.ceil() as usize).min(values.len().saturating_sub(2));
+    let mut out = Vec::new();
+    for i in lo..=hi {
+        let (a, b, c) = (values[i - 1], values[i], values[i + 1]);
+        if b < floor || b <= a || b < c {
+            continue;
+        }
+        let denom = a - 2.0 * b + c;
+        let offset = if denom.abs() > f64::EPSILON { 0.5 * (a - c) / denom } else { 0.0 };
+        out.push((i as f64 + offset.clamp(-0.5, 0.5), b));
+    }
+    out
+}
+
+/// Follows the hits from `start` (a hit, in envelope samples) while their
+/// spacing drifts — a slowdown or a speed-up the fitted line has lost —
+/// until they stop, jump, or reach `until`, where the line resumes.
+/// Returns the beats walked, `start` first, and the ratio the period was
+/// changing by at the end.
+fn walk_ramp(values: &[f64], start: f64, period: f64, until: f64) -> (Vec<f64>, f64) {
+    let mut beats = vec![start];
+    let mut heights: Vec<f64> = vec![local_peak(values, start, 1.0).map_or(HIT_FLOOR, |(_, h)| h)];
+    let (mut t, mut p, mut g) = (start, period, 1.0_f64);
+    while beats.len() < MAX_WALKED_BEATS {
+        let lo = t + RAMP_WINDOW.0 * p * g.min(1.0);
+        let hi = t + RAMP_WINDOW.1 * p * g.max(1.0);
+        if lo >= until {
+            break;
+        }
+        let predicted = t + p * g;
+        let mean = heights.iter().rev().take(RAMP_MEMORY).sum::<f64>() / heights.len().min(RAMP_MEMORY) as f64;
+        let floor = (mean * RAMP_FADE).max(HIT_FLOOR);
+        // The strongest peak for its distance from the prediction: a bass
+        // note a beat's width off beats a noise peak on the prediction.
+        let reach = (hi - lo) / 2.0;
+        let score = |&(x, h): &(f64, f64)| h / (1.0 + (x - predicted).abs() / reach);
+        let Some(&(next, height)) = peaks_in(values, lo, hi, floor)
+            .iter()
+            .max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap_or(std::cmp::Ordering::Equal))
+        else {
+            break;
+        };
+        let next_period = next - t;
+        let ratio = next_period / p;
+        if !(RAMP_RATIO.0..=RAMP_RATIO.1).contains(&ratio) {
+            break;
+        }
+        // The resumed line's first beat is not a ramp beat.
+        if (next - until).abs() <= next_period * 0.1 || next >= until {
+            break;
+        }
+        beats.push(next);
+        heights.push(height);
+        t = next;
+        p = next_period;
+        g = ratio;
+    }
+    (beats, g)
+}
+
+/// Whether a walk's periods change in one direction, give or take a
+/// wobble: a slowdown slows, a speed-up quickens, and a chain of
+/// breakdown hits that speeds and slows by turns is not a ramp.
+fn one_way(beats: &[f64]) -> bool {
+    let periods: Vec<f64> = beats.windows(2).map(|w| w[1] - w[0]).collect();
+    let Some((&first, &last)) = periods.first().zip(periods.last()) else { return false };
+    let up = last > first;
+    let against = periods
+        .windows(2)
+        .filter(|w| if up { w[1] < w[0] * (1.0 - RAMP_WOBBLE) } else { w[1] > w[0] * (1.0 + RAMP_WOBBLE) })
+        .count();
+    against * 4 < periods.len()
+}
+
+/// A ramp's period may step back against its direction by this fraction
+/// and still be going one way.
+const RAMP_WOBBLE: f64 = 0.01;
+
+/// The ramp, for measurement: the beats walked from the hit nearest
+/// `from_secs` at `bpm` until `until_secs`, as `(seconds, bpm from the
+/// previous beat)`.
+pub fn ramp_report(onsets: &OnsetEnvelope, bpm: f64, from_secs: f64, until_secs: f64) -> Vec<(f64, f64)> {
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+    let x_of = |secs: f64| (secs - onsets.origin_secs) * onsets.rate;
+    let period = onsets.rate * 60.0 / bpm;
+    let start = local_peak(&values, x_of(from_secs), period * 0.1).map_or(x_of(from_secs), |(at, _)| at);
+    let (beats, _) = walk_ramp(&values, start, period, x_of(until_secs));
+    beats
+        .windows(2)
+        .map(|w| (onsets.time_of(w[1]), onsets.rate * 60.0 / (w[1] - w[0])))
+        .collect()
+}
+
+/// The hit at the last beat of `f`'s last bar of hits at least `floor`
+/// high before `until` (looking a little past it, since the line's beats
+/// may still land on the first hits of a change), as an envelope sample.
+fn last_supported_hit(values: &[f64], f: Fit, from: f64, until: f64, floor: f64) -> Option<f64> {
+    let hits = beat_hits(values, f, from as usize, (until + f.period * 2.0) as usize);
+    let supported: Vec<bool> = hits.iter().map(|&(at, _, h)| h >= floor && at < until).collect();
+    (0..supported.len())
+        .rev()
+        .find(|&i| (0..SUPPORTED_RUN).all(|d| i >= d && supported[i - d]))
+        .and_then(|i| hits.get(i))
+        .map(|h| h.1)
+}
+
+/// Where `b` first has two bars of hits at least `floor` high in
+/// `from..to`, as an envelope sample.
+fn resume_of(values: &[f64], b: Fit, from: f64, to: f64, floor: f64) -> Option<f64> {
+    let hits = beat_hits(values, b, from as usize, to as usize);
+    let supported: Vec<bool> = hits.iter().map(|&(_, _, h)| h >= floor).collect();
+    (0..supported.len())
+        .find(|&i| (0..GAP_BEATS).all(|d| supported.get(i + d).copied().unwrap_or(false)))
+        .and_then(|i| hits.get(i))
+        .map(|h| h.0)
+}
+
+/// A line with no hits from its segment's start is a compromise that
+/// landed on a later stretch's phase. The stretch up to where the line
+/// first has two bars of hits is fitted on its own, and when that puts it
+/// on its kicks somewhere else, that is the line from here.
+fn refit_start(reader: Reader<'_>, f: Fit, from: f64, to: f64, hits: &[(f64, f64, f64)], supported: &[bool], options: TempoOptions) -> Option<Fit> {
+    let leading = supported.iter().take_while(|&&s| !s).count();
+    if leading < GAP_BEATS {
+        return None;
+    }
+    let resumes = (0..supported.len()).find(|&i| (0..GAP_BEATS).all(|d| supported.get(i + d).copied().unwrap_or(false)));
+    let until = resumes.and_then(|i| hits.get(i)).map_or(to, |h| h.0);
+    let period = f.period;
+    let g = fit(reader, reader.rate * 60.0 / period, from as usize, until as usize, options)
+        .filter(|g| (g.period - period).abs() <= period * options.segment_threshold)
+        .and_then(|g| on_the_kicks(reader, g, from, until))?;
+    let d = g.phase - f.phase;
+    ((d - (d / period).round() * period).abs() > PHASE_TOLERANCE * period).then_some(g)
+}
+
+/// The walked beats of a ramp as segments, one per beat, and from the last
+/// walked beat to `cut` whole beats at the pace the ramp was going.
+fn ramp_segments(walked: &[f64], growth: f64, cut: f64, rate: f64, origin_secs: f64) -> Vec<Segment> {
+    let to_secs = |x: f64| origin_secs + x / rate;
+    let beat = |start: f64, end: f64| Segment {
+        from_secs: to_secs(start),
+        to_secs: to_secs(end),
+        period_secs: (end - start) / rate,
+        phase_secs: to_secs(start),
+    };
+    let mut out: Vec<Segment> = walked.windows(2).map(|w| beat(w[0], w[1])).collect();
+    let Some((&last, last_period)) = walked.last().zip(walked.windows(2).last().map(|w| w[1] - w[0])) else {
+        return out;
+    };
+    let remaining = cut - last;
+    if remaining > 0.0 {
+        let count = ((remaining / (last_period * growth)).round() as usize).max(1);
+        let step = remaining / count as f64;
+        for i in 0..count {
+            let start = last + i as f64 * step;
+            out.push(beat(start, start + step));
+        }
+    }
+    out
+}
+
+/// Splits every segment where its line loses its hits for two bars or
+/// more and the music comes back somewhere else.
+///
+/// A line fitted through a whole stretch is right only where the hits
+/// are on it. Where they stop — a breakdown, a slowdown — and come back on
+/// the same grid, the line holds, as rekordbox holds it. Where they come
+/// back at the same tempo on another phase, the stretch after the gap is
+/// fitted on its own and the grid changes at the first bar of hits on the
+/// new line, the old line dropping the beat within half a beat of the
+/// cut. And where the hits through the gap drift — an eighth-note bass
+/// under a tape-stop, slowing bar after bar with no kick to follow — they
+/// are walked from the last supported beat and each becomes a beat of its
+/// own length, up to the cut.
+fn split_gaps(reader: Reader<'_>, segments: &[Segment], options: TempoOptions, mut trace: Option<&mut Vec<GapDecision>>) -> Vec<Segment> {
+    let (values, rate, origin_secs) = (reader.values, reader.rate, reader.origin_secs);
+    let n = values.len();
+    let x_of = |secs: f64| (secs - origin_secs) * rate;
+    let to_secs = |x: f64| origin_secs + x / rate;
+    let mut out: Vec<Segment> = Vec::new();
+    for segment in segments {
+        let mut from = x_of(segment.from_secs).max(0.0);
+        let to = x_of(segment.to_secs).min(n as f64);
+        let mut f = Fit { phase: x_of(segment.phase_secs), period: segment.period_secs * rate };
+        let line = |from: f64, to: f64, f: Fit| Segment {
+            from_secs: to_secs(from),
+            to_secs: to_secs(to),
+            period_secs: f.period / rate,
+            phase_secs: to_secs(f.phase),
+        };
+        let mut searched = 0usize;
+        let mut start_refitted = false;
+        loop {
+            if f.period < 2.0 || to <= from {
+                break;
+            }
+            let hits = beat_hits(values, f, from as usize, to as usize);
+            let mut heights: Vec<f64> = hits.iter().map(|&(_, _, h)| h).filter(|&h| h >= HIT_FLOOR).collect();
+            heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let floor = heights.get(heights.len() / 2).map_or(HIT_FLOOR, |m| (m * 0.2).max(HIT_FLOOR));
+            let supported: Vec<bool> = hits.iter().map(|&(_, _, h)| h >= floor).collect();
+            // A line with no hits from the segment's start is a compromise
+            // that landed on a later stretch's phase: the stretch up to
+            // where it first has two bars of hits is fitted on its own,
+            // and if that puts it on its kicks elsewhere, it is the line
+            // from here.
+            if !start_refitted && searched == 0 {
+                start_refitted = true;
+                if let Some(g) = refit_start(reader, f, from, to, &hits, &supported, options) {
+                    f = g;
+                    continue;
+                }
+            }
+            let Some(gap) = first_gap(&supported, searched) else { break };
+
+            // The stretches before and after the gap, each fitted on its
+            // own. A line through both is a compromise: where the two
+            // halves of a track sit on different phases it is on one of
+            // them or on neither, and only the halves' own fits say which.
+            let after = hits.get(gap.last_supported + 1).map_or(to, |&(at, _, _)| at);
+            let period = f.period;
+            let same_tempo = move |b: &Fit| (b.period - period).abs() <= period * options.segment_threshold;
+            let bpm_here = rate * 60.0 / period;
+            // Each half on its kicks: the attack judge inside `fit` is
+            // wrong on one stretch in thirty, and two halves it puts on
+            // different halves of the beat would read as a phase change.
+            let probe = gap.resumes.map_or(f64::midpoint(after, to), |i| hits[i].0);
+            let judged = judge_gap(reader, f, from, after, to, probe, options);
+            let shift = judged.map_or(0.0, |(_, _, shift)| shift);
+            // Moved: both halves say where their kicks are, the lines
+            // differ, and the kicks after the gap are on the new line
+            // rather than the old one carried on.
+            let moved = judged.is_some_and(|(a, b, shift)| {
+                shift.abs() > PHASE_TOLERANCE * period
+                    && (reader.kicks.is_none() || kick_support(reader, b, after, to) > kick_support(reader, a, after, to) * KICK_MARGIN)
+            });
+            let (before, refit) = judged.map_or((f, None), |(a, b, _)| (a, Some(b)));
+            let nearest = |g: Fit, x: f64| g.phase + ((x - g.phase) / g.period).round() * g.period;
+            // The walk starts from the hit at the old line's own last
+            // supported beat: read on `before`, not carried over from `f`,
+            // which may sit half a beat from it, where the nearest beat is
+            // a coin toss and the toss lands the walk on the off-beat.
+            let last_hit = last_supported_hit(values, before, from, after, floor).unwrap_or_else(|| {
+                let last_beat = nearest(before, hits[gap.last_supported].0);
+                local_peak(values, last_beat, (before.period * 0.1).max(1.0)).map_or(last_beat, |(at, _)| at)
+            });
+            f = before;
+            if !moved {
+                // The line holds across the gap, whatever the break did:
+                // the music came back on its own grid.
+                let Some(resumes) = gap.resumes else { break };
+                searched = resumes;
+                continue;
+            }
+            // The cut: the first two bars of hits on the new line. Without
+            // one the line holds to the end, as it is.
+            let Some((resumed, cut)) = refit.and_then(|b| Some((b, resume_of(values, b, after, to, floor * RESUME_FRACTION)?))) else {
+                break;
+            };
+            // The resumed line, fitted over the stretch it will cover.
+            let resumed = fit(reader, bpm_here, cut as usize, to as usize, options)
+                .filter(same_tempo)
+                .and_then(|b| on_the_kicks(reader, b, cut, to))
+                .unwrap_or(resumed);
+            // The cut is the resumed line's own beat: a refit moves the line
+            // by a fraction of a sample, and a beat a hair before the cut
+            // would be the next segment's first beat lost.
+            let cut = nearest(resumed, cut);
+
+            // A ramp through the gap, if the hits drift.
+            // A ramp through the gap, if the hits drift — and only where it
+            // leads somewhere: a line that comes back on its own grid held
+            // through whatever the breakdown did, as the hand grids do.
+            let (walked, growth) = walk_ramp(values, last_hit, f.period, cut);
+            let departure = walked.windows(2).map(|w| ((w[1] - w[0]) / f.period - 1.0).abs()).fold(0.0, f64::max);
+            let ramp = walked.len() >= RAMP_MIN_BEATS && departure >= RAMP_DEPARTURE && one_way(&walked);
+            if let Some(trace) = trace.as_deref_mut() {
+                let resumes_secs = gap.resumes.and_then(|i| hits.get(i)).map(|h| to_secs(h.0));
+                let (last_supported_secs, shift_ms, cut_secs) = (to_secs(last_hit), shift * 1000.0 / rate, Some(to_secs(cut)));
+                trace.push(GapDecision { last_supported_secs, resumes_secs, moved, shift_ms, walked: walked.len(), departure, cut_secs });
+            }
+            if ramp {
+                if walked[0] - f.period / 2.0 > from {
+                    out.push(line(from, walked[0] - f.period / 2.0, f));
+                }
+                out.extend(ramp_segments(&walked, growth, cut, rate, origin_secs));
+            } else if cut - f.period / 2.0 > from {
+                out.push(line(from, cut - f.period / 2.0, f));
+            }
+            from = cut;
+            f = resumed;
+            searched = 0;
+        }
+        if to > from {
+            out.push(line(from, to, f));
+        }
+    }
+    out
+}
+
 /// Chooses the octave nearest a reference tempo.
 ///
 /// Tempo estimation reliably finds *a* multiple of the beat; picking which one
@@ -1489,4 +2004,86 @@ pub fn nearest_octave(bpm: f64, reference: f64) -> f64 {
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .unwrap_or(bpm)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    const RATE: f64 = 44_100.0 / 256.0;
+
+    /// An onset envelope with a peak at each of `hits`, in seconds.
+    fn envelope(hits: &[f64], secs: f64) -> OnsetEnvelope {
+        let mut values = vec![0.0_f32; (secs * RATE) as usize];
+        for &t in hits {
+            let i = (t * RATE).round() as usize;
+            if let Some(v) = values.get_mut(i) {
+                *v = 1.0;
+            }
+            if let Some(v) = values.get_mut(i + 1) {
+                *v = 0.4;
+            }
+        }
+        OnsetEnvelope { values, rate: RATE, origin_secs: 0.0 }
+    }
+
+    /// A track at 130 whose kick stops at 118 s, whose bass slows from an
+    /// eighth of 231 ms to one of 1.4 s over the next 24 s, and which comes
+    /// back at 130 at 147.03 s, `shift` seconds off the old line.
+    fn slowdown(shift: f64) -> (OnsetEnvelope, OnsetEnvelope) {
+        let period = 60.0 / 130.0;
+        let first = 0.05;
+        let mut kicks: Vec<f64> = (0..1000).map(|k| first + f64::from(k) * period).take_while(|&t| t < 118.0).collect();
+        let mut all = kicks.clone();
+        // Eighths that stretch by a fixed ratio per note.
+        let (mut t, mut eighth) = (118.205, period / 2.0);
+        while t < 142.5 {
+            all.push(t);
+            t += eighth;
+            eighth *= 1.038;
+        }
+        // 130 again, on the old line moved by `shift`.
+        let k = ((147.03 - first - shift) / period).ceil();
+        let resume = first + shift + k * period;
+        let back: Vec<f64> = (0..1000).map(|k| resume + f64::from(k) * period).take_while(|&t| t < 300.0).collect();
+        kicks.extend(&back);
+        all.extend(&back);
+        (envelope(&all, 300.0), envelope(&kicks, 300.0))
+    }
+
+    fn options() -> TempoOptions {
+        TempoOptions { placement: Placement::Envelope, ..TempoOptions::default() }
+    }
+
+    #[test]
+    fn a_slowdown_that_comes_back_on_another_phase_is_walked_and_cut() {
+        let (onsets, kicks) = slowdown(0.21);
+        let result = detect_tempo_with(&onsets, Some(&kicks), None, options());
+        let segments = &result.segments;
+        let first = segments.first().expect("a first segment");
+        let last = segments.last().expect("a last segment");
+        assert!((first.bpm() - 130.0).abs() < 0.1, "first segment at {}", first.bpm());
+        assert!((first.start_secs() - 0.05).abs() < 0.02, "first beat at {}", first.start_secs());
+        assert!((last.bpm() - 130.0).abs() < 0.1, "last segment at {}", last.bpm());
+        let expected_cut = 0.05 + 0.21 + ((147.03_f64 - 0.26) / (60.0 / 130.0)).ceil() * (60.0 / 130.0);
+        assert!((last.from_secs - expected_cut).abs() < 0.03, "cut at {} not {expected_cut}", last.from_secs);
+        // The ramp: one-beat segments, slowing.
+        let ramp: Vec<&Segment> = segments.iter().filter(|s| s.beats() == 1).collect();
+        assert!(ramp.len() >= 8, "{} ramp beats", ramp.len());
+        assert!(ramp.first().is_some_and(|s| s.bpm() > 100.0) && ramp.last().is_some_and(|s| s.bpm() < 40.0));
+        assert!(ramp.windows(2).filter(|w| w[1].bpm() > w[0].bpm() * 1.01).count() * 4 < ramp.len());
+        // The old line stops before the ramp, and nothing overlaps.
+        for w in segments.windows(2) {
+            assert!(w[1].from_secs >= w[0].to_secs - 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_slowdown_that_comes_back_on_its_own_grid_holds_the_line() {
+        let (onsets, kicks) = slowdown(0.0);
+        let result = detect_tempo_with(&onsets, Some(&kicks), None, options());
+        assert_eq!(result.segments.len(), 1, "{:?}", result.segments);
+        assert!((result.bpm - 130.0).abs() < 0.1);
+    }
 }
