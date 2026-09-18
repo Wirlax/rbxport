@@ -37,6 +37,7 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - Add Artwork and Delete Artwork on the Info tab's Artwork page.
 - PHRASE EDIT on the GRID panel: CUT splits the phrase under the head and
   CLEAR takes it out.
+- My Tag is edited on the Info tab: every tag of the library a toggle.
 - A track played for a minute goes on today's history session and its DJ
   Play Count goes up, as rekordbox records it; Remove from History takes a
   play off again. Preferences › Advanced › Browse turns the recording off.
