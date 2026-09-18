@@ -66,3 +66,4 @@ mod tests {
         assert_eq!(FourCc([0xff, 0xfe, 0xfd, 0xfc]).as_str(), "????");
     }
 }
+pub mod paths;

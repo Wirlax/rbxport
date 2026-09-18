@@ -3457,6 +3457,7 @@ name = "rbl-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs 5.0.1",
  "serde",
  "thiserror 2.0.20",
 ]
@@ -3639,6 +3640,21 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "rbl-usbtest"
+version = "0.1.0"
+dependencies = [
+ "rbl-anlz",
+ "rbl-core",
+ "rbl-db",
+ "rbl-devices",
+ "rbl-export",
+ "rbl-onelibrary",
+ "rbl-pdb",
+ "rusqlite",
+ "serde_json",
 ]
 
 [[package]]

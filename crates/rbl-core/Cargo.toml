@@ -10,6 +10,7 @@ description = "Shared ids, time formats and error primitives for rbxport."
 workspace = true
 
 [dependencies]
+dirs = "5"
 # `clock` only: the local offset for the dates rekordbox writes in local
 # time. Already in the lock through other dependencies, so nothing new is built.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

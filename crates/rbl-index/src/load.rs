@@ -156,6 +156,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     let conn = db.connection();
     let t0 = Instant::now();
     let mut lib = Library::default();
+    let cloud_root = rbl_db::cloud_contents_root();
     let mut stats = LoadStats::default();
 
     let artists = load_lookup(conn, "djmdArtist", "Name", &mut lib.artists)?;
@@ -168,7 +169,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,
                 BPM, Length, Rating, ColorID, FolderPath, FileNameL,
                 AnalysisDataPath, DJPlayCount, StockDate, ReleaseDate, Commnt, Analysed,
-                ImagePath, ReleaseYear
+                ImagePath, BitRate, SampleRate, FileSize, ReleaseYear
          FROM djmdContent
          WHERE rb_local_deleted = 0",
     )?;
@@ -213,7 +214,11 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         lib.rating.push(clamp_u8(num(r, 9)?, 5));
         lib.color.push(clamp_u8(num(r, 10)?, u8::MAX));
 
-        lib.folder_path.push(&r.get::<_, Option<String>>(11)?.unwrap_or_default());
+        // A cloud-library track's path names rekordbox's Dropbox folder, not
+        // a place on this disk; resolved here once so every reader sees a
+        // file that exists.
+        let folder_path = r.get::<_, Option<String>>(11)?.unwrap_or_default();
+        lib.folder_path.push(&rbl_db::resolve_folder_path(&folder_path, cloud_root.as_deref()));
         lib.file_name.push(&r.get::<_, Option<String>>(12)?.unwrap_or_default());
         lib.analysis_path.push(&r.get::<_, Option<String>>(13)?.unwrap_or_default());
         lib.artwork_path.push(&r.get::<_, Option<String>>(19)?.unwrap_or_default());
@@ -224,7 +229,10 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
         // `Analysed` is a bitfield whose values are not yet all understood
         // (105/104/16/17/1 observed); non-zero means rekordbox analysed it.
         lib.analysed.push(u8::from(num(r, 18)? != 0));
-        lib.year.push(u16::try_from(num(r, 20)?.clamp(0, i64::from(u16::MAX))).unwrap_or(0));
+        lib.bitrate.push(clamp_u32(num(r, 20)?));
+        lib.sample_rate.push(clamp_u32(num(r, 21)?));
+        lib.file_size.push(u64::try_from(num(r, 22)?).unwrap_or(0));
+        lib.year.push(u16::try_from(num(r, 23)?.clamp(0, i64::from(u16::MAX))).unwrap_or(0));
 
         // Keyed by the parsed id, not the text: the map is only ever looked
         // up from a membership row, and parsing 75,386 of those is cheaper
