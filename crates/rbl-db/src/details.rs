@@ -48,6 +48,9 @@ use crate::Result;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TrackDetails {
     pub id: String,
+    /// The ids of the My Tags on the track (`djmdSongMyTag`). Empty on a
+    /// library without the table.
+    pub my_tags: Vec<String>,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -91,6 +94,24 @@ pub struct TrackDetails {
 
 /// Reads one live track, or `None` when there is no such track.
 pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
+    let Some(mut details) = track_row(conn, id)? else { return Ok(None) };
+    details.my_tags = my_tags_of(conn, id);
+    Ok(Some(details))
+}
+
+/// The My Tags on a track, by id; none on a library without the table.
+fn my_tags_of(conn: &Connection, id: &str) -> Vec<String> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT MyTagID FROM djmdSongMyTag WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, MyTagID",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map([id], |r| r.get::<_, Option<String>>(0))
+        .map(|rows| rows.filter_map(std::result::Result::ok).flatten().collect())
+        .unwrap_or_default()
+}
+
+fn track_row(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     // One statement with the lookups joined, rather than a query per
     // reference: seven round trips for one row is seven times the work for
     // no reason, and the joins are on primary keys.
@@ -117,6 +138,7 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
         |r| {
             Ok(TrackDetails {
                 id: text(r, 0),
+                my_tags: Vec::new(),
                 title: text(r, 1),
                 artist: text(r, 2),
                 album: text(r, 3),

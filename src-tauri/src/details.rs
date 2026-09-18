@@ -56,6 +56,24 @@ pub struct TrackDetailsDto {
     pub publish: bool,
     /// Whether `rbl://artwork/<id>` will serve anything for this track.
     pub has_artwork: bool,
+    /// The ids of the My Tags on the track.
+    pub my_tags: Vec<String>,
+}
+
+/// One My Tag, for the Info tab's toggles.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyTagDto {
+    pub id: String,
+    pub name: String,
+}
+
+/// A My Tag category and the tags under it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyTagCategoryDto {
+    pub name: String,
+    pub tags: Vec<MyTagDto>,
 }
 
 /// What the Info tab's dropdowns offer.
@@ -69,6 +87,8 @@ pub struct TrackDetailsDto {
 pub struct TrackLookupsDto {
     pub keys: Vec<String>,
     pub genres: Vec<String>,
+    /// The library's My Tags, by category, with the ids the toggles set.
+    pub my_tag_categories: Vec<MyTagCategoryDto>,
 }
 
 /// Names past this many are dropped, so a library with an absurd genre list
@@ -126,6 +146,7 @@ pub async fn track_details(
             hot_cue_auto_load: d.hot_cue_auto_load,
             publish: d.publish,
             has_artwork,
+            my_tags: d.my_tags,
         })
     })
     .await
@@ -134,7 +155,23 @@ pub async fn track_details(
 #[tauri::command]
 pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLookupsDto> {
     let library = state.library()?;
+    let state = Arc::clone(&state);
     blocking("track_lookups", move || {
+        // Categories first in their order, then each one's tags in theirs.
+        let rows = state
+            .read_db(|db| rbl_db::export_info::my_tags(db.connection()))
+            .map_err(write_error)?;
+        let mut my_tag_categories: Vec<(String, MyTagCategoryDto)> = rows
+            .iter()
+            .filter(|t| t.attribute == 1)
+            .map(|t| (t.id.clone(), MyTagCategoryDto { name: t.name.clone(), tags: Vec::new() }))
+            .collect();
+        for tag in rows.iter().filter(|t| t.attribute == 0) {
+            if let Some((_, category)) = my_tag_categories.iter_mut().find(|(id, _)| *id == tag.parent) {
+                category.tags.push(MyTagDto { id: tag.id.clone(), name: tag.name.clone() });
+            }
+        }
+        let my_tag_categories = my_tag_categories.into_iter().map(|(_, c)| c).collect();
         let names = |interner: &rbl_index::strings::Interner| -> Vec<String> {
             let mut out: Vec<String> = (0..interner.len())
                 .filter_map(|i| u32::try_from(i).ok())
@@ -146,9 +183,20 @@ pub async fn track_lookups(state: State<'_, Arc<AppState>>) -> AppResult<TrackLo
             out.sort_unstable_by_key(|n| n.to_lowercase());
             out
         };
-        Ok(TrackLookupsDto { keys: names(&library.keys), genres: names(&library.genres) })
+        Ok(TrackLookupsDto { keys: names(&library.keys), genres: names(&library.genres), my_tag_categories })
     })
     .await
+}
+
+/// Sets the My Tags on a track to exactly the ids given.
+#[tauri::command]
+pub async fn set_my_tags<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    tags: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "set_my_tags", Touched::Tracks, move |w| w.set_my_tags(&track, &tags).map(|_| ())).await
 }
 
 /// Add Artwork: the image at `image` is filed in the share tree and the

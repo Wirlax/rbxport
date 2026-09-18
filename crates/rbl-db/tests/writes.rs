@@ -1584,3 +1584,30 @@ fn a_play_goes_on_todays_session_and_can_be_taken_off_again() {
     assert_eq!(left, vec![(track_id(4), 1)], "the gap closes");
     assert!(matches!(f.writer.record_play("no-such-track"), Err(DbError::WriteRefused(_))));
 }
+
+#[test]
+fn my_tags_are_set_as_a_whole_and_read_back_on_the_details() {
+    use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
+    let mut f = fixture();
+    let id = track_id(2);
+    f.writer.set_my_tags(&id, &[MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]).unwrap();
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    assert_eq!(read.my_tags, vec![MY_TAG_PEAK.to_owned(), MY_TAG_WARM_UP.to_owned()]);
+
+    f.writer.set_my_tags(&track_id(3), &[MY_TAG_PEAK.to_owned()]).unwrap();
+    let second: i64 = f.one(
+        "SELECT TrackNo FROM djmdSongMyTag WHERE MyTagID = ?1 AND ContentID = ?2 AND rb_local_deleted = 0",
+        &[&MY_TAG_PEAK, &track_id(3)],
+    );
+    assert_eq!(second, 2, "each tag's list numbers on");
+
+    // Taking one off soft-deletes it and leaves the other row untouched.
+    let changed = f.writer.set_my_tags(&id, &[MY_TAG_WARM_UP.to_owned()]).unwrap();
+    assert_eq!(changed.rows, 1);
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    assert_eq!(read.my_tags, vec![MY_TAG_WARM_UP.to_owned()]);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongMyTag WHERE rb_local_deleted = 1"), 1);
+
+    assert!(matches!(f.writer.set_my_tags(&id, &["nope".to_owned()]), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.set_my_tags("no-track", &[]), Err(DbError::WriteRefused(_))));
+}

@@ -373,6 +373,43 @@ function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit
           onChange={setColor}
         />
       </div>
+      {/* My Tag: the library's categories, each tag a toggle. Not in the
+          captures — rekordbox keeps My Tag in a panel of its own — so this
+          is the form's own row, in its own type. */}
+      {lookups && lookups.myTagCategories.length > 0 ? (
+        <div className={styles.rowFull}>
+          <div className={styles.fieldBlock}>
+            <span className={styles.formLabel}>My Tag</span>
+            <div className={styles.tagRows} role="group" aria-label="My Tag">
+              {lookups.myTagCategories.map((category) => (
+                <div key={category.name} className={styles.tagRow}>
+                  <span className={styles.tagCategory}>{category.name}</span>
+                  {category.tags.map((tag) => {
+                    const on = details?.myTags.includes(tag.id) ?? false;
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        className={styles.tag}
+                        data-on={on || undefined}
+                        aria-pressed={on}
+                        disabled={readOnly || !details}
+                        onClick={() => {
+                          const current = details?.myTags ?? [];
+                          const next = on ? current.filter((t) => t !== tag.id) : [...current, tag.id];
+                          void onEdit(`My Tag ${on ? "removed" : "added"}.`, (b) => b.edits.setMyTags(id, next));
+                        }}
+                      >
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -414,6 +451,7 @@ function fromRow(row: RowDto): TrackDetails {
     hotCueAutoLoad: false,
     publish: false,
     hasArtwork: row.hasArtwork,
+    myTags: [],
   };
 }
 

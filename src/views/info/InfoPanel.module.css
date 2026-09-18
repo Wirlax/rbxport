@@ -444,3 +444,25 @@
 }
 .artworkButton:disabled { cursor: default; }
 .artworkGlyph { width: 20px; height: 22px; }
+
+/* My Tag: a row per category, each tag a small toggle in the form's own
+   field colours; on takes the tab's blue, as the panel's selected tab does. */
+.tagRows { display: flex; flex-direction: column; gap: 4px; }
+.tagRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.tagCategory {
+  min-width: 90px;
+  font-size: var(--f-size-info-label);
+  color: var(--c-info-label);
+}
+.tag {
+  border: 0;
+  border-radius: 2px;
+  padding: 2px 8px;
+  background: var(--c-info-field);
+  color: var(--c-info-form-text);
+  font: inherit;
+  font-size: var(--f-size-info-label);
+  cursor: default;
+}
+.tag[data-on] { background: var(--c-info-tab-active); color: var(--c-info-tab-active-text); }
+.tag:disabled { opacity: 0.6; }

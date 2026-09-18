@@ -500,6 +500,7 @@ pub fn run() {
             details::track_lookups,
             details::set_track_field,
             details::add_artwork,
+            details::set_my_tags,
             details::clear_artwork,
         ])
         .build(context);

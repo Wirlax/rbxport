@@ -975,6 +975,8 @@ export interface Edits {
    * `readOnly` rather than mapped onto a guess.
    */
   setTrackField(track: string, field: TrackField, value: string): Promise<number>;
+  /** Sets the My Tags on a track to exactly these ids. */
+  setMyTags(track: string, tags: string[]): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(track: string, image: string): Promise<number>;
   /** Delete Artwork: the track points at no image; the file stays. */
@@ -1068,11 +1070,15 @@ export interface TrackDetails {
   hotCueAutoLoad: boolean;
   publish: boolean;
   hasArtwork: boolean;
+  /** The ids of the My Tags on the track. */
+  myTags: string[];
 }
 
 export interface TrackLookups {
   keys: string[];
   genres: string[];
+  /** The library's My Tags by category, with the ids the toggles set. */
+  myTagCategories: { name: string; tags: { id: string; name: string }[] }[];
 }
 
 /** The fields the backend will write. Everything else on the Info tab is shown read-only. */

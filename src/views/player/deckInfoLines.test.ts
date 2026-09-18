@@ -60,6 +60,7 @@ const details: TrackDetails = {
   hotCueAutoLoad: true,
   publish: false,
   hasArtwork: false,
+    myTags: [],
 };
 
 describe("the deck's INFO tab", () => {

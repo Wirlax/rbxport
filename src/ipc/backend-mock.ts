@@ -636,6 +636,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (d) d.color = color ?? "0";
       return bump();
     },
+    setMyTags: (track, tags) => {
+      const row = all.find((r) => r.id === track);
+      if (row) detailsOf(row).myTags = [...tags];
+      return bump();
+    },
     addArtwork: (track) => {
       const row = all.find((r) => r.id === track);
       if (row) {
@@ -801,6 +806,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       hotCueAutoLoad: true,
       publish: false,
       hasArtwork: false,
+      myTags: seed % 4 === 0 ? ["t-peak"] : [],
     };
     details.set(row.id, d);
     return d;
@@ -1762,7 +1768,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // A copy: the panel must not be able to edit the backend's own record.
       return wait({ ...detailsOf(row) });
     },
-    trackLookups: () => wait({ keys: [...KEYS], genres: GENRES.filter((g) => g !== "") }),
+    trackLookups: () =>
+      wait({
+        keys: [...KEYS],
+        genres: GENRES.filter((g) => g !== ""),
+        myTagCategories: [
+          { name: "Situation", tags: [{ id: "t-peak", name: "Peak" }, { id: "t-warm", name: "Warm-up" }] },
+          { name: "Components", tags: [{ id: "t-synth", name: "Synth" }, { id: "t-vocal", name: "Vocal" }] },
+        ],
+      }),
   };
 }
 

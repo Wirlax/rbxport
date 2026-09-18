@@ -885,6 +885,77 @@ impl Writer {
         }
     }
 
+    // ---------------------------------------------------------------- my tag
+
+    /// Sets the My Tags on a track to exactly `tags`: memberships not in
+    /// the set are soft-deleted, new ones added on the end of each tag's
+    /// list. Rows in the shape pyrekordbox documents for `djmdSongMyTag`
+    /// [DOC; the reference library held none to transcribe]. A tag id the
+    /// library does not hold is refused before anything is written.
+    pub fn set_my_tags(&mut self, content: &str, tags: &[String]) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let mut ids: Vec<(String, String)> = Vec::with_capacity(tags.len());
+        for _ in tags {
+            ids.push((self.rng.uuid4(), self.rng.uuid4()));
+        }
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if !content_exists(&tx, content)? {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        }
+        for tag in tags {
+            let known: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM djmdMyTag WHERE ID = ?1 AND Attribute = 0 AND rb_local_deleted = 0",
+                params![tag],
+                |r| r.get(0),
+            )?;
+            if known == 0 {
+                return Err(DbError::WriteRefused(format!("no My Tag {tag}")));
+            }
+        }
+        let mut stmt = tx.prepare(
+            "SELECT MyTagID FROM djmdSongMyTag WHERE ContentID = ?1 AND rb_local_deleted = 0",
+        )?;
+        let current: Vec<String> = stmt
+            .query_map(params![content], |r| r.get::<_, String>(0))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        drop(stmt);
+        let mut rows = 0;
+        let mut usn = next_usn(&tx);
+        for gone in current.iter().filter(|t| !tags.contains(t)) {
+            usn = next_usn(&tx);
+            rows += tx.execute(
+                "UPDATE djmdSongMyTag SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+                 WHERE ContentID = ?3 AND MyTagID = ?4 AND rb_local_deleted = 0",
+                params![usn, stamp, content, gone],
+            )?;
+        }
+        for (tag, (id, uuid)) in tags.iter().zip(&ids) {
+            if current.contains(tag) {
+                continue;
+            }
+            let track_no: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(TrackNo), 0) + 1 FROM djmdSongMyTag WHERE MyTagID = ?1 AND rb_local_deleted = 0",
+                params![tag],
+                |r| r.get(0),
+            )?;
+            usn = next_usn(&tx);
+            rows += tx.execute(
+                "INSERT INTO djmdSongMyTag
+                    (ID, MyTagID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                params![id, tag, content, track_no, uuid, usn, stamp],
+            )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     // --------------------------------------------------------------- history
 
     /// Records a play: the track goes on the end of today's history session

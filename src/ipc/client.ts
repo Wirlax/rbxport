@@ -324,6 +324,7 @@ async function realBackend(): Promise<Backend> {
       setTrackField: (track, field, value) =>
         invoke<number>("set_track_field", { track, field, value }),
       addArtwork: (track, image) => invoke<number>("add_artwork", { track, image }),
+      setMyTags: (track, tags) => invoke<number>("set_my_tags", { track, tags }),
       clearArtwork: (track) => invoke<number>("clear_artwork", { track }),
     },
     filterValues: (spec) => invoke<FilterValues>("filter_values", { spec }),
