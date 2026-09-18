@@ -27,10 +27,6 @@
 }
 .nodes::-webkit-scrollbar-thumb:hover { background-color: var(--c-scrub); }
 .nodes::-webkit-scrollbar-button { display: none; }
-/* One row short of the pane, so a section jumped to can sit at the top with
-   nothing under it, whatever comes last in the tree. */
-.tail { height: calc(100% - var(--s-row-height)); flex: none; }
-
 .node {
   /* So the drop line can be placed against the row's own edges. */
   position: relative;

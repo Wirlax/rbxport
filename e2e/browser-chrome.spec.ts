@@ -175,6 +175,9 @@ test("the list's scrollbars are the measured column with the thumb inset in it, 
 
 test("the tree's scrollbar is the same column, and the tree's width is unchanged by it", async ({ page, browserName }) => {
   test.skip(browserName === "chromium", HIDDEN_BARS);
+  // The tree ends at its last row, so it only scrolls when the pane is
+  // shorter than the list: a short window makes it so.
+  await page.setViewportSize({ width: 1440, height: 420 });
   const nodes = page.getByRole("tree").first();
   const w = await token(page, "--s-scrollbar-w");
   const geometry = await nodes.evaluate((el: HTMLElement) => ({

@@ -370,8 +370,10 @@ export function TreeView({
     [nodes, source, collapsed],
   );
   // Set by a rail click, read once the selection has moved: the section's
-  // heading is scrolled to the top. A click on a node scrolls nothing; it
-  // was in view to be clicked.
+  // heading is scrolled to the top, or as near it as the list's end allows;
+  // the list ends at its last row, so the bottom of the scroll is the last
+  // playlist at the bottom of the pane. A click on a node scrolls nothing;
+  // it was in view to be clicked.
   const list = useRef<HTMLDivElement>(null);
   const jumped = useRef(false);
   const jumpTo = useCallback(
@@ -424,9 +426,6 @@ export function TreeView({
         {visible.length === 0 ? (
           <p className={styles.emptyNote}>Nothing here yet.</p>
         ) : null}
-        {/* Panel below the last row, as the capture shows under the
-            Explorer's [OBS]. */}
-        <div className={styles.tail} aria-hidden />
       </div>
 
       {menu ? (
