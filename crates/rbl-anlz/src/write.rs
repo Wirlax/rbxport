@@ -67,6 +67,14 @@ pub fn beat_grid_section(beats: &[Beat]) -> Section {
     Section::new(b"PQTZ", header, payload)
 }
 
+/// An empty `PQT2` section: see [`AnlzBuilder::extended_grid_empty`].
+#[must_use]
+pub fn extended_grid_empty_section() -> Section {
+    let mut header = vec![0_u8; 44];
+    header[4..8].copy_from_slice(&be32(0x0100_0002));
+    Section::new(b"PQT2", header, Vec::new())
+}
+
 /// Builds an ANLZ file section by section.
 #[derive(Debug)]
 pub struct AnlzBuilder {
@@ -178,9 +186,7 @@ impl AnlzBuilder {
     /// `.EXT` files carry [OBS]. The payload of a filled one is [UNKNOWN]
     /// (see `Anlz::has_extended_grid`), so an empty one is the honest form.
     pub fn extended_grid_empty(&mut self) -> &mut Self {
-        let mut header = vec![0_u8; 44];
-        header[4..8].copy_from_slice(&be32(0x0100_0002));
-        self.sections.push(Section::new(b"PQT2", header, Vec::new()));
+        self.sections.push(extended_grid_empty_section());
         self
     }
 

@@ -421,12 +421,36 @@ impl Anlz {
     /// modulo about a thousand, which looks like a phase but does not divide
     /// evenly into the beat interval.
     ///
-    /// That last unknown is why nothing here writes a `PQT2`. A grid edit
-    /// invalidates it, and inventing a payload would put a guess into the
-    /// user's library.
+    /// That last unknown is why nothing here writes a filled `PQT2`. A grid
+    /// edit invalidates it, and inventing a payload would put a guess into
+    /// the user's library; [`Anlz::with_extended_grid_cleared`] empties it
+    /// instead.
     #[must_use]
     pub fn has_extended_grid(&self) -> bool {
         self.section(b"PQT2").is_some()
+    }
+
+    /// The file with its `PQT2` emptied and every other section byte-for-byte
+    /// as it was, or `None` when there is no filled `PQT2` to empty.
+    ///
+    /// What a grid edit does to the `.EXT`: the extended grid describes the
+    /// beats the `.DAT` used to have, and its payload cannot be re-derived
+    /// (see [`Anlz::has_extended_grid`]), so it is replaced with the empty
+    /// form 36 of 400 reference `.EXT` files carry [OBS] — the shape
+    /// rekordbox 7.2.11 accepted on a registered analysis and left in place
+    /// when it loaded the track (recorded 2026-09-17, see
+    /// `rbl-db/src/write.rs`).
+    #[must_use]
+    pub fn with_extended_grid_cleared(&self) -> Option<Vec<u8>> {
+        let at = self.sections.iter().position(|s| s.tag == FourCc::new(b"PQT2"))?;
+        if self.sections.get(at).is_some_and(|s| s.payload.is_empty()) {
+            return None;
+        }
+        let mut sections = self.sections.clone();
+        if let Some(slot) = sections.get_mut(at) {
+            *slot = write::extended_grid_empty_section();
+        }
+        Some(write::render(&self.header_extra, &sections))
     }
 
     /// The file with its beat grid replaced and every other section

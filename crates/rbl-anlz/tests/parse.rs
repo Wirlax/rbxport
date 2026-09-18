@@ -426,3 +426,33 @@ fn the_drawn_palette_covers_the_same_indices_as_the_stored_one() {
     assert_eq!(rbl_anlz::cue_colour_drawn(41), None);
     assert_eq!(rbl_anlz::cue_colour_drawn(0), None);
 }
+
+/// A grid edit empties the `.EXT`'s extended grid rather than leaving one
+/// that describes the beats the `.DAT` no longer has, and leaves every other
+/// section as it was. A file with no `PQT2`, or an already empty one, has
+/// nothing to do and says so.
+#[test]
+fn a_grid_edit_empties_the_extended_grid_and_nothing_else() {
+    let mut filled = vec![0_u8; 44];
+    filled[4..8].copy_from_slice(&0x0100_0002_u32.to_be_bytes());
+    let file = build(&[
+        (b"PPTH", vec![0, 0, 0, 4], vec![0, b'a', 0, 0]),
+        (b"PQT2", filled.clone(), vec![1, 2, 3, 4, 5, 6]),
+        (b"PWV3", vec![0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0], vec![7, 8, 9]),
+    ]);
+    let parsed = parse(&file).unwrap();
+    let cleared = parse(&parsed.with_extended_grid_cleared().expect("a filled PQT2 is emptied")).unwrap();
+    assert_eq!(cleared.sections.len(), 3);
+    assert_eq!(cleared.sections[0], parsed.sections[0]);
+    assert_eq!(cleared.sections[2], parsed.sections[2]);
+    let grid = &cleared.sections[1];
+    assert_eq!(grid.tag, FourCc::new(b"PQT2"));
+    assert!(grid.payload.is_empty());
+    assert_eq!(grid.header.len(), 44);
+    assert_eq!(&grid.header[4..8], &0x0100_0002_u32.to_be_bytes());
+    assert!(grid.header[8..].iter().all(|&b| b == 0), "no beat is described");
+
+    assert!(cleared.with_extended_grid_cleared().is_none(), "already empty");
+    let without = parse(&build(&[(b"PPTH", vec![0, 0, 0, 4], vec![0, b'a', 0, 0])])).unwrap();
+    assert!(without.with_extended_grid_cleared().is_none(), "nothing to empty");
+}
