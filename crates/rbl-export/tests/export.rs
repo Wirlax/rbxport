@@ -34,7 +34,7 @@ fn writes_a_tree_a_player_can_browse() {
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
     ];
-    let playlists = vec![SourcePlaylist { name: "Melodic Vox".into(), track_indices: vec![0, 1] }];
+    let playlists = vec![SourcePlaylist { name: "Melodic Vox".into(), track_indices: vec![0, 1], ..Default::default() }];
 
     let report = export(dest.path(), &tracks, &playlists).unwrap();
     assert_eq!(report.tracks, 2);
@@ -134,8 +134,8 @@ fn a_large_export_keeps_every_track_and_playlist_entry() {
         .map(|i| track(src.path(), i, &format!("Track {i:03}"), &format!("Artist {}", i % 20)))
         .collect();
     let playlists = vec![
-        SourcePlaylist { name: "All".into(), track_indices: (0..300).collect() },
-        SourcePlaylist { name: "First ten".into(), track_indices: (0..10).collect() },
+        SourcePlaylist { name: "All".into(), track_indices: (0..300).collect(), ..Default::default() },
+        SourcePlaylist { name: "First ten".into(), track_indices: (0..10).collect(), ..Default::default() },
     ];
 
     let report = export(dest.path(), &tracks, &playlists).unwrap();
@@ -186,6 +186,7 @@ fn an_export_carries_a_readable_export_library_beside_the_pdb() {
     let playlists = vec![rbl_export::SourcePlaylist {
         name: "Friday".to_owned(),
         track_indices: vec![1, 0],
+        ..Default::default()
     }];
 
     let report = rbl_export::export(dir.path(), &tracks, &playlists).expect("export");

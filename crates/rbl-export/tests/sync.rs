@@ -28,7 +28,7 @@ fn track(dir: &std::path::Path, id: u64, title: &str, artist: &str) -> SourceTra
 }
 
 fn one_list(tracks: &[SourceTrack]) -> Vec<SourcePlaylist> {
-    vec![SourcePlaylist { name: "Set".into(), track_indices: (0..tracks.len()).collect() }]
+    vec![SourcePlaylist { name: "Set".into(), track_indices: (0..tracks.len()).collect(), ..Default::default() }]
 }
 
 fn ids(destination: &std::path::Path) -> Vec<(u64, u32)> {

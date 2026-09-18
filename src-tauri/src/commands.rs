@@ -609,11 +609,10 @@ pub async fn link_take_master_tempo(state: State<'_, Arc<AppState>>) -> AppResul
 
 /// Writes a playlist to a stick.
 ///
-/// Copies the audio, re-emits the analysis, and writes `export.pdb`,
-/// `exportExt.pdb` and `exportLibrary.db`. Never re-analyses: an export moves
-/// what the library already knows.
+/// Copies the audio, re-emits the analysis, and writes `export.pdb` and
+/// `exportLibrary.db`. Never re-analyses: an export moves what the library
+/// already knows.
 #[tauri::command]
-#[allow(clippy::too_many_lines, reason = "one linear pipeline: gather, export, write the defaults, verify")]
 pub async fn export_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -628,42 +627,80 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
-        let playlists = library.playlists();
-        let Some(index) = playlist
-            .parse::<u64>()
-            .ok()
-            .and_then(|numeric| playlists.index_of(numeric))
-        else {
-            return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+        let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist))?;
+        // Per track, as `sync:progress` is per stick: the status bar follows
+        // a long export rather than showing a busy flag alone.
+        let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
+        let mut on_progress = |p: &rbl_export::ExportProgress| {
+            let _ = tauri::Emitter::emit(
+                &progress_app,
+                "export:progress",
+                ExportProgressDto { done: u32::try_from(p.done).unwrap_or(u32::MAX), total, title: p.title.clone() },
+            );
         };
-        let name = playlists.name(index).to_owned();
-        // An intelligent playlist is exported as what its rule admits now,
-        // which is what rekordbox writes to a stick for one too.
-        let source = if playlists.is_smart(index) {
-            rbl_index::TrackSource::SmartPlaylist(index)
-        } else {
-            rbl_index::TrackSource::Playlist(index)
-        };
-        drop(playlists);
-        let rows: Vec<u32> = library.source_rows(&source);
+        write_export(std::path::Path::new(&destination), &selection, defaults.as_ref(), &mut on_progress)
+    })
+    .await?;
 
-        if rows.is_empty() {
-            return Err(AppError::new(
-                ErrorKind::NotFound,
-                "That playlist has no tracks to export.",
-            ));
+    let _ = tauri::Emitter::emit(&app, "export:done", &report);
+    Ok(report)
+}
+
+/// What an export is asked to write: the tracks, the playlists that name
+/// them by index, and the library's My Tags. Built once and written to as
+/// many sticks as asked.
+pub(crate) struct ExportSelection {
+    pub tracks: Vec<rbl_export::SourceTrack>,
+    pub playlists: Vec<rbl_export::SourcePlaylist>,
+    /// Every My Tag of the library, listed on the stick whole as rekordbox
+    /// lists them.
+    pub my_tags: Vec<rbl_export::SourceMyTag>,
+}
+
+impl ExportSelection {
+    /// The union of these playlists, each track read once however many of
+    /// them hold it. Ids are the tree's numeric playlist ids. An intelligent
+    /// playlist is exported as what its rule admits now, which is what
+    /// rekordbox writes to a stick for one too.
+    pub(crate) fn from_playlists(
+        state: &AppState,
+        library: &rbl_index::Library,
+        share: &std::path::Path,
+        playlist_ids: &[String],
+    ) -> AppResult<Self> {
+        // Named first and read after: `source_rows` takes the playlists
+        // itself, so the guard is let go before it is asked.
+        let mut named: Vec<(u64, String, rbl_index::TrackSource)> = Vec::with_capacity(playlist_ids.len());
+        {
+            let playlists = library.playlists();
+            for id in playlist_ids {
+                let Some(index) = id.parse::<u64>().ok().and_then(|numeric| playlists.index_of(numeric)) else {
+                    return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+                };
+                let source = if playlists.is_smart(index) {
+                    rbl_index::TrackSource::SmartPlaylist(index)
+                } else {
+                    rbl_index::TrackSource::Playlist(index)
+                };
+                named.push((playlists.ids.get(index).copied().unwrap_or(0), playlists.name(index).to_owned(), source));
+            }
         }
+        let rows_of: Vec<Vec<u32>> = named.iter().map(|(_, _, source)| library.source_rows(source)).collect();
 
         // What the index does not hold: the My Tags, and the other places a
-        // cloud-synced file may be. One read for the whole playlist.
-        let ids: Vec<String> = rows.iter().map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string()).collect();
+        // cloud-synced file may be. One read for the whole selection.
+        let ids: Vec<String> = rows_of
+            .iter()
+            .flatten()
+            .map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string())
+            .collect();
         let (my_tags, extras) = state
             .read_db(|db| {
                 let conn = db.connection();
                 Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::track_extras(conn, &ids)?))
             })
             .map_err(write_error)?;
-        let source_my_tags: Vec<rbl_export::SourceMyTag> = my_tags
+        let my_tags: Vec<rbl_export::SourceMyTag> = my_tags
             .iter()
             .map(|tag| rbl_export::SourceMyTag {
                 id: tag.id.parse().unwrap_or(0),
@@ -674,89 +711,111 @@ pub async fn export_playlist<R: tauri::Runtime>(
             })
             .collect();
 
-        let mut tracks = Vec::with_capacity(rows.len());
-        for (&row, id_text) in rows.iter().zip(&ids) {
-            let i = row as usize;
-            let analysis = read_analysis(&share, library.analysis_path.get(i));
-            let extra = extras.get(id_text).cloned().unwrap_or_default();
-            // The library's own image, share-relative like the analysis.
-            let artwork = Some(library.artwork_path.get(i))
-                .filter(|p| !p.is_empty())
-                .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
-            tracks.push(rbl_export::SourceTrack {
-                // The content id is how a second export to the same stick
-                // recognises a track it has already written.
-                id: library.ids.get(i).copied().unwrap_or(0),
-                source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),
-                artwork,
-                my_tags: extra.my_tags.iter().filter_map(|t| t.parse().ok()).collect(),
-                title: library.title.get(i).to_owned(),
-                artist: library.artist_name(row).to_owned(),
-                album: library.album_name(row).to_owned(),
-                genre: library.genre_name(row).to_owned(),
-                label: library.label_name(row).to_owned(),
-                key: library.key_name(row).to_owned(),
-                comment: library.comment.get(i).to_owned(),
-                date_added: library.date_added.get(i).to_owned(),
-                release_date: library.release_date.get(i).to_owned(),
-                bpm_x100: library.bpm_x100.get(i).copied().unwrap_or(0),
-                duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0)).unwrap_or(u16::MAX),
-                rating: library.rating.get(i).copied().unwrap_or(0),
-                color_id: library.color.get(i).copied().unwrap_or(0),
-                analysis,
-                ..rbl_export::SourceTrack::default()
-            });
+        let mut tracks: Vec<rbl_export::SourceTrack> = Vec::new();
+        let mut position: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        let mut source_playlists = Vec::with_capacity(named.len());
+        for ((id, name, _), rows) in named.into_iter().zip(rows_of) {
+            let mut track_indices = Vec::with_capacity(rows.len());
+            for row in rows {
+                let at = *position.entry(row).or_insert_with(|| {
+                    let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
+                    let extra = extras.get(&content).cloned().unwrap_or_default();
+                    tracks.push(source_track(library, share, row, &extra));
+                    tracks.len() - 1
+                });
+                track_indices.push(at);
+            }
+            source_playlists.push(rbl_export::SourcePlaylist { id, name, track_indices });
         }
+        if tracks.is_empty() {
+            return Err(AppError::new(ErrorKind::NotFound, "That playlist has no tracks to export."));
+        }
+        Ok(Self { tracks, playlists: source_playlists, my_tags })
+    }
+}
 
-        let source_playlist = rbl_export::SourcePlaylist {
-            name,
-            track_indices: (0..tracks.len()).collect(),
-        };
-        let library_defaults = defaults.as_ref().map(crate::device_settings::library_defaults);
-        // Per track, as `sync:progress` would be per stick: the status bar
-        // follows a long export rather than showing a busy flag alone.
-        let total = tracks.len();
-        let mut on_progress = |p: &rbl_export::ExportProgress| {
-            let _ = tauri::Emitter::emit(
-                &progress_app,
-                "export:progress",
-                ExportProgressDto { done: u32::try_from(p.done).unwrap_or(u32::MAX), total: u32::try_from(total).unwrap_or(u32::MAX), title: p.title.clone() },
-            );
-        };
-        let report = rbl_export::export_full(
-            std::path::Path::new(&destination),
-            &tracks,
-            std::slice::from_ref(&source_playlist),
-            &source_my_tags,
-            library_defaults.as_ref(),
-            &mut on_progress,
-        )
+/// One library row as the export wants it, analysis read from the share
+/// tree, and what the index does not hold from `extra`.
+fn source_track(
+    library: &rbl_index::Library,
+    share: &std::path::Path,
+    row: u32,
+    extra: &rbl_db::export_info::TrackExtras,
+) -> rbl_export::SourceTrack {
+    let i = row as usize;
+    // The library's own image, share-relative like the analysis.
+    let artwork = Some(library.artwork_path.get(i))
+        .filter(|p| !p.is_empty())
+        .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
+    rbl_export::SourceTrack {
+        // The content id is how a second export to the same stick
+        // recognises a track it has already written.
+        id: library.ids.get(i).copied().unwrap_or(0),
+        source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),
+        artwork,
+        my_tags: extra.my_tags.iter().filter_map(|t| t.parse().ok()).collect(),
+        title: library.title.get(i).to_owned(),
+        artist: library.artist_name(row).to_owned(),
+        album: library.album_name(row).to_owned(),
+        genre: library.genre_name(row).to_owned(),
+        label: library.label_name(row).to_owned(),
+        key: library.key_name(row).to_owned(),
+        comment: library.comment.get(i).to_owned(),
+        date_added: library.date_added.get(i).to_owned(),
+        release_date: library.release_date.get(i).to_owned(),
+        bpm_x100: library.bpm_x100.get(i).copied().unwrap_or(0),
+        duration_sec: u16::try_from(library.length_sec.get(i).copied().unwrap_or(0)).unwrap_or(u16::MAX),
+        rating: library.rating.get(i).copied().unwrap_or(0),
+        color_id: library.color.get(i).copied().unwrap_or(0),
+        analysis: read_analysis(share, library.analysis_path.get(i)),
+        ..rbl_export::SourceTrack::default()
+    }
+}
+
+/// Writes a selection to one destination and reads it back.
+///
+/// Runs inside a `blocking` closure: it copies audio over USB.
+pub(crate) fn write_export(
+    destination: &std::path::Path,
+    selection: &ExportSelection,
+    defaults: Option<&crate::device_settings::StickDefaultsDto>,
+    progress: &mut dyn FnMut(&rbl_export::ExportProgress),
+) -> AppResult<ExportReportDto> {
+    if !destination.is_dir() {
+        return Err(AppError::new(
+            ErrorKind::NotFound,
+            "That device is no longer connected. It may have been unplugged or renamed.",
+        ));
+    }
+    let library_defaults = defaults.map(crate::device_settings::library_defaults);
+    let report = rbl_export::export_full(
+        destination,
+        &selection.tracks,
+        &selection.playlists,
+        &selection.my_tags,
+        library_defaults.as_ref(),
+        progress,
+    )
+    .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+    if let Some(defaults) = defaults {
+        crate::device_settings::write_dev_defaults(destination, defaults)?;
+    }
+
+    // Re-read what was written with the independent parser: an export that
+    // cannot be read back is not an export.
+    let check = rbl_export::verify(destination)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-        // `DEVSETTING.DAT` is not written here: rekordbox writes none until
-        // the device panel is opened, and neither does this — the panel asks
-        // for the defaults when it opens on a stick that has none.
-        let _ = &defaults;
 
-        // Re-read what was written with the independent parser: an export that
-        // cannot be read back is not an export.
-        let check = rbl_export::verify(std::path::Path::new(&destination))
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-
-        Ok(ExportReportDto {
-            tracks: u32::try_from(report.tracks).unwrap_or(0),
-            playlists: u32::try_from(report.playlists).unwrap_or(0),
-            bytes_copied: report.bytes_copied,
-            analysis_files: u32::try_from(report.analysis_files).unwrap_or(0),
-            reused: u32::try_from(report.reused).unwrap_or(0),
-            removed: u32::try_from(report.removed).unwrap_or(0),
-            skipped: report.skipped,
-            verified: check.parsed && check.tracks == report.tracks,
-        })
+    Ok(ExportReportDto {
+        tracks: u32::try_from(report.tracks).unwrap_or(0),
+        playlists: u32::try_from(report.playlists).unwrap_or(0),
+        bytes_copied: report.bytes_copied,
+        analysis_files: u32::try_from(report.analysis_files).unwrap_or(0),
+        reused: u32::try_from(report.reused).unwrap_or(0),
+        removed: u32::try_from(report.removed).unwrap_or(0),
+        skipped: report.skipped,
+        verified: check.parsed && check.tracks == report.tracks,
     })
-    .await?;
-
-    let _ = tauri::Emitter::emit(&app, "export:done", &report);
-    Ok(report)
 }
 
 /// Lists the volumes an export could be written to, and what is on each.

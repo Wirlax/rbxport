@@ -28,6 +28,19 @@ pub struct Manifest {
     pub written: String,
     #[serde(default)]
     pub tracks: Vec<ManifestTrack>,
+    /// The playlists the export was asked for, so a sync window can offer
+    /// the same selection next time. Absent in records written before it
+    /// was kept, which read as "no selection".
+    #[serde(default)]
+    pub playlists: Vec<ManifestPlaylist>,
+}
+
+/// One playlist as it was asked for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestPlaylist {
+    /// `djmdPlaylist.ID`, or 0 when the playlist did not come from the library.
+    pub library_id: u64,
+    pub name: String,
 }
 
 /// One track as it was left on the stick.
@@ -165,12 +178,14 @@ mod tests {
                 analysis: 5,
                 artwork: String::new(),
             }],
+            playlists: vec![ManifestPlaylist { library_id: 9, name: "Set".to_owned() }],
         };
         manifest.save(dir.path()).unwrap();
         let read = Manifest::load(dir.path()).expect("saved manifest");
         assert_eq!(read.tracks.len(), 1);
         assert_eq!(read.tracks[0].export_id, 7);
         assert_eq!(read.tracks[0].key(), "#42");
+        assert_eq!(read.playlists[0].library_id, 9);
         // The temporary must not survive the rename.
         assert!(!Manifest::path(dir.path()).with_extension("json.part").exists());
     }

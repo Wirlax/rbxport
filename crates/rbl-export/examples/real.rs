@@ -78,6 +78,7 @@ fn main() {
     let playlists = vec![rbl_export::SourcePlaylist {
         name: "rbxport test".to_owned(),
         track_indices: playlist_indices,
+        ..Default::default()
     }];
 
     let started = std::time::Instant::now();

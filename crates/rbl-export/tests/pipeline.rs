@@ -113,6 +113,7 @@ fn analyse_author_export_and_read_it_back() {
     let playlist = rbl_export::SourcePlaylist {
         name: "Fixture set".into(),
         track_indices: vec![0],
+        ..Default::default()
     };
     let report = rbl_export::export(dest.path(), &[track], &[playlist]).unwrap();
     assert_eq!(report.tracks, 1);

@@ -23,7 +23,7 @@ fn a_stick_we_wrote_reports_what_is_on_it_and_that_it_can_be_synced() {
     let src = tempfile::tempdir().unwrap();
     let stick = tempfile::tempdir().unwrap();
     let tracks = vec![track(src.path(), 1, "One"), track(src.path(), 2, "Two")];
-    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0, 1] }];
+    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
     export(stick.path(), &tracks, &playlists).unwrap();
 
     let found = rbl_devices::inspect(stick.path()).expect("an export");
@@ -38,7 +38,7 @@ fn a_stick_someone_else_wrote_still_reports_its_contents() {
     let src = tempfile::tempdir().unwrap();
     let stick = tempfile::tempdir().unwrap();
     let tracks = vec![track(src.path(), 1, "One")];
-    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0] }];
+    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }];
     export(stick.path(), &tracks, &playlists).unwrap();
 
     // As rekordbox would have left it: the databases, but no record of ours.
@@ -58,6 +58,7 @@ fn a_stick_with_only_a_manifest_is_not_an_export() {
         version: rbl_export::manifest::MANIFEST_VERSION,
         written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
         tracks: Vec::new(),
+        playlists: Vec::new(),
     };
     manifest.save(stick.path()).unwrap();
     // Without export.pdb no player can read it, so there is nothing to report.

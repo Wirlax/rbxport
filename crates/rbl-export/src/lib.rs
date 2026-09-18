@@ -16,7 +16,7 @@ pub mod manifest;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-pub use manifest::{track_key, Manifest, ManifestTrack};
+pub use manifest::{track_key, Manifest, ManifestPlaylist, ManifestTrack};
 
 use rbl_pdb::build::FileBuilder;
 use rbl_pdb::rows::{
@@ -88,8 +88,12 @@ pub struct SourceMyTag {
 }
 
 /// A playlist to include.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SourcePlaylist {
+    /// `djmdPlaylist.ID`, or 0 for a playlist that is not in the library.
+    /// Recorded on the stick so the next sync can start from the same
+    /// selection.
+    pub id: u64,
     pub name: String,
     /// Indices into the track slice.
     pub track_indices: Vec<usize>,
@@ -633,6 +637,10 @@ pub fn export_full(
         version: manifest::MANIFEST_VERSION,
         written: rbl_core::time::now(),
         tracks: recorded,
+        playlists: playlists
+            .iter()
+            .map(|p| manifest::ManifestPlaylist { library_id: p.id, name: p.name.clone() })
+            .collect(),
     }
     .save(destination)?;
 
