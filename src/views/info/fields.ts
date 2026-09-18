@@ -112,6 +112,7 @@ export function fieldText(d: TrackDetails, field: TrackField): string {
     case "genre": return d.genre;
     case "label": return d.label;
     case "key": return d.key;
+    case "bpm": return (d.bpmX100 / 100).toFixed(2);
   }
 }
 
@@ -125,6 +126,11 @@ export function acceptable(field: TrackField, value: string): boolean {
     case "trackNumber": return /^\s*\d{1,4}\s*$/.test(value);
     case "discNumber": return /^\s*\d{1,3}\s*$/.test(value);
     case "playCount": return /^\s*\d{1,6}\s*$/.test(value);
+    // 20 to 400, as the writer takes it.
+    case "bpm": {
+      const bpm = Number.parseFloat(value.trim());
+      return /^\s*\d+(\.\d+)?\s*$/.test(value) && bpm >= 20 && bpm <= 400;
+    }
     default: return true;
   }
 }

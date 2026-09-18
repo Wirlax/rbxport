@@ -1033,7 +1033,7 @@ export interface TrackLookups {
 export type TrackField =
   | "title" | "artist" | "album" | "year" | "trackNumber" | "discNumber"
   | "originalArtist" | "composer" | "remixer" | "lyricist" | "playCount"
-  | "genre" | "label" | "key";
+  | "genre" | "label" | "key" | "bpm";
 
 /**
  * The BPM column of the track filter bar.

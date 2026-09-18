@@ -258,6 +258,7 @@ export const FIELD_LABEL: Record<TrackField, string> = {
   genre: "Genre",
   label: "Label",
   key: "Key",
+  bpm: "BPM",
 };
 
 function InfoForm({ track, details, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {

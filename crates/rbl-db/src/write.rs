@@ -113,7 +113,7 @@ const ID_ATTEMPTS: usize = 64;
 const WRITABLE_COLUMNS: &[&str] = &[
     "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL",
     // The information panel's Info tab.
-    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID",
+    "Title", "Lyricist", "ReleaseYear", "TrackNo", "DiscNo", "DJPlayCount", "KeyID", "BPM",
     "ArtistID", "OrgArtistID", "ComposerID", "RemixerID", "AlbumID", "GenreID", "LabelID",
 ];
 
@@ -145,6 +145,10 @@ pub enum TrackField {
     Genre,
     Label,
     Key,
+    /// A BPM typed over the analysed one. The beat grid in the analysis
+    /// file is retimed to it from its first beat, so the CDJ's grid and the
+    /// column agree; see [`Writer::set_bpm`].
+    Bpm,
 }
 
 impl TrackField {
@@ -166,6 +170,7 @@ impl TrackField {
             "genre" => Self::Genre,
             "label" => Self::Label,
             "key" => Self::Key,
+            "bpm" => Self::Bpm,
             _ => return None,
         })
     }
@@ -876,7 +881,56 @@ impl Writer {
             TrackField::Genre => self.touch_reference(content, "GenreID", "djmdGenre", value),
             TrackField::Label => self.touch_reference(content, "LabelID", "djmdLabel", value),
             TrackField::Key => self.touch_key(content, value),
+            TrackField::Bpm => self.set_bpm(content, value),
         }
+    }
+
+    /// A BPM typed over the analysed one: `128`, `128.5`.
+    ///
+    /// The grid in the track's `.DAT` is retimed to the new tempo from its
+    /// first beat — the beats keep their count and their downbeats, only
+    /// the spacing changes — and the `PQT2` copy of it is dropped, since a
+    /// stale one beside a new grid is worse than none. The file is written
+    /// before the column, so a row never names a tempo its grid does not
+    /// have. A track without analysis only gets the column.
+    pub fn set_bpm(&mut self, content: &str, value: &str) -> Result<Changed> {
+        let bpm: f64 = value.trim().parse().map_err(|_| DbError::WriteRefused(format!("{value:?} is not a BPM")))?;
+        if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) {
+            return Err(DbError::WriteRefused(format!("{bpm} is outside 20 to 400 BPM")));
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "20 to 400, checked above")]
+        let bpm_x100 = (bpm * 100.0).round() as u32;
+
+        let relative: Option<String> = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(relative) = relative.filter(|p| !p.is_empty()) {
+            let dat = rbl_anlz::resolve(&self.library.location().share_root, &relative);
+            if let Ok(anlz) = rbl_anlz::Anlz::read(&dat) {
+                if let Some(beats) = anlz.beat_grid().filter(|b| !b.is_empty()) {
+                    let retimed = retime(&beats, bpm_x100);
+                    let sections: Vec<rbl_anlz::Section> = anlz
+                        .sections
+                        .iter()
+                        .filter(|s| s.tag != rbl_core::FourCc::new(b"PQT2"))
+                        .cloned()
+                        .collect();
+                    let kept = rbl_anlz::Anlz { header_extra: anlz.header_extra.clone(), sections };
+                    let bytes = kept.with_beat_grid(&retimed);
+                    let staged = dat.with_extension("tmp");
+                    std::fs::write(&staged, bytes)?;
+                    std::fs::rename(&staged, &dat)?;
+                }
+            }
+        }
+        self.touch_content(content, "BPM", &Value::Integer(i64::from(bpm_x100)))
     }
 
     /// A non-negative integer column, refused when the text is not one.
@@ -1360,6 +1414,23 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(suffix);
     PathBuf::from(name)
+}
+
+/// The grid at a new tempo: the same beats, numbered as they were, spaced
+/// from the first at the new interval.
+fn retime(beats: &[rbl_anlz::Beat], bpm_x100: u32) -> Vec<rbl_anlz::Beat> {
+    let first = beats.first().map_or(0.0, |b| f64::from(b.time_ms));
+    let interval_ms = 6_000_000.0 / f64::from(bpm_x100.max(1));
+    let tempo = u16::try_from(bpm_x100).unwrap_or(u16::MAX);
+    beats
+        .iter()
+        .enumerate()
+        .map(|(i, beat)| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "milliseconds of a track, far inside u32")]
+            let time_ms = (first + i as f64 * interval_ms).round().max(0.0) as u32;
+            rbl_anlz::Beat { beat_number: beat.beat_number, tempo_x100: tempo, time_ms }
+        })
+        .collect()
 }
 
 /// The backups in a directory, oldest first: the name carries the

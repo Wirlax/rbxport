@@ -114,14 +114,17 @@ function cellText(row: RowDto, key: Column["key"]): string {
  *
  * `key` is left out too — it is checked against the keys the library already
  * holds, so a free-typed one would be refused after the fact, and the
- * information panel offers the list instead. `bpm` and the dates are
- * formatted on the way out and would have to be parsed back on the way in.
+ * information panel offers the list instead. The dates are formatted on the
+ * way out and would have to be parsed back on the way in. `bpm` is typed
+ * over as a number, which the backend reads back and retimes the beat grid
+ * to, so the CDJ and the column agree.
  */
 const EDITABLE_FIELDS: Partial<Record<ColumnKey, TrackField>> = {
   artist: "artist",
   album: "album",
   genre: "genre",
   label: "label",
+  bpm: "bpm",
 };
 
 const Stars = memo(function Stars({
@@ -192,6 +195,11 @@ const EditableCell = memo(function EditableCell({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  // Whether the row was selected when the button went down. The press
+  // selects the row and React re-renders before the click arrives, so by
+  // then `onClick` says "selected" for a row the same gesture selected —
+  // and a click that selects must not also open the editor.
+  const pressedOnSelected = useRef(false);
 
   if (!editing) {
     const begin = () => {
@@ -203,7 +211,12 @@ const EditableCell = memo(function EditableCell({
         className={styles.cell}
         data-col={col}
         role="gridcell"
-        onClick={onClick ? begin : undefined}
+        onMouseDown={(e) => {
+          pressedOnSelected.current = onClick && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+        }}
+        onClick={onClick ? () => {
+          if (pressedOnSelected.current) begin();
+        } : undefined}
         onDoubleClick={(e) => {
           // Swallowed only when the double click is the gesture that opens
           // the editor. Otherwise it belongs to the row, where it loads the

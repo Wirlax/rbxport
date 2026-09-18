@@ -669,11 +669,12 @@ fn the_wire_names_round_trip() {
         ("genre", TrackField::Genre),
         ("label", TrackField::Label),
         ("key", TrackField::Key),
+        ("bpm", TrackField::Bpm),
     ] {
         assert_eq!(TrackField::parse(name), Some(field));
     }
     // What the panel shows read-only must not be reachable by name either.
-    for refused in ["albumArtist", "bpm", "mixName", "message", "hotCueAutoLoad", "publish", ""] {
+    for refused in ["albumArtist", "mixName", "message", "hotCueAutoLoad", "publish", ""] {
         assert_eq!(TrackField::parse(refused), None, "{refused}");
     }
 }
@@ -1474,4 +1475,43 @@ fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
     let again = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
     assert_eq!((again.imported, again.existing, again.cues), (0, 2, 0));
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath LIKE '%One.wav'"), 1);
+}
+
+#[test]
+fn a_bpm_typed_over_retimes_the_grid_and_sets_the_column() {
+    let mut f = fixture();
+    let location = f.writer.library().location().clone();
+    // A DAT with a 120 BPM grid of eight beats, and a stale PQT2 beside it.
+    let beats: Vec<rbl_anlz::Beat> = (0..8)
+        .map(|i| rbl_anlz::Beat { beat_number: (i % 4) + 1, tempo_x100: 12_000, time_ms: 250 + u32::from(i) * 500 })
+        .collect();
+    let mut builder = rbl_anlz::AnlzBuilder::new();
+    builder.path("/m/x.mp3").beat_grid(&beats).raw(rbl_core::FourCc::new(b"PQT2"), vec![0; 32], vec![0; 16]);
+    let relative = "/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT";
+    let dat = location.share_root.join(relative.trim_start_matches('/'));
+    std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+    std::fs::write(&dat, builder.finish()).unwrap();
+    fixture::set_analysis_path(&location, 0, relative).unwrap();
+
+    f.writer.set_field(&track_id(0), TrackField::Bpm, "128.5").unwrap();
+    let bpm: i64 = f.one("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_eq!(bpm, 12_850);
+    let rewritten = rbl_anlz::Anlz::read(&dat).unwrap();
+    let grid = rewritten.beat_grid().unwrap();
+    assert_eq!(grid.len(), 8);
+    assert_eq!(grid[0].time_ms, 250, "the first beat stays where it was");
+    assert_eq!(grid[1].time_ms, 250 + 467, "60000 / 128.5 is 466.9 ms");
+    assert_eq!(grid[7].time_ms, 250 + (7.0_f64 * 6_000_000.0 / 12_850.0).round() as u32);
+    assert!(grid.iter().all(|b| b.tempo_x100 == 12_850));
+    assert_eq!(grid.iter().map(|b| b.beat_number).collect::<Vec<_>>(), vec![1, 2, 3, 4, 1, 2, 3, 4]);
+    assert!(!rewritten.has_extended_grid(), "the stale PQT2 is dropped");
+    assert_eq!(rewritten.path().as_deref(), Some("/m/x.mp3"), "the rest of the file is kept");
+
+    // Nonsense and the impossible are refused before anything is touched.
+    assert!(matches!(f.writer.set_field(&track_id(0), TrackField::Bpm, "fast"), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.set_field(&track_id(0), TrackField::Bpm, "1200"), Err(DbError::WriteRefused(_))));
+    // A track with no analysis only gets the column.
+    f.writer.set_field(&track_id(1), TrackField::Bpm, "90").unwrap();
+    let plain: i64 = f.one("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&track_id(1)]);
+    assert_eq!(plain, 9_000);
 }

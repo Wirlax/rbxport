@@ -654,8 +654,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (field === "key" && value !== "" && !KEYS.includes(value)) {
         return Promise.reject(new Error(`${JSON.stringify(value)} is not a key the library knows`));
       }
+      if (field === "bpm") {
+        const bpm = Number.parseFloat(value.trim());
+        if (!Number.isFinite(bpm) || bpm < 20 || bpm > 400) {
+          return Promise.reject(new Error(`${JSON.stringify(value)} is not a BPM between 20 and 400`));
+        }
+        row.bpmX100 = Math.round(bpm * 100);
+        d.bpmX100 = row.bpmX100;
+        return bump();
+      }
       // Narrowed by hand: what is left after the numeric fields is text.
-      const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount">;
+      const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount" | "bpm">;
       d[text] = value.trim();
       // The row carries some of the same columns; keep the two in step the
       // way a reload of the index would.
