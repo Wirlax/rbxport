@@ -21,7 +21,20 @@
 //!     off by the end of a track, and the one a variable-tempo track needs.
 //!   - **key**: the same name rekordbox chose.
 //!
-//! `filter` is a substring of the title, to look at one track.
+//! `filter` is a substring of the title, to look at one track. `score` is
+//! `eval` under another name. With a filter or `RB_LITE_VERBOSE`, every
+//! track is listed, a track with a tempo change with both grids' tempo
+//! runs and the drift between the grids at ten points along it.
+//!
+//! `cargo run --release -p rbl-analysis --example golden -- transition [filter]`
+//!   prints what the audio holds around every hand-gridded tempo change,
+//!   per beat of rekordbox's grid (`RB_LITE_BARS` bars either side), or
+//!   with `RB_LITE_BGRID=1` per bar of rekordbox's incoming grid extended
+//!   back over the change; `RB_LITE_PEAKS=kick|flux|attack,from,to[,min]`
+//!   lists one band's raw peaks in a range.
+//!
+//! `RUST_LOG=rbl_analysis=debug` on any mode prints the tempo stage's
+//! decisions at each change: the settled levels, the kick's runs, the cut.
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Write as _;
@@ -60,12 +73,17 @@ struct Track {
 }
 
 fn main() {
+    // `RUST_LOG=rbl_analysis=debug` prints the tempo stage's decisions.
+    if std::env::var("RUST_LOG").is_ok() {
+        let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_target(false).without_time().try_init();
+    }
     let mode = std::env::args().nth(1).unwrap_or_else(|| "eval".to_owned());
     match mode.as_str() {
         "cache" => cache(),
-        "eval" => eval(),
+        "eval" | "score" => eval(),
         "downbeat" => downbeat_experiment(),
         "kick" => kick_experiment(),
+        "transition" => transition_experiment(),
         "key" => key_experiment(),
         "bassroot" => bassroot_experiment(),
         other => println!("unknown mode {other:?}; use `cache` or `eval`"),
@@ -223,6 +241,9 @@ struct Score {
     extension: String,
     rb_bpm: f64,
     our_bpm: f64,
+    /// Both grids as tempo runs, for the verbose listing.
+    rb_runs: String,
+    our_runs: String,
     /// Signed offset of our downbeats from rekordbox's, modulo a bar, in ms.
     downbeat_offset_ms: f64,
     /// Signed offset of our beats from rekordbox's, modulo a beat, in ms.
@@ -350,6 +371,8 @@ fn score(track: &Track) -> Score {
         beat_offset_ms,
         beat_in_bar,
         grid_matched,
+        rb_runs: score::runs_line(rb),
+        our_runs: format!("{}\n    drift (ours - rb, ms, at ten points): {}", score::runs_line(ours), drift_line(ours, rb)),
         rb_key: track.key.clone(),
         our_key: analysis.key.map(|k| k.name).unwrap_or_default(),
         elapsed_ms,
@@ -423,6 +446,10 @@ fn eval() {
             s.elapsed_ms,
             s.extension,
         );
+        if verbose && (s.rb_runs.contains('|') || s.our_runs.contains('|')) {
+            println!("    rb   runs: {}", s.rb_runs);
+            println!("    ours runs: {}", s.our_runs);
+        }
     }
 
     // Every failure by metric, so a run reads as a to-do list.
@@ -455,6 +482,25 @@ fn eval() {
     }
     let total_ms: u128 = scores.iter().map(|s| s.elapsed_ms).sum();
     println!("  analysis time: mean {} ms per track", total_ms / n as u128);
+}
+
+/// The offset of our nearest beat from rekordbox's, in ms, at ten of
+/// rekordbox's beats spread over the track, with the beat numbers where
+/// they differ: where a grid drifts or a change lands a beat off.
+fn drift_line(ours: &[Beat], rb: &[Beat]) -> String {
+    if rb.is_empty() || ours.is_empty() {
+        return String::new();
+    }
+    (0..10)
+        .map(|k| {
+            let beat = &rb[(rb.len() - 1) * k / 9];
+            let t = f64::from(beat.time_ms);
+            let nearest = ours.iter().min_by(|a, b| (f64::from(a.time_ms) - t).abs().partial_cmp(&(f64::from(b.time_ms) - t).abs()).unwrap()).unwrap();
+            let numbers = if nearest.beat_number == beat.beat_number { String::new() } else { format!("({}≠{})", nearest.beat_number, beat.beat_number) };
+            format!("{:.0}s:{:+.0}{numbers}", t / 1000.0, f64::from(nearest.time_ms) - t)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -852,4 +898,126 @@ fn kick_experiment() {
         }
     }
     println!("midpoints have more kick than rekordbox's beats on {wrong} / {n}");
+}
+
+/// What the audio holds around every hand-gridded tempo change, per beat of
+/// rekordbox's grid: the kick band (onset flux under 200 Hz), the full-band
+/// flux, the click-band attack, and the flux on the half beat after — so
+/// the rule for placing a change is read off the material rather than
+/// guessed. `transition <filter>`; `RB_LITE_BARS` bars either side (12).
+fn transition_experiment() {
+    use rbl_analysis::onset::{onset_envelope_band, Band};
+    use rbl_analysis::attack::{AttackMap, AttackOptions};
+    let filter = std::env::args().nth(2).map(|s| s.to_lowercase()).unwrap_or_default();
+    let bars: i64 = std::env::var("RB_LITE_BARS").ok().and_then(|v| v.parse().ok()).unwrap_or(12);
+    let dir = cache_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "gold")).collect())
+        .unwrap_or_default();
+    paths.sort();
+    for path in &paths {
+        let Some(track) = read_track(path) else { continue };
+        if !track.title.to_lowercase().contains(&filter) { continue; }
+        let full = onset_envelope_band(&track.samples, track.sample_rate, Band::FULL);
+        let low = onset_envelope_band(&track.samples, track.sample_rate, Band::LOW);
+        let attacks = AttackMap::new(&track.samples, track.sample_rate, AttackOptions::default());
+        let thumps = AttackMap::new(&track.samples, track.sample_rate, AttackOptions { low_hz: 30.0, high_hz: 200.0, step_secs: 0.002, reach_secs: 0.04 });
+        let analysis = rbl_analysis::analyse_with(&track.samples, track.sample_rate, options_under_test());
+        let peak = |env: &rbl_analysis::onset::OnsetEnvelope, secs: f64, reach_secs: f64| -> f64 {
+            let x = (secs - env.origin_secs) * env.rate;
+            let r = reach_secs * env.rate;
+            let lo = (x - r).max(0.0) as usize;
+            let hi = ((x + r) as usize).min(env.len().saturating_sub(1));
+            (lo..=hi).map(|i| f64::from(env.values[i])).fold(0.0, f64::max)
+        };
+        // `RB_LITE_PEAKS=kick|flux|attack,from,to[,min]` lists every peak
+        // of that band in the range, with its time.
+        if let Some((band, from, to, min)) = std::env::var("RB_LITE_PEAKS").ok().and_then(|v| {
+            let f: Vec<&str> = v.split(',').collect();
+            Some((f.first()?.to_string(), f.get(1)?.parse::<f64>().ok()?, f.get(2)?.parse::<f64>().ok()?, f.get(3).and_then(|m| m.parse::<f64>().ok()).unwrap_or(0.1)))
+        }) {
+            let mut line = String::new();
+            if band == "attack" {
+                let mut t = from;
+                while t < to {
+                    if let Some(a) = attacks.attack_within(t, 0.005) {
+                        if a.height >= min { line.push_str(&format!(" {:.3}:{:.2}", a.secs, a.height)); }
+                    }
+                    t += 0.01;
+                }
+            } else {
+                let env = if band == "kick" { &low } else { &full };
+                let lo = ((from - env.origin_secs) * env.rate).max(0.0) as usize;
+                let hi = (((to - env.origin_secs) * env.rate) as usize).min(env.len().saturating_sub(2));
+                for i in lo.max(1)..hi {
+                    let v = f64::from(env.values[i]);
+                    if v >= min && v > f64::from(env.values[i - 1]) && v >= f64::from(env.values[i + 1]) {
+                        line.push_str(&format!(" {:.3}:{:.2}", env.time_of(i as f64), v));
+                    }
+                }
+            }
+            println!("{band} peaks {from}..{to} in {}:{line}", track.title);
+        }
+        println!("{}  (rb {:.2}; our changes at {})", track.title, track.bpm,
+            analysis.tempo.segments.iter().skip(1).map(|s| format!("{:.3}s->{:.2}", s.from_secs, s.bpm())).collect::<Vec<_>>().join(", "));
+        let changes: Vec<usize> = track.grid.windows(2).enumerate().filter(|(_, w)| w[0].tempo_x100 != w[1].tempo_x100).map(|(i, _)| i + 1).collect();
+        // `RB_LITE_BGRID=1`: rekordbox's incoming grid extended back over
+        // the zone, per bar: kick, attack, flux, half-beat flux means and
+        // how many of the four beats have any onset within reach.
+        if std::env::var("RB_LITE_BGRID").is_ok() {
+            for &c in &changes {
+                let b = track.grid[c];
+                let period = 60.0 / (f64::from(b.tempo_x100) / 100.0);
+                let cut = f64::from(b.time_ms) / 1000.0;
+                let a_period = 60.0 / (f64::from(track.grid[c - 1].tempo_x100) / 100.0);
+                let a_cut = f64::from(track.grid[c - 1].time_ms) / 1000.0;
+                println!("  b-grid bars around the cut at {cut:.3}s ({:.2} -> {:.2}): start | kick attack flux half | beats-with-onset | old grid's kick attack flux", f64::from(track.grid[c - 1].tempo_x100) / 100.0, f64::from(b.tempo_x100) / 100.0);
+                for bar in -(bars)..8 {
+                    let t0 = cut + bar as f64 * 4.0 * period;
+                    if t0 < 0.0 { continue; }
+                    let (mut k, mut a, mut f, mut h, mut n) = (0.0, 0.0, 0.0, 0.0, 0usize);
+                    let mut th = 0.0;
+                    let (mut ka, mut aa, mut fa) = (0.0, 0.0, 0.0);
+                    for i in 0..4 {
+                        let t = t0 + i as f64 * period;
+                        let reach = period * 0.1;
+                        let kk = peak(&low, t, reach); let ff = peak(&full, t, reach);
+                        let at = attacks.attack_within(t, 0.015).map_or(0.0, |x| x.height);
+                        k += kk; f += ff; a += at; h += peak(&full, t + period / 2.0, reach);
+                        th += thumps.attack_within(t, 0.04).map_or(0.0, |x| x.height);
+                        if kk >= 0.1 || ff >= 0.1 || at >= 0.1 { n += 1; }
+                        // The old grid's beat nearest this time.
+                        let ta = a_cut + ((t - a_cut) / a_period).round() * a_period;
+                        ka += peak(&low, ta, a_period * 0.1); fa += peak(&full, ta, a_period * 0.1);
+                        aa += attacks.attack_within(ta, 0.015).map_or(0.0, |x| x.height);
+                    }
+                    println!("   {:>8.3}{} | {:.2} {:.2} {:.2} {:.2} | {n} | {:.2} {:.2} {:.2} | thump {:.4}", t0, if bar == 0 { "*" } else { " " }, k / 4.0, a / 4.0, f / 4.0, h / 4.0, ka / 4.0, aa / 4.0, fa / 4.0, th / 4.0);
+                }
+            }
+            continue;
+        }
+        for &c in &changes {
+            let from = (c as i64 - bars * 4).max(0) as usize;
+            let to = (c + (bars as usize) * 4 / 3).min(track.grid.len() - 1);
+            println!("  change at beat {c}: {:.3}s {:.2} -> {:.2} BPM   (t  b  kick  flux  attack  half-flux)", f64::from(track.grid[c].time_ms) / 1000.0, f64::from(track.grid[c - 1].tempo_x100) / 100.0, f64::from(track.grid[c].tempo_x100) / 100.0);
+            let mut line = String::new();
+            for i in from..to {
+                let b = track.grid[i];
+                let t = f64::from(b.time_ms) / 1000.0;
+                let next = f64::from(track.grid[i + 1].time_ms) / 1000.0;
+                let period = next - t;
+                let reach = period * 0.1;
+                let k = peak(&low, t, reach);
+                let f = peak(&full, t, reach);
+                let a = attacks.attack_within(t, 0.015).map_or(0.0, |a| a.height);
+                let h = peak(&full, t + period / 2.0, reach);
+                if b.beat_number == 1 {
+                    if !line.is_empty() { println!("{line}"); }
+                    line = format!("   {:>8.3}{} |", t, if i == c { "*" } else { " " });
+                }
+                line.push_str(&format!(" {}{}:{:.2}/{:.2}/{:.2}/{:.2}", b.beat_number, if i == c { "*" } else { "" }, k, f, a, h));
+            }
+            if !line.is_empty() { println!("{line}"); }
+        }
+    }
 }
