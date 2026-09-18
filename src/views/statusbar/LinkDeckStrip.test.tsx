@@ -153,9 +153,13 @@ describe("LinkDeckStrip", () => {
   it("marks LINK unavailable and explains why on click when it is blocked", () => {
     const problem = "rekordbox is running and holds the link ports. Quit it to turn LINK on.";
     let toggled = 0;
-    // Blocked is the case with no peers at all: rekordbox holds the port, so
-    // the watcher hears nothing — the strip must still appear.
+    // Blocked with nothing on the network is no strip at all: the reason is
+    // told in Preferences › DJ System instead.
     render({ peers: [], link: { ...off(), problem }, onToggle: () => toggled++ });
+    expect(host.querySelector('[data-testid="link-deck-strip"]')).toBeNull();
+
+    // With a player heard, the strip shows and LINK is marked unavailable.
+    render({ peers: [peer({ number: 2 })], link: { ...off(), problem }, onToggle: () => toggled++ });
 
     const button = host.querySelector('[data-testid="link-button"]') as HTMLButtonElement;
     expect(button).not.toBeNull();

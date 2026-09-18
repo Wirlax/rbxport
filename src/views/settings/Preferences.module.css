@@ -412,6 +412,8 @@
   margin-left: calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
 }
 .actions .button { flex: none; }
+/* A button that heads a section keeps a row's pitch above the control below. */
+.actions[data-spaced] { margin-bottom: var(--s-pref-button-gap); }
 
 /* Facts: the library's counts. */
 .facts {

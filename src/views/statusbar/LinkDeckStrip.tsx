@@ -85,8 +85,10 @@ export function LinkDeckStrip({
     };
   }, [explaining]);
 
-  // Nothing to link to and nothing to explain: no strip at all.
-  if (!on && others.length === 0 && !blocked) {
+  // Nothing to link to: no strip at all. That holds even while LINK is
+  // blocked (rekordbox holds the ports): an empty strip saying "unavailable"
+  // is noise, and Preferences › DJ System spells the reason out.
+  if (!on && others.length === 0) {
     return null;
   }
 

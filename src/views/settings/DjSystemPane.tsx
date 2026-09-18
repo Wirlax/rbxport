@@ -249,7 +249,7 @@ function LinkSection({ linkInterface, onChoose }: {
 
   return (
     <Section title="PRO DJ LINK" label="Link">
-      <div className={styles.actions}>
+      <div className={styles.actions} data-spaced>
         <Button onClick={toggle} disabled={busy || link === null}>
           {link?.on ? "Disconnect" : "Connect to PRO DJ LINK"}
         </Button>
