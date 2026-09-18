@@ -31,6 +31,20 @@ pub fn now() -> String {
     format_utc(secs, since.subsec_millis())
 }
 
+/// Today's date where the machine is, `YYYY-MM-DD`.
+///
+/// The one place rekordbox writes local time rather than UTC: the date an
+/// export was created, in `exportLibrary.db` and as the name of the day's
+/// history. Late in the evening west of Greenwich the UTC date is already
+/// tomorrow, which is how our exports came to be dated a day after
+/// rekordbox's. The `time` crate refuses to read the local offset in a
+/// process with threads without an `unsafe` opt-in; `chrono` reads the zone
+/// database itself.
+#[must_use]
+pub fn local_date() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
 /// Civil date from a count of days since 1970-01-01.
 ///
 /// Hinnant's algorithm: shift the era so March is the first month, which makes

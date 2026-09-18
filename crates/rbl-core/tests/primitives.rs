@@ -2,7 +2,7 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_core::ids::{Rng, MAX_CONTENT_ID, MAX_PLAYLIST_ID};
-use rbl_core::time::{format_utc, now};
+use rbl_core::time::{format_utc, local_date, now};
 
 #[test]
 fn a_timestamp_matches_the_format_rekordbox_writes() {
@@ -23,6 +23,23 @@ fn dates_are_right_across_the_awkward_boundaries() {
     assert!(format_utc(-2_203_891_200, 0).starts_with("1900-03-01"));
     assert!(format_utc(1_767_225_599, 999).starts_with("2025-12-31 23:59:59.999"));
     assert!(format_utc(1_767_225_600, 0).starts_with("2026-01-01 00:00:00.000"));
+}
+
+#[test]
+fn the_local_date_is_a_date_within_a_day_of_utc() {
+    let local = local_date();
+    assert_eq!(local.len(), 10, "{local}");
+    assert!(local.as_bytes()[4] == b'-' && local.as_bytes()[7] == b'-', "{local}");
+    // Whatever the zone, the local day is the UTC day or one either side of it.
+    let utc_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let candidates: Vec<String> = [-86_400, 0, 86_400]
+        .iter()
+        .map(|delta| format_utc(utc_secs + delta, 0)[..10].to_owned())
+        .collect();
+    assert!(candidates.contains(&local), "{local} is not near {candidates:?}");
 }
 
 #[test]

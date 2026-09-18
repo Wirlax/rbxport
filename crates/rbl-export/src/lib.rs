@@ -663,8 +663,9 @@ fn write_one_library(
         }
     }
 
-    // The date only, which is what rekordbox's own export carries.
-    let created = rbl_core::time::now().get(..10).unwrap_or("").to_owned();
+    // The date only, and the local one: rekordbox's own export carries the
+    // day the person exported on, not the UTC day.
+    let created = rbl_core::time::local_date();
     let device_name = if settings.device_name.is_empty() {
         "RBXPORT"
     } else {
