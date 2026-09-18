@@ -6,6 +6,7 @@
  */
 import type {
   Backup,
+  Duplicates,
   XmlImportReport,
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   PreferencesRequest, UpdateCheck, UpdateProgress,
@@ -224,6 +225,7 @@ async function realBackend(): Promise<Backend> {
     takeLinkMasterTempo: () => invoke<LinkStatus>("link_take_master_tempo"),
     onLinkStatus: (listener) => subscribe<LinkStatus>("link:status", listener),
     missingTracks: (limit) => invoke<MissingTracks>("missing_tracks", { limit }),
+    findDuplicates: (limit) => invoke<Duplicates>("find_duplicates", { limit }),
     relocateTrack: async (trackId) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({

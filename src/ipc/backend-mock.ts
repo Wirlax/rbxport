@@ -1594,6 +1594,25 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // Nothing in the mock has a file behind it, so nothing can be missing and
     // there is no picker to choose one with.
     missingTracks: () => wait({ total: 0, tracks: [] }),
+    // The mock's titles are drawn from a short list, so the same title under
+    // the same artist comes up as it does in a real library.
+    findDuplicates: (limit) => {
+      const groups = new Map<string, RowDto[]>();
+      for (const row of all) {
+        const key = `${row.title.toLowerCase()}\u0000${row.artist.toLowerCase()}`;
+        groups.set(key, [...(groups.get(key) ?? []), row]);
+      }
+      const found = [...groups.values()].filter((rows) => rows.length > 1);
+      return wait({
+        groups: found.length,
+        extra: found.reduce((n, rows) => n + rows.length - 1, 0),
+        shown: found.slice(0, limit).map((rows) => ({
+          title: rows[0]?.title ?? "",
+          artist: rows[0]?.artist ?? "",
+          tracks: rows.map((row) => ({ id: row.id, path: `/Music/${row.title}.mp3`, durationSec: row.durationSec, present: true })),
+        })),
+      });
+    },
     relocateTrack: () => wait(null),
     // No files behind the rows, so nothing is missing and nothing moves.
     autoRelocate: () => wait({ relocated: 0, unresolved: 0 }),

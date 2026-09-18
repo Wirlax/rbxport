@@ -482,6 +482,8 @@ export interface Backend {
   revealTrack(trackId: string): Promise<void>;
 
   missingTracks(limit: number): Promise<MissingTracks>;
+  /** Tracks that share a title and an artist, the first `limit` groups listed. */
+  findDuplicates(limit: number): Promise<Duplicates>;
 
   /**
    * Asks the user for a file and points a track at it.
@@ -897,6 +899,28 @@ export interface MissingTrack {
   artist: string;
   /** Where the library still expects it. */
   path: string;
+}
+
+export interface DuplicateTrack {
+  id: string;
+  path: string;
+  durationSec: number;
+  /** Whether the file is where the library says. */
+  present: boolean;
+}
+
+export interface DuplicateGroup {
+  title: string;
+  artist: string;
+  tracks: DuplicateTrack[];
+}
+
+export interface Duplicates {
+  /** Every group, not just the ones listed. */
+  groups: number;
+  /** Copies beyond the first, over every group. */
+  extra: number;
+  shown: DuplicateGroup[];
 }
 
 export interface MissingTracks {

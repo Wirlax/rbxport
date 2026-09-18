@@ -455,6 +455,7 @@ pub fn run() {
             commands::track_phrases,
             commands::track_vocals,
             commands::missing_tracks,
+            commands::find_duplicates,
             commands::import_files,
             commands::relocate_track,
             relocate::auto_relocate,

@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { Backend, Backup, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
+import type { Backend, Backup, Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
 import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -154,8 +154,107 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
         onFolders={(relocateFolders) => set({ relocateFolders })}
         readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary}
       />
+      <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
       <BackupSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
     </>
+  );
+}
+
+/** How many duplicate groups to list. The counts above are exact. */
+const DUPLICATE_GROUPS_SHOWN = 20;
+
+/** `m:ss`, for telling two copies apart by length. */
+function minutes(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Duplicates: tracks that share a title and an artist. Nothing is changed
+ * by looking; a copy is removed from the collection one at a time, after
+ * asking, and the file stays where it is.
+ */
+function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
+  const [found, setFound] = useState<Duplicates | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const scan = async () => {
+    const backend = await getBackend();
+    setFound(await backend.findDuplicates(DUPLICATE_GROUPS_SHOWN));
+  };
+
+  return (
+    <Section title="Duplicates">
+      {found === null ? (
+        <>
+          <div className={styles.actions}>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void scan().finally(() => setBusy(false));
+              }}
+            >
+              {busy ? "Looking…" : "Find duplicates"}
+            </Button>
+          </div>
+          <Note>Lists tracks that share a title and an artist. Nothing is changed by looking.</Note>
+        </>
+      ) : found.groups === 0 ? (
+        <Note>No two tracks share a title and an artist.</Note>
+      ) : (
+        <>
+          <Note>
+            {found.groups.toLocaleString()} title{found.groups === 1 ? "" : "s"} with more than one copy,{" "}
+            {found.extra.toLocaleString()} extra cop{found.extra === 1 ? "y" : "ies"} in all.
+          </Note>
+          <ul className={styles.list} aria-label="Duplicates">
+            {found.shown.map((group) => (
+              <li key={`${group.title}\u0000${group.artist}`}>
+                <span className={styles.listTitle}>
+                  {group.title}
+                  {group.artist ? ` — ${group.artist}` : ""}
+                </span>
+                {group.tracks.map((track) => (
+                  <span key={track.id} className={styles.listPath}>
+                    {minutes(track.durationSec)} · {track.path}
+                    {track.present ? "" : " (file missing)"}
+                    <button
+                      type="button"
+                      className={styles.listAction}
+                      disabled={readOnly || busy}
+                      onClick={() => {
+                        setBusy(true);
+                        void (async () => {
+                          try {
+                            const backend = await getBackend();
+                            const sure = await backend.confirm(
+                              `Remove this copy of ${group.title} from the collection? The file stays where it is.`,
+                            );
+                            if (!sure) return;
+                            await backend.edits.removeFromCollection([track.id]);
+                            setNote(`Removed a copy of ${group.title}.`);
+                            await scan();
+                          } catch (e) {
+                            setNote(e instanceof Error ? e.message : "That copy could not be removed.");
+                          } finally {
+                            setBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          {found.groups > found.shown.length ? <Note>Showing the first {found.shown.length}.</Note> : null}
+          {note ? <Note>{note}</Note> : null}
+        </>
+      )}
+    </Section>
   );
 }
 

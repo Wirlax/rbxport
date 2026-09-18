@@ -21,6 +21,9 @@ use crate::dto::{
     ExportProgressDto,
     BackupDto,
     XmlImportReportDto,
+    DuplicatesDto,
+    DuplicateGroupDto,
+    DuplicateTrackDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -1686,6 +1689,62 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
 ) -> AppResult<u32> {
     edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, move |w| {
         w.remove_tracks(&playlist, &tracks).map(|_| ())
+    })
+    .await
+}
+
+/// Tracks that share a title and an artist, case and accents aside.
+///
+/// One pass over the folded title column and the artists' folded names —
+/// both already in memory for search and sort — into a map of groups, so
+/// 38,681 tracks cost a few milliseconds. Same file size or same audio is
+/// not tried: a re-encode of the same track has neither, and the same
+/// title under the same artist is what a person calls a duplicate.
+#[tauri::command]
+pub async fn find_duplicates(state: State<'_, Arc<AppState>>, limit: u32) -> AppResult<DuplicatesDto> {
+    let library = state.library()?;
+    let wanted = (limit as usize).min(MAX_ROWS as usize);
+    blocking("find_duplicates", move || {
+        let mut groups: std::collections::HashMap<(&str, &str), Vec<usize>> = std::collections::HashMap::new();
+        for index in 0..library.len() {
+            let title = library.title_folded.get(index);
+            if title.trim().is_empty() {
+                continue;
+            }
+            let artist = library.artists.folded(library.artist.get(index).copied().unwrap_or(rbl_index::NO_ID));
+            groups.entry((title, artist)).or_default().push(index);
+        }
+        let mut found: Vec<Vec<usize>> = groups.into_values().filter(|rows| rows.len() > 1).collect();
+        // By title, so the list reads the same from one look to the next.
+        found.sort_by(|a, b| {
+            let name = |rows: &Vec<usize>| rows.first().map_or("", |&i| library.title_folded.get(i)).to_owned();
+            name(a).cmp(&name(b))
+        });
+        let extra = found.iter().map(|rows| u32::try_from(rows.len() - 1).unwrap_or(u32::MAX)).fold(0_u32, u32::saturating_add);
+        let shown = found
+            .iter()
+            .take(wanted)
+            .map(|rows| {
+                let first = rows.first().copied().unwrap_or(0);
+                DuplicateGroupDto {
+                    title: library.title.get(first).to_owned(),
+                    artist: library.artist_name(u32::try_from(first).unwrap_or(0)).to_owned(),
+                    tracks: rows
+                        .iter()
+                        .map(|&i| {
+                            let path = library.folder_path.get(i);
+                            DuplicateTrackDto {
+                                id: library.ids.get(i).copied().unwrap_or(0).to_string(),
+                                path: path.to_owned(),
+                                duration_sec: library.length_sec.get(i).copied().unwrap_or(0),
+                                present: !path.is_empty() && std::path::Path::new(path).is_file(),
+                            }
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        Ok(DuplicatesDto { groups: u32::try_from(found.len()).unwrap_or(u32::MAX), extra, shown })
     })
     .await
 }

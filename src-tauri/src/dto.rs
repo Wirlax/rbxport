@@ -154,6 +154,36 @@ pub struct MissingTracksDto {
     pub tracks: Vec<MissingTrackDto>,
 }
 
+/// One copy in a group of duplicates.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateTrackDto {
+    pub id: String,
+    pub path: String,
+    pub duration_sec: u32,
+    /// Whether the file is where the library says.
+    pub present: bool,
+}
+
+/// Tracks that share a title and artist.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateGroupDto {
+    pub title: String,
+    pub artist: String,
+    pub tracks: Vec<DuplicateTrackDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicatesDto {
+    /// Every group, not just the ones listed.
+    pub groups: u32,
+    /// Copies beyond the first, over every group.
+    pub extra: u32,
+    pub shown: Vec<DuplicateGroupDto>,
+}
+
 /// One cue point, as the interface needs it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
