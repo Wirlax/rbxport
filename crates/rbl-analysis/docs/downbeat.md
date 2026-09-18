@@ -2,7 +2,7 @@
 
 Decides which beat is beat 1, and checks that the grid is on the kick and
 not on the off-beat. Code: `downbeat.rs`, applied in `lib.rs::analyse`.
-Steps 7–11 of [pipeline.md](pipeline.md).
+Steps 8–12 of [pipeline.md](pipeline.md).
 
 ```mermaid
 flowchart TD
@@ -18,15 +18,15 @@ flowchart TD
     J --> K[Each long tempo segment<br/>asked again on its own beats]
 ```
 
-## Why not just look at the kick
+## Why structure, not the kick
 
-The obvious way to pick the beat is to find the loudest hits. It does not
-work on every track. On tech house the open hat between the kicks shows up
-in the onset envelope as strongly as the kick; on hardstyle the reverse
-bass on the off-beat does. On the test playlist, the full spectrum picked
-the off-beat on 22 tracks, a 0–200 Hz band on 19, 0–4 kHz on 8, and a
-"low-band hit *and* mid-band hit at the same instant" test on 54. No band
-told the kick from the off-beat on every track.
+The loudest hits do not pick the beat on every track. On tech house the
+open hat between the kicks shows up in the onset envelope as strongly as
+the kick; on hardstyle the reverse bass on the off-beat does. On the
+reference playlist the full spectrum picks the off-beat on 22 tracks, a
+0–200 Hz band on 19, 0–4 kHz on 8, and a "low-band hit *and* mid-band hit
+at the same instant" test on 54. No band tells the kick from the off-beat
+on every track.
 
 Structure does. Dance music changes at bar lines and, much more strongly,
 at phrase lines eight or sixteen bars apart — a drop, a breakdown, a new
@@ -46,11 +46,11 @@ grid on the beat at all?".
    four and eight bars), the distance between the average profile over
    that many half beats *before* it and over that many *after* it. A big
    number means the music is different on the two sides.
-4. **Peaks only.** Summing the novelty itself put nearly equal weight on
-   every position — the best beat led the next by 3 % — because a slow
-   crescendo raises every half beat alike. Keeping only local maxima
-   raises that lead to 2.8×. Each scale's peaks are normalised to sum to 1
-   so a long phrase counts as much as a bar.
+4. **Peaks only.** Only local maxima of the novelty count. A slow
+   crescendo raises every half beat alike, so the novelty summed as it
+   stands puts nearly equal weight on every position (the best leads the
+   next by 3 %); its peaks separate them by 2.8×. Each scale's peaks are
+   normalised to sum to 1 so a long phrase counts as much as a bar.
 5. **Score the eight positions** by the peaks that land on each. The
    winner is the downbeat position.
 6. **Move if needed.** An odd position means the music changes on the
@@ -62,20 +62,18 @@ grid on the beat at all?".
    on its own beats and renumbered from its own downbeat. A DJ edit's two
    halves are two pieces of music, and a bar count carried across a tempo
    change that landed a beat off would misnumber the whole second half.
-   A bar-by-bar transition ([beat.md](beat.md), step 6) needs no asking:
+   A bar-by-bar transition ([beat.md](beat.md), §6) needs no asking:
    its cuts are downbeats by construction, so the count runs 1–4 through
    it from the settled stretch before.
 
-On rekordbox's own grids, this picks rekordbox's downbeat on 153 of the
-155 test tracks (`golden downbeat`). On our grids it is 151.
+## Accuracy
 
-## What it gets wrong
-
-- `BATTERY OPERATED`: rekordbox's beats sit where every band of the
-  spectrum and the phrase structure say the off-beat is. Half a beat off.
-- `Go Back [136-174]`: our beat 1 is one beat before rekordbox's,
-  throughout. The novelty peaks land a beat before each phrase change.
-  Chris re-checked this grid by hand; rekordbox's is right.
+On rekordbox's own grids (`golden downbeat`) this picks rekordbox's
+downbeat on 153 of the 155 reference tracks. On our grids the downbeat
+metric passes on 143: the eleven rekordbox 6 grids miss by the 25 ms
+their beats sit off the kick ([golden-gate.md](golden-gate.md)), and on
+`Go Back [136-174]` the novelty peaks land a beat before each phrase
+change, so beat 1 is one beat early throughout.
 
 ## Also produced here
 

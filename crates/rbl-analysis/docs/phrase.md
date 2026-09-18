@@ -1,13 +1,14 @@
 # Phrases
 
-Two different things go by this name. One is done, one is not.
+Two different things go by this name: phrase starts, which the crate
+finds, and phrase labels, which it does not.
 
-## Phrase starts — done
+## Phrase starts
 
 Where sections begin: the downbeats at which the music changes most over
-the four bars either side. They come out of the downbeat stage for free
-(see [downbeat.md](downbeat.md)) and are used by the key rules that read
-the bass at the start of a phrase.
+the four bars either side. They come out of the downbeat stage
+([downbeat.md](downbeat.md)) and are used by the key rules that read the
+bass at the start of a phrase.
 
 ```mermaid
 flowchart LR
@@ -17,11 +18,11 @@ flowchart LR
     C -- no --> E[ignored]
 ```
 
-On the test playlist this finds about six phrase starts per track. They
-are times in seconds, in order, in `GridPhase::phrase_starts`, and are
-passed to key detection as `KeyGrid::phrase_starts`.
+A track has about six of them. They are times in seconds, in order, in
+`GridPhase::phrase_starts`, and are passed to key detection as
+`KeyGrid::phrase_starts`.
 
-## Phrase labels — not done
+## Phrase labels (not implemented)
 
 Rekordbox's `PSSI` tag labels each section: intro, verse, bridge, chorus,
 up, down, outro. There is no open implementation to compare against, and a
@@ -31,5 +32,5 @@ stub that returns `None`, and the ANLZ writer leaves the tag out rather
 than write invented structure. The same goes for vocal detection (`PVDI`,
 `vocal.rs`).
 
-If labels are ever built, the phrase starts above are the section
-boundaries to label.
+If labels are built, the phrase starts above are the section boundaries
+to label.

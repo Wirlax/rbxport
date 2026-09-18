@@ -1,9 +1,9 @@
 # Analysis rules
 
-The rules Chris has set for how this library's music is to be read, and
-what the code does with each. They are general: none is about a particular
-track. Evidence and measurements live in [golden-gate.md](golden-gate.md)
-and [key.md](key.md).
+The rules for how this library's music is read, and what the code does
+with each. They are general: none is about a particular track. Evidence
+and measurements live in [golden-gate.md](golden-gate.md) and
+[key.md](key.md).
 
 ## The reference
 
@@ -50,11 +50,11 @@ and [key.md](key.md).
   cut. Where the music comes back on the grid it left, the ramp is a
   breakdown and the grid holds.
 - **A gradual tempo change between two settled tempos is gridded bar by
-  bar.** Each bar's first downbeat is found by bisection: it lies between
-  where the old tempo and the new tempo would put it, and the kick is
-  looked for between those bounds. A cut goes at every such downbeat and
-  each bar carries its own tempo, so a rise or fall — linear or not, up or
-  down — is followed a bar at a time until the tempo is settled again.
+  bar.** The beats are walked from the last settled bar at the old tempo,
+  the period drifting with the kick, and a cut goes at every fourth beat
+  with each bar carrying its own tempo, so a rise or fall — linear or not,
+  up or down — is followed a bar at a time until the tempo is settled
+  again.
 
 ## Downbeat
 
@@ -79,7 +79,7 @@ and [key.md](key.md).
   the second eighth: the kick, tail included, takes the first sixteenth to
   eighth of the beat, so the second eighth is the bass line alone. The
   code's `BassRoot` and `BassVote` rules read the bass in each of those
-  windows; which of them ship is decided by measurement ([key.md](key.md)).
+  windows; which rules ship is decided by measurement ([key.md](key.md)).
 - Key names are rekordbox's: `Dbm`, `F#m`, `Abm`, `Bbm` for the minors and
   `Db`, `F#`, `Ab`, `Bb`, `Eb` for the majors, matching `djmdKey.ScaleName`.
 

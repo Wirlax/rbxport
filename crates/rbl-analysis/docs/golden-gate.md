@@ -20,16 +20,19 @@ cargo run --release -p rbl-analysis --example golden -- bassroot
   rekordbox recorded — BPM, key and the `PQTZ` beat grid — under
   `target/golden/` (3.6 GB, about two minutes). Delete a track's `.gold`
   file and run `cache` again after re-analysing it in rekordbox.
-- `eval` scores every track in about five seconds. With a title substring
-  it scores one track; add `RB_LITE_CANDIDATES=1` to also print the tempo
-  candidates, the segments, the fit's passes, the half-beat scores and the
-  first beats side by side with rekordbox's.
+  `RB_LITE_GOLDEN` points the cache elsewhere, which is how another
+  playlist is scored ([multibpm.md](multibpm.md)).
+- `eval` (or `score`) scores every track in about five seconds. With a
+  title substring it scores one track; add `RB_LITE_CANDIDATES=1` to also
+  print the tempo candidates, the segments, the fit's passes, the
+  half-beat scores and the first beats side by side with rekordbox's.
+  `RB_LITE_PLACEMENT=envelope` places beats on the onset envelope's peak
+  instead of the kick's attack.
 - `downbeat` checks the downbeat stage on rekordbox's own grids, so it is
-  judged apart from our grid. `RB_LITE_PLACEMENT=envelope` on `eval`
-  places beats on the onset envelope's peak instead of the kick's attack.
-- `key` measures the key rules — what each fired on, fixed and broke — and
-  searches the bass-rule knobs. `bassroot` measures the bass as evidence by
-  itself, per band and window.
+  judged apart from our grid.
+- `key` measures every front end, profile and rule — what each fires on,
+  fixes and breaks — and searches the bass-rule knobs. `bassroot` measures
+  the bass as evidence by itself, per band and window.
 
 ## What is scored
 
@@ -46,84 +49,78 @@ placed at the right beat for the numbering after it to match.
 
 ## Results
 
-| metric | start | now |
-|---|---|---|
-| bpm | 146 | **155 / 155** |
-| downbeat | 27 | **142 / 155** |
-| grid | 26 | **142 / 155** |
-| key | 27 | **141 / 155** |
+| metric | passes |
+|---|---|
+| bpm | 155 / 155 |
+| downbeat | 143 / 155 |
+| grid | 142 / 155 |
+| key | 141 / 155 |
 
 The target is 99 %, at most one miss per metric. Every BPM is a whole
 number, as every one of rekordbox's is. Beats are placed on the kick's
-attack: the offset from rekordbox 7's grids is 0.0 ms at the median and
-at the 90th percentile. Every downbeat and grid miss but two is one of
-the eleven rekordbox 6 grids below, whose beats sit 25 ms after the kick,
-−25 to −27 ms from ours, just past the tolerance. On the 142 tracks
-rekordbox 7 analysed itself: BPM 142 / 142, downbeat 141 / 142, grid
-142 / 142. Analysis takes 506 ms per track at the mean, 460 before the
-kick band was added.
+attack: the offset from rekordbox 7's grids is 0.0 ms at the median and at
+the 90th percentile. On the 142 tracks rekordbox 7 analysed itself: BPM
+142 / 142, downbeat 141 / 142, grid 142 / 142. Analysis takes about 460 ms
+per track at the mean.
 
 ## The misses
 
-**Eleven tracks analysed by an older rekordbox.** *See Me Now, technikore &
+**Eleven tracks analysed by rekordbox 6.** *See Me Now, technikore &
 weaver – diya, Missing, Insane Stampede, Sky Fall, Concrete Jungle, Voltage,
-Goddess, Drift Around Me, Angels, Force of Gravity.* Their rekordbox grids
-sit exactly 1105 samples (25 ms) after the kick; the other 140 MP3s sit on
-it. Chris confirmed the playlist was analysed at different times, some by
-rekordbox 6 and some by 7. Our beats are on the kick, so all eleven fail
-both the downbeat and the grid metric, at −25 to −27 ms. Re-analysing
-them in rekordbox 7 would settle it. Before that was known, the cause was
-chased through the file and the decoder: it is not the Xing/Info frame,
-the LAME tag's CRC, the encoder version, the ID3 version, or anything in
-`djmdContent`; and rekordbox's own bundled `libmpg123`, driven from Python,
+Goddess, Drift Around Me, Angels, Force of Gravity.* The playlist was
+analysed at different times, some of it by rekordbox 6 and the rest by 7.
+These eleven grids sit exactly 1105 samples (25 ms) after the kick; the
+other 140 MP3s sit on it. Our beats are on the kick, so all eleven fail
+both the downbeat and the grid metric, at −25 to −27 ms, just past the
+tolerance. The offset is not in the file or the decoder: it is not the
+Xing/Info frame, the LAME tag's CRC, the encoder version, the ID3 version,
+or anything in `djmdContent`, and rekordbox's own bundled `libmpg123`
 gives exactly our timeline (gapless off) or exactly 1105 samples earlier
-(gapless on), never later.
+(gapless on), never later. Re-analysing them in rekordbox 7 would settle
+it.
 
 **One DJ edit, gridded by hand.** `Go Back [136-174]`: 136 BPM until bar
 61, rising until bar 82.2, then 174. The hand grid holds 136 through the
 rise, nudged half a beat somewhere in it, and switches at bar 82.25. The
-bar-by-bar walk cannot follow the rise because it begins in a breakdown
-with no kick to track, so ours holds 136 straight and cuts where the kick
-states 174 — 2 ms from the hand grid, numbered as it numbers — and matches
-89 % of its beats, all but the nudged bars of the rise. (`Bring Me Back
-to Life [138-150]`, the other DJ edit, passes since the cut goes where the
-kick arrives at full level: its 150 kick pattern plays at half level under
-the 138 breakdown from 76 s, stops for two bars, and drops at 105.158 s.)
+rise begins in a breakdown with no kick to track, so the walk cannot
+follow it: ours holds 136 straight and cuts where the kick states 174 —
+2 ms from the hand grid, numbered as it numbers — and matches 89 % of its
+beats, all but the nudged bars of the rise. Its beat 1 on the 136 section
+is one beat before rekordbox's, which is the downbeat miss: the novelty
+peaks land a beat before each phrase change. (`Bring Me Back to Life
+[138-150]`, the other DJ edit, passes: its 150 kick pattern plays at half
+level under the 138 breakdown from 76 s, stops for two bars, and drops at
+105.158 s, where the cut goes.)
 
-**BATTERY OPERATED.** Not ambiguous after all: two grids. The hand grid
-is one 130 line from 0.051 s to 146.359 s and another 130 line from
-147.029 s, 208 ms (0.45 beat) later than the first would put it — the same
-tempo, so the runs printer shows one run. Between them, from bar 65
-(118.2 s), the kick stops and an eighth-note bass slows under a filter to
-an eighth of 1.4 s at 2:22, then silence, then 130 again at 2:27.0. A
-single line can only sit on one half; ours sat on the second in the
-golden cache and on the first in the multibpm rig, and either way half
-the track was on the midpoints. The judges "leaning the wrong way"
-recorded here before were measuring that. The gap stage
-([beat.md](beat.md), step 7) now fits the halves on their own, judges
-each on the kick band, cuts at 147.029 s, and walks the slowdown beat by
-beat (25 beats, 130 → 22 BPM). Downbeat passes at −2 ms and the second
-half matches the hand grid in time and number (the count carried across
-the ramp puts beat 3 at the cut, as the hand grid has it). The grid metric
-still fails, on purpose, at 91 %: the hand grid holds 130 through the
-slowdown (62 beats) where ours follows the bass (25 beats). Re-gridding
-the original with the slowdown would settle it.
+**BATTERY OPERATED.** Two 130 BPM grids: one from 0.051 s to 146.359 s
+and another from 147.029 s, 208 ms (0.45 beat) later than the first would
+put it. Between them, from bar 65 (118.2 s), the kick stops and an
+eighth-note bass slows under a filter to an eighth of 1.4 s at 2:22, then
+silence, then 130 again at 2:27.0. The gap stage ([beat.md](beat.md), §8)
+fits the halves on their own, cuts at 147.029 s, and walks the slowdown
+beat by beat (25 beats, 130 → 22 BPM). Downbeat passes at −2 ms and the
+second half matches the hand grid in time and number. The grid metric
+fails at 91 % because the hand grid holds 130 through the slowdown (62
+beats) where ours follows the bass (25 beats). Re-gridding the original
+with the slowdown would settle it.
 
-**Key.** See [key.md](key.md): 9 mode misses, 3 fifths, 2 others.
+**Key.** 14 misses, listed in [key.md](key.md).
 
-## Rekordbox facts learned on the way
+## What rekordbox does
 
-- Rekordbox's grid is on the untrimmed MP3 timeline. A track whose first
-  kick is at sample 0 of the master has its first beat at ~24 ms — the LAME
-  encoder delay plus decoder delay, 1105 samples. Symphonia with
+Facts about rekordbox's grids established while building the gate:
+
+- The grid is on the untrimmed MP3 timeline. A track whose first kick is
+  at sample 0 of the master has its first beat at ~24 ms — the LAME encoder
+  delay plus decoder delay, 1105 samples. Symphonia with
   `enable_gapless: false` matches it.
 - Rekordbox 7 bundles `libmpg123.0.dylib` in `rekordbox.app/Contents/MacOS`.
-  Its output here is 32-bit float.
-- Rekordbox's grids are constant-tempo to within 1–3 ms over a whole
-  track. A tempo change is a second constant grid with the 1–4 count
-  carrying on and a new phase.
-- Rekordbox starts the grid at the first grid position after time zero,
-  extended back from the music, even over silence or a beatless intro.
+  Its output is 32-bit float.
+- Grids are constant-tempo to within 1–3 ms over a whole track. A tempo
+  change is a second constant grid with the 1–4 count carrying on and a
+  new phase.
+- The grid starts at the first grid position after time zero, extended
+  back from the music, even over silence or a beatless intro.
 - Ten of the 155 tracks have beat 1 one to three beats after the first
   beat.
 - `.EXT` files can carry an empty `PQT2`; the `.DAT`'s `PQTZ` is the grid.

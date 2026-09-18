@@ -6,7 +6,7 @@ holds nine DJ edits with tempo changes, each gridded by hand in rekordbox.
 The rig `examples/multibpm.rs` copies their files, imports the copies into
 `RBX-BPM-MULTIBPM-RESULTS`, analyses them, and registers the result in the
 library the way rekordbox registers its own, so a copy can be loaded on a
-deck beside its original. `report` then scores the copies with the golden
+deck beside its original. `report` scores the copies with the golden
 gate's metrics and prints both grids as tempo runs. The Claude skill
 `.claude/skills/multibpm-test` runs it for all songs or one.
 
@@ -19,6 +19,10 @@ rekordbox and its agent must be quit: the writer refuses otherwise, and takes
 a backup of `master.db` (under `target/multibpm/backups`) before the first
 write of a run.
 
+The same playlist can be scored without touching the library: cache it
+with `golden cache RBX-BPM-MULTIBPM-TEST` into `RB_LITE_GOLDEN=target/multibpm-gold`
+and run `golden score` there ([golden-gate.md](golden-gate.md)).
+
 ## What is written, and the evidence for it
 
 Only rows the rig imported itself, recognised by their file living under
@@ -26,8 +30,8 @@ Only rows the rig imported itself, recognised by their file living under
 
 **The analysis files.** A `.DAT` and `.EXT` under
 `share/PIONEER/USBANLZ/<uuid[0..3]>/<uuid[3..]>/ANLZ0000.DAT`, section for
-section as rekordbox writes them. Every section header was checked against
-400 reference files and is constant [OBS]:
+section as rekordbox writes them. Every section header is constant across
+400 reference files [OBS]:
 
 | file | sections |
 |---|---|
@@ -55,25 +59,33 @@ recording:
   2794270948 on 13).
 - `AnalysisUpdated` (0–10) is left alone; its meaning is [UNKNOWN].
 
-The first time rekordbox opens the results playlist is therefore the
-recording this was missing: `check` compares the files and columns with what
-`analyse` wrote (kept in `target/multibpm/registered.tsv`) and reports
-anything rekordbox changed.
+`Writer::import_file` fills the columns rekordbox fills on its own imports
+— `FileType`, `DeviceID`, `MasterDBID`, `BitDepth`, `StockDate`,
+`DateCreated` and a handful of constants (all 645 rows rekordbox 7
+imported on this machine carry them [OBS]) — and stores a lexically clean
+path. A row without them shows the missing-file mark and will not load.
+
+## What rekordbox does with a registered copy
+
+Loading a copy on a deck, rekordbox 7.2.11 (recorded 2026-09-17):
+
+- keeps the `.DAT`, so the grid on the deck is ours, and keeps `BPM`,
+  `KeyID` and `Analysed`;
+- rewrites the `.EXT` in place — same sections, same sizes, its own
+  waveform bytes, `PQT2` still empty, no `PSSI`;
+- adds a `.2EX` (`PWV6`, `PWV7`, `PWVC`, no `PVDI`) and a `.3EX`;
+- sets `AnalysisUpdated` and `TrackInfoUpdated` from NULL to 1.
+
+Relaunching rekordbox alone touches nothing. `check` compares each copy's
+files and columns with what `analyse` wrote (kept in
+`target/multibpm/registered.tsv`) and says whether the grid survived.
 
 ## Results
 
-First run, 2026-09-17. BPM 9 / 9, key 9 / 9, downbeat 7 / 9, grid 1 / 9.
-The bpm and key are right on every edit; what this playlist tests is
-where the tempo change is placed, and that is where the misses were.
-
-Second measurement, later the same day, read-only (`golden cache
-RBX-BPM-MULTIBPM-TEST` into `RB_LITE_GOLDEN=target/multibpm-gold`, then
-`golden score`): BPM 9 / 9, key 9 / 9, downbeat 7 / 9, grid 4 / 9. The
-change went in with the cut placed where the kick states the new tempo
-at full level ([beat.md](beat.md), step 6), runs of fewer than three
-settled windows absorbed, the count carried across joins, a new segment
-starting with the beat it was cut on, and every steady tempo a whole
-number. Seven of the ten changes are now within 3 ms of the hand grid.
+BPM 9 / 9, key 9 / 9, downbeat 8 / 9, grid 4 / 9. The bpm and key are
+right on every edit; what this playlist tests is where the tempo change is
+placed, and that is where the misses are. Seven of the ten hand-gridded
+changes are within 3 ms.
 
 | track | grid | what differs |
 |---|---|---|
@@ -84,40 +96,12 @@ number. Seven of the ten changes are now within 3 ms of the hand grid.
 | It Feels So Good [150-134] | 100 % | 125.899 s against 125.900 s |
 | Cannonball [136-150-136] | 16 % | the return to 136 at 217.186 s against 217.187 s; but the hand grid cuts to 128 at 56.489 s and to 145 at 86.032 s at the impacts that end each section, with no kick at the new tempo for twenty seconds after either, and ours cuts at 67.3 s (where the onsets change sides) and at 109.95 s (where the 145 kick arrives), so the count is off from 56 s to 217 s |
 | Sao Paulo | 62 % | the 160 stretch is at 133.523 s against 133.524 s; the hand grid returns to 128 at 157.524 s at the impact that ends the 160 section, with the 128 kick arriving at 196 s, and ours cuts there |
-| Castles In The Sky (EDCLV23 Closer) [138-160] | 100 % | the spurious 162.6 stretch is gone (one window at 1.19 had been assigned to the 160 cluster at 1.16) and the change is at 233.260 s exactly |
-| BATTERY OPERATED | 0 % | half a beat off, as on the golden gate (the ambiguous track) |
+| Castles In The Sky (EDCLV23 Closer) [138-160] | 100 % | the change is at 233.260 s exactly |
+| BATTERY OPERATED | 91 % | the cut at 147.029 s is the hand grid's; the hand grid holds 130 through the slowdown before it and ours follows the bass beat by beat ([golden-gate.md](golden-gate.md)) |
 
-The three remaining cut misses are one kind: the hand grid switches at
-the impact that ends the old section, and the new tempo's kick comes
-much later. Onsets alone cannot tell that impact from the one that
-starts a breakdown in the middle of a section (Bring Me Back to Life at
-60 s, which the hand grid holds through), so the rule stays "where the
-kick states the tempo". The registered copies in the library are from
-the first run; `run` (rekordbox quit) refreshes them.
-BATTERY OPERATED was not ambiguous: its hand grid is two 130 lines 208 ms
-apart, joined by a slowdown with no kick ([golden-gate.md](golden-gate.md)).
-The gap stage built on it cuts where the hand grid does and grids the
-slowdown; the copy in the results playlist was registered before that and
-shows the old grid until `analyse` is run again.
-
-### What rekordbox did with the copies
-
-The first import showed every copy with the missing-file mark and none
-would load. Our importer had left empty the columns rekordbox fills on its
-own imports — `FileType`, `DeviceID`, `MasterDBID`, `BitDepth`,
-`StockDate`, `DateCreated` and a handful of constants (all 645 rows
-rekordbox 7 imported on this machine carry them [OBS]) — and stored a path
-with `../..` in it. `Writer::import_file` now writes all of them and a
-lexically clean path; the copies then load.
-
-Loading a copy on a deck, rekordbox 7.2.11 (recorded 2026-09-17):
-
-- kept the `.DAT`, so the grid on the deck is ours, and kept `BPM`, `KeyID`
-  and `Analysed`;
-- rewrote the `.EXT` in place — same sections, same sizes, its own
-  waveform bytes, `PQT2` still empty, no `PSSI`;
-- added a `.2EX` (`PWV6`, `PWV7`, `PWVC`, no `PVDI`) and a `.3EX`;
-- set `AnalysisUpdated` and `TrackInfoUpdated` from NULL to 1.
-
-Relaunching rekordbox alone touches nothing. `check` reports all of this
-per copy and says whether the grid survived.
+The three cut misses (Cannonball twice, Sao Paulo) are one kind: the hand
+grid switches at the impact that ends the old section, and the new
+tempo's kick comes much later. Onsets alone cannot tell that impact from
+the one that starts a breakdown in the middle of a section (Bring Me Back
+to Life at 60 s, which the hand grid holds through), so the rule stays
+"where the kick states the tempo" ([rules.md](rules.md)).
