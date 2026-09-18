@@ -325,7 +325,7 @@ test("the player carries the controls a deck has", async ({ page }) => {
   // The pad modes are stacked tabs, and the cue-list has its own three.
   await expect(player.getByRole("tab", { name: "CUE/LOOP" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "GRID" })).toBeVisible();
-  await expect(player.getByRole("group", { name: "Cue mode" })).toBeVisible();
+  await expect(player.getByRole("group", { name: "Loop mode" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "MEMORY" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "HOT CUE" })).toBeVisible();
   await expect(player.getByRole("tab", { name: "INFO" })).toBeVisible();
