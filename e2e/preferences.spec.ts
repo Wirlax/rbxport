@@ -211,6 +211,7 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
   // The ask sits at the foot of the pane, just above where it was made.
   const support = dialog.getByRole("button", { name: "Support this app for $20" });
   await expect(support).toBeVisible();
+  await expect(dialog.getByText("rbxport is free. This is a tip, not a fee.")).toBeVisible();
   const [supportBox, madeBox, paneBox] = await Promise.all([
     support.boundingBox(),
     dialog.getByText("Made with ❤️ in California").boundingBox(),

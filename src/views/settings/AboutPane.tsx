@@ -84,6 +84,7 @@ export function AboutPane() {
         <button type="button" className={styles.aboutSupport} onClick={() => open(SUPPORT_URL)}>
           Support this app for ${SUPPORT_AMOUNT}
         </button>
+        <p className={styles.aboutMade}>rbxport is free. This is a tip, not a fee.</p>
         <p className={styles.aboutMade}>Made with ❤️ in California</p>
       </div>
     </>
