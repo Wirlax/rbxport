@@ -29,12 +29,15 @@ the version numbers [Semantic Versioning](https://semver.org/).
   the backups, and puts one back.
 - An export says which track it is on, and a stick plugged in or pulled out
   is noticed within two seconds.
+- The BPM is typed over in the list and the Info tab, and the beat grid is
+  retimed to it so the CDJ agrees with the column.
 
 ### Fixed
 - A cloud-synced track whose file is not where the library says is exported
   from its local copy rather than skipped.
 - The LINK strip stays hidden while nothing is on the network, even when
   LINK cannot be turned on, and the Connect button keeps its space.
+- A click that selects a row no longer opens the cell's editor as well.
 
 ## [0.7.0] — 2026-09-16
 
