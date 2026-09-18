@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  cancel, emptyQueue, enqueue, fail, isRunning, reset, start, succeed, total,
+  cancel, emptyQueue, enqueue, fail, isRunning, reset, SLOTS, start, succeed, total,
   type QueueItem,
 } from "./queue";
+
+const running = (q: { running: QueueItem[] }) => q.running.map((i) => i.id);
 
 const items = (...ids: string[]): QueueItem[] =>
   ids.map((id) => ({ id, title: `Track ${id}` }));
@@ -45,15 +47,23 @@ describe("enqueue", () => {
 });
 
 describe("start", () => {
-  it("takes the first waiting track", () => {
-    const q = start(enqueue(emptyQueue, items("a", "b")));
-    expect(q.current?.id).toBe("a");
-    expect(q.pending.map((i) => i.id)).toEqual(["b"]);
+  it("takes the first waiting tracks, up to the slots", () => {
+    const ids = ["a", "b", "c", "d", "e", "f"];
+    const q = start(enqueue(emptyQueue, items(...ids)));
+    expect(running(q)).toEqual(ids.slice(0, SLOTS));
+    expect(q.pending.map((i) => i.id)).toEqual(ids.slice(SLOTS));
   });
 
-  it("does nothing while one is running", () => {
-    const q = start(enqueue(emptyQueue, items("a", "b")));
+  it("does nothing while the slots are full", () => {
+    const q = start(enqueue(emptyQueue, items("a", "b", "c", "d")));
     expect(start(q)).toBe(q);
+  });
+
+  it("fills a slot as soon as one frees, in order", () => {
+    let q = start(enqueue(emptyQueue, items("a", "b", "c", "d")));
+    q = start(succeed(q, "b"));
+    expect(running(q)).toEqual(["a", "c", "d"]);
+    expect(q.pending).toEqual([]);
   });
 
   it("does nothing on an empty queue", () => {
@@ -62,33 +72,41 @@ describe("start", () => {
 
   it("drops what is waiting when the run is cancelling", () => {
     const q = start(cancel(enqueue(emptyQueue, items("a", "b"))));
-    expect(q.current).toBeNull();
+    expect(q.running).toEqual([]);
     expect(q.pending).toEqual([]);
   });
 });
 
 describe("succeed and fail", () => {
   it("counts a finished track", () => {
-    const q = succeed(start(enqueue(emptyQueue, items("a"))));
+    const q = succeed(start(enqueue(emptyQueue, items("a"))), "a");
     expect(q.done).toBe(1);
-    expect(q.current).toBeNull();
+    expect(q.running).toEqual([]);
+  });
+
+  it("finishes one track and keeps the others running", () => {
+    const q = succeed(start(enqueue(emptyQueue, items("a", "b", "c"))), "b");
+    expect(running(q)).toEqual(["a", "c"]);
+    expect(q.done).toBe(1);
   });
 
   it("keeps why a track failed", () => {
-    const q = fail(start(enqueue(emptyQueue, items("a"))), "could not decode");
+    const q = fail(start(enqueue(emptyQueue, items("a"))), "a", "could not decode");
     expect(q.failed).toEqual([{ id: "a", title: "Track a", reason: "could not decode" }]);
     expect(q.done).toBe(0);
   });
 
-  it("does nothing when nothing is running", () => {
-    expect(succeed(emptyQueue)).toBe(emptyQueue);
-    expect(fail(emptyQueue, "x")).toBe(emptyQueue);
+  it("does nothing for a track that is not running", () => {
+    expect(succeed(emptyQueue, "a")).toBe(emptyQueue);
+    expect(fail(emptyQueue, "a", "x")).toBe(emptyQueue);
+    const q = start(enqueue(emptyQueue, items("a")));
+    expect(succeed(q, "b")).toBe(q);
   });
 
   it("keeps going after a failure", () => {
-    let q = enqueue(emptyQueue, items("a", "b"));
-    q = fail(start(q), "bad file");
-    q = succeed(start(q));
+    let q = start(enqueue(emptyQueue, items("a", "b")));
+    q = fail(q, "a", "bad file");
+    q = succeed(start(q), "b");
     expect(q.done).toBe(1);
     expect(q.failed).toHaveLength(1);
     expect(isRunning(q)).toBe(false);
@@ -96,14 +114,15 @@ describe("succeed and fail", () => {
 });
 
 describe("cancel", () => {
-  it("lets the running track finish but drops the rest", () => {
-    // The running track is most of a second already spent; abandoning it
-    // would leave half a result.
-    let q = start(enqueue(emptyQueue, items("a", "b", "c")));
+  it("lets the running tracks finish but drops the rest", () => {
+    // A running track is work already spent; abandoning it would leave half
+    // a result.
+    let q = start(enqueue(emptyQueue, items("a", "b", "c", "d", "e")));
     q = cancel(q);
-    expect(q.current?.id).toBe("a");
+    expect(running(q)).toEqual(["a", "b", "c"]);
     expect(q.pending).toEqual([]);
-    q = succeed(q);
+    expect(start(q)).toBe(q);
+    q = succeed(succeed(succeed(q, "a"), "b"), "c");
     expect(isRunning(q)).toBe(false);
   });
 });
@@ -112,9 +131,9 @@ describe("total and isRunning", () => {
   it("counts everything the run covers", () => {
     let q = enqueue(emptyQueue, items("a", "b", "c"));
     expect(total(q)).toBe(3);
-    q = succeed(start(q));
+    q = succeed(start(q), "a");
     expect(total(q)).toBe(3);
-    q = fail(start(q), "x");
+    q = fail(start(q), "b", "x");
     expect(total(q)).toBe(3);
   });
 
@@ -122,13 +141,13 @@ describe("total and isRunning", () => {
     expect(isRunning(emptyQueue)).toBe(false);
     const q = enqueue(emptyQueue, items("a"));
     expect(isRunning(q)).toBe(true);
-    expect(isRunning(succeed(start(q)))).toBe(false);
+    expect(isRunning(succeed(start(q), "a"))).toBe(false);
   });
 });
 
 describe("reset", () => {
   it("clears a finished run", () => {
-    const q = succeed(start(enqueue(emptyQueue, items("a"))));
+    const q = succeed(start(enqueue(emptyQueue, items("a"))), "a");
     expect(reset(q)).toEqual(emptyQueue);
   });
 

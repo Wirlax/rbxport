@@ -1,9 +1,9 @@
 /**
  * Drives the analysis queue against the backend.
  *
- * One track at a time: analysis decodes and runs a DSP pass, so several at
- * once would fight for the same cores and finish no sooner, while making the
- * progress meaningless.
+ * A few tracks at a time (`SLOTS` in the queue): each is a decode and a DSP
+ * pass, and three in flight finish a batch nearly three times sooner than one
+ * while the progress still reads as a count.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -38,8 +38,9 @@ export function useAnalysis(
   onDrained?: () => void,
 ): Analysis {
   const [state, setState] = useState<QueueState>(emptyQueue);
-  // The effect below must not start a second track while one is in flight.
-  const inFlight = useRef(false);
+  // The tracks whose request is in flight, so the effect below never sends
+  // one twice.
+  const inFlight = useRef(new Set<string>());
   // Whether a run has been going, so the drain fires once at its end.
   const ran = useRef(false);
   const running = isRunning(state);
@@ -53,28 +54,29 @@ export function useAnalysis(
   }, [running, onDrained]);
 
   useEffect(() => {
-    if (inFlight.current) return;
-    if (state.current === null) {
-      // Nothing running: take the next, if the run has not been cancelled.
-      const next = start(state);
-      if (next !== state) setState(next);
+    // Fill the free slots first, if the run has not been cancelled; the
+    // effect runs again on the new state and sends the requests.
+    const next = start(state);
+    if (next !== state) {
+      setState(next);
       return;
     }
-
-    inFlight.current = true;
-    const track = state.current;
-    void (async () => {
-      try {
-        const backend = await getBackend();
-        const result = await backend.analyseTrack(track.id);
-        setState((s) => succeed(s));
-        onAnalysed?.(track.id, result);
-      } catch (e) {
-        setState((s) => fail(s, e instanceof Error ? e.message : String(e)));
-      } finally {
-        inFlight.current = false;
-      }
-    })();
+    for (const track of state.running) {
+      if (inFlight.current.has(track.id)) continue;
+      inFlight.current.add(track.id);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          const result = await backend.analyseTrack(track.id);
+          setState((s) => succeed(s, track.id));
+          onAnalysed?.(track.id, result);
+        } catch (e) {
+          setState((s) => fail(s, track.id, e instanceof Error ? e.message : String(e)));
+        } finally {
+          inFlight.current.delete(track.id);
+        }
+      })();
+    }
   }, [state, onAnalysed]);
 
   const add = useCallback((items: readonly QueueItem[]) => setState((s) => enqueue(s, items)), []);

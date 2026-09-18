@@ -1752,7 +1752,7 @@ export function App() {
         activity={
           analysis.running
             ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
-              (analysis.state.current ? ` — ${analysis.state.current.title}` : "")
+              (analysis.state.running[0] ? ` — ${analysis.state.running[0].title}` : "")
             : (note !== null && !note.failed
                 ? note.text
                 : (summary ? "" : "Loading the library…"))

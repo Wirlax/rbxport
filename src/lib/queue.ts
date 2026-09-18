@@ -1,11 +1,22 @@
 /**
  * The analysis queue's state, as pure transitions.
  *
- * Analysis is slow — decoding and a DSP pass per track — so it runs one at a
- * time against the backend and the queue tracks where it has got to. Kept
- * apart from the component so the sequencing is testable without a backend:
- * ordering, cancellation and the counting are exactly the parts that go wrong.
+ * Analysis is a decode and a DSP pass per track, so a few run at once against
+ * the backend and the queue tracks where it has got to. Kept apart from the
+ * component so the sequencing is testable without a backend: ordering,
+ * cancellation and the counting are exactly the parts that go wrong.
  */
+
+/**
+ * How many tracks are analysed at once.
+ *
+ * Measured on 27 five-minute files on a 14-core machine, decode and analysis
+ * together: one at a time 289 ms a track, two 153, three 106, four 89, six 84.
+ * The analysis already runs its own front stages on several threads, so three
+ * tracks fill a machine with eight cores and the progress still reads as a
+ * count; beyond four the workers only fight.
+ */
+export const SLOTS = 3;
 
 export interface QueueItem {
   id: string;
@@ -15,8 +26,8 @@ export interface QueueItem {
 export interface QueueState {
   /** Waiting, in order. */
   pending: QueueItem[];
-  /** Being analysed now, or `null` between tracks. */
-  current: QueueItem | null;
+  /** Being analysed now, up to `SLOTS` of them, in the order they started. */
+  running: QueueItem[];
   done: number;
   /** One entry per track that failed, with why. */
   failed: { id: string; title: string; reason: string }[];
@@ -26,7 +37,7 @@ export interface QueueState {
 
 export const emptyQueue: QueueState = {
   pending: [],
-  current: null,
+  running: [],
   done: 0,
   failed: [],
   cancelling: false,
@@ -34,12 +45,12 @@ export const emptyQueue: QueueState = {
 
 /** Total tracks this run covers, finished or not. */
 export function total(state: QueueState): number {
-  return state.done + state.failed.length + state.pending.length + (state.current ? 1 : 0);
+  return state.done + state.failed.length + state.pending.length + state.running.length;
 }
 
 /** Whether anything is left to do. */
 export function isRunning(state: QueueState): boolean {
-  return state.current !== null || state.pending.length > 0;
+  return state.running.length > 0 || state.pending.length > 0;
 }
 
 /**
@@ -49,8 +60,7 @@ export function isRunning(state: QueueState): boolean {
  * which makes the progress meaningless.
  */
 export function enqueue(state: QueueState, items: readonly QueueItem[]): QueueState {
-  const known = new Set(state.pending.map((i) => i.id));
-  if (state.current) known.add(state.current.id);
+  const known = new Set([...state.pending, ...state.running].map((i) => i.id));
   const fresh = items.filter((item) => {
     if (known.has(item.id)) return false;
     known.add(item.id);
@@ -60,37 +70,45 @@ export function enqueue(state: QueueState, items: readonly QueueItem[]): QueueSt
   return { ...state, pending: [...state.pending, ...fresh], cancelling: false };
 }
 
-/** Takes the next track, or parks if there is none or the run is cancelling. */
+/**
+ * Fills the free slots from the waiting tracks, in order, or parks if there
+ * is nothing waiting, the slots are full, or the run is cancelling.
+ */
 export function start(state: QueueState): QueueState {
-  if (state.current !== null) return state;
-  if (state.cancelling || state.pending.length === 0) {
+  if (state.cancelling) {
     return state.pending.length > 0 ? { ...state, pending: [] } : state;
   }
-  const [next, ...rest] = state.pending;
-  return next ? { ...state, current: next, pending: rest } : state;
-}
-
-/** Records the running track as finished. */
-export function succeed(state: QueueState): QueueState {
-  if (!state.current) return state;
-  return { ...state, current: null, done: state.done + 1 };
-}
-
-/** Records the running track as failed, keeping why. */
-export function fail(state: QueueState, reason: string): QueueState {
-  if (!state.current) return state;
+  const free = SLOTS - state.running.length;
+  if (free <= 0 || state.pending.length === 0) return state;
   return {
     ...state,
-    current: null,
-    failed: [...state.failed, { ...state.current, reason }],
+    running: [...state.running, ...state.pending.slice(0, free)],
+    pending: state.pending.slice(free),
+  };
+}
+
+/** Records a running track as finished. */
+export function succeed(state: QueueState, id: string): QueueState {
+  if (!state.running.some((i) => i.id === id)) return state;
+  return { ...state, running: state.running.filter((i) => i.id !== id), done: state.done + 1 };
+}
+
+/** Records a running track as failed, keeping why. */
+export function fail(state: QueueState, id: string, reason: string): QueueState {
+  const track = state.running.find((i) => i.id === id);
+  if (!track) return state;
+  return {
+    ...state,
+    running: state.running.filter((i) => i.id !== id),
+    failed: [...state.failed, { ...track, reason }],
   };
 }
 
 /**
  * Asks the run to stop.
  *
- * The track already being analysed finishes: it is most of a second's work
- * that is already spent, and abandoning it would leave half a result.
+ * The tracks already being analysed finish: each is a few hundred
+ * milliseconds already spent, and abandoning one would leave half a result.
  */
 export function cancel(state: QueueState): QueueState {
   return { ...state, cancelling: true, pending: [] };
