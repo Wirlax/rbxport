@@ -20,6 +20,7 @@ use crate::dto::{
     CountedDto, FilterValuesDto, TagCategoryDto,
     ExportProgressDto,
     BackupDto,
+    XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
 use crate::state::{rows_to_dto, spec_from_wire, AppState};
@@ -1638,6 +1639,70 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
 ) -> AppResult<u32> {
     edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, move |w| {
         w.remove_tracks(&playlist, &tracks).map(|_| ())
+    })
+    .await
+}
+
+/// Imports a rekordbox XML collection: the files it names into the
+/// library, the playlist tree, and the cues of each track that landed.
+#[tauri::command]
+pub async fn import_xml<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<XmlImportReportDto> {
+    let state_for_reload = Arc::clone(&state);
+    let writing = Arc::clone(&state);
+    let progress_app = app.clone();
+    let report = blocking("import_xml", move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
+        })?;
+        let document = rbl_db::xml::XmlLibrary::parse(&text);
+        if document.tracks.is_empty() && document.nodes.is_empty() {
+            return Err(AppError::new(ErrorKind::Malformed, "That is not a rekordbox XML collection."));
+        }
+        let mut on_progress = |done: usize, total: usize| {
+            let _ = tauri::Emitter::emit(
+                &progress_app,
+                "import:progress",
+                ExportProgressDto {
+                    done: u32::try_from(done).unwrap_or(u32::MAX),
+                    total: u32::try_from(total).unwrap_or(u32::MAX),
+                    title: String::new(),
+                },
+            );
+        };
+        let report = writing
+            .write(|writer| rbl_db::xml::import(writer, &document, &mut on_progress))
+            .map_err(write_error)?;
+        Ok(XmlImportReportDto {
+            imported: u32::try_from(report.imported).unwrap_or(u32::MAX),
+            existing: u32::try_from(report.existing).unwrap_or(u32::MAX),
+            skipped: report.skipped,
+            playlists: u32::try_from(report.playlists).unwrap_or(u32::MAX),
+            cues: u32::try_from(report.cues).unwrap_or(u32::MAX),
+            tracks: report.tracks.into_iter().map(|(id, title)| crate::dto::ImportedTrackDto { id, title }).collect(),
+        })
+    })
+    .await?;
+    if report.imported > 0 || report.playlists > 0 {
+        reload(app, state_for_reload).await?;
+    }
+    Ok(report)
+}
+
+/// Writes the collection as rekordbox's XML to `path`; resolves to how many
+/// tracks it holds.
+#[tauri::command]
+pub async fn export_xml(state: State<'_, Arc<AppState>>, path: String) -> AppResult<u32> {
+    let library = state.library()?;
+    blocking("export_xml", move || {
+        let text = rbl_index::export_xml(&library);
+        std::fs::write(&path, text).map_err(|e| {
+            AppError::new(ErrorKind::Internal, "The XML could not be written.").with_detail(e.to_string())
+        })?;
+        Ok(u32::try_from(library.len()).unwrap_or(u32::MAX))
     })
     .await
 }

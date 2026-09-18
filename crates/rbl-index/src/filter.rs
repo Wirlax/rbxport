@@ -286,18 +286,30 @@ impl Library {
     #[must_use]
     pub fn source_rows(&self, source: &TrackSource) -> Vec<Row> {
         match source {
-            TrackSource::Collection => (0..u32::try_from(self.len()).unwrap_or(u32::MAX)).collect(),
-            TrackSource::Playlist(index) => {
-                self.playlists().members.get(*index).cloned().unwrap_or_default()
-            }
             TrackSource::History(index) => {
                 self.histories().members.get(*index).cloned().unwrap_or_default()
             }
+            TrackSource::Collection | TrackSource::Playlist(_) | TrackSource::SmartPlaylist(_) => {
+                let playlists = self.playlists();
+                self.source_rows_unlocked(&playlists, source)
+            }
+        }
+    }
+
+    /// [`source_rows`](Self::source_rows) for a caller already holding the
+    /// playlists, which the lock would otherwise wait on for ever. A history
+    /// source is not answered here.
+    #[must_use]
+    pub fn source_rows_unlocked(&self, playlists: &crate::Playlists, source: &TrackSource) -> Vec<Row> {
+        match source {
+            TrackSource::Collection | TrackSource::History(_) => {
+                (0..u32::try_from(self.len()).unwrap_or(u32::MAX)).collect()
+            }
+            TrackSource::Playlist(index) => playlists.members.get(*index).cloned().unwrap_or_default(),
             // A rule that does not parse admits nothing, which is what
             // rekordbox shows for a rule it cannot read.
             TrackSource::SmartPlaylist(index) => {
-                let rule = self.playlists().smart_rule(*index);
-                rule.map(|rule| rule.evaluate(self)).unwrap_or_default()
+                playlists.smart_rule(*index).map(|rule| rule.evaluate(self)).unwrap_or_default()
             }
         }
     }

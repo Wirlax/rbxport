@@ -10,6 +10,8 @@
 export type MenuAction =
   | "settings"
   | "import"
+  | "import-xml"
+  | "export-xml"
   | "missing"
   | "info"
   | "sub"
@@ -28,6 +30,8 @@ export interface MenuCommand {
 const COMMANDS: Record<string, MenuCommand> = {
   settings: { action: "settings", writes: false },
   import: { action: "import", writes: true },
+  "import-xml": { action: "import-xml", writes: true },
+  "export-xml": { action: "export-xml", writes: false },
   missing: { action: "missing", writes: true },
   info: { action: "info", writes: false },
   sub: { action: "sub", writes: false },

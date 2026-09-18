@@ -1415,3 +1415,63 @@ fn a_backup_is_listed_and_can_be_put_back() {
     assert!(matches!(restore_backup(&location, &stray), Err(DbError::WriteRefused(_))));
     drop(keep);
 }
+
+#[test]
+fn a_rekordbox_xml_document_is_imported_with_its_playlists_and_cues() {
+    use rbl_db::xml::{self, XmlLibrary};
+    let audio = tempfile::tempdir().unwrap();
+    let one = audio.path().join("One.wav");
+    let two = audio.path().join("Two Ü.wav");
+    write_wav(&one, 2);
+    write_wav(&two, 2);
+    let location = |p: &std::path::Path| {
+        format!("file://localhost{}", p.to_string_lossy().bytes().map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => char::from(b).to_string(),
+            _ => format!("%{b:02X}"),
+        }).collect::<String>())
+    };
+    let doc = format!(
+        r#"<?xml version="1.0"?><DJ_PLAYLISTS Version="1.0.0"><COLLECTION Entries="3">
+        <TRACK TrackID="1" Name="One" Artist="A" Rating="153" Comments="hi" Location="{}">
+          <POSITION_MARK Name="" Type="0" Start="1.5" Num="-1"/>
+          <POSITION_MARK Name="" Type="0" Start="0.25" Num="0"/>
+          <POSITION_MARK Name="" Type="4" Start="0.5" End="1.0" Num="2"/>
+        </TRACK>
+        <TRACK TrackID="2" Name="Two" Artist="B" Rating="0" Location="{}"/>
+        <TRACK TrackID="3" Name="Gone" Artist="C" Rating="0" Location="file://localhost/nowhere/gone.wav"/>
+        </COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="1">
+        <NODE Name="Sets" Type="0" Count="1"><NODE Name="Warm up" Type="1" KeyType="0" Entries="3">
+        <TRACK Key="1"/><TRACK Key="2"/><TRACK Key="3"/></NODE></NODE></NODE></PLAYLISTS></DJ_PLAYLISTS>"#,
+        location(&one),
+        location(&two),
+    );
+    let parsed = XmlLibrary::parse(&doc);
+    assert_eq!(parsed.tracks.len(), 3);
+
+    let mut f = fixture();
+    let mut seen = Vec::new();
+    let report = xml::import(&mut f.writer, &parsed, &mut |done, total| seen.push((done, total))).unwrap();
+    assert_eq!((report.imported, report.existing, report.skipped.len(), report.playlists, report.cues), (2, 0, 1, 2, 3));
+    assert_eq!(seen, vec![(1, 3), (2, 3), (3, 3)]);
+    assert!(report.skipped[0].contains("gone.wav"));
+
+    let (rating, comment): (i64, String) = f
+        .conn()
+        .query_row("SELECT Rating, Commnt FROM djmdContent WHERE FolderPath = ?1", [one.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((rating, comment.as_str()), (3, "hi"));
+    let kinds: Vec<(i64, i64, i64)> = {
+        let mut stmt = f.conn().prepare("SELECT Kind, InMsec, OutMsec FROM djmdCue WHERE ContentID = (SELECT ID FROM djmdContent WHERE FolderPath = ?1) AND rb_local_deleted = 0 ORDER BY InMsec").unwrap();
+        stmt.query_map([one.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(-1)))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    assert_eq!(kinds, vec![(1, 250, -1), (3, 500, 1000), (0, 1500, -1)]);
+    let folder: String = f.one("SELECT ID FROM djmdPlaylist WHERE Name = 'Sets' AND Attribute = 1", &[]);
+    let playlist_parent: String = f.one("SELECT ParentID FROM djmdPlaylist WHERE Name = 'Warm up'", &[]);
+    assert_eq!(playlist_parent, folder);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongPlaylist WHERE rb_local_deleted = 0 AND PlaylistID = (SELECT ID FROM djmdPlaylist WHERE Name = 'Warm up')"), 2);
+
+    // Importing again reuses the tracks and doubles no cues.
+    let again = xml::import(&mut f.writer, &parsed, &mut |_, _| {}).unwrap();
+    assert_eq!((again.imported, again.existing, again.cues), (0, 2, 0));
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdContent WHERE rb_local_deleted = 0 AND FolderPath LIKE '%One.wav'"), 1);
+}

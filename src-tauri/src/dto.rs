@@ -250,6 +250,19 @@ pub struct ExportReportDto {
     pub verified: bool,
 }
 
+/// What importing a rekordbox XML document did.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlImportReportDto {
+    pub imported: u32,
+    pub existing: u32,
+    pub skipped: Vec<String>,
+    pub playlists: u32,
+    pub cues: u32,
+    /// The tracks that landed, so they can be queued for analysis.
+    pub tracks: Vec<ImportedTrackDto>,
+}
+
 /// One backup of the library, for Preferences › Advanced › Database.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

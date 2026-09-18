@@ -17,6 +17,7 @@ pub mod fixture;
 pub mod import;
 pub mod key;
 pub mod write;
+pub mod xml;
 mod schema;
 
 use std::path::{Path, PathBuf};

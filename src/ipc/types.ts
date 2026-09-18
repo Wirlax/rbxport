@@ -254,6 +254,17 @@ export interface Backend {
    * tracks should import the rest.
    */
   importFiles(): Promise<ImportReport | null>;
+  /**
+   * Imports a rekordbox XML collection chosen in the platform's file
+   * dialog: its files into the library, its playlists, and the cues of each
+   * track that landed. Null when the dialog is cancelled.
+   */
+  importXml(): Promise<XmlImportReport | null>;
+  /**
+   * Writes the collection as rekordbox's XML where the platform's save
+   * dialog says; resolves to how many tracks, or null when cancelled.
+   */
+  exportXml(): Promise<number | null>;
 
   /**
    * Writes a playlist to `destination`, asking for one when none is given.
@@ -838,6 +849,17 @@ export interface ImportReport {
   /** One line per file that was not imported, saying why. */
   skipped: string[];
   /** The tracks that landed, so they can be queued for analysis. */
+  tracks: { id: string; title: string }[];
+}
+
+/** What importing a rekordbox XML collection did. */
+export interface XmlImportReport {
+  imported: number;
+  /** Tracks whose file was already in the library, reused as they are. */
+  existing: number;
+  skipped: string[];
+  playlists: number;
+  cues: number;
   tracks: { id: string; title: string }[];
 }
 

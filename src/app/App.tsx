@@ -996,6 +996,45 @@ export function App() {
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
+  const importXmlFromMenu = useCallback(async () => {
+    report("Choosing a rekordbox XML file…");
+    try {
+      const backend = await getBackend();
+      const imported = await backend.importXml();
+      if (imported === null) {
+        setNote(null);
+        return;
+      }
+      const parts = [
+        `${imported.imported} track${imported.imported === 1 ? "" : "s"} imported`,
+        imported.existing > 0 ? `${imported.existing} already here` : "",
+        imported.skipped.length > 0 ? `${imported.skipped.length} skipped` : "",
+        `${imported.playlists} playlist${imported.playlists === 1 ? "" : "s"}`,
+        imported.cues > 0 ? `${imported.cues} cue${imported.cues === 1 ? "" : "s"}` : "",
+      ].filter((part) => part !== "");
+      report(`${parts.join(", ")}.`);
+      setTree(await backend.playlistTree());
+      if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+    } catch (e) {
+      refuse(e instanceof Error ? e.message : "That XML could not be imported.");
+    }
+  }, [report, refuse, analysisPrefs.auto, analysis]);
+
+  const exportXmlFromMenu = useCallback(async () => {
+    report("Choosing where to write the XML…");
+    try {
+      const backend = await getBackend();
+      const written = await backend.exportXml();
+      if (written === null) {
+        setNote(null);
+        return;
+      }
+      report(`Wrote ${written.toLocaleString()} tracks and the playlists as XML.`);
+    } catch (e) {
+      refuse(e instanceof Error ? e.message : "The XML could not be written.");
+    }
+  }, [report, refuse]);
+
   // A menu item, by id. The shell sends the id and nothing else; what it
   // means, and whether it is allowed right now, is decided in one place —
   // and the keyboard reaches it the same way on the platforms where the
@@ -1009,6 +1048,14 @@ export function App() {
     }
     if (outcome.action === "import") {
       void importFromMenu();
+      return;
+    }
+    if (outcome.action === "import-xml") {
+      void importXmlFromMenu();
+      return;
+    }
+    if (outcome.action === "export-xml") {
+      void exportXmlFromMenu();
       return;
     }
     if (outcome.action === "info") {
@@ -1029,7 +1076,10 @@ export function App() {
     }
     // The missing-file manager is a pane of Preferences.
     openPreferences(outcome.action === "missing" ? "advanced" : "view");
-  }, [readOnly, advancedPrefs.protectLibrary, importFromMenu, refuse, openPreferences, checkForUpdates]);
+  }, [
+    readOnly, advancedPrefs.protectLibrary, importFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
+    openPreferences, checkForUpdates,
+  ]);
 
   // Native menu clicks.
   useEffect(() => {

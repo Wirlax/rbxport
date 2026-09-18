@@ -1169,7 +1169,11 @@ impl Writer {
     /// Copies the library aside on request — Preferences › Advanced ›
     /// Database management — and says where the copy went.
     pub fn back_up_now(&mut self) -> Result<PathBuf> {
-        self.back_up()
+        let copy = self.back_up()?;
+        // The session's backup is this one: a write that follows in the
+        // same millisecond must not take another under the same name.
+        self.backup_taken = true;
+        Ok(copy)
     }
 
     /// Finds an id no row in `table` is using.

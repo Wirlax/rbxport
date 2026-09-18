@@ -18,6 +18,7 @@ pub mod key;
 pub mod smart;
 pub mod strings;
 pub mod testing;
+pub mod xml_export;
 mod filter;
 mod load;
 mod view;
@@ -27,6 +28,7 @@ pub use filter::{
 };
 pub use load::{content_version, load, reload_cues_of, reload_playlists, LoadStats};
 pub use smart::SmartRule;
+pub use xml_export::export_xml;
 pub use view::{SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};

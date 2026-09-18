@@ -5,6 +5,7 @@
 pub mod ids;
 pub mod musickey;
 pub mod time;
+pub mod xml;
 
 use serde::{Deserialize, Serialize};
 

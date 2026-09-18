@@ -17,16 +17,17 @@
 //! ones (`name` is the title, `counter` the play count, `grouping` the
 //! colour, `producer` the composer, `stockDate` the date added).
 //!
-//! Parsed here with a scanner of its own: the document is a flat handful of
-//! elements with quoted attributes, an XML crate would be the only user of
-//! itself in the workspace, and a rule that does not parse is simply a
-//! playlist with nothing in it.
+//! Read with `rbl_core::xml`'s scanner: the document is a flat handful of
+//! elements with quoted attributes, and a rule that does not parse is
+//! simply a playlist with nothing in it.
 //!
 //! The format is what rekordbox 6 and 7 write, as documented by the
 //! community (pyrekordbox's `smartlist` module) rather than measured against
 //! this library: there was no rekordbox library on the machine that wrote
 //! this, so the value conventions marked `[ASSUME]` below want checking
 //! against a recorded rule the first time one is to hand.
+
+use rbl_core::xml::{attribute, tags, Tag};
 
 use crate::strings::fold;
 use crate::{Library, Row, NO_ID};
@@ -562,119 +563,6 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-// ------------------------------------------------------------------ scanning
-
-/// One element of the document, as far as this rule format needs.
-enum Tag {
-    Open { name: String, attributes: Vec<(String, String)>, closed: bool },
-    Close { name: String },
-}
-
-/// The elements in order. Declarations, comments and text between elements
-/// are skipped; an attribute without a closing quote ends the scan.
-fn tags(xml: &str) -> Vec<Tag> {
-    let mut out = Vec::new();
-    let mut rest = xml;
-    while let Some(start) = rest.find('<') {
-        rest = rest.get(start + 1..).unwrap_or("");
-        if rest.starts_with('?') || rest.starts_with('!') {
-            // `<?xml ...?>` or `<!-- ... -->`: skip to its end.
-            let Some(end) = rest.find('>') else { break };
-            rest = rest.get(end + 1..).unwrap_or("");
-            continue;
-        }
-        if let Some(after) = rest.strip_prefix('/') {
-            let Some(end) = after.find('>') else { break };
-            out.push(Tag::Close { name: after.get(..end).unwrap_or("").trim().to_owned() });
-            rest = after.get(end + 1..).unwrap_or("");
-            continue;
-        }
-        let name_end = rest.find(|c: char| c.is_whitespace() || c == '>' || c == '/').unwrap_or(rest.len());
-        let name = rest.get(..name_end).unwrap_or("").to_owned();
-        rest = rest.get(name_end..).unwrap_or("");
-        let mut attributes = Vec::new();
-        let mut closed = false;
-        loop {
-            rest = rest.trim_start();
-            if let Some(after) = rest.strip_prefix("/>") {
-                closed = true;
-                rest = after;
-                break;
-            }
-            if let Some(after) = rest.strip_prefix('>') {
-                rest = after;
-                break;
-            }
-            if rest.is_empty() {
-                break;
-            }
-            let Some(eq) = rest.find('=') else {
-                // Something without a value: skip the word.
-                let skip = rest.find(|c: char| c.is_whitespace() || c == '>' || c == '/').unwrap_or(rest.len());
-                rest = rest.get(skip..).unwrap_or("");
-                continue;
-            };
-            let key = rest.get(..eq).unwrap_or("").trim().to_owned();
-            rest = rest.get(eq + 1..).unwrap_or("").trim_start();
-            let Some(quote) = rest.chars().next().filter(|&c| c == '"' || c == '\'') else { break };
-            rest = rest.get(1..).unwrap_or("");
-            let Some(end) = rest.find(quote) else { return out };
-            attributes.push((key, unescape(rest.get(..end).unwrap_or(""))));
-            rest = rest.get(end + 1..).unwrap_or("");
-        }
-        out.push(Tag::Open { name, attributes, closed });
-    }
-    out
-}
-
-fn attribute(attributes: &[(String, String)], name: &str) -> String {
-    attributes
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.clone())
-        .unwrap_or_default()
-}
-
-/// The five XML entities and numeric references.
-fn unescape(text: &str) -> String {
-    if !text.contains('&') {
-        return text.to_owned();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(amp) = rest.find('&') {
-        out.push_str(rest.get(..amp).unwrap_or(""));
-        rest = rest.get(amp..).unwrap_or("");
-        let Some(semi) = rest.find(';') else {
-            out.push_str(rest);
-            return out;
-        };
-        let entity = rest.get(1..semi).unwrap_or("");
-        let replacement = match entity {
-            "amp" => Some('&'),
-            "lt" => Some('<'),
-            "gt" => Some('>'),
-            "quot" => Some('"'),
-            "apos" => Some('\''),
-            _ => entity
-                .strip_prefix('#')
-                .and_then(|number| {
-                    number
-                        .strip_prefix('x')
-                        .map_or_else(|| number.parse::<u32>().ok(), |hex| u32::from_str_radix(hex, 16).ok())
-                })
-                .and_then(char::from_u32),
-        };
-        match replacement {
-            Some(c) => out.push(c),
-            None => out.push_str(rest.get(..=semi).unwrap_or("")),
-        }
-        rest = rest.get(semi + 1..).unwrap_or("");
-    }
-    out.push_str(rest);
-    out
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -733,6 +621,6 @@ mod tests {
         assert_eq!(seconds("330"), 330);
         assert_eq!(color_id("Aqua"), 6);
         assert_eq!(color_id("3"), 3);
-        assert_eq!(unescape("a &lt;b&gt; &#39;c&#x27; &unknown; &"), "a <b> 'c' &unknown; &");
+        assert_eq!(rbl_core::xml::unescape("a &lt;b&gt; &#39;c&#x27; &unknown; &"), "a <b> 'c' &unknown; &");
     }
 }

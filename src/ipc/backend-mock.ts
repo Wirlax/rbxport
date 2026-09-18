@@ -1539,8 +1539,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       );
     },
 
-    // No picker in a browser, so nothing can be chosen to import.
+    // No picker in a browser, so nothing can be chosen to import or written.
     importFiles: () => wait(null),
+    importXml: () => wait(null),
+    exportXml: () => wait(null),
 
     // Nothing in the mock has a file behind it, so nothing can be missing and
     // there is no picker to choose one with.

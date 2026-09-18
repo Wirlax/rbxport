@@ -6,6 +6,7 @@
  */
 import type {
   Backup,
+  XmlImportReport,
   AnalysisResult, AudioDevices, Backend, Cue, DeckEvent, Device, DeviceSettings, Diagnostics, Limiter,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
@@ -94,6 +95,27 @@ async function realBackend(): Promise<Backend> {
       // Cancelling is a normal outcome, not an error.
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
+    },
+    importXml: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Choose a rekordbox XML collection",
+        filters: [{ name: "rekordbox XML", extensions: ["xml"] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<XmlImportReport>("import_xml", { path: picked });
+    },
+    exportXml: async () => {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const picked = await save({
+        title: "Export the collection as rekordbox XML",
+        defaultPath: "rekordbox.xml",
+        filters: [{ name: "rekordbox XML", extensions: ["xml"] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<number>("export_xml", { path: picked });
     },
     exportPlaylist: async (playlistId, destination, defaults) => {
       let target = destination;
