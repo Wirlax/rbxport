@@ -251,6 +251,8 @@ pub struct DeviceDto {
     pub total_bytes: u64,
     pub free_bytes: u64,
     pub removable: bool,
+    /// Names the medium across a rename; `rbl_devices::volume_id`.
+    pub volume_id: String,
     /// What is already on it, absent when it holds no export.
     pub export: Option<DeviceExportDto>,
 }

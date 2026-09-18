@@ -757,6 +757,11 @@ export interface Device {
   freeBytes: number;
   /** Whether the OS calls it removable. External SSDs often say no. */
   removable: boolean;
+  /**
+   * Names the medium across a rename. On macOS a rename moves the mount
+   * point, so `path` goes stale while this stays the same.
+   */
+  volumeId: string;
   /** What is already on it, null when it holds no export. */
   export: DeviceExport | null;
 }

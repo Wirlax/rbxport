@@ -20,7 +20,7 @@ import { detectPlatform, dispatch, menuAccelerator } from "@/lib/shortcuts";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
-import { deviceId, deviceNodes } from "@/lib/devices";
+import { deviceId, deviceNodes, devicePath, renamedDevice } from "@/lib/devices";
 import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
@@ -1211,6 +1211,51 @@ export function App() {
     })();
   }, []);
 
+  // A stick renamed while the panel is open moves to another mount point on
+  // macOS, so the node that was selected names a path that no longer
+  // exists. The medium is still the same volume, so the selection follows it
+  // to its new name rather than dropping back to the track list, and the
+  // status bar says what happened. Checked when the window regains focus —
+  // the rename happened in the Finder, so focus is the moment it can have
+  // changed — and never on a timer.
+  useEffect(() => {
+    let live = true;
+    const onFocus = () => {
+      void getBackend()
+        .then((backend) => backend.listDevices())
+        .then((volumes) => {
+          if (live) setDevices(volumes);
+        })
+        .catch(() => {
+          // A failed listing leaves the last one standing.
+        });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+  const previousDevices = useRef<readonly Device[]>([]);
+  useEffect(() => {
+    const before = previousDevices.current;
+    previousDevices.current = devices;
+    const path = selectedNode ? devicePath(selectedNode.id) : null;
+    if (path === null || devices.some((device) => device.path === path)) return;
+    // Only a stick this session has seen can be said to have moved or gone;
+    // a device id restored from a previous run just falls back quietly.
+    if (!before.some((device) => device.path === path)) return;
+    const moved = renamedDevice(devices, path, before);
+    if (moved) {
+      setSelectedNode({ id: deviceId(moved.device), name: moved.device.name, kind: "device", depth: 0 });
+      report(`${moved.oldName} is now ${moved.device.name}.`);
+    } else {
+      report(`${selectedNode?.name ?? "The device"} is no longer connected.`);
+    }
+    // Only the device list changing can move a selected device; the node
+    // itself is what is being corrected here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices]);
   // A stick plugged in or pulled out: the shell says so, and the list follows.
   useEffect(() => {
     let stop: (() => void) | undefined;

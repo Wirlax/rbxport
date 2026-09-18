@@ -521,6 +521,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       totalBytes: 32 * 1024 ** 3,
       freeBytes: 24 * 1024 ** 3,
       removable: true,
+      volumeId: "dev:1",
       export: null,
     },
     // A stick rekordbox wrote, as the device tabs' captures show one: the
@@ -532,6 +533,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       totalBytes: 1_535_800_000_000,
       freeBytes: 216_800_000_000,
       removable: true,
+      volumeId: "dev:2",
       export: { tracks: 77, playlists: 3, ours: false, written: "" },
     },
   ];

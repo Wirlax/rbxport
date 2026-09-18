@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   capacityText, contentsText, deviceId, deviceNodes, devicePath, formatSpace, fullness, hasRoomFor,
+  renamedDevice,
 } from "./devices";
 import type { Device } from "@/ipc/types";
 
@@ -11,6 +12,7 @@ const stick: Device = {
   totalBytes: 32 * 1024 ** 3,
   freeBytes: 8 * 1024 ** 3,
   removable: true,
+  volumeId: "dev:1",
   export: null,
 };
 
@@ -75,5 +77,17 @@ describe("devices", () => {
   it("knows when a stick is too full", () => {
     expect(hasRoomFor(stick, 1024 ** 3)).toBe(true);
     expect(hasRoomFor(stick, 30 * 1024 ** 3)).toBe(false);
+  });
+
+  it("follows a renamed stick by its volume id, not by its path", () => {
+    const renamed: Device = { ...stick, name: "USB B", path: "/Volumes/USB B" };
+    const other: Device = { ...stick, name: "SD", path: "/Volumes/SD", volumeId: "dev:9" };
+    const moved = renamedDevice([other, renamed], stick.path, [stick, other]);
+    expect(moved?.device.path).toBe("/Volumes/USB B");
+    expect(moved?.oldName).toBe("DJ STICK");
+    // Unplugged, not renamed: nothing in the fresh list carries its id.
+    expect(renamedDevice([other], stick.path, [stick, other])).toBeNull();
+    // Never seen before: nothing to follow.
+    expect(renamedDevice([renamed], stick.path, [])).toBeNull();
   });
 });

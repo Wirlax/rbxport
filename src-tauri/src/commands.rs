@@ -836,6 +836,7 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
                     total_bytes: device.total_bytes,
                     free_bytes: device.free_bytes,
                     removable: device.removable,
+                    volume_id: device.volume_id,
                     export: found.map(|export| DeviceExportDto {
                         tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
                         playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),

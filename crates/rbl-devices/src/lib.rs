@@ -33,6 +33,8 @@ pub struct Device {
     /// Whether the OS calls it removable. External SSDs often say no, so this
     /// is shown, not used to decide what to list.
     pub removable: bool,
+    /// A name for the medium that a rename does not change; see [`volume_id`].
+    pub volume_id: String,
 }
 
 impl Device {
@@ -86,6 +88,7 @@ fn devices_from(disks: &sysinfo::Disks) -> Vec<Device> {
             total_bytes: disk.total_space(),
             free_bytes: disk.available_space(),
             removable: disk.is_removable(),
+            volume_id: volume_id(disk.mount_point()),
         })
         .collect();
     // The same volume can be reported twice when it is mounted more than once.
@@ -103,7 +106,30 @@ fn fake_device(path: &Path) -> Device {
         total_bytes: 0,
         free_bytes: 0,
         removable: true,
+        volume_id: volume_id(path),
     }
+}
+
+/// What still names a stick after the user renames it.
+///
+/// On macOS a volume's mount point is its name, so renaming `USB A` to
+/// `USB B` moves it to `/Volumes/USB B` and every path the app holds for it
+/// goes stale. The filesystem underneath does not move: its device number
+/// (`st_dev`) is the same before and after, so that is the identity, and a
+/// device list taken after the rename can be matched to the one before it.
+/// It is not stable across an unplug, which is right — a stick that was
+/// pulled and pushed back in is looked at afresh. On Windows a rename
+/// changes only the label; the drive letter stays and is the identity.
+#[must_use]
+pub fn volume_id(mount_point: &Path) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(meta) = std::fs::metadata(mount_point) {
+            return format!("dev:{}", meta.dev());
+        }
+    }
+    format!("path:{}", mount_point.to_string_lossy())
 }
 
 /// Whether a volume should be offered as somewhere to export to.
@@ -255,6 +281,7 @@ mod tests {
             mount_point: PathBuf::new(),
             total_bytes: 100,
             free_bytes: 400,
+            volume_id: String::new(),
             removable: true,
         };
         assert_eq!(device.used_bytes(), 0);

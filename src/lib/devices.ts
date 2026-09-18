@@ -19,6 +19,22 @@ export function devicePath(id: string): string | null {
 }
 
 /**
+ * The device a stale path now lives at, when it was renamed rather than
+ * unplugged: the one in the fresh list with the same volume id, if any. Its
+ * old name is what the path ended in, for saying what happened.
+ */
+export function renamedDevice(
+  devices: readonly Device[],
+  stalePath: string,
+  previous: readonly Device[],
+): { device: Device; oldName: string } | null {
+  const before = previous.find((device) => device.path === stalePath);
+  if (before === undefined) return null;
+  const device = devices.find((d) => d.volumeId === before.volumeId && d.path !== stalePath);
+  return device ? { device, oldName: before.name } : null;
+}
+
+/**
  * Devices as tree nodes, so the Devices section renders like every other
  * section rather than needing its own list component.
  */
