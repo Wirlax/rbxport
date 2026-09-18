@@ -12,7 +12,7 @@ import type { SVGProps } from "react";
 
 import type { Source } from "@/lib/tree";
 
-import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon } from "@/components/icons";
+import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, SmartListIcon } from "@/components/icons";
 import styles from "./SourceRail.module.css";
 import { useTooltip } from "@/store/usePreferences";
 
@@ -22,6 +22,10 @@ const SOURCES: ReadonlyArray<{
   Icon: (props: SVGProps<SVGSVGElement>) => React.ReactElement;
 }> = [
   { id: "playlists", label: "Playlists", Icon: FolderIcon },
+  // Between Playlists and Histories, where rekordbox's rail has it [DOC];
+  // the icon is the intelligent playlist's [ASSUME], with no capture of
+  // rekordbox's own.
+  { id: "related", label: "Related Tracks", Icon: SmartListIcon },
   { id: "histories", label: "Histories", Icon: HistoryIcon },
   // Above Devices, as rekordbox's rail has it: its tooltip there is
   // `Display Explorer` (german.lang); the label is the section's own name.

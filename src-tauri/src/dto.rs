@@ -120,6 +120,10 @@ pub enum TrackSourceDto {
     /// which lists nothing.
     #[serde(rename = "folder")]
     Folder { path: String },
+    /// Related Tracks: the tracks that go with `track` under a criterion —
+    /// `bpmKey`, `genreRecent` or `artist`. An empty track opens empty.
+    #[serde(rename = "related")]
+    Related { track: String, criterion: String },
 }
 
 #[derive(Debug, Clone, Deserialize)]

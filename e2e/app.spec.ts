@@ -481,10 +481,10 @@ test("the column layout survives a reload", async ({ page }) => {
 test("the source rail switches which part of the library the tree shows", async ({ page }) => {
   await page.goto("/");
   const rail = page.getByRole("tablist", { name: "Library sources" });
-  // Four: Playlists, Histories, Explorer, Devices. No Collection — All Tracks
-  // is at the top of the tree and always in sight, so a button that scrolls
-  // to it is a shortcut to where you already are.
-  await expect(rail.getByRole("tab")).toHaveCount(4);
+  // Five: Playlists, Related Tracks, Histories, Explorer, Devices. No
+  // Collection — All Tracks is at the top of the tree and always in sight, so
+  // a button that scrolls to it is a shortcut to where you already are.
+  await expect(rail.getByRole("tab")).toHaveCount(5);
   await expect(rail.getByRole("tab", { name: "Collection" })).toHaveCount(0);
 
   // A filter, as rekordbox's is: the tree shows the lit section and nothing
@@ -500,6 +500,35 @@ test("the source rail switches which part of the library the tree shows", async 
   await rail.getByRole("tab", { name: "Playlists" }).click();
   await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toBeVisible();
   await expect(page.getByRole("treeitem").filter({ hasText: "CURRENT" })).toBeVisible();
+});
+
+test("Related Tracks lists what goes with the track on Player 1, by criterion", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const rail = page.getByRole("tablist", { name: "Library sources" });
+  const tree = page.getByRole("navigation", { name: "Library" });
+
+  // With nothing on the player the criteria open empty, as rekordbox's do.
+  await rail.getByRole("tab", { name: "Related Tracks" }).click();
+  await expect(tree.getByRole("treeitem").filter({ hasText: /^\s*Related Tracks\s*$/ })).toHaveAttribute("aria-selected", "true");
+  await tree.getByRole("treeitem").filter({ hasText: "Same artist" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("Same artist (0 Tracks)");
+
+  // Load a track and the section fills with its artist's other tracks.
+  await rail.getByRole("tab", { name: "Playlists" }).click();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  const artist = await page.locator('[role="gridcell"][data-col="artist"]').nth(3).textContent();
+  await cell.dblclick();
+  await rail.getByRole("tab", { name: "Related Tracks" }).click();
+  await tree.getByRole("treeitem").filter({ hasText: "Same artist" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText(/Same artist \([1-9]\d* Tracks\)/);
+  const artists = await page.locator('[role="gridcell"][data-col="artist"]').allTextContents();
+  expect(artists.length).toBeGreaterThan(0);
+  for (const seen of artists) expect(seen).toBe(artist);
+
+  // BPM + KEY: every row within six percent of the track's BPM.
+  await tree.getByRole("treeitem").filter({ hasText: "BPM + KEY" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("BPM + KEY (");
 });
 
 test("the Histories section opens on the sessions rekordbox recorded", async ({ page }) => {

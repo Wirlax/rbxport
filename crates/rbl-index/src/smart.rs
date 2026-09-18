@@ -520,7 +520,7 @@ impl Date {
 }
 
 /// The machine's date today, for the relative conditions.
-fn today() -> Date {
+pub(crate) fn today() -> Date {
     Date::parse(&rbl_core::time::local_date()).unwrap_or(Date { year: 1970, month: 1, day: 1 })
 }
 

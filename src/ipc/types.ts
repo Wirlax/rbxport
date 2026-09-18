@@ -49,7 +49,12 @@ export type TrackSource =
   | { kind: "playlist"; id: string }
   | { kind: "history"; id: string }
   /** A folder on disk, for the Explorer. An empty path is the heading, which lists nothing. */
-  | { kind: "folder"; path: string };
+  | { kind: "folder"; path: string }
+  /** Related Tracks: what goes with `track` under a criterion. An empty track lists nothing. */
+  | { kind: "related"; track: string; criterion: RelatedCriterion };
+
+/** The Related Tracks section's criteria: rekordbox's own three. */
+export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist";
 
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
@@ -92,6 +97,8 @@ export interface TreeNode {
     | "smartPlaylist"
     /** The Explorer heading, and a folder on disk under it. */
     | "explorer" | "directory"
+    /** The Related Tracks heading, and a criterion under it. */
+    | "related" | "relatedCriterion"
     /** A line of information in the tree, not a place: nothing opens when it is clicked. */
     | "note";
   depth: number;

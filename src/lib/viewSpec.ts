@@ -7,6 +7,7 @@
  */
 import type { KeyDisplay, SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { explorerPath } from "./explorer";
+import { relatedCriterionOf } from "./tree";
 
 export interface SortState {
   column: SortColumn;
@@ -38,6 +39,12 @@ export function specForNode(
    * after `A` and `Ab`.
    */
   keyDisplay: KeyDisplay = "classic",
+  /**
+   * The track Related Tracks relates to: the one on the player. None, and
+   * the section's criteria open empty, as rekordbox's do with no track
+   * loaded.
+   */
+  relatedTo: string | null = null,
 ): ViewSpec {
   const order = sort ?? DEFAULT_SORT;
   return {
@@ -58,7 +65,9 @@ export function specForNode(
             ? { kind: "folder", path: explorerPath(node.id) ?? "" }
             : node?.kind === "explorer"
               ? { kind: "folder", path: "" }
-              : { kind: "collection" },
+              : node?.kind === "relatedCriterion" || node?.kind === "related"
+                ? { kind: "related", track: relatedTo ?? "", criterion: relatedCriterionOf(node.id) ?? "bpmKey" }
+                : { kind: "collection" },
     sort: order.column === "key" && keyDisplay === "alphanumeric" ? "keyCamelot" : order.column,
     descending: order.descending,
     query,

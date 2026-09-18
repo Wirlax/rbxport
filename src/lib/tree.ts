@@ -183,7 +183,35 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
  * sight, so a button whose whole job is to scroll to the first row is a
  * shortcut to where you already are.
  */
-export type Source = "playlists" | "histories" | "explorer" | "devices";
+export type Source = "playlists" | "related" | "histories" | "explorer" | "devices";
+
+/**
+ * The Related Tracks section: rekordbox's three criteria under a heading,
+ * the same in every library, so they are the frontend's own rows rather
+ * than the backend's. [DOC: the rekordbox manual; no capture of the panel
+ * exists here, so the rows are drawn as any other section's are.]
+ */
+export const RELATED_NODES: readonly TreeNode[] = [
+  { id: "related", name: "Related Tracks", kind: "related", depth: 0, expanded: true },
+  { id: "related:bpmKey", name: "BPM + KEY", kind: "relatedCriterion", depth: 1 },
+  { id: "related:genreRecent", name: "Same genre in 30 days", kind: "relatedCriterion", depth: 1 },
+  { id: "related:artist", name: "Same artist", kind: "relatedCriterion", depth: 1 },
+];
+
+/** The criterion a Related Tracks node names, or `null` for the heading. */
+export function relatedCriterionOf(id: string): "bpmKey" | "genreRecent" | "artist" | null {
+  switch (id) {
+    case "related:bpmKey": return "bpmKey";
+    case "related:genreRecent": return "genreRecent";
+    case "related:artist": return "artist";
+    default: return null;
+  }
+}
+
+/** The backend's tree with the Related Tracks section after it. */
+export function withRelated(nodes: readonly TreeNode[]): TreeNode[] {
+  return [...nodes.filter((n) => n.kind !== "related" && n.kind !== "relatedCriterion"), ...RELATED_NODES];
+}
 
 /**
  * The nodes belonging to one source: what the tree shows while that rail
@@ -202,6 +230,8 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
       return nodes.filter((n) => n.kind === "histories" || n.kind === "history");
     case "devices":
       return nodes.filter((n) => n.kind === "device");
+    case "related":
+      return nodes.filter((n) => n.kind === "related" || n.kind === "relatedCriterion");
     case "explorer":
       // The heading first, as with histories: jumping there lands on the
       // section, which rekordbox opens as an empty Explorer. A note is the
@@ -248,6 +278,9 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
     case "explorer":
     case "directory":
       return "explorer";
+    case "related":
+    case "relatedCriterion":
+      return "related";
     default:
       return "playlists";
   }

@@ -63,6 +63,25 @@ pub enum TrackSource {
     /// Index into `Library::playlists` of an intelligent playlist: the rows
     /// are whatever its rule admits at the moment it is opened.
     SmartPlaylist(usize),
+    /// rekordbox's Related Tracks: the tracks that go with one track under a
+    /// criterion. A `track` past the end of the library — no track loaded —
+    /// opens empty.
+    Related { track: Row, criterion: RelatedCriterion },
+}
+
+/// The Related Tracks section's criteria, the three rekordbox's Export
+/// mode lists [DOC: the rekordbox manual's Related Tracks; the panel itself
+/// has no capture here].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelatedCriterion {
+    /// `BPM + KEY`: within 6 % of the track's BPM [ASSUME] and in its key or
+    /// a key beside it on the wheel (Relative Key 1).
+    BpmAndKey,
+    /// `Same genre in 30 days`: the track's genre, added in the last thirty
+    /// days [ASSUME: what the thirty days count].
+    SameGenreRecent,
+    /// `Same artist`.
+    SameArtist,
 }
 
 #[derive(Debug, Clone)]

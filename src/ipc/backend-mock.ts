@@ -11,7 +11,8 @@
  */
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot,
-  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RowDto, SortKey, Tick, TrackDetails, TrackField,
+  FilterValues, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey, Tick, TrackDetails,
+  TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -360,6 +361,41 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const playlistSize = (id: string): number =>
     membership.get(id)?.length ?? mockPlaylistSize(id);
 
+  /**
+   * Related Tracks, as the index picks them: within six percent of the
+   * track's BPM and in its key or one beside it on the wheel, the same
+   * genre added in the last thirty days, or the same artist. The track
+   * itself is left out. No track, no rows.
+   */
+  const relatedTo = (trackId: string, criterion: RelatedCriterion): number[] => {
+    const at = indexOfId.get(trackId);
+    const track = at === undefined ? undefined : all[at];
+    if (!track) return [];
+    const rank = (key: string) => {
+      const code = toCamelot(key);
+      return code === "" ? -1 : (Number(code.slice(0, -1)) - 1) * 2 + (code.endsWith("B") ? 1 : 0);
+    };
+    const together = (a: number, b: number) =>
+      a >= 0 && b >= 0 && (a === b || (a ^ 1) === b || ((a & 1) === (b & 1) && ((a + 2) % 24 === b || (b + 2) % 24 === a)));
+    const since = Date.parse("2026-09-18") - 30 * 86_400_000;
+    return all.flatMap((row, i) => {
+      if (i === at) return [];
+      switch (criterion) {
+        case "bpmKey": {
+          if (track.bpmX100 === 0 && rank(track.key) < 0) return [];
+          if (track.bpmX100 !== 0 && Math.abs(row.bpmX100 - track.bpmX100) > track.bpmX100 * 0.06) return [];
+          if (rank(track.key) >= 0 && !together(rank(track.key), rank(row.key))) return [];
+          return [i];
+        }
+        case "genreRecent":
+          return track.genre !== "" && row.genre === track.genre && Date.parse(row.dateAdded) >= since ? [i] : [];
+        case "artist":
+          return track.artist !== "" && row.artist === track.artist ? [i] : [];
+        default:
+          return [];
+      }
+    });
+  };
   const candidatesFor = (spec: ViewSpec): number[] => {
     let candidates: number[];
     if (spec.source.kind === "playlist") {
@@ -369,6 +405,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         : seededMembers(spec.source.id);
     } else if (spec.source.kind === "history") {
       candidates = seededMembers(spec.source.id);
+    } else if (spec.source.kind === "related") {
+      candidates = relatedTo(spec.source.track, spec.source.criterion);
     } else {
       candidates = Array.from({ length: trackCount }, (_, i) => i);
     }

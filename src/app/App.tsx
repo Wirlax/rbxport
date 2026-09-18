@@ -41,7 +41,7 @@ import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { isLooseId } from "@/lib/explorer";
-import { parentFor } from "@/lib/tree";
+import { parentFor, withRelated } from "@/lib/tree";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -391,7 +391,7 @@ export function App() {
           backend.librarySummary(),
         ]);
         if (cancelled) return true;
-        setTree(nodes);
+        setTree(withRelated(nodes));
         setSummary(info);
         setLoadError(null);
         // The playlist that was open at exit, when it is still there — it can
@@ -503,13 +503,15 @@ export function App() {
   // the deck's tempo-adjusted one — the tempo lives in the player and the
   // capture cannot say which rekordbox uses.
   const masterBpmX100 = (syncMaster === "b" ? playerTrackB : playerTrack)?.bpmX100 ?? null;
+  // Related Tracks relate to the track on Player 1, as rekordbox's do.
+  const relatedTo = playerTrack?.id ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay);
+    const base = specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, relatedTo);
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay]);
+  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, relatedTo]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
@@ -520,7 +522,7 @@ export function App() {
     void (async () => {
       const backend = await getBackend();
       try {
-        const values = await backend.filterValues(specForNode(selectedNode, query, null));
+        const values = await backend.filterValues(specForNode(selectedNode, query, null, "classic", relatedTo));
         if (live) setFilterValues(values);
       } catch {
         // The library is not up yet; the ready event re-runs this through
@@ -530,7 +532,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [filterOpen, selectedNode, query, libraryGeneration]);
+  }, [filterOpen, selectedNode, query, libraryGeneration, relatedTo]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortState((s) => nextSort(s, column));
@@ -548,7 +550,7 @@ export function App() {
         setPendingEdits(new Map());
         // The tree can change too — a playlist gained tracks, or one was
         // deleted — so it is re-read rather than assumed still right.
-        void backend.playlistTree().then(setTree);
+        void backend.playlistTree().then((nodes) => setTree(withRelated(nodes)));
       });
     })();
     return () => {

@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use rbl_index::folder::FolderView;
-use rbl_index::{BpmFilter, Library, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES};
+use rbl_index::{
+    BpmFilter, Library, RelatedCriterion, SortColumn, TrackFilter, TrackSource, View, ViewSpec, COLOR_NAMES,
+};
 
 use crate::dto::{cue_colour_css, RowCueDto, RowDto, TrackFilterDto, TrackSourceDto, ViewSpecDto};
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -426,6 +428,15 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
                 })
             })
             .unwrap_or(TrackSource::Collection),
+        TrackSourceDto::Related { track, criterion } => TrackSource::Related {
+            // No such track, or none: past the end, which relates to nothing.
+            track: library.row_of(track).unwrap_or(u32::MAX),
+            criterion: match criterion.as_str() {
+                "genreRecent" => RelatedCriterion::SameGenreRecent,
+                "artist" => RelatedCriterion::SameArtist,
+                _ => RelatedCriterion::BpmAndKey,
+            },
+        },
     };
     ViewSpec {
         source,

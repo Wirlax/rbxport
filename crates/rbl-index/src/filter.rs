@@ -293,6 +293,7 @@ impl Library {
                 let playlists = self.playlists();
                 self.source_rows_unlocked(&playlists, source)
             }
+            TrackSource::Related { track, criterion } => self.related_rows(*track, *criterion),
         }
     }
 
@@ -311,6 +312,7 @@ impl Library {
             TrackSource::SmartPlaylist(index) => {
                 playlists.smart_rule(*index).map(|rule| rule.evaluate(self)).unwrap_or_default()
             }
+            TrackSource::Related { track, criterion } => self.related_rows(*track, *criterion),
         }
     }
 }

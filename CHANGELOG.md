@@ -38,6 +38,10 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - PHRASE EDIT on the GRID panel: CUT splits the phrase under the head and
   CLEAR takes it out.
 - My Tag is edited on the Info tab: every tag of the library a toggle.
+- Related Tracks, a section of its own on the rail: BPM + KEY (within six
+  percent of the track on Player 1 and in its key or one beside it on the
+  wheel), Same genre in 30 days, and Same artist. With no track loaded the
+  criteria open empty, as rekordbox's do. Rust picks the rows.
 - The keyboard map is rekordbox's Export preset, built out: Loop In, Loop
   Out and Exit/Reloop on I, O and R, the beat loops on 4 to 9, / and
   option + \\ for the length, Memory Cue 1 to 10 on A to ;, SYNC, MASTER
