@@ -347,3 +347,48 @@ impl FileBuilder {
         out
     }
 }
+
+/// Replaces the rows of a table that fits one data page — the colours, on
+/// every export — inside an existing file, keeping the page where it is
+/// and its links as they were. rekordbox does this when a colour comment
+/// is renamed on the device panel [OBS 7.2.11]: the name in `export.pdb`
+/// follows the one in `exportLibrary.db`. `None` when the table is not
+/// there, spans more than one page, or the rows would not fit.
+#[must_use]
+pub fn replace_single_page_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) -> Option<Vec<u8>> {
+    let page_size = usize::try_from(u32::from_le_bytes(file.get(4..8)?.try_into().ok()?)).ok()?;
+    let num_tables = usize::try_from(u32::from_le_bytes(file.get(8..12)?.try_into().ok()?)).ok()?;
+    let (first, last) = (0..num_tables).find_map(|i| {
+        let at = 28 + i * 16;
+        let entry = file.get(at..at + 16)?;
+        (u32::from_le_bytes(entry[0..4].try_into().ok()?) == page_type).then(|| {
+            (
+                u32::from_le_bytes(entry[8..12].try_into().unwrap_or([0; 4])),
+                u32::from_le_bytes(entry[12..16].try_into().unwrap_or([0; 4])),
+            )
+        })
+    })?;
+    // The index page names the data page; a table on one page has it as
+    // its last page too.
+    let index_at = usize::try_from(first).ok()? * page_size;
+    let data_index = u32::from_le_bytes(file.get(index_at + PAGE_HEADER_LEN + 4..index_at + PAGE_HEADER_LEN + 8)?.try_into().ok()?);
+    if data_index != last || data_index == 0x03ff_ffff {
+        return None;
+    }
+    let data_at = usize::try_from(data_index).ok()? * page_size;
+    let old = file.get(data_at..data_at + page_size)?;
+    let next = u32::from_le_bytes(old.get(0x0c..0x10)?.try_into().ok()?);
+    let sequence = u32::from_le_bytes(old.get(0x10..0x14)?.try_into().ok()?);
+    let mut builder = PageBuilder::new(page_size, data_index, page_type, next);
+    for row in rows {
+        if builder.free_space() < row.len() + 8 {
+            return None;
+        }
+        builder.push_row(row);
+    }
+    let page = builder.finish_with(sequence);
+    let mut out = file.to_vec();
+    out.get_mut(data_at..data_at + page_size)?.copy_from_slice(&page);
+    Some(out)
+}
+

@@ -209,13 +209,16 @@ impl StickSettings {
 
         let tx = conn.unchecked_transaction()?;
         tx.execute("UPDATE property SET deviceName = ?1", params![self.device_name])?;
-        for slot in &self.categories {
+        // rekordbox numbers the visible rows 1.. in their order and gives a
+        // hidden row 0 [OBS 7.2.11, BPM taken off the sort list]; the same
+        // change made here and there then leaves the same rows.
+        for slot in &renumbered(&self.categories) {
             tx.execute(
                 "UPDATE category SET sequenceNo = ?1, isVisible = ?2 WHERE category_id = ?3",
                 params![slot.seq, i64::from(slot.visible), slot.id],
             )?;
         }
-        for slot in &self.sorts {
+        for slot in &renumbered(&self.sorts) {
             let sub = i64::from(self.sub_column == Some(slot.menu_item));
             tx.execute(
                 "UPDATE sort SET sequenceNo = ?1, isVisible = ?2, isSelectedAsSubColumn = ?3
@@ -268,3 +271,46 @@ mod tests {
         assert_eq!(plain("GENRE"), "GENRE");
     }
 }
+
+/// The slots with rekordbox's numbering: visible ones 1.. in their present
+/// order (by sequence, then id, so an unnumbered newcomer lands last),
+/// hidden ones 0.
+#[must_use]
+pub fn renumbered(slots: &[MenuSlot]) -> Vec<MenuSlot> {
+    let mut visible: Vec<&MenuSlot> = slots.iter().filter(|s| s.visible).collect();
+    visible.sort_by_key(|s| (s.seq <= 0, s.seq, s.id));
+    let mut out: Vec<MenuSlot> = slots.iter().map(|s| MenuSlot { seq: 0, ..s.clone() }).collect();
+    for (i, slot) in visible.iter().enumerate() {
+        if let Some(target) = out.iter_mut().find(|o| o.id == slot.id) {
+            target.seq = i64::try_from(i).unwrap_or(0) + 1;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod renumber_tests {
+    use super::*;
+
+    fn slot(id: i64, seq: i64, visible: bool) -> MenuSlot {
+        MenuSlot { id, menu_item: id, name: format!("S{id}"), seq, visible }
+    }
+
+    #[test]
+    fn a_hidden_row_gets_zero_and_the_rest_close_the_gap() {
+        // BPM (id 4) taken off a list numbered 1..7.
+        let slots = vec![slot(0, 1, true), slot(1, 2, true), slot(4, 5, false), slot(5, 6, true), slot(12, 7, true)];
+        let out = renumbered(&slots);
+        let seqs: Vec<(i64, i64)> = out.iter().map(|s| (s.id, s.seq)).collect();
+        assert_eq!(seqs, vec![(0, 1), (1, 2), (4, 0), (5, 3), (12, 4)]);
+    }
+
+    #[test]
+    fn a_newcomer_without_a_number_lands_last() {
+        let slots = vec![slot(2, 0, true), slot(0, 1, true), slot(1, 2, true)];
+        let out = renumbered(&slots);
+        assert_eq!(out.iter().find(|s| s.id == 2).unwrap().seq, 3);
+    }
+}
+

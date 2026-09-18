@@ -301,6 +301,21 @@ pub fn write(mount_point: &Path, settings: &DeviceSettings) -> Result<(), Settin
         if path.is_file() {
             library.write(&path)?;
         }
+        // The colour comments live in both databases; rekordbox renames them
+        // in `export.pdb` too, and a player reads its names from there.
+        let pdb_path = root.join("rekordbox/export.pdb");
+        if let Ok(bytes) = std::fs::read(&pdb_path) {
+            let rows: Vec<Vec<u8>> = library
+                .colors
+                .iter()
+                .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
+                .collect();
+            if let Some(next) = rbl_pdb::build::replace_single_page_table(&bytes, 6, &rows) {
+                if next != bytes {
+                    std::fs::write(&pdb_path, next)?;
+                }
+            }
+        }
     }
     Ok(())
 }

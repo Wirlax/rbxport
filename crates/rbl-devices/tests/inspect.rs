@@ -64,3 +64,28 @@ fn a_stick_with_only_a_manifest_is_not_an_export() {
     // Without export.pdb no player can read it, so there is nothing to report.
     assert_eq!(rbl_devices::inspect(stick.path()), None);
 }
+
+/// Renaming a colour on the device panel renames it for the player too.
+#[test]
+fn a_renamed_colour_reaches_the_pdb_as_well_as_the_library() {
+    let source = tempfile::tempdir().unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let tracks = vec![track(source.path(), 1, "One")];
+    let playlists = vec![SourcePlaylist { name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+    rbl_export::export(stick.path(), &tracks, &playlists).unwrap();
+
+    let mut settings = rbl_devices::settings::read(stick.path());
+    let library = settings.library.as_mut().expect("exportLibrary.db");
+    library.colors[0].name = "Vocal".to_owned();
+    rbl_devices::settings::write(stick.path(), &settings).unwrap();
+
+    let bytes = std::fs::read(stick.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let colours = pdb.named_rows(pdb.table(rbl_pdb::PageType::Colors).unwrap());
+    assert_eq!(colours[0].name, "Vocal");
+    assert_eq!(colours.len(), 8);
+    // The rest of the file is untouched: the tracks still read.
+    assert_eq!(pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap()).len(), 1);
+    assert_eq!(rbl_devices::settings::read(stick.path()).library.unwrap().colors[0].name, "Vocal");
+}
+
