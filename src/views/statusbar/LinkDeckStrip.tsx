@@ -85,10 +85,10 @@ export function LinkDeckStrip({
     };
   }, [explaining]);
 
-  // Nothing to link to: no strip at all. That holds even while LINK is
-  // blocked (rekordbox holds the ports): an empty strip saying "unavailable"
-  // is noise, and Preferences › DJ System spells the reason out.
-  if (!on && others.length === 0) {
+  // Nothing to link to, or LINK cannot be turned on (rekordbox holds the
+  // ports): no strip at all. A LINK button that cannot do anything is
+  // noise, and Preferences › PRO DJ LINK spells the reason out.
+  if (!on && (others.length === 0 || blocked)) {
     return null;
   }
 

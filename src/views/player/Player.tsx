@@ -42,7 +42,6 @@ import {
   pressCue,
   releaseCue,
   beatCountText,
-  clickSeconds,
   headPercent,
   isClick,
   parseBeatGrid,
@@ -63,8 +62,12 @@ import { deckMenu, type DeckAction } from "@/lib/contextMenus";
 import { TempoField } from "./TempoField";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
-import { beatNudgeFor, beatWait, syncTo, tempoFor, type Deck as SyncDeck } from "@/lib/sync";
-import { actionFor, detectPlatform, dispatch, hotCuePad } from "@/lib/shortcuts";
+import {
+  beatNudgeFor, beatWait, MAX_TEMPO, MIN_TEMPO, syncTo, tempoFor, type Deck as SyncDeck,
+} from "@/lib/sync";
+import {
+  beatLoopLength, detectPlatform, dispatchBinding, hotCuePad, matchBinding, memoryCueNumber,
+} from "@/lib/shortcuts";
 import { WaveformDetail } from "./WaveformDetail";
 import { SimplePlayer } from "./SimplePlayer";
 import { JumpMenu } from "./JumpMenu";
@@ -891,15 +894,20 @@ export const Player = memo(function Player({
   /** A LOOP IN pressed and waiting for its OUT, in seconds. */
   const [loopIn, setLoopIn] = useState<number | null>(null);
   const activeLoop = playback.loop?.active ?? false;
+  /** A loop of so many beats from the playhead, on the grid when Q is on. */
+  const loopOfBeats = useCallback((beats: number) => {
+    if (playback.idle) return;
+    const range = beatLoopRange(grid, quantize ? quantizeGrid : null, playback.positionNow() * 1000, beats);
+    if (range) playback.setLoop(range[0] / 1000, range[1] / 1000);
+  }, [playback, grid, quantize, quantizeGrid]);
   const autoLoop = useCallback(() => {
     if (playback.idle) return;
     if (activeLoop) {
       playback.setLoopActive(false);
       return;
     }
-    const range = beatLoopRange(grid, quantize ? quantizeGrid : null, playback.positionNow() * 1000, loopBeats);
-    if (range) playback.setLoop(range[0] / 1000, range[1] / 1000);
-  }, [playback, activeLoop, grid, quantize, quantizeGrid, loopBeats]);
+    loopOfBeats(loopBeats);
+  }, [playback, activeLoop, loopOfBeats, loopBeats]);
   const markLoopIn = useCallback(() => {
     if (playback.idle) return;
     setLoopIn(playback.positionNow());
@@ -997,121 +1005,6 @@ export const Player = memo(function Player({
     playback.toggle();
   }, [playback, synced, quantize, peerSync, grid]);
 
-  /*
-   * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
-   *
-   * Space, C, Q and F10-F12 belong to the deck whenever nothing is being typed
-   * into, as they do in rekordbox. The arrows are the exception: they move the
-   * browser's cursor as readily as the track, so they wait until the deck has
-   * been clicked, which is what turns the playhead red.
-   */
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const action = dispatch(event, platform, event.target as HTMLElement | null);
-      if (action === null) return;
-      if (action === "jumpBack" || action === "jumpForward") {
-        // Left/Right always beat-jump Player 1, wherever the focus is; the
-        // other decks leave the arrows to the browser.
-        if (deck !== "a") return;
-        event.preventDefault();
-        jump(action === "jumpForward" ? 1 : -1);
-        return;
-      }
-      if (action === "loadPlayer1") {
-        // Enter loads the highlighted track onto Player 1. A deck already
-        // playing carries the sound into the new track; a stopped one cues it.
-        if (deck !== "a" || !onLoadSelected || selectedTrackId === null) return;
-        event.preventDefault();
-        if (playback.playing) playback.playWhenLoaded(selectedTrackId);
-        onLoadSelected();
-        return;
-      }
-      if (playback.idle && action !== "showMemory" && action !== "showHotCues"
-        && action !== "showInfo") {
-        return;
-      }
-      switch (action) {
-        case "playPause":
-          // Space scrolls the page otherwise.
-          event.preventDefault();
-          togglePlay();
-          break;
-        case "cue":
-          // Pressed, not tapped. CUE is a held control on the hardware and in
-          // rekordbox: on the cue point it plays for as long as it is down and
-          // snaps back when it comes up, which is how a preview works. Doing
-          // both on the key down made the key the one control that could not
-          // preview — and auto-repeat then ran the pair thirty times a second
-          // for as long as the key was held. `keyup` below lets go.
-          if (!event.repeat) holdCue();
-          break;
-        case "quantize":
-          setQuantize((on) => !on);
-          break;
-        case "showMemory":
-          event.preventDefault();
-          setPanel("memory");
-          break;
-        case "showHotCues":
-          event.preventDefault();
-          setPanel("hotCue");
-          break;
-        case "showInfo":
-          event.preventDefault();
-          setPanel("info");
-          break;
-        case "memoryCue":
-          if (!event.repeat) memory.store();
-          break;
-        case "previousMemoryCue":
-          memory.callPrevious();
-          break;
-        case "nextMemoryCue":
-          memory.callNext();
-          break;
-        case "deleteMemoryCue":
-          if (!event.repeat) memory.deleteAtHead();
-          break;
-        default: {
-          // `1`-`3` are the first three pads and `command + 1`-`3` their
-          // clears; a repeat on a held key is one press, as with M and X.
-          const pad = hotCuePad(action);
-          if (!pad || event.repeat) break;
-          // Command with a digit is a tab switch in a browser; not here.
-          event.preventDefault();
-          if (pad.clear) hot.clear(pad.letter);
-          else hot.press(pad.letter);
-          break;
-        }
-      }
-    };
-    /**
-     * Letting go of CUE.
-     *
-     * Mapped without the typing guard `dispatch` applies, on purpose: a key
-     * released while the search box has the focus still has to end a preview
-     * that is running, and `dropCue` does nothing when none is. The same
-     * reasoning covers the window losing focus altogether — a preview that
-     * outlives the key would play on with nothing able to stop it.
-     */
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (actionFor({ key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
-        shiftKey: event.shiftKey, altKey: event.altKey }, platform) === "cue") {
-        dropCue();
-      }
-    };
-    const onBlur = () => dropCue();
-
-    // `globalThis`, because `window` here is the slice of the track on screen.
-    globalThis.addEventListener("keydown", onKey);
-    globalThis.addEventListener("keyup", onKeyUp);
-    globalThis.addEventListener("blur", onBlur);
-    return () => {
-      globalThis.removeEventListener("keydown", onKey);
-      globalThis.removeEventListener("keyup", onKeyUp);
-      globalThis.removeEventListener("blur", onBlur);
-    };
-  }, [deck, jump, platform, playback, onLoadSelected, selectedTrackId, holdCue, dropCue, memory, hot, togglePlay]);
 
   /**
    * The overview is a scrubber: the pointer goes where you put it, and holding
@@ -1149,20 +1042,17 @@ export const Player = memo(function Player({
 
   /**
    * A press let go where it landed: View › Display Type › Click on the
-   * waveform for PLAY and CUE. The head goes to the music under the pointer;
-   * a stopped deck takes that as its cue point too and plays, the way a
-   * CUE press followed by PLAY would. Off, a click does nothing.
+   * waveform for PLAY and CUE. A stopped deck plays; a playing one pauses
+   * and takes the playhead as its cue point, the way a CUE press does. The
+   * head does not move for a click — a drag is what moves it. Off, a click
+   * does nothing.
    */
-  const clickDetail = (event: React.PointerEvent<HTMLDivElement>, held: { x: number; at: number }) => {
+  const clickDetail = () => {
     if (!viewPrefs.waveformClick || playback.idle || total <= 0) return;
-    const box = event.currentTarget.getBoundingClientRect();
-    if (box.width <= 0) return;
-    const target = clickSeconds(event.clientX - box.left, box.width, held.at, span, total);
-    playback.seek(target);
-    if (!playback.playing) {
-      setCuePoint(target);
-      playback.toggle();
+    if (playback.playing) {
+      setCuePoint(playback.positionNow());
     }
+    playback.toggle();
   };
 
   const dragDetail = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1180,7 +1070,7 @@ export const Player = memo(function Player({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     if (held && event.type === "pointerup" && isClick(event.clientX - held.x, event.clientY - held.y)) {
-      clickDetail(event, held);
+      clickDetail();
     }
   };
 
@@ -1251,6 +1141,179 @@ export const Player = memo(function Player({
     if (synced) onSyncToggle?.();
     playback.setTempo(1);
   }, [synced, onSyncToggle, playback]);
+
+  /*
+   * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
+   *
+   * Space, C, Q and F10-F12 belong to the deck whenever nothing is being typed
+   * into, as they do in rekordbox. The arrows are the exception: they move the
+   * browser's cursor as readily as the track, so they wait until the deck has
+   * been clicked, which is what turns the playhead red.
+   */
+  const keyOverrides = preferences.keyboard.overrides;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, keyOverrides);
+      if (hit?.action === undefined) return;
+      // Player A's keys are Player A's and Player B's, with shift, Player
+      // B's: a row for the other deck is not this one's business.
+      if (hit.deck !== undefined && hit.deck !== deck) return;
+      const action = hit.action;
+      if (action === "jumpBack" || action === "jumpForward") {
+        event.preventDefault();
+        jump(action === "jumpForward" ? 1 : -1);
+        return;
+      }
+      if (action === "loadPlayer1") {
+        // Enter loads the highlighted track onto Player 1. A deck already
+        // playing carries the sound into the new track; a stopped one cues it.
+        if (deck !== "a" || !onLoadSelected || selectedTrackId === null) return;
+        event.preventDefault();
+        if (playback.playing) playback.playWhenLoaded(selectedTrackId);
+        onLoadSelected();
+        return;
+      }
+      if (action === "metronomeSound") {
+        // The engine's click, not the deck's: the next of the three sounds.
+        event.preventDefault();
+        const sound = preferences.audio.metronomeSound;
+        updatePreferences("audio", { metronomeSound: sound === 3 ? 1 : sound === 2 ? 3 : 2 });
+        return;
+      }
+      if (playback.idle && action !== "showMemory" && action !== "showHotCues"
+        && action !== "showInfo") {
+        return;
+      }
+      switch (action) {
+        case "playPause":
+          // Space scrolls the page otherwise.
+          event.preventDefault();
+          togglePlay();
+          break;
+        case "cue":
+          // Pressed, not tapped. CUE is a held control on the hardware and in
+          // rekordbox: on the cue point it plays for as long as it is down and
+          // snaps back when it comes up, which is how a preview works. Doing
+          // both on the key down made the key the one control that could not
+          // preview — and auto-repeat then ran the pair thirty times a second
+          // for as long as the key was held. `keyup` below lets go.
+          if (!event.repeat) holdCue();
+          break;
+        case "quantize":
+          setQuantize((on) => !on);
+          break;
+        case "showMemory":
+          event.preventDefault();
+          setPanel("memory");
+          break;
+        case "showHotCues":
+          event.preventDefault();
+          setPanel("hotCue");
+          break;
+        case "showInfo":
+          event.preventDefault();
+          setPanel("info");
+          break;
+        case "memoryCue":
+          if (!event.repeat) memory.store();
+          break;
+        case "previousMemoryCue":
+          memory.callPrevious();
+          break;
+        case "nextMemoryCue":
+          memory.callNext();
+          break;
+        case "deleteMemoryCue":
+          if (!event.repeat) memory.deleteAtHead();
+          break;
+        case "loopIn":
+          if (!event.repeat) markLoopIn();
+          break;
+        case "loopOut":
+          if (!event.repeat) markLoopOut();
+          break;
+        case "reloop":
+          if (!event.repeat) reloopOrExit();
+          break;
+        case "loopHalf":
+          setLoopBeats((beats) => Math.max(0.25, beats / 2));
+          break;
+        case "loopDouble":
+          event.preventDefault();
+          setLoopBeats((beats) => Math.min(32, beats * 2));
+          break;
+        case "sync":
+          event.preventDefault();
+          if (!event.repeat) beatSync();
+          break;
+        case "masterTempo":
+          event.preventDefault();
+          if (!event.repeat) playback.setMasterTempo(!playback.masterTempo);
+          break;
+        case "tempoReset":
+          event.preventDefault();
+          resetTempo();
+          break;
+        case "bpmUp":
+        case "bpmDown":
+          // A tenth of a percent a press [ASSUME]: the fader's finest step.
+          event.preventDefault();
+          playback.setTempo(Math.min(Math.max(
+            playback.tempo + (action === "bpmUp" ? 0.001 : -0.001), MIN_TEMPO), MAX_TEMPO));
+          break;
+        default: {
+          const beats = beatLoopLength(action);
+          if (beats !== null) {
+            // A beat loop key sets the length and starts the loop, as the
+            // pad does; a held key is one press.
+            if (event.repeat) break;
+            setLoopBeats(beats);
+            loopOfBeats(beats);
+            break;
+          }
+          const number = memoryCueNumber(action);
+          if (number !== null) {
+            memory.callNumber(number);
+            break;
+          }
+          // `1`-`3` are the first three pads and `command + 1`-`3` their
+          // clears; a repeat on a held key is one press, as with M and X.
+          const pad = hotCuePad(action);
+          if (!pad || event.repeat) break;
+          // Command with a digit is a tab switch in a browser; not here.
+          event.preventDefault();
+          if (pad.clear) hot.clear(pad.letter);
+          else hot.press(pad.letter);
+          break;
+        }
+      }
+    };
+    /**
+     * Letting go of CUE.
+     *
+     * Mapped without the typing guard `dispatch` applies, on purpose: a key
+     * released while the search box has the focus still has to end a preview
+     * that is running, and `dropCue` does nothing when none is. The same
+     * reasoning covers the window losing focus altogether — a preview that
+     * outlives the key would play on with nothing able to stop it.
+     */
+    const onKeyUp = (event: KeyboardEvent) => {
+      const hit = matchBinding(event, platform, keyOverrides);
+      if (hit?.action === "cue" && hit.deck === deck) dropCue();
+    };
+    const onBlur = () => dropCue();
+
+    // `globalThis`, because `window` here is the slice of the track on screen.
+    globalThis.addEventListener("keydown", onKey);
+    globalThis.addEventListener("keyup", onKeyUp);
+    globalThis.addEventListener("blur", onBlur);
+    return () => {
+      globalThis.removeEventListener("keydown", onKey);
+      globalThis.removeEventListener("keyup", onKeyUp);
+      globalThis.removeEventListener("blur", onBlur);
+    };
+  }, [deck, jump, platform, playback, onLoadSelected, selectedTrackId, holdCue, dropCue, memory, hot, togglePlay, keyOverrides, markLoopIn, markLoopOut, reloopOrExit, loopOfBeats, beatSync, resetTempo,
+    preferences.audio.metronomeSound, updatePreferences]);
 
   const takesDrop = dragging && Boolean(onDropTrack);
 

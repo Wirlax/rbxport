@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type 
 import {
   PrefAboutIcon, PrefAdvancedIcon, PrefAnalysisIcon, PrefAudioIcon, PrefDjSystemIcon,
   PrefKeyboardIcon, PrefViewIcon,
+  LinkIcon,
 } from "@/components/icons";
 import type { LibrarySummary, Limiter } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
@@ -28,6 +29,7 @@ import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
 import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
 import { KeyboardPane } from "./KeyboardPane";
+import { LinkPane } from "./LinkPane";
 import styles from "./Preferences.module.css";
 import { Button } from "./controls";
 import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
@@ -36,13 +38,14 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  * The sidebar, in the capture's order and wording, less PLAN and CLOUD, and
  * with About at the end — ours, for the version and the update check.
  */
-export type Pane = "view" | "audio" | "analysis" | "djSystem" | "keyboard" | "advanced" | "about";
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "about";
 
 const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: "view", label: "View", Icon: PrefViewIcon },
   { id: "audio", label: "Audio", Icon: PrefAudioIcon },
   { id: "analysis", label: "Analysis", Icon: PrefAnalysisIcon },
   { id: "djSystem", label: "DJ System", Icon: PrefDjSystemIcon },
+  { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
   { id: "about", label: "About", Icon: PrefAboutIcon },
@@ -63,6 +66,9 @@ export interface PreferencesProps {
   limiter: Limiter;
   onLimiterChange: (change: Partial<Limiter>) => void;
   reduction: number;
+  /** The loudest sample the device was given, per channel, for the Audio pane's meters. */
+  peakLeft?: number;
+  peakRight?: number;
   onResetColumns: () => void;
   onResetLayout: () => void;
   onClose: () => void;
@@ -97,8 +103,8 @@ const FIRST_TABS: Tabs = {
 };
 
 export function Preferences({
-  summary, limiter, onLimiterChange, reduction, onResetColumns, onResetLayout, onClose,
-  initialPane = "view", windowed = false,
+  summary, limiter, onLimiterChange, reduction, peakLeft = 0, peakRight = 0, onResetColumns, onResetLayout,
+  onClose, initialPane = "view", windowed = false,
 }: PreferencesProps) {
   const window_ = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -239,11 +245,15 @@ export function Preferences({
                     limiter={limiter}
                     onLimiterChange={onLimiterChange}
                     reduction={reduction}
+                    peakLeft={peakLeft}
+                    peakRight={peakRight}
                   />
                 ) : pane === "analysis" ? (
                   <AnalysisPane tab={tabs.analysis} />
                 ) : pane === "djSystem" ? (
                   <DjSystemPane tab={tabs.djSystem} />
+                ) : pane === "link" ? (
+                  <LinkPane />
                 ) : pane === "keyboard" ? (
                   <KeyboardPane />
                 ) : pane === "about" ? (

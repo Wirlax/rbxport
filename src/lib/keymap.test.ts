@@ -36,7 +36,7 @@ describe("the Export key map", () => {
     const ids = new Set(Object.values(KEYMAP).flat().map((r) => r.id));
     for (const binding of BINDINGS) {
       if (binding.command !== undefined) expect(ids.has(binding.command), binding.label).toBe(true);
-      else expect(binding.pane, `${binding.label} needs a pane`).toBeDefined();
+      else if (!binding.alias) expect(binding.pane, `${binding.label} needs a pane`).toBeDefined();
     }
   });
 
@@ -49,7 +49,13 @@ describe("the Export key map", () => {
   it("the pane's rows are rekordbox's, live where built, plus this app's own", () => {
     const rows = rowsFor("Player A", true);
     expect(rows.find((r) => r.label === "Play/Pause")).toMatchObject({ key: "spacebar", built: true });
-    expect(rows.find((r) => r.label === "Loop In")).toMatchObject({ key: "I", built: false });
+    expect(rows.find((r) => r.label === "Loop In")).toMatchObject({ key: "I", built: true, bindingId: "loopIn" });
+    expect(rows.find((r) => r.label === "Time Mode")).toMatchObject({ key: "T", built: false, bindingId: null });
+    // A key of the person's own is what the row shows, and a key taken
+    // away leaves the row without one.
+    const own = rowsFor("Player A", true, { loopIn: { key: "l", shiftKey: true }, loopOut: { key: "" } });
+    expect(own.find((r) => r.label === "Loop In")).toMatchObject({ key: "shift + L", changed: true });
+    expect(own.find((r) => r.label === "Loop Out")).toMatchObject({ key: null, changed: true });
     const browse = rowsFor("Browse", true);
     expect(browse.find((r) => r.label === "Search for tracks in the track list")?.built).toBe(true);
     expect(browse.find((r) => r.label === "Select All")).toMatchObject({ key: "command + A", built: true });

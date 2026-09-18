@@ -10,6 +10,7 @@
  * the same way: a hand-edited value, a value from a build that spelt a choice
  * differently, or nothing at all must each come back as a working set.
  */
+import type { KeyChord } from "./shortcuts";
 import { toCamelot, type TrafficLightReach } from "./camelot";
 import type {
   KeyDisplay, MenuSlot, OverviewWaveform, WaveformColor, WaveformPosition,
@@ -152,6 +153,9 @@ export interface DjSystemPreferences {
   linkInterface: string | null;
 }
 
+export const UPDATE_FREQUENCIES = ["start", "daily", "weekly"] as const;
+export type UpdateFrequency = (typeof UPDATE_FREQUENCIES)[number];
+
 export interface AdvancedPreferences {
   /** Auto Relocate Search Folders › Specified user folders. */
   relocateFolders: string[];
@@ -165,8 +169,15 @@ export interface AdvancedPreferences {
   quantizeBeat: QuantizeBeat;
   /** Ask the download server for a newer version when the app starts. */
   checkUpdates: boolean;
+  /** How often that automatic check runs: every start, once a day, once a week. */
+  updateFrequency: UpdateFrequency;
   /** A track played for a minute goes on today's history and its count goes up. */
   recordHistory: boolean;
+}
+
+/** Keyboard: the keys changed from the preset, by binding id (`shortcuts.ts`). */
+export interface KeyboardPreferences {
+  overrides: Record<string, KeyChord>;
 }
 
 export interface Preferences {
@@ -175,6 +186,7 @@ export interface Preferences {
   analysis: AnalysisPreferences;
   djSystem: DjSystemPreferences;
   advanced: AdvancedPreferences;
+  keyboard: KeyboardPreferences;
 }
 
 export type PreferencePane = keyof Preferences;
@@ -235,7 +247,11 @@ export const DEFAULT_PREFERENCES: Preferences = {
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
     checkUpdates: true,
+    updateFrequency: "daily",
     recordHistory: true,
+  },
+  keyboard: {
+    overrides: {},
   },
 };
 
@@ -245,6 +261,23 @@ export function formatKey(key: string, display: KeyDisplay): string {
   // A key the wheel does not know — a blank, "Unknown", a typo — is shown as
   // it is rather than hidden.
   return toCamelot(key) || key;
+}
+
+/** The stored key changes that are chords: a key, and booleans for the rest. */
+function chords(value: unknown): Record<string, KeyChord> {
+  const out: Record<string, KeyChord> = {};
+  if (typeof value !== "object" || value === null) return out;
+  for (const [id, raw] of Object.entries(value)) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const chord = raw as Partial<KeyChord>;
+    if (typeof chord.key !== "string" || chord.key.length > 32) continue;
+    const kept: KeyChord = { key: chord.key };
+    if (chord.metaKey === true) kept.metaKey = true;
+    if (chord.shiftKey === true) kept.shiftKey = true;
+    if (chord.altKey === true) kept.altKey = true;
+    out[id] = kept;
+  }
+  return out;
 }
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -309,6 +342,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const analysis = part<AnalysisPreferences>(raw.analysis);
   const dj = part<DjSystemPreferences>(raw.djSystem);
   const advanced = part<AdvancedPreferences>(raw.advanced);
+  const keyboard = part<KeyboardPreferences>(raw.keyboard);
   const d = DEFAULT_PREFERENCES;
   return {
     view: {
@@ -362,6 +396,10 @@ export function sanitisePreferences(value: unknown): Preferences {
       syncDoubleHalf: bool(advanced.syncDoubleHalf, d.advanced.syncDoubleHalf),
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),
       checkUpdates: bool(advanced.checkUpdates, d.advanced.checkUpdates),
+      updateFrequency: oneOf(advanced.updateFrequency, UPDATE_FREQUENCIES, d.advanced.updateFrequency),
+    },
+    keyboard: {
+      overrides: chords(keyboard.overrides),
     },
   };
 }

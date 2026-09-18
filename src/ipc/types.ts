@@ -308,6 +308,8 @@ export interface Backend {
    */
   trackVocals(trackId: string): Promise<Uint8Array>;
 
+  /** Opens an https address in the person's browser. */
+  openUrl(url: string): Promise<void>;
   /** The backups this app has taken, newest first. */
   listBackups(): Promise<Backup[]>;
   /** Copies the library aside now; resolves to where the copy went. */

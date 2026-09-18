@@ -27,6 +27,11 @@ function memoryCues(cues: readonly Cue[]): Cue[] {
   return cues.filter((cue) => cue.memory).sort((a, b) => a.positionMs - b.positionMs);
 }
 
+/** The nth memory cue from the start of the track, one-based, or `null`. */
+export function memoryCueNumber(cues: readonly Cue[], n: number): Cue | null {
+  return memoryCues(cues)[n - 1] ?? null;
+}
+
 /**
  * The first memory cue after the playhead, or `null` when there is none.
  *

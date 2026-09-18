@@ -7,7 +7,7 @@
  * CUE Analysis is not here either; analysis sets no cues.
  */
 import { usePreferencesContext } from "@/store/usePreferences";
-import { Note, Section, Sub, Toggle } from "./controls";
+import { Section, Sub, Toggle } from "./controls";
 
 export type AnalysisTab = "track";
 
@@ -24,11 +24,6 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
       {/* rekordbox's switch is labelled Disable and is off by default, so on
           means no auto analysis. Kept that way: the wording is the capture's. */}
       <Toggle label="Disable" nested checked={!auto} onChange={(off) => update("analysis", { auto: !off })} />
-      <Note>
-        {auto
-          ? "A track added to the library is analysed straight away, for its tempo, grid and key."
-          : "A track added to the library waits until it is analysed by hand."}
-      </Note>
     </Section>
   );
 }

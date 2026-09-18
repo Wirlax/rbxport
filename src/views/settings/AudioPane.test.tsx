@@ -23,10 +23,17 @@ let host: HTMLDivElement;
 let root: Root;
 let onLimiterChange: ReturnType<typeof vi.fn>;
 
-function mount(limiter: Limiter, reduction = 0) {
+function mount(limiter: Limiter, reduction = 0, peakLeft = 0, peakRight = 0) {
   act(() => {
     root.render(
-      <AudioPane tab="configuration" limiter={limiter} onLimiterChange={onLimiterChange} reduction={reduction} />,
+      <AudioPane
+        tab="configuration"
+        limiter={limiter}
+        onLimiterChange={onLimiterChange}
+        reduction={reduction}
+        peakLeft={peakLeft}
+        peakRight={peakRight}
+      />,
     );
   });
 }
@@ -114,15 +121,27 @@ describe("AudioPane's limiter controls", () => {
     expect(onLimiterChange).toHaveBeenCalledWith({ enabled: true });
   });
 
-  it("says how far it is turning the sum down only while it is on and doing so", async () => {
-    mount(DEFAULT_LIMITER, 2.46);
+  it("meters the output per channel and the reduction, each with its figure", async () => {
+    mount(DEFAULT_LIMITER, 2.46, 0.5, 1);
     await settle();
-    expect(host.textContent).toContain("Limiter — turning down 2.5 dB");
+    const meters = host.querySelectorAll<HTMLElement>("[role=meter]");
+    expect([...meters].map((meter) => meter.getAttribute("aria-label"))).toEqual([
+      "Output L",
+      "Output R",
+      "Reduction L",
+      "Reduction R",
+    ]);
+    // Half is six decibels down: nine tenths of a sixty-decibel scale.
+    expect(meters[0]?.getAttribute("aria-valuenow")).toBe("90");
+    expect(meters[1]?.getAttribute("aria-valuenow")).toBe("100");
+    expect(host.textContent).toContain("-6.0 dB");
+    expect(host.textContent).toContain("0.0 dB");
+    expect(host.textContent).toContain("−2.5 dB");
+    // Reduction is on a twelve-decibel scale.
+    expect(meters[2]?.getAttribute("aria-valuenow")).toBe("21");
 
-    mount(DEFAULT_LIMITER, 0.05);
-    expect(host.textContent).not.toContain("turning down");
-
-    mount({ ...DEFAULT_LIMITER, enabled: false }, 2.46);
-    expect(host.textContent).not.toContain("turning down");
+    mount(DEFAULT_LIMITER, 0);
+    expect(host.textContent).toContain("−∞ dB");
+    expect(host.textContent).toContain("−0.0 dB");
   });
 });

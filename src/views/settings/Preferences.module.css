@@ -25,7 +25,6 @@
   color: var(--c-icon-on);
   font-size: var(--f-size-pref-label);
 }
-.window:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
 /* As a window of its own the shell draws the chrome, and this fills it. */
 .window[data-windowed] {
   width: 100vw;
@@ -414,6 +413,8 @@
 .actions .button { flex: none; }
 /* A button that heads a section keeps a row's pitch above the control below. */
 .actions[data-spaced] { margin-bottom: var(--s-pref-button-gap); }
+/* A button under a switch keeps the same gap above it. */
+.actions[data-gap-above] { margin-top: var(--s-pref-button-gap); }
 
 /* Facts: the library's counts. */
 .facts {
@@ -493,6 +494,9 @@
 .keyBadge {
   display: grid;
   place-items: center;
+  border: 0;
+  color: inherit;
+  font: inherit;
   min-width: var(--s-pref-key-badge-w);
   height: var(--s-pref-key-badge-h);
   padding: 0 8px;
@@ -501,6 +505,12 @@
   background: var(--c-pref-key-badge);
   font-size: var(--f-size-pref-badge);
 }
+/* A badge that can be clicked to change the key, one waiting for it, and
+   one showing a key of the person's own rather than the preset's. */
+button.keyBadge { cursor: default; }
+button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
+.keyBadge[data-listening] { background: var(--c-pad-active); color: var(--c-icon-on); }
+.keyBadge[data-changed] { color: var(--c-icon-on); }
 
 /* The device tabs' list pair, borrowed for DJ System › Category and Sort.
    In this window the lists are black on the section's grey and the headings
@@ -510,3 +520,56 @@
   --c-panel: var(--c-black);
   --c-device-label: var(--c-icon-on);
 }
+
+/* About: the name large, the version beside it, prose in the pane's own
+   type, the links as the pane's buttons, and the sign-off centred below. */
+.aboutHead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.aboutName { font-size: var(--f-size-pref-title); font-weight: 700; }
+.aboutVersion { color: var(--c-text-dim); font-variant-numeric: tabular-nums; }
+.aboutLine { margin: 0 0 10px; max-width: 560px; line-height: 1.5; color: var(--c-text); }
+.aboutLinks { display: flex; gap: 8px; margin-top: 4px; }
+.aboutLink {
+  border: 0;
+  border-radius: 2px;
+  padding: 5px 12px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  cursor: default;
+}
+.aboutLink:hover { background: var(--c-pad-active); color: var(--c-icon-on); }
+.aboutFoot { margin: 16px 0 0; text-align: center; color: var(--c-text-dim); }
+
+/* The Audio pane's meters: a channel letter, the bar, and its figure. */
+.meters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 10px calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
+}
+.meterRow { display: flex; align-items: center; gap: 8px; }
+.meterLabel { width: 12px; color: var(--c-device-label); font-size: var(--f-size-xs); font-weight: 700; }
+.meterBar {
+  flex: 1;
+  max-width: 320px;
+  height: 8px;
+  background: var(--c-meter-track);
+  overflow: hidden;
+}
+.meterFill { display: block; height: 100%; background: var(--c-meter-fill); }
+.meterFill[data-vu] {
+  background: linear-gradient(
+    to right,
+    var(--c-meter-green) 0%,
+    var(--c-meter-green) 70%,
+    var(--c-meter-yellow) 70%,
+    var(--c-meter-yellow) 90%,
+    var(--c-meter-red) 90%,
+    var(--c-meter-red) 100%
+  );
+  background-size: 320px 100%;
+}
+.meterFill[data-reduction] { background: var(--c-meter-red); }
+.meterDb { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; color: var(--c-text-dim); font-size: var(--f-size-xs); }

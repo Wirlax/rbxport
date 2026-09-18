@@ -897,7 +897,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let clockAt = 0;
 
   /** The master level, which a browser can hold even with nothing to apply it to. */
-  let master = 1;
+  // −1 dB, the knob at 10: what the engine starts at.
+  let master = 0.891_250_9;
 
   /** The master limiter, likewise. */
   let limiter: Limiter = { enabled: true, ceilingDb: -0.3, releaseMs: 100 };
@@ -1286,6 +1287,11 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device }))),
     onExportProgress: () => () => undefined,
+    // A browser opens the address itself.
+    openUrl: (url) => {
+      window.open(url, "_blank", "noopener");
+      return wait(undefined);
+    },
     // Two backups, as a session that has edited twice would have.
     listBackups: () =>
       wait([

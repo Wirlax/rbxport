@@ -20,12 +20,15 @@
   font-size: var(--f-size-xs);
   font-weight: 400;
 }
+/* Blue, as the lit controls are, so it reads as a state rather than a label;
+   hovering it says why. */
 .readOnly {
   padding: 2px 6px;
   border-radius: 2px;
-  background: var(--c-raised);
+  background: var(--c-pad-active);
   color: var(--c-icon-on);
   font-size: var(--f-size-xs);
+  cursor: default;
 }
 /* LINK on, drawn as the read-only pill is: a state of the library, said once. */
 .link {

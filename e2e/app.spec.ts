@@ -280,16 +280,31 @@ test("the level knob turns, and both meters are the measured size", async ({ pag
   await page.goto("/");
   const bar = page.getByRole("banner");
   const knob = bar.getByRole("slider", { name: "Master level" });
-  await expect(knob).toHaveAttribute("aria-valuenow", "100");
+  // The knob reads 0 to 10, and starts at 10: a decibel under full.
+  await expect(knob).toHaveAttribute("aria-valuenow", "10");
 
-  // Dragged, not clicked, and up is louder — so a drag down turns it down.
+  // Dragged, not clicked, and up is louder — so a drag down turns it down,
+  // and the reading shows while it turns.
   const box = await knob.boundingBox();
   await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9);
   await page.mouse.down();
   await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 69, { steps: 6 });
+  await expect(knob).toHaveText(/^[0-9]$/);
   await page.mouse.up();
+  await expect(knob).toHaveText("");
   await expect.poll(async () => Number(await knob.getAttribute("aria-valuenow")))
-    .toBeLessThan(100);
+    .toBeLessThan(10);
+
+  // Pulled past 10 the knob holds there; keep pulling for a moment and it
+  // lets go to 11, full level.
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9);
+  await page.mouse.down();
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) - 200, { steps: 6 });
+  await expect(knob).toHaveAttribute("aria-valuenow", "10");
+  await page.waitForTimeout(600);
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) - 201);
+  await expect(knob).toHaveAttribute("aria-valuenow", "11");
+  await page.mouse.up();
 
   // The meters are the capture's: 80pt over two channels, and 35pt alone.
   const vu = await bar.getByRole("meter", { name: "Master output L" }).boundingBox();
@@ -1121,8 +1136,6 @@ test("settings can check for missing files", async ({ page }) => {
 
   const section = page.getByRole("region", { name: "Missing files" });
   await expect(section.getByRole("button", { name: /check for missing files/i })).toBeVisible();
-  // Looking must not change anything, so it says so before you press it.
-  await expect(section).toContainText("Nothing is changed by looking");
 
   await section.getByRole("button", { name: /check for missing files/i }).click();
   // The mock has no files behind its rows, so nothing can be missing.
@@ -1156,9 +1169,10 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
 
   const section = dialog.getByRole("region", { name: "Track Analysis" });
   // On by default, as rekordbox ships; the switch is its "Disable".
-  await expect(section).toContainText("analysed straight away");
-  await section.getByRole("switch", { name: "Disable" }).click();
-  await expect(section).toContainText("analysed by hand");
+  const disable = section.getByRole("switch", { name: "Disable" });
+  await expect(disable).not.toBeChecked();
+  await disable.click();
+  await expect(disable).toBeChecked();
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
@@ -1214,7 +1228,7 @@ test("analysing a selection reports progress and can be stopped", async ({ page 
   const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
   await rows.nth(2).click();
   await rows.nth(9).click({ modifiers: ["Shift"] });
-  await page.keyboard.press("a");
+  await page.keyboard.press("Shift+Meta+A");
 
   const status = page.getByRole("contentinfo");
   await expect(status).toContainText(/Analyzing: \d+ of \d+/);
@@ -1231,7 +1245,7 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
   const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
   await rows.nth(0).click();
   await rows.nth(14).click({ modifiers: ["Shift"] });
-  await page.keyboard.press("a");
+  await page.keyboard.press("Shift+Meta+A");
 
   const status = page.getByRole("contentinfo");
   await expect(status).toContainText("failed", { timeout: 15_000 });
@@ -1243,7 +1257,6 @@ test("settings has the LINK switch, and says why a browser cannot turn it on", a
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Preferences" });
-  await dialog.getByRole("tab", { name: "DJ System" }).click();
   await dialog.getByRole("tab", { name: "PRO DJ LINK" }).click();
 
   const section = page.getByRole("region", { name: "Link" });
@@ -1251,7 +1264,8 @@ test("settings has the LINK switch, and says why a browser cannot turn it on", a
 
   await section.getByRole("button", { name: "Connect to PRO DJ LINK" }).click();
   await expect(section).toContainText("browser has no access to the network");
-  await expect(section.getByRole("button", { name: "Connect to PRO DJ LINK" })).toBeVisible();
+  // A LINK that cannot be turned on offers no button; the reason stands in its place.
+  await expect(section.getByRole("button", { name: "Connect to PRO DJ LINK" })).toHaveCount(0);
 });
 
 test("the detail waveform shows a window, not the whole track again", async ({ page }) => {

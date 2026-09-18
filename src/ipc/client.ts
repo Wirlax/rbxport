@@ -152,6 +152,7 @@ async function realBackend(): Promise<Backend> {
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
     listBackups: () => invoke<Backup[]>("list_backups"),
+    openUrl: (url) => invoke<void>("open_url", { url }),
     backUpLibrary: () => invoke<string>("back_up_library"),
     restoreBackup: (path) => invoke<number>("restore_backup", { path }),
     confirm: async (message) => {

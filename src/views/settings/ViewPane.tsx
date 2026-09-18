@@ -9,7 +9,7 @@ import { BROWSE_SCALE_STEPS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import {
-  Button, Checkbox, Note, Radios, Section, Select, Separator, Slider, Sub, Toggle,
+  Button, Checkbox, Radios, Section, Select, Separator, Slider, Sub, Toggle,
 } from "./controls";
 
 export type ViewTab = "display" | "layout" | "color";
@@ -45,7 +45,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
             ]}
             onChange={() => {}}
           />
-          <Note>The light theme is not built; the window is dark.</Note>
         </Section>
         <Section title="Waveform color">
           {/* The three palettes rekordbox 7 draws, from the analysis files
@@ -72,10 +71,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
             ]}
             onChange={(hotCueColor) => set({ hotCueColor })}
           />
-          <Note>
-            COLORFUL draws each hot cue in the colour it was given; CDJ draws
-            every one in the green a CDJ shows them in.
-          </Note>
         </Section>
       </>
     );
@@ -144,10 +139,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
             <Button onClick={onResetColumns}>Reset columns</Button>
             <Button onClick={onResetLayout}>Reset panel sizes</Button>
           </div>
-          <Note>
-            Columns, their order and widths, and the tree&rsquo;s width are
-            remembered between sessions.
-          </Note>
         </Section>
       </>
     );
@@ -232,18 +223,13 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
         />
       </Section>
       <Section title="Click on the waveform for PLAY and CUE">
-        {/* rekordbox's switch is the negative: on means off. Stored the way
-            the deck reads it, and drawn the way the window does. */}
+        {/* On to enable: a click on the enlarged waveform plays a stopped
+            deck, and pauses a playing one and sets the cue at the playhead. */}
         <Toggle
-          label="Disable"
-          checked={!view.waveformClick}
-          onChange={(disabled) => set({ waveformClick: !disabled })}
+          label="Enable"
+          checked={view.waveformClick}
+          onChange={(waveformClick) => set({ waveformClick })}
         />
-        <Note>
-          A click on the enlarged waveform moves the playhead there, sets the
-          cue there when the deck is stopped, and plays. Disabled, a click
-          does nothing; dragging still moves the record.
-        </Note>
       </Section>
       <Section title="Traffic Light">
         {/* rekordbox's own reaches, from its tooltip: for a track in 2A,
@@ -260,10 +246,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           ]}
           onChange={(trafficLight) => set({ trafficLight })}
         />
-        <Note>
-          Rows whose key goes with the loaded track&rsquo;s are lit green in
-          the browser; the MASTER menu above the track list picks which deck.
-        </Note>
       </Section>
     </>
   );

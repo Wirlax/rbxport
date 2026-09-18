@@ -161,7 +161,9 @@ pub struct Master {
 impl Default for Master {
     fn default() -> Self {
         Self {
-            gain: AtomicU32::new(1.0_f32.to_bits()),
+            // The knob's 10: a decibel under full, the headroom every output
+            // is given by default. 11 is full, past the detent.
+            gain: AtomicU32::new(DEFAULT_MASTER_GAIN.to_bits()),
             peak_left: AtomicU32::new(0),
             peak_right: AtomicU32::new(0),
             reduction: AtomicU32::new(1.0_f32.to_bits()),
@@ -169,6 +171,9 @@ impl Default for Master {
         }
     }
 }
+
+/// The master level the engine starts at: −1 dB, which is the knob at 10.
+pub const DEFAULT_MASTER_GAIN: f32 = 0.891_250_9;
 
 impl Master {
     pub fn gain(&self) -> f32 {
@@ -328,8 +333,12 @@ impl Engine {
         // Built at the first callback with the channels, for the same reason:
         // its lookahead is a number of frames, and that needs the rate.
         let mut limit: Option<Limiter> = None;
-        // One buffer per deck, allocated here rather than in the callback.
+        // One buffer per deck, allocated here rather than in the callback,
+        // and one for the metronome's clicks, which join after the master
+        // level: the click is a reference, and turning the music down must
+        // not turn it down too.
         let mut scratch = vec![0.0_f32; MIX_FRAMES * 2];
+        let mut click_scratch = vec![0.0_f32; MIX_FRAMES * 2];
         let mut channels: Option<[Channel; 2]> = None;
         // The level a callback is given is one number for the whole buffer, so
         // a hand on the fader arrives as a staircase eleven milliseconds wide.
@@ -345,8 +354,12 @@ impl Engine {
             let (fade_a, fade_b) = strip.fader();
             // Each deck through its own strip and then summed, which is what a
             // mixer is: a per-channel EQ applied to the sum would be one EQ.
+            let target = mixing.gain();
+            let level = level.get_or_insert_with(|| Smoothed::new(target, mixing.rate()));
             for chunk in out.chunks_mut(MIX_FRAMES * 2) {
                 let Some(buffer) = scratch.get_mut(..chunk.len()) else { continue };
+                let Some(click_buffer) = click_scratch.get_mut(..chunk.len()) else { continue };
+                click_buffer.fill(0.0);
                 for (i, (reader, channel)) in
                     readers.iter_mut().zip(channels.iter_mut()).enumerate()
                 {
@@ -362,20 +375,20 @@ impl Engine {
                     // beats too, and nobody wants it clicking.
                     if reader.clock.playing() && !reader.clock.scrubbing() {
                         if let (Some(metro), Some(voice)) = (clicking.get(i), voices.get_mut(i)) {
-                            voice.render(metro, before, after, buffer, rate);
+                            voice.render(metro, before, after, click_buffer, rate);
                         }
                     }
                     for (sample, add) in chunk.iter_mut().zip(buffer.iter()) {
                         *sample += *add;
                     }
                 }
-            }
-            let target = mixing.gain();
-            let level = level.get_or_insert_with(|| Smoothed::new(target, mixing.rate()));
-            for frame in out.chunks_exact_mut(2) {
-                let gain = level.step(target);
-                for sample in frame.iter_mut() {
-                    *sample *= gain;
+                // The master level over the music, then the clicks on top at
+                // their own volume, whatever the knob says.
+                for (frame, click) in chunk.chunks_exact_mut(2).zip(click_buffer.chunks_exact(2)) {
+                    let gain = level.step(target);
+                    for (sample, add) in frame.iter_mut().zip(click.iter()) {
+                        *sample = *sample * gain + *add;
+                    }
                 }
             }
             // Two decks at full level sum past 1.0. The limiter sits after
@@ -968,9 +981,10 @@ mod master_tests {
     use super::*;
 
     #[test]
-    fn a_new_master_is_open_and_silent() {
+    fn a_new_master_is_a_decibel_under_full_and_silent() {
         let master = Master::default();
-        assert_eq!(master.gain(), 1.0);
+        assert_eq!(master.gain(), DEFAULT_MASTER_GAIN);
+        assert!((20.0 * master.gain().log10() + 1.0).abs() < 0.001);
         assert_eq!(master.peaks(), (0.0, 0.0));
     }
 

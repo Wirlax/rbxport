@@ -69,6 +69,8 @@ export function PreferencesWindow() {
         limiter={limiter.limiter}
         onLimiterChange={limiter.set}
         reduction={master.reduction}
+        peakLeft={master.peakLeft}
+        peakRight={master.peakRight}
         initialPane={pane}
         onResetColumns={() => ask("columns")}
         onResetLayout={() => ask("layout")}

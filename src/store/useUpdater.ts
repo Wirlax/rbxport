@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import type { UpdateFrequency } from "@/lib/preferences";
 import type { UpdateCheck, UpdateProgress } from "@/ipc/types";
 
 /** How long after launch the automatic check runs: after the library, not before it. */
@@ -49,7 +50,40 @@ function reason(error: unknown): string {
   return "An error occurred. Please try later.";
 }
 
-export function useUpdater(autoCheck: boolean): Updater {
+/** Where the last automatic check's time is kept, so the frequency holds across launches. */
+const LAST_CHECK_KEY = "rbxport.updates.lastCheck";
+
+/** The shortest gap between automatic checks for each frequency, in milliseconds. */
+const CHECK_GAP_MS: Record<UpdateFrequency, number> = {
+  start: 0,
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+};
+
+/** Whether an automatic check is due, by the last one's time. */
+export function checkDue(frequency: UpdateFrequency, lastCheckMs: number | null, nowMs: number): boolean {
+  if (frequency === "start" || lastCheckMs === null || !Number.isFinite(lastCheckMs)) return true;
+  return nowMs - lastCheckMs >= CHECK_GAP_MS[frequency];
+}
+
+function lastCheck(): number | null {
+  try {
+    const stored = localStorage.getItem(LAST_CHECK_KEY);
+    return stored === null ? null : Number.parseInt(stored, 10);
+  } catch {
+    return null;
+  }
+}
+
+function noteCheck(nowMs: number): void {
+  try {
+    localStorage.setItem(LAST_CHECK_KEY, String(nowMs));
+  } catch {
+    // Storage refused: the next launch checks again, which is the safe side.
+  }
+}
+
+export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "start"): Updater {
   const [state, setState] = useState<UpdaterState>({ phase: "idle" });
   const [open, setOpen] = useState(false);
   // The state outside a render, so an action can read it without a side
@@ -128,9 +162,13 @@ export function useUpdater(autoCheck: boolean): Updater {
   useEffect(() => {
     if (!autoCheck || checkedOnStart.current) return;
     checkedOnStart.current = true;
-    const timer = setTimeout(() => check(false), AUTO_CHECK_AFTER_MS);
+    if (!checkDue(frequency, lastCheck(), Date.now())) return;
+    const timer = setTimeout(() => {
+      noteCheck(Date.now());
+      check(false);
+    }, AUTO_CHECK_AFTER_MS);
     return () => clearTimeout(timer);
-  }, [autoCheck, check]);
+  }, [autoCheck, frequency, check]);
 
   const dismiss = useCallback(() => setOpen(false), []);
 

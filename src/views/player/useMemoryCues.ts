@@ -16,7 +16,7 @@
 import { useCallback } from "react";
 
 import type { Cue } from "@/ipc/types";
-import { memoryCueAt, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
+import { memoryCueAt, memoryCueNumber, nextMemoryCue, previousMemoryCue } from "@/lib/cues";
 import { useCueWriter } from "./useCueWriter";
 
 export { READ_ONLY_REASON } from "./useCueWriter";
@@ -47,6 +47,8 @@ export interface MemoryCueActions {
   callPrevious: () => void;
   /** `Call Next Memory Cue`. */
   callNext: () => void;
+  /** `Memory Cue 1` to `10`: the nth from the start of the track, one-based. */
+  callNumber: (n: number) => void;
   /** `Delete Memory Cue`: the one under the playhead, if any. */
   deleteAtHead: () => void;
   /** The ✕ on a list row. */
@@ -99,6 +101,14 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
     call(nextMemoryCue(cues, positionSeconds() * 1000));
   }, [trackId, cues, positionSeconds, call]);
 
+  const callNumber = useCallback(
+    (n: number) => {
+      if (trackId === null) return;
+      call(memoryCueNumber(cues, n));
+    },
+    [trackId, cues, call],
+  );
+
   const remove = useCallback(
     (cue: Cue) => {
       // An empty id is a cue the backend cannot address; the row shows it
@@ -114,5 +124,5 @@ export function useMemoryCues(deck: MemoryCueDeck): MemoryCueActions {
     if (cue) remove(cue);
   }, [cues, positionSeconds, remove]);
 
-  return { canEdit, store, callPrevious, callNext, deleteAtHead, remove };
+  return { canEdit, store, callPrevious, callNext, callNumber, deleteAtHead, remove };
 }

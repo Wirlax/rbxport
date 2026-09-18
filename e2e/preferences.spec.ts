@@ -106,7 +106,7 @@ test("the Beat Count Display counts bars, or down to the next memory cue", async
   await expect(bars).toHaveText(/^\d+\.\dBars$/);
 });
 
-test("a click on the enlarged waveform cues and plays, unless disabled", async ({ page }) => {
+test("a click on the enlarged waveform plays, and again pauses and sets the cue, unless off", async ({ page }) => {
   await open(page);
   await load(page);
   const detail = page.getByTestId("player-detail");
@@ -115,15 +115,18 @@ test("a click on the enlarged waveform cues and plays, unless disabled", async (
   const play = player(page).getByRole("button", { name: "Play", exact: true });
   const pause = player(page).getByRole("button", { name: "Pause", exact: true });
 
-  // A stopped deck: the click sets the cue there and starts playing.
+  // A stopped deck: the click plays it from where the head is.
   await detail.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
   await expect(pause).toBeVisible();
+  // A second click, once the head has moved, pauses it and takes the head
+  // as the cue point.
   await expect(page.getByTestId("player-overview")).not.toHaveAttribute("aria-valuenow", "0");
-  await pause.click();
+  await detail.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
   await expect(play).toBeVisible();
+  await expect(page.getByTestId("player-overview")).not.toHaveAttribute("aria-valuenow", "0");
 
   const dialog = await prefs(page);
-  await dialog.getByRole("switch", { name: "Disable" }).click();
+  await dialog.getByRole("switch", { name: "Enable" }).click();
   await page.keyboard.press("Escape");
   const before = await page.getByTestId("player-overview").getAttribute("aria-valuenow");
   await detail.click({ position: { x: box.width * 0.25, y: box.height / 2 } });
@@ -170,18 +173,30 @@ test("Keyboard lists rekordbox's ten groups, with the unbuilt rows greyed", asyn
   await expect(groups).toHaveText([
     "Browse", "Player A", "Player B", "General", "File", "View", "Track", "Playlist", "Help", "Link Export",
   ]);
-  // Every group opens closed; Player A opened: Play/Pause works here, Loop In
-  // is rekordbox's alone.
+  // Every group opens closed; Player A opened: Play/Pause works here, Time
+  // Mode is rekordbox's alone.
   await expect(dialog.locator('[class*="keyRow"]')).toHaveCount(0);
   await dialog.getByRole("button", { name: "Player A" }).click();
   const playPause = dialog.locator('[class*="keyRow"]', { hasText: "Play/Pause" }).first();
   await expect(playPause).toContainText("spacebar");
   await expect(playPause).not.toHaveAttribute("data-dim");
+  const timeMode = dialog.locator('[class*="keyRow"]', { hasText: "Time Mode" }).first();
+  await expect(timeMode).toContainText(/^Time ModeT$/);
+  await expect(timeMode).toHaveAttribute("data-dim", "");
+  // A built row's key is a button: click it, press a key, and that is the key.
   const loopIn = dialog.locator('[class*="keyRow"]', { hasText: "Loop In" }).first();
-  await expect(loopIn).toContainText(/^Loop InI$/);
-  await expect(loopIn).toHaveAttribute("data-dim", "");
+  await expect(loopIn).not.toHaveAttribute("data-dim");
+  await loopIn.getByRole("button", { name: "Loop In key" }).click();
+  await page.keyboard.press("Shift+L");
+  await expect(loopIn.getByRole("button", { name: "Loop In key" })).toHaveText("shift + L");
+  // Player B's shift + L was Memory Cue 9; the key moved, so that row lost it.
+  await dialog.getByRole("button", { name: "Player B" }).click();
+  const cue9 = dialog.locator('[class*="keyRow"]', { hasText: "Memory Cue 9" }).nth(1);
+  await expect(cue9.getByRole("button", { name: "Memory Cue 9 key" })).toHaveText("+");
+  await dialog.getByRole("button", { name: "Reset to the preset" }).click();
+  await expect(loopIn.getByRole("button", { name: "Loop In key" })).toHaveText("I");
   // A row rekordbox lists unbound has no key.
-  await expect(dialog.locator('[class*="keyRow"]', { hasText: "1/64 Beat Loop" })).toHaveText("1/64 Beat Loop");
+  await expect(dialog.locator('[class*="keyRow"]', { hasText: "1/64 Beat Loop" }).first()).toHaveText("1/64 Beat Loop");
 
   await dialog.getByRole("button", { name: "Link Export" }).click();
   await expect(dialog.getByText("Nothing is bound here in the Export preset.")).toBeVisible();

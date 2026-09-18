@@ -47,10 +47,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             checked={advanced.protectLibrary}
             onChange={(protectLibrary) => set({ protectLibrary })}
           />
-          <Note>
-            Every edit is refused while this is on — ratings, comments, cues,
-            playlists — as they already are while rekordbox is running.
-          </Note>
         </Section>
         <Section title="Edit Library">
           <Toggle
@@ -58,11 +54,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             checked={advanced.doubleClickToEdit}
             onChange={(doubleClickToEdit) => set({ doubleClickToEdit })}
           />
-          <Note>
-            {advanced.doubleClickToEdit
-              ? "A comment is edited by double-clicking it; a double-click on the rest of the row loads the track."
-              : "A comment is edited by clicking it on a row that is already selected."}
-          </Note>
         </Section>
       </>
     );
@@ -77,10 +68,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             checked={advanced.recordHistory}
             onChange={(recordHistory) => set({ recordHistory })}
           />
-          <Note>
-            A track played for a minute goes on today&rsquo;s history session
-            and its DJ Play Count goes up, as rekordbox records it.
-          </Note>
         </Section>
         <Section title="QUANTIZE BEAT VALUE">
           <Select
@@ -115,7 +102,19 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             checked={advanced.checkUpdates}
             onChange={(checkUpdates) => set({ checkUpdates })}
           />
-          <div className={styles.actions}>
+          <Radios
+            label="How often"
+            nested
+            dim={!advanced.checkUpdates}
+            value={advanced.updateFrequency}
+            choices={[
+              { value: "start", label: "Every start" },
+              { value: "daily", label: "Once a day" },
+              { value: "weekly", label: "Once a week" },
+            ]}
+            onChange={(updateFrequency) => set({ updateFrequency })}
+          />
+          <div className={styles.actions} data-gap-above>
             <Button
               onClick={() => {
                 // The Update Manager belongs to the main window, so the
@@ -127,10 +126,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
               Check for Updates…
             </Button>
           </div>
-          <Note>
-            A new version is downloaded and installed from here, with what
-            changed since this one shown first.
-          </Note>
         </Section>
       </>
     );
@@ -155,10 +150,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
                 : "Available"}
           </dd>
         </dl>
-        <Note>
-          Changes are refused while rekordbox is running, because it holds the
-          database open. Quit it to edit.
-        </Note>
       </Section>
       <RelocateSection
         folders={advanced.relocateFolders}
@@ -209,7 +200,6 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
               {busy ? "Looking…" : "Find duplicates"}
             </Button>
           </div>
-          <Note>Lists tracks that share a title and an artist. Nothing is changed by looking.</Note>
         </>
       ) : found.groups === 0 ? (
         <Note>No two tracks share a title and an artist.</Note>
@@ -322,11 +312,6 @@ function BackupSection({ readOnly }: { readOnly: boolean }) {
           Back up now
         </Button>
       </div>
-      <Note>
-        A copy is taken before the first change of every session and the last
-        five are kept. Restoring one puts the library back as it was then;
-        every change since is lost.
-      </Note>
       {backups === null ? null : backups.length === 0 ? (
         <Note>No backups yet.</Note>
       ) : (
@@ -411,10 +396,6 @@ function RelocateSection({ folders, onFolders, readOnly }: {
             Del
           </Button>
         </div>
-        <Note>
-          A missing track is looked for in these folders by its file name,
-          and pointed at the first file found.
-        </Note>
       </Section>
 
       <Section title="Missing files">
@@ -431,10 +412,6 @@ function RelocateSection({ folders, onFolders, readOnly }: {
                 {scanning ? "Checking…" : "Check for missing files"}
               </Button>
             </div>
-            <Note>
-              Checks every track&rsquo;s file, which takes a moment on a large
-              library. Nothing is changed by looking.
-            </Note>
           </>
         ) : missing.total === 0 ? (
           <Note>Every track&rsquo;s file is where the library expects it.</Note>
@@ -501,11 +478,6 @@ function RelocateSection({ folders, onFolders, readOnly }: {
             {missing.total > missing.tracks.length ? (
               <Note>Showing the first {missing.tracks.length}.</Note>
             ) : null}
-            <Note>
-              Locating a track points it at a new file. Its analysis, cues and
-              playlists all key off the track rather than the path, so they
-              stay as they are.
-            </Note>
           </>
         )}
       </Section>

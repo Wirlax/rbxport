@@ -158,24 +158,11 @@ describe("LinkDeckStrip", () => {
     render({ peers: [], link: { ...off(), problem }, onToggle: () => toggled++ });
     expect(host.querySelector('[data-testid="link-deck-strip"]')).toBeNull();
 
-    // With a player heard, the strip shows and LINK is marked unavailable.
+    // With a player heard but LINK still blocked, there is no button to
+    // press either: a LINK button that cannot do anything is not shown.
     render({ peers: [peer({ number: 2 })], link: { ...off(), problem }, onToggle: () => toggled++ });
-
-    const button = host.querySelector('[data-testid="link-button"]') as HTMLButtonElement;
-    expect(button).not.toBeNull();
-    expect(host.textContent).toContain("unavailable");
-    // The reason is not spelled out until it is asked for.
-    expect(host.textContent).not.toContain(problem);
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
-
-    // Clicking opens the popover with the reason, and does not try to toggle.
-    act(() => button.click());
+    expect(host.querySelector('[data-testid="link-deck-strip"]')).toBeNull();
     expect(toggled).toBe(0);
-    expect(host.querySelector('[role="dialog"]')?.textContent).toContain(problem);
-
-    // Clicking again dismisses it.
-    act(() => button.click());
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("shows the master clock and drives its controls", () => {

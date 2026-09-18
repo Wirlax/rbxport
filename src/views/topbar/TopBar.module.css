@@ -59,11 +59,28 @@
    pointer at the value. Grabbed and dragged, so it takes no pointer events
    from the bar it sits on. */
 .knob {
+  position: relative;
   width: var(--s-top-knob-size);
   height: var(--s-top-knob-size);
   flex: none;
   touch-action: none;
   cursor: ns-resize;
+}
+/* The reading while the knob turns, under it so the hand does not cover it. */
+.knobValue {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--c-raised);
+  color: var(--c-icon-on);
+  font-size: var(--f-size-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 5;
 }
 .knob svg { width: 100%; height: 100%; display: block; }
 .knob:focus-visible { outline: 1px solid var(--c-accent); outline-offset: 1px; }

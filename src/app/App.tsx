@@ -17,6 +17,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch, menuAccelerator } from "@/lib/shortcuts";
+import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes } from "@/lib/devices";
@@ -278,7 +279,7 @@ export function App() {
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
   // Checks on its own a while after launch when Preferences says so; the
   // menu and Preferences ask by hand.
-  const updater = useUpdater(advancedPrefs.checkUpdates);
+  const updater = useUpdater(advancedPrefs.checkUpdates, advancedPrefs.updateFrequency);
   const checkForUpdates = updater.check;
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
@@ -1105,6 +1106,9 @@ export function App() {
 
   // The keyboard: the shell's own shortcuts, and the menu accelerators the
   // webview keeps from the native menu on Windows.
+  const keyOverrides = prefs.preferences.keyboard.overrides;
+  /** The level Mute took the master down from, while it is muted. */
+  const mutedFrom = useRef<number | null>(null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // The native menu's accelerators, on the platforms where a keystroke
@@ -1115,11 +1119,33 @@ export function App() {
         runMenu(item);
         return;
       }
-      const action = dispatch(event, platform, event.target as HTMLElement | null);
+      const action = dispatch(event, platform, event.target as HTMLElement | null, keyOverrides);
       if (action === null) return;
       // Only the actions handled here are swallowed; everything else falls
       // through to the browser and the OS.
       switch (action) {
+        case "volumeUp":
+        case "volumeDown": {
+          // A knob reading a step: rekordbox's command + F12 and F11.
+          event.preventDefault();
+          const reading = Math.round(gainToKnob(master.level));
+          const next = action === "volumeUp" ? Math.min(reading + 1, KNOB_FULL) : Math.max(reading - 1, 0);
+          if (next > 0) mutedFrom.current = null;
+          master.setLevel(knobToGain(next));
+          break;
+        }
+        case "mute":
+          // Mute remembers where the knob was, and a second press puts it back.
+          event.preventDefault();
+          if (event.repeat) break;
+          if (mutedFrom.current !== null) {
+            master.setLevel(mutedFrom.current);
+            mutedFrom.current = null;
+          } else if (master.level > 0) {
+            mutedFrom.current = master.level;
+            master.setLevel(0);
+          }
+          break;
         case "focusSearch":
           event.preventDefault();
           searchRef.current?.focus();
@@ -1147,7 +1173,7 @@ export function App() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [platform, query, runMenu, analyseSelection]);
+  }, [platform, query, runMenu, analyseSelection, keyOverrides, master]);
 
   // The Preferences window asking for what only this window holds.
   useEffect(() => {
@@ -1628,6 +1654,8 @@ export function App() {
           limiter={limiter.limiter}
           onLimiterChange={limiter.set}
           reduction={master.reduction}
+          peakLeft={master.peakLeft}
+          peakRight={master.peakRight}
           initialPane={settingsOpen}
           onResetColumns={cols.reset}
           onResetLayout={() => {

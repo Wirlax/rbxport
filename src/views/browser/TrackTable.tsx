@@ -822,7 +822,7 @@ export function TrackTable({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const action = dispatch(event, platform, target);
+      const action = dispatch(event, platform, target, preferences.keyboard.overrides);
       if (action === null || view.count === 0) return;
       // A focused knob or fader owns the up/down keys — turning one must not
       // also walk the track list. `dispatch` already yields the text fields.
@@ -863,7 +863,7 @@ export function TrackTable({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor]);
+  }, [platform, selection.anchorIndex, firstIndex, rowH, view, view.count, moveCursor, preferences.keyboard.overrides]);
 
   const startDragOut = useCallback(
     (row: RowDto) => {

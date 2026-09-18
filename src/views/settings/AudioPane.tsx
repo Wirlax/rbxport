@@ -28,6 +28,9 @@ export interface AudioPaneProps {
   onLimiterChange: (change: Partial<Limiter>) => void;
   /** How far the limiter is turning the sum down right now, in dB. */
   reduction: number;
+  /** The loudest sample the device was given, per channel, 0 to 1. */
+  peakLeft?: number;
+  peakRight?: number;
 }
 
 /** `512 samples (10.7 ms)`, as the capture prints the buffer size. */
@@ -36,7 +39,22 @@ export function bufferCaption(frames: number, sampleRate: number): string {
   return `${frames} samples (${ms.toFixed(1)} ms)`;
 }
 
-export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProps) {
+/** A level as the meter's own scale: −∞ for silence, else decibels below full. */
+function decibels(peak: number): string {
+  if (!(peak > 0)) return "−∞ dB";
+  return `${(20 * Math.log10(Math.min(peak, 1))).toFixed(1)} dB`;
+}
+
+/** How much of a meter a level fills: a sixty-decibel scale. */
+function fillOf(peak: number): number {
+  if (!(peak > 0)) return 0;
+  return Math.min(Math.max(1 + (20 * Math.log10(Math.min(peak, 1))) / 60, 0), 1);
+}
+
+/** The reduction meters' scale: twelve decibels of gain reduction is full. */
+const REDUCTION_FULL_DB = 12;
+
+export function AudioPane({ limiter, onLimiterChange, reduction, peakLeft = 0, peakRight = 0 }: AudioPaneProps) {
   const [audio, setAudio] = useState<AudioDevices | null>(null);
   const { preferences, update } = usePreferencesContext();
   const prefs = preferences.audio;
@@ -92,10 +110,6 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
               ))}
             </select>
           </div>
-          <Note>
-            A change takes effect the next time a deck plays: a running stream
-            belongs to the device it was opened on.
-          </Note>
         </>
       ) : (
         <Note>
@@ -112,10 +126,6 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
         choices={SAMPLE_RATES.map((rate) => ({ value: String(rate), label: `${rate} Hz` }))}
         onChange={(value) => set({ sampleRate: Number(value) as SampleRate })}
       />
-      <Note>
-        Asked of the device the next time a deck plays. One that does not
-        offer the rate is opened at its own, and the log says so.
-      </Note>
     </Section>
 
     <Section title="Buffer size">
@@ -129,10 +139,6 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
         ends={[`${BUFFER_SIZES[0]}`, `${BUFFER_SIZES[BUFFER_SIZES.length - 1]}`]}
         onChange={(stop) => set({ bufferSize: BUFFER_SIZES[stop] ?? prefs.bufferSize })}
       />
-      <Note>
-        Smaller is quicker to answer a press and easier to underrun; larger
-        is the other way round. Takes effect with the sample rate.
-      </Note>
     </Section>
 
     <Section title="Metronome">
@@ -159,19 +165,54 @@ export function AudioPane({ limiter, onLimiterChange, reduction }: AudioPaneProp
         ]}
         onChange={(metronomeVolume) => set({ metronomeVolume })}
       />
-      <Note>
-        The metronome button in the deck&rsquo;s GRID EDIT row clicks on every
-        beat of the grid while the deck plays.
-      </Note>
     </Section>
 
     <Section title="Master limiter">
+      {/* What the device is given, per channel, and how far the limiter is
+          holding it down: two stereo meters, then two reduction meters, each
+          with its figure. */}
+      <div className={styles.meters} role="group" aria-label="Master output">
+        {([["L", peakLeft], ["R", peakRight]] as const).map(([channel, peak]) => (
+          <div key={channel} className={styles.meterRow}>
+            <span className={styles.meterLabel}>{channel}</span>
+            <div
+              className={styles.meterBar}
+              role="meter"
+              aria-label={`Output ${channel}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(fillOf(peak) * 100)}
+            >
+              <span className={styles.meterFill} data-vu style={{ width: `${fillOf(peak) * 100}%` }} />
+            </div>
+            <span className={styles.meterDb}>{decibels(peak)}</span>
+          </div>
+        ))}
+      </div>
+      <div className={styles.meters} role="group" aria-label="Limiter reduction">
+        {(["L", "R"] as const).map((channel) => (
+          <div key={channel} className={styles.meterRow}>
+            <span className={styles.meterLabel}>{channel}</span>
+            <div
+              className={styles.meterBar}
+              role="meter"
+              aria-label={`Reduction ${channel}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(Math.min(reduction / REDUCTION_FULL_DB, 1) * 100)}
+            >
+              <span
+                className={styles.meterFill}
+                data-reduction
+                style={{ width: `${Math.min(reduction / REDUCTION_FULL_DB, 1) * 100}%` }}
+              />
+            </div>
+            <span className={styles.meterDb}>{`−${reduction.toFixed(1)} dB`}</span>
+          </div>
+        ))}
+      </div>
       <Toggle
-        label={
-          limiter.enabled && reduction > 0.05
-            ? `Limiter — turning down ${reduction.toFixed(1)} dB`
-            : "Limiter"
-        }
+        label="Limiter"
         checked={limiter.enabled}
         onChange={(enabled) => onLimiterChange({ enabled })}
       />

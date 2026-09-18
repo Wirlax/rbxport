@@ -158,6 +158,9 @@ fn harness() -> Harness {
         &sink_events,
     )
     .expect("engine");
+    // The tests measure the decks' own levels: the master's decibel of
+    // headroom would put a factor on every figure, so it is opened for them.
+    engine.master().set_gain(1.0);
 
     let sink = sink_slot.lock().unwrap().clone().expect("sink");
     // These tests measure the deck path, and the ramp fixtures run to full
@@ -1326,4 +1329,27 @@ fn a_loop_rounds_at_its_out_point_with_no_gap_and_exit_plays_on() {
     assert!(h.engine.snapshot().a.looping);
     h.engine.clear_loop(Deck::A);
     assert_eq!(h.engine.snapshot().a.loop_out_frames, 0);
+}
+
+#[test]
+fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("silence.wav");
+    write_wav(&path, RATE, 2, &vec![0.0_f32; RATE as usize * 2 * 2]);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_metronome_grid(Deck::A, &[(0, true), (500, false), (1000, false), (1500, false)]);
+    h.engine.set_metronome(Deck::A, true);
+    h.engine.play(Deck::A);
+    let loud = h.play_until(Deck::A, u64::from(RATE) * 3 / 4);
+    let at_full = loud.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+
+    // The master down to a tenth: the click at 1.0 s is as loud as the one
+    // at 0.5 s was, because the click joins after the master level.
+    h.engine.master().set_gain(0.1);
+    let quiet = h.play_until(Deck::A, u64::from(RATE) * 5 / 4);
+    let at_tenth = quiet.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+    assert!(at_full > 0.05, "the click is heard at full: {at_full}");
+    assert!((at_tenth - at_full).abs() < 0.02, "the click changed with the master: {at_full} then {at_tenth}");
 }

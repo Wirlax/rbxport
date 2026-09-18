@@ -38,6 +38,21 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - PHRASE EDIT on the GRID panel: CUT splits the phrase under the head and
   CLEAR takes it out.
 - My Tag is edited on the Info tab: every tag of the library a toggle.
+- The keyboard map is rekordbox's Export preset, built out: Loop In, Loop
+  Out and Exit/Reloop on I, O and R, the beat loops on 4 to 9, / and
+  option + \\ for the length, Memory Cue 1 to 10 on A to ;, SYNC, MASTER
+  TEMPO, Tempo Reset and BPM ± on the function keys, F9 for the metronome's
+  sound, and the master's volume and Mute on command + F10 to F12. Player
+  B's keys are Player A's with shift. Every key is changed from the
+  Keyboard pane: click its badge, press the new one; Backspace takes it
+  away, Reset puts the preset back.
+- Preferences › PRO DJ LINK is a pane of its own.
+- Preferences › Advanced › Update Manager asks how often to check: every
+  start, once a day, once a week.
+- The About pane: the version, the licence, the disclaimer, and links to
+  Instagram, the web and Twitch.
+- Preferences › Audio › Master limiter meters the output per channel and
+  the limiter's reduction, each with its decibels.
 - A track played for a minute goes on today's history session and its DJ
   Play Count goes up, as rekordbox records it; Remove from History takes a
   play off again. Preferences › Advanced › Browse turns the recording off.
@@ -85,6 +100,19 @@ the version numbers [Semantic Versioning](https://semver.org/).
   tab is opened.
 
 ### Changed
+- The master starts a decibel under full, and the knob reads 0 to 10 while
+  it turns, 10 being that decibel of headroom; pulled past 10 it holds,
+  then lets go to 11 at six o'clock, full level.
+- The metronome's click keeps its own volume whatever the master is at.
+- The beat count at the top of the waveform is bars.beats: the second
+  number runs 1 to 4.
+- A click on the enlarged waveform plays a stopped deck; a second click
+  pauses it and sets the cue at the head. The switch is View › "Click on
+  the waveform for PLAY and CUE".
+- Analyze Track is shift + command + A: the preset's A calls Memory Cue 1.
+- The read-only badge is blue, and says why on hover; the LINK button is
+  not shown until LINK can be turned on; the blurbs are gone from every
+  Preferences pane, and so is the blue halo on a secondary window.
 - The Preferences window has the app's own title bar on every OS, and its
   Keyboard pane opens with every group closed.
 - DJ System › PRO DJ LINK reads "Connect to PRO DJ LINK" / "Disconnect", with

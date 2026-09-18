@@ -475,6 +475,7 @@ pub fn run() {
             commands::list_backups,
             commands::back_up_library,
             commands::restore_backup,
+            commands::open_url,
             commands::reset_play_count,
             commands::record_play,
             commands::remove_from_history,

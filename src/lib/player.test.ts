@@ -627,14 +627,18 @@ describe("subdivideGrid", () => {
 
 describe("beatCountText", () => {
   // 120 BPM: two beats a second, a bar every two seconds.
-  it("counts bars from the start by default", () => {
-    expect(beatCountText(10, 120, "position", [30])).toBe("5.0Bars");
-    expect(beatCountText(0, 120, "position", [])).toBe("0.0Bars");
+  it("counts bars and beats from the start by default, the beat only ever 1 to 4", () => {
+    // Ten seconds at 120 is twenty beats: the first beat of the sixth bar.
+    expect(beatCountText(10, 120, "position", [30])).toBe("6.1Bars");
+    expect(beatCountText(0, 120, "position", [])).toBe("1.1Bars");
+    expect(beatCountText(1.5, 120, "position", [])).toBe("1.4Bars");
+    expect(beatCountText(2, 120, "position", [])).toBe("2.1Bars");
   });
 
-  it("counts down to the next memory cue in bars or beats", () => {
+  it("counts down to the next memory cue in bars and beats, or beats", () => {
     expect(beatCountText(10, 120, "toMemoryBars", [30, 14, 5])).toBe("-2.0Bars");
     expect(beatCountText(10, 120, "toMemoryBeats", [30, 14, 5])).toBe("-8Beats");
+    expect(beatCountText(10.5, 120, "toMemoryBars", [14])).toBe("-1.3Bars");
     // Part way through a beat rounds up: seven and a bit beats left is eight.
     expect(beatCountText(10.1, 120, "toMemoryBeats", [14])).toBe("-8Beats");
     // At the cue itself the count is zero, not the cue before it.

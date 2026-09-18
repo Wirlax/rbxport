@@ -579,11 +579,12 @@ export function waveSlice(
 /**
  * The number beside the playhead: View › Display Type › Beat Count Display.
  *
- * `position` counts bars from the start, as the deck always did. The other
- * two count down to the next memory cue at or after the playhead, in bars
- * to a tenth or in whole beats, the way a CDJ's count-down does; with no
- * cue ahead there is nothing to count, and nothing is shown. Four beats to
- * the bar, which is what the grid gives.
+ * `position` is bars and beats from the start, `12.3` being the third beat
+ * of the twelfth bar, so the figure after the point only ever reads 1 to 4.
+ * The other two count down to the next memory cue at or after the
+ * playhead, in bars and beats or in whole beats, the way a CDJ's count-down
+ * does; with no cue ahead there is nothing to count, and nothing is shown.
+ * Four beats to the bar, which is what the grid gives.
  */
 export function beatCountText(
   seconds: number,
@@ -594,14 +595,19 @@ export function beatCountText(
 ): string {
   if (!(bpm > 0) || !Number.isFinite(seconds)) return "";
   const beatsPerSecond = bpm / 60;
-  if (mode === "position") return `${((seconds * beatsPerSecond) / 4).toFixed(1)}Bars`;
+  if (mode === "position") {
+    const elapsed = Math.max(0, Math.floor(seconds * beatsPerSecond + 1e-9));
+    return `${Math.floor(elapsed / 4) + 1}.${(elapsed % 4) + 1}Bars`;
+  }
   let next = Number.POSITIVE_INFINITY;
   for (const at of memorySeconds) {
     if (at >= seconds && at < next) next = at;
   }
   if (!Number.isFinite(next)) return "";
   const beats = (next - seconds) * beatsPerSecond;
-  return mode === "toMemoryBars" ? `-${(beats / 4).toFixed(1)}Bars` : `-${Math.ceil(beats - 1e-9)}Beats`;
+  // Whole beats left, rounded up, then split into bars and beats.
+  const whole = Math.ceil(beats - 1e-9);
+  return mode === "toMemoryBars" ? `-${Math.floor(whole / 4)}.${whole % 4}Bars` : `-${whole}Beats`;
 }
 
 /**

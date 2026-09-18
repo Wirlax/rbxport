@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  actionFor, BINDINGS, describeChord, dispatch, hotCuePad, isTyping, menuAccelerator, type Platform,
+  actionFor, beatLoopLength, BINDINGS, chordFromEvent, describeChord, dispatch, hotCuePad, isTyping,
+  matchBinding, memoryCueNumber, menuAccelerator, sameChord, type Platform,
 } from "./shortcuts";
 
 const MAC: Platform = { mac: true };
@@ -164,20 +165,76 @@ describe("rekordbox's own Export key map", () => {
 
   it("gives the first three pads 1, 2 and 3, and their clears the same with command", () => {
     // `Set Hot Cue A`-`C` on `1`-`3`, `Clear Hot Cue A`-`C` on `command + 1`-`3`.
-    // The preset binds nothing past C, so 4 stays free.
+    // The preset binds nothing past C: 4 is the first beat loop.
     expect(actionFor({ key: "1" }, mac)).toBe("hotCueA");
     expect(actionFor({ key: "2" }, mac)).toBe("hotCueB");
     expect(actionFor({ key: "3" }, mac)).toBe("hotCueC");
     expect(actionFor({ key: "1", metaKey: true }, mac)).toBe("clearHotCueA");
     expect(actionFor({ key: "3", metaKey: true }, mac)).toBe("clearHotCueC");
     expect(actionFor({ key: "3", ctrlKey: true }, { mac: false })).toBe("clearHotCueC");
-    expect(actionFor({ key: "4" }, mac)).toBeNull();
+    expect(actionFor({ key: "4" }, mac)).toBe("beatLoop1");
     expect(actionFor({ key: "4", metaKey: true }, mac)).toBeNull();
     // Typing a digit into the search box is typing.
     expect(dispatch({ key: "1" }, mac, { tagName: "INPUT" })).toBeNull();
     expect(hotCuePad("hotCueB")).toEqual({ letter: "B", clear: false });
     expect(hotCuePad("clearHotCueC")).toEqual({ letter: "C", clear: true });
     expect(hotCuePad("cue")).toBeNull();
+  });
+
+  it("gives the loop I, O and R, the beat loops 4 to 9, and / and option + \\ the length", () => {
+    expect(actionFor({ key: "i" }, mac)).toBe("loopIn");
+    expect(actionFor({ key: "o" }, mac)).toBe("loopOut");
+    expect(actionFor({ key: "r" }, mac)).toBe("reloop");
+    expect(actionFor({ key: "9" }, mac)).toBe("beatLoop32");
+    expect(beatLoopLength("beatLoop16")).toBe(16);
+    expect(beatLoopLength("loopIn")).toBeNull();
+    expect(actionFor({ key: "/" }, mac)).toBe("loopHalf");
+    // Option + \\ on a US Mac reports « as the key; the code says which key it was.
+    expect(actionFor({ key: "«", code: "Backslash", altKey: true }, mac)).toBe("loopDouble");
+  });
+
+  it("calls the first ten memory cues on A to ;, and gives the tempo the function keys", () => {
+    expect(actionFor({ key: "a" }, mac)).toBe("callMemoryCue1");
+    expect(actionFor({ key: ";" }, mac)).toBe("callMemoryCue10");
+    expect(memoryCueNumber("callMemoryCue7")).toBe(7);
+    expect(memoryCueNumber("cue")).toBeNull();
+    expect(actionFor({ key: "F1" }, mac)).toBe("sync");
+    expect(actionFor({ key: "F2" }, mac)).toBe("masterTempo");
+    expect(actionFor({ key: "F3" }, mac)).toBe("tempoReset");
+    expect(actionFor({ key: "F9" }, mac)).toBe("metronomeSound");
+    // Analysis moved off A to make room, to shift + command + A.
+    expect(actionFor({ key: "a", metaKey: true, shiftKey: true }, mac)).toBe("analyseSelection");
+  });
+
+  it("is Player B's with shift, and shift + 1 is still 1", () => {
+    expect(matchBinding({ key: " ", shiftKey: true }, mac)).toMatchObject({ action: "playPause", deck: "b" });
+    expect(matchBinding({ key: " " }, mac)).toMatchObject({ action: "playPause", deck: "a" });
+    expect(matchBinding({ key: "!", code: "Digit1", shiftKey: true }, mac)).toMatchObject({ action: "hotCueA", deck: "b" });
+    // Shift + cursor up extends the browser's selection; it is not Player B's.
+    expect(actionFor({ key: "ArrowUp", shiftKey: true }, mac)).toBe("extendUp");
+    expect(matchBinding({ key: "ArrowRight", shiftKey: true }, mac)).toMatchObject({ action: "jumpForward", deck: "b" });
+    // The master's keys.
+    expect(actionFor({ key: "F12", metaKey: true }, mac)).toBe("volumeUp");
+    expect(actionFor({ key: "F10", metaKey: true }, mac)).toBe("mute");
+  });
+
+  it("reads a key of the person's own in place of the preset's", () => {
+    const overrides = { loopIn: { key: "l", shiftKey: true }, loopOut: { key: "" } };
+    expect(actionFor({ key: "i" }, mac, overrides)).toBeNull();
+    expect(actionFor({ key: "l", shiftKey: true }, mac, overrides)).toBe("loopIn");
+    // A key taken away answers to nothing; Player B's shift + L is untouched.
+    expect(actionFor({ key: "o" }, mac, overrides)).toBeNull();
+    expect(matchBinding({ key: "l", shiftKey: true }, mac, {})).toMatchObject({ deck: "b" });
+    expect(dispatch({ key: "l", shiftKey: true }, mac, { tagName: "INPUT" }, overrides)).toBeNull();
+  });
+
+  it("turns an event into a chord to store: the key the physical key stands for", () => {
+    expect(chordFromEvent({ key: "!", code: "Digit1", shiftKey: true }, mac)).toEqual({ key: "1", shiftKey: true });
+    expect(chordFromEvent({ key: "F", code: "KeyF", metaKey: true }, mac)).toEqual({ key: "f", metaKey: true });
+    expect(chordFromEvent({ key: "f", code: "KeyF", ctrlKey: true }, { mac: false })).toEqual({ key: "f", metaKey: true });
+    expect(chordFromEvent({ key: "Shift", shiftKey: true }, mac)).toBeNull();
+    expect(chordFromEvent({ key: "f", ctrlKey: true }, mac)).toBeNull();
+    expect(sameChord({ key: "F", metaKey: true }, { key: "f", metaKey: true, shiftKey: false })).toBe(true);
   });
 
   it("puts the three cue lists on F10, F11 and F12", () => {

@@ -16,21 +16,20 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { LinkStatus, MenuSlot } from "@/ipc/types";
+import type { MenuSlot } from "@/ipc/types";
 import { displayName, isFixed } from "@/lib/deviceSettings";
 import { usePreferencesContext } from "@/store/usePreferences";
 import { ListPairTab } from "@/views/devices/ListPairTab";
 import styles from "./Preferences.module.css";
-import { Button, Note, Radios, Section, Select, Sub } from "./controls";
+import { Radios, Section, Select, Sub } from "./controls";
 
-export type DjSystemTab = "general" | "category" | "sort" | "column" | "link";
+export type DjSystemTab = "general" | "category" | "sort" | "column";
 
 export const DJ_SYSTEM_TABS: readonly { id: DjSystemTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "category", label: "Category" },
   { id: "sort", label: "Sort" },
   { id: "column", label: "Column" },
-  { id: "link", label: "PRO DJ LINK" },
 ];
 
 /** The reference rows, read once: they are what a stored null stands for. */
@@ -72,11 +71,6 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
             onChange={(slots) => set(tab === "category" ? { categories: slots } : { sorts: slots })}
           />
         </div>
-        <Note>
-          What a CDJ lists when it browses a stick this application has
-          exported to for the first time. A stick that already holds a
-          library keeps its own, which its device panel edits.
-        </Note>
       </Section>
     );
   }
@@ -85,9 +79,6 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
     return <ColumnSection sorts={sorts} subColumn={dj.subColumn} onChange={(subColumn) => set({ subColumn })} />;
   }
 
-  if (tab === "link") {
-    return <LinkSection linkInterface={dj.linkInterface} onChoose={(linkInterface) => set({ linkInterface })} />;
-  }
 
   return (
     <>
@@ -143,10 +134,6 @@ export function DjSystemPane({ tab }: { tab: DjSystemTab }) {
           ]}
           onChange={(keyDisplay) => set({ keyDisplay })}
         />
-        <Note>
-          Written to a stick&rsquo;s DEVSETTING.DAT the first time it is
-          exported to, with the three choices above.
-        </Note>
       </Section>
     </>
   );
@@ -179,121 +166,6 @@ function ColumnSection({ sorts, subColumn, onChange }: {
         choices={choices}
         onChange={(value) => onChange(value === "" ? null : Number(value))}
       />
-    </Section>
-  );
-}
-
-/** The dropdown's value for "no interface chosen". */
-const AUTOMATIC = "";
-
-/**
- * PRO DJ LINK: the LINK switch, the interface it runs on, and the players
- * on the network with what each has loaded from us.
- *
- * The interface is a preference, so the strip's LINK button honours it too;
- * "Automatic" leaves the choice to the app, which takes the interface the
- * players are reached through. It is changed with LINK off: a session is
- * bound to its interface for as long as it runs.
- *
- * Status arrives by event as it changes and is read once on open; the
- * session itself outlives the pane, as LINK does — a source that vanished
- * when Preferences closed would be no source at all.
- */
-function LinkSection({ linkInterface, onChoose }: {
-  linkInterface: string | null;
-  onChoose: (name: string | null) => void;
-}) {
-  const [link, setLink] = useState<LinkStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    let stop: (() => void) | undefined;
-    void (async () => {
-      const backend = await getBackend();
-      if (!live) return;
-      stop = backend.onLinkStatus((status) => {
-        if (live) setLink(status);
-      });
-      const status = await backend.linkStatus();
-      if (live) setLink(status);
-    })();
-    return () => {
-      live = false;
-      stop?.();
-    };
-  }, []);
-
-  const interfaces = link?.interfaces ?? [];
-  // A chosen interface that is not there right now (unplugged, renamed) is
-  // kept in the store and shown as such, not silently swapped for another.
-  const choices = [
-    { value: AUTOMATIC, label: "Automatic" },
-    ...interfaces.map((i) => ({ value: i.name, label: `${i.name} — ${i.address}` })),
-  ];
-  if (linkInterface !== null && !interfaces.some((i) => i.name === linkInterface)) {
-    choices.push({ value: linkInterface, label: `${linkInterface} — not present` });
-  }
-
-  const toggle = () => {
-    setBusy(true);
-    void (async () => {
-      const backend = await getBackend();
-      try {
-        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined));
-      } finally {
-        setBusy(false);
-      }
-    })();
-  };
-
-  return (
-    <Section title="PRO DJ LINK" label="Link">
-      <div className={styles.actions} data-spaced>
-        <Button onClick={toggle} disabled={busy || link === null}>
-          {link?.on ? "Disconnect" : "Connect to PRO DJ LINK"}
-        </Button>
-      </div>
-      <Select
-        label="Network interface"
-        caption="Network interface"
-        plain
-        value={linkInterface ?? AUTOMATIC}
-        disabled={link === null || link.on}
-        choices={choices}
-        onChange={(value) => onChoose(value === AUTOMATIC ? null : value)}
-      />
-      {link === null ? null : link.on ? (
-        <>
-          <Note>
-            On as <b>rekordbox</b>
-            {link.interface ? ` on ${link.interface.name} (${link.interface.address})` : ""}.
-            Players list the library under LINK.
-          </Note>
-          {link.players.length === 0 ? (
-            <Note>No players have announced themselves yet.</Note>
-          ) : (
-            <ul className={styles.list} aria-label="Players on the link">
-              {link.players.map((player) => (
-                <li key={player.number}>
-                  <span className={styles.listTitle}>
-                    {player.name} — {player.kind} {player.number}
-                    {player.master ? " · MASTER" : ""}
-                  </span>
-                  <span className={styles.listPath}>
-                    {player.loaded
-                      ? `${player.playing ? "Playing" : "Loaded"}: ${player.loaded.title}` +
-                        (player.loaded.artist ? ` — ${player.loaded.artist}` : "")
-                      : `Nothing of ours loaded · ${player.address}`}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      ) : link.problem ? (
-        <Note failed>{link.problem}</Note>
-      ) : null}
     </Section>
   );
 }

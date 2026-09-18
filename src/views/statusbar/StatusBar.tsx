@@ -43,7 +43,7 @@ export function StatusBar({
         {version === null ? null : <> <span className={styles.version}>{version}</span></>}
       </span>
       {readOnly ? (
-        <span className={styles.readOnly} title={tip(refusal(protectedLibrary))}>
+        <span className={styles.readOnly} title={refusal(protectedLibrary)}>
           Read-only
         </span>
       ) : null}
