@@ -33,6 +33,11 @@ pub struct Manifest {
     /// was kept, which read as "no selection".
     #[serde(default)]
     pub playlists: Vec<ManifestPlaylist>,
+    /// `djmdContent.ID` of the tracks on the stick in no playlist: put
+    /// there on their own by Export Track, and kept there by every sync
+    /// after. Absent in older records.
+    #[serde(default)]
+    pub loose: Vec<u64>,
 }
 
 /// One playlist as it was asked for.
@@ -179,6 +184,7 @@ mod tests {
                 artwork: String::new(),
             }],
             playlists: vec![ManifestPlaylist { library_id: 9, name: "Set".to_owned() }],
+            loose: vec![42],
         };
         manifest.save(dir.path()).unwrap();
         let read = Manifest::load(dir.path()).expect("saved manifest");
@@ -186,6 +192,7 @@ mod tests {
         assert_eq!(read.tracks[0].export_id, 7);
         assert_eq!(read.tracks[0].key(), "#42");
         assert_eq!(read.playlists[0].library_id, 9);
+        assert_eq!(read.loose, vec![42]);
         // The temporary must not survive the rename.
         assert!(!Manifest::path(dir.path()).with_extension("json.part").exists());
     }

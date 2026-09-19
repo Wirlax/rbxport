@@ -253,7 +253,7 @@ fn a_fresh_stick_takes_the_defaults_it_is_given_and_keeps_them_after() {
 #[test]
 fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
     let stick = tempfile::tempdir().unwrap();
-    assert!(rbl_export::create_library(stick.path(), None).expect("create"), "a blank stick gets a database");
+    assert!(rbl_export::create_library(stick.path(), None, &[], None).expect("create"), "a blank stick gets a database");
     assert!(stick.path().join("PIONEER/rekordbox/export.pdb").is_file());
     assert!(stick.path().join("PIONEER/rekordbox/exportLibrary.db").is_file());
     assert!(stick.path().join("PIONEER/USBANLZ").is_dir());
@@ -287,7 +287,7 @@ fn a_blank_stick_is_given_the_database_folders_rekordbox_creates_on_connect() {
     assert_eq!(settings.categories.len(), 22);
 
     // Asking again leaves what is there.
-    assert!(!rbl_export::create_library(stick.path(), None).expect("second"));
+    assert!(!rbl_export::create_library(stick.path(), None, &[], None).expect("second"));
 }
 
 #[test]
@@ -352,8 +352,16 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
 
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
-    let image = src.path().join("cover.jpg");
+    // The library keeps three sizes in one folder; the track names the big
+    // one, the stick gets the small and the medium.
+    let folder = src.path().join("Artwork/abc/def");
+    std::fs::create_dir_all(&folder).unwrap();
+    let image = folder.join("artwork.jpg");
     std::fs::write(&image, b"\xff\xd8not really a jpeg\xff\xd9").unwrap();
+    let small = folder.join("artwork_s.jpg");
+    std::fs::write(&small, b"\xff\xd8small\xff\xd9").unwrap();
+    let medium = folder.join("artwork_m.jpg");
+    std::fs::write(&medium, b"\xff\xd8medium, a little bigger\xff\xd9").unwrap();
     let mut tracks = vec![
         track(src.path(), 1, "All U Need", "TRIODE"),
         track(src.path(), 2, "The Abyss", "ARTBAT"),
@@ -372,13 +380,13 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
-    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, &mut |p| seen.push((p.done, p.total))).unwrap();
+    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |p| seen.push((p.done, p.total))).unwrap();
     assert_eq!(report.tracks, 3);
     assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)], "progress is reported per track");
     assert_eq!(report.artwork_files, 4, "one image, written under its four names");
-    for name in ["a1.jpg", "a1_m.jpg", "b1.jpg", "b1_m.jpg"] {
+    for (name, source) in [("a1.jpg", &small), ("a1_m.jpg", &medium), ("b1.jpg", &small), ("b1_m.jpg", &medium)] {
         let file = dest.path().join("PIONEER/Artwork/00001").join(name);
-        assert_eq!(std::fs::read(&file).unwrap(), std::fs::read(&image).unwrap(), "{name}");
+        assert_eq!(std::fs::read(&file).unwrap(), std::fs::read(source).unwrap(), "{name}");
     }
 
     // The pdb names the image and the tracks point at it.
@@ -411,6 +419,35 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     assert_eq!(path, "/PIONEER/Artwork/00001/a1.jpg");
 
     // A second export finds the artwork in place and writes none again.
-    let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None, &mut |_| {}).unwrap();
+    let again = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |_| {}).unwrap();
     assert_eq!(again.artwork_files, 0);
+}
+
+#[test]
+fn artwork_without_the_library_sizes_is_copied_as_it_is_and_folders_hold_twenty() {
+    use rbl_export::export_full;
+
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    // Twenty-one images, each its own file with no `_s`/`_m` beside it.
+    let mut tracks = Vec::new();
+    for i in 1..=21u32 {
+        let image = src.path().join(format!("cover{i}.jpg"));
+        std::fs::write(&image, format!("\u{ff}\u{d8}cover {i}\u{ff}\u{d9}")).unwrap();
+        let mut t = track(src.path(), i, &format!("Track {i}"), "Someone");
+        t.artwork = Some(image);
+        tracks.push(t);
+    }
+    let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: (0..21).collect() }];
+    let report = export_full(dest.path(), &tracks, &playlists, &[], None, None, &mut |_| {}).unwrap();
+    assert_eq!(report.artwork_files, 84);
+    // 1–19 in the first folder, 20 and 21 in the second, as rekordbox lays
+    // them out.
+    assert!(dest.path().join("PIONEER/Artwork/00001/a19_m.jpg").is_file());
+    assert!(dest.path().join("PIONEER/Artwork/00002/a20.jpg").is_file());
+    assert!(dest.path().join("PIONEER/Artwork/00002/b21_m.jpg").is_file());
+    assert_eq!(
+        std::fs::read(dest.path().join("PIONEER/Artwork/00002/a21.jpg")).unwrap(),
+        std::fs::read(src.path().join("cover21.jpg")).unwrap()
+    );
 }

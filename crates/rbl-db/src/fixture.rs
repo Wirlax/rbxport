@@ -86,9 +86,11 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
     }
 
     let stamp = rbl_core::time::now();
+    // A number, as a real library's DBID is: a stick's sync record names
+    // it, and is only this library's when the numbers agree.
     conn.execute(
         "INSERT INTO djmdProperty (DBID, DBVersion, created_at, updated_at)
-         VALUES ('fixture', '6000', ?1, ?1)",
+         VALUES ('1000000001', '6000', ?1, ?1)",
         params![stamp],
     )?;
     conn.execute(

@@ -59,6 +59,7 @@ fn a_stick_with_only_a_manifest_is_not_an_export() {
         written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
         tracks: Vec::new(),
         playlists: Vec::new(),
+        loose: Vec::new(),
     };
     manifest.save(stick.path()).unwrap();
     // Without export.pdb no player can read it, so there is nothing to report.

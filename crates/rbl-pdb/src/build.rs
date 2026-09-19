@@ -235,16 +235,39 @@ pub struct FileBuilder {
     page_size: usize,
     /// (`page_type`, pages)
     tables: Vec<(u32, Vec<Vec<u8>>)>,
+    /// The order rekordbox wrote the tables in, which is the order their
+    /// pages past the first are allocated in; see [`Self::write_order`].
+    write_order: Vec<u32>,
 }
 
 impl FileBuilder {
     pub fn new(page_size: usize) -> Self {
-        Self { page_size, tables: Vec::new() }
+        Self { page_size, tables: Vec::new(), write_order: Vec::new() }
+    }
+
+    /// The order the tables were written in, by page type. Every table
+    /// gets its index page and one data page up front, in table order; a
+    /// table's further data pages and its empty candidate are allocated
+    /// when it is written, so a table written early has its candidate
+    /// before a later table's overflow. Types not named here follow the
+    /// named ones in table order. Without this, `history` (type 19) is
+    /// written first and the rest in table order, as `export.pdb` has it
+    /// [OBS 7.2.11]; `exportExt.pdb` writes its type 7 before its type 3.
+    pub fn write_order(&mut self, order: &[u32]) {
+        self.write_order = order.to_vec();
     }
 
     /// Adds a table whose rows are already encoded. Its index page and its
     /// empty candidate are added when the file is finished.
     pub fn add_table(&mut self, page_type: u32, rows: &[Vec<u8>]) {
+        self.add_table_numbered(page_type, rows, |_, _| {});
+    }
+
+    /// [`add_table`](Self::add_table), with each row told its index on its
+    /// page before it is written: `exportExt.pdb`'s tag rows carry that
+    /// index, times 32, in their third and fourth bytes, and it starts
+    /// again on every page.
+    pub fn add_table_numbered(&mut self, page_type: u32, rows: &[Vec<u8>], number: impl Fn(&mut Vec<u8>, u16)) {
         // Page indices are assigned in `finish`, so use a placeholder for now
         // and patch the links afterwards.
         let mut pages: Vec<Vec<u8>> = Vec::new();
@@ -257,7 +280,9 @@ impl FileBuilder {
                 )
                 .finish());
             }
-            builder.push_row(row);
+            let mut row = row.clone();
+            number(&mut row, u16::try_from(builder.row_count()).unwrap_or(u16::MAX));
+            builder.push_row(&row);
         }
         pages.push(builder.finish());
         self.tables.push((page_type, pages));
@@ -280,31 +305,24 @@ impl FileBuilder {
         // (page_type, first page, last page, empty candidate)
         let mut entries: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(num_tables);
         // Tables with rows get their empty candidate after all the tables.
-        let mut pending_candidates: Vec<(usize, usize)> = Vec::new();
         let mut pages: Vec<Vec<u8>> = Vec::new();
 
-        for (table_at, (page_type, table_pages)) in self.tables.into_iter().enumerate() {
+        // Every table's index page and first page, in table order. A table
+        // with rows keeps the rest of its pages back until it is "written".
+        let mut held: Vec<(usize, Vec<Vec<u8>>)> = Vec::new();
+        for (table_at, (page_type, mut table_pages)) in self.tables.into_iter().enumerate() {
             let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x22] != 0 || p[0x23] != 0);
             let index_at = next_index;
             next_index += 1;
             if has_rows {
                 let first_data = next_index;
-                let count = u32::try_from(table_pages.len()).unwrap_or(1);
-                let last_data = first_data + count - 1;
+                next_index += 1;
                 pages.push(index_page(page_size, index_at, page_type, first_data, Some(first_data)));
-                for (i, mut page) in table_pages.into_iter().enumerate() {
-                    let index = first_data + u32::try_from(i).unwrap_or(0);
-                    page[0x04..0x08].copy_from_slice(&index.to_le_bytes());
-                    sequence += 1;
-                    page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
-                    // Patched to the empty candidate once that is allocated.
-                    let next = if index == last_data { u32::MAX } else { index + 1 };
-                    page[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
-                    pages.push(page);
-                }
-                next_index = last_data + 1;
-                pending_candidates.push((table_at, pages.len() - 1));
-                entries.push((page_type, index_at, last_data, u32::MAX));
+                let mut first = table_pages.remove(0);
+                first[0x04..0x08].copy_from_slice(&first_data.to_le_bytes());
+                pages.push(first);
+                held.push((table_at, table_pages));
+                entries.push((page_type, index_at, first_data, u32::MAX));
             } else {
                 // The zeroed page right after the index page is the candidate.
                 let candidate = next_index;
@@ -314,19 +332,57 @@ impl FileBuilder {
                 entries.push((page_type, index_at, index_at, candidate));
             }
         }
-        // rekordbox hands out the candidates in the order it wrote the
-        // tables, and it writes `history` (type 19) before the others.
-        pending_candidates.sort_by_key(|&(table_at, _)| entries.get(table_at).map_or(0, |e| u8::from(e.0 != 19)));
-        for (table_at, last_page_at) in pending_candidates {
+        // Then each table's further pages and its candidate, in the order
+        // the tables were written: as asked, else `history` (type 19)
+        // first and the rest in table order.
+        let order = |page_type: u32| -> (usize, u32) {
+            match self.write_order.iter().position(|&t| t == page_type) {
+                Some(at) => (0, u32::try_from(at).unwrap_or(u32::MAX)),
+                None if self.write_order.is_empty() && page_type == 19 => (0, 0),
+                None => (1, page_type),
+            }
+        };
+        held.sort_by_key(|&(table_at, _)| entries.get(table_at).map_or((2, 0), |e| order(e.0)));
+        for (table_at, rest) in held {
+            let Some(&(page_type, _, first_data, _)) = entries.get(table_at) else { continue };
+            // The first data page is where the index page sent us.
+            let mut last_page_at = pages.iter().position(|p| {
+                crate::u4(p, 0x04) == first_data && crate::u4(p, 0x08) == page_type && p[0x1b] & 0x40 == 0
+            });
+            let mut last_index = first_data;
+            if let Some(at) = last_page_at {
+                sequence += 1;
+                pages[at][0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
+            }
+            for mut page in rest {
+                let index = next_index;
+                next_index += 1;
+                page[0x04..0x08].copy_from_slice(&index.to_le_bytes());
+                sequence += 1;
+                page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
+                if let Some(at) = last_page_at {
+                    pages[at][0x0c..0x10].copy_from_slice(&index.to_le_bytes());
+                }
+                pages.push(page);
+                last_page_at = Some(pages.len() - 1);
+                last_index = index;
+            }
             let candidate = next_index;
             next_index += 1;
             pages.push(vec![0_u8; page_size]);
-            if let Some(page) = pages.get_mut(last_page_at) {
-                page[0x0c..0x10].copy_from_slice(&candidate.to_le_bytes());
+            if let Some(at) = last_page_at {
+                pages[at][0x0c..0x10].copy_from_slice(&candidate.to_le_bytes());
             }
             if let Some(entry) = entries.get_mut(table_at) {
+                entry.2 = last_index;
                 entry.3 = candidate;
             }
+        }
+        // Zeroed pages at the end are not written: rekordbox's files stop
+        // at the last page with anything in it, and name candidates past
+        // the end [OBS 7.2.11: 41 pages in a blank export that names 45].
+        while pages.last().is_some_and(|p| p.iter().all(|&b| b == 0)) {
+            pages.pop();
         }
 
         out[0x04..0x08].copy_from_slice(&u32::try_from(page_size).unwrap_or(4096).to_le_bytes());

@@ -665,6 +665,68 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
 }
 
 #[test]
+fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
+    let s = shell();
+    let one = s._dir.path().join("One.wav");
+    let two = s._dir.path().join("Two.wav");
+    write_wav(&one, 2);
+    write_wav(&two, 2);
+    let report = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![one.display().to_string(), two.display().to_string()],
+    ))
+    .unwrap();
+    let (first, second) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![first.clone()])).unwrap();
+
+    // The second track goes on a blank stick on its own: one track, no
+    // playlist, and the record says it is loose.
+    let stick = tempfile::tempdir().unwrap();
+    let written = run(commands::export_tracks_to_device(
+        s.handle(),
+        s.state(),
+        vec![second.clone()],
+        stick.path().display().to_string(),
+        None,
+    ))
+    .unwrap();
+    assert_eq!((written.tracks, written.playlists), (1, 0));
+    let record = rbl_export::Manifest::load(stick.path()).expect("a record");
+    assert_eq!(record.loose, vec![second.parse::<u64>().unwrap()]);
+
+    // A sync of playlist 1 to the same stick keeps the loose track beside
+    // the playlist's, and the record still says which is which.
+    let reports = run(commands::sync_devices(
+        s.handle(),
+        s.state(),
+        vec![playlist_id(1)],
+        vec![stick.path().display().to_string()],
+        None,
+        None,
+    ))
+    .unwrap();
+    let synced = reports[0].report.as_ref().expect("written");
+    assert_eq!((synced.tracks, synced.playlists, synced.removed), (2, 1, 0));
+    let record = rbl_export::Manifest::load(stick.path()).expect("a record");
+    assert_eq!(record.loose, vec![second.parse::<u64>().unwrap()]);
+    assert_eq!(record.playlists.len(), 1);
+
+    // Exporting the first track loose too, on top of the synced playlist:
+    // it is in the playlist already, so it is not loose, and nothing is
+    // removed.
+    let again = run(commands::export_tracks_to_device(
+        s.handle(),
+        s.state(),
+        vec![first],
+        stick.path().display().to_string(),
+        None,
+    ))
+    .unwrap();
+    assert_eq!((again.tracks, again.playlists, again.removed), (2, 1, 0));
+}
+
+#[test]
 fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them() {
     let s = shell();
     // One real file in playlist 1, so there is something to copy; the
@@ -689,13 +751,13 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
 
     // A stick that is not there says nothing about what it holds.
     let gone = s._dir.path().join("gone");
-    let err = run(commands::device_sync_state(gone.display().to_string())).unwrap_err();
+    let err = run(commands::device_sync_state(s.state(), gone.display().to_string())).unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
 
     // A stick with nothing on it: no selection, nothing on the device.
     let stick_a = tempfile::tempdir().unwrap();
     let stick_b = tempfile::tempdir().unwrap();
-    let fresh = run(commands::device_sync_state(stick_a.path().display().to_string())).unwrap();
+    let fresh = run(commands::device_sync_state(s.state(), stick_a.path().display().to_string())).unwrap();
     assert!(fresh.selected.is_empty());
     assert!(fresh.on_device.is_empty());
 
@@ -711,6 +773,7 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
             stick_b.path().display().to_string(),
         ],
         None,
+        Some(true),
     ))
     .unwrap();
     assert_eq!(reports.len(), 3);
@@ -731,9 +794,67 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
     // Each stick remembers the selection it was given, by the tree's id,
     // and shows the playlist it holds.
     for stick in [&stick_a, &stick_b] {
-        let state = run(commands::device_sync_state(stick.path().display().to_string())).unwrap();
+        let state = run(commands::device_sync_state(s.state(), stick.path().display().to_string())).unwrap();
         assert_eq!(state.selected.len(), 1);
         assert_eq!(state.selected[0].library_id, playlist_id(1));
         assert_eq!(state.on_device, vec![state.selected[0].name.clone()]);
+        assert!(state.automatic, "the record asked for automatic sync");
+        // The sync record rekordbox reads is there, naming this library and
+        // the playlist by its id, and it alone carries the selection once
+        // our manifest is gone.
+        let record = rbl_export::sync_record::read(stick.path()).expect("a sync record");
+        assert!(record.automatic);
+        assert_eq!(record.ticked, vec![playlist_id(1).parse::<u64>().unwrap()]);
+        std::fs::remove_file(stick.path().join("PIONEER/rbxport/manifest.json")).unwrap();
+        let from_record = run(commands::device_sync_state(s.state(), stick.path().display().to_string())).unwrap();
+        assert_eq!(from_record.selected.len(), 1);
+        assert_eq!(from_record.selected[0].library_id, playlist_id(1));
     }
+}
+
+#[test]
+fn an_intelligent_playlist_is_made_from_a_rule_and_its_rule_is_edited() {
+    use rbxport_lib::dto::{SmartConditionDto, SmartRuleDto};
+    let s = shell();
+    let condition = |property: &str, operator: &str, left: &str, right: &str| SmartConditionDto {
+        property: property.to_owned(),
+        operator: operator.to_owned(),
+        left: left.to_owned(),
+        right: right.to_owned(),
+        unit: String::new(),
+    };
+    // Track titles are "Track 000" to "Track 039": the ones ending in 7.
+    let rule = SmartRuleDto { logic: "all".to_owned(), conditions: vec![condition("name", "11", "7", "")] };
+    run(commands::create_smart_playlist(s.handle(), s.state(), "Sevens".to_owned(), ROOT.to_owned(), rule)).unwrap();
+    let node = s.node("Sevens");
+    assert_eq!(node.kind, "smartPlaylist");
+    assert_eq!(s.playlist_rows(&node.id).len(), 4, "007, 017, 027, 037");
+
+    // The rule reads back as it was given, and a new one takes effect.
+    let read = run(commands::smart_rule(s.state(), node.id.clone())).unwrap();
+    assert_eq!(read.logic, "all");
+    assert_eq!(read.conditions.len(), 1);
+    assert_eq!((read.conditions[0].property.as_str(), read.conditions[0].operator.as_str(), read.conditions[0].left.as_str()), ("name", "11", "7"));
+    let wider = SmartRuleDto {
+        logic: "any".to_owned(),
+        conditions: vec![condition("name", "11", "7", ""), condition("name", "11", "8", "")],
+    };
+    run(commands::set_smart_rule(s.handle(), s.state(), node.id.clone(), wider)).unwrap();
+    assert_eq!(s.playlist_rows(&node.id).len(), 8);
+    // Not on a plain playlist, and not with a property this cannot answer.
+    assert!(run(commands::set_smart_rule(
+        s.handle(),
+        s.state(),
+        playlist_id(1),
+        SmartRuleDto { logic: "all".to_owned(), conditions: vec![] }
+    ))
+    .is_err());
+    assert!(run(commands::create_smart_playlist(
+        s.handle(),
+        s.state(),
+        "Nope".to_owned(),
+        ROOT.to_owned(),
+        SmartRuleDto { logic: "all".to_owned(), conditions: vec![condition("myTag", "1", "x", "")] }
+    ))
+    .is_err());
 }

@@ -8,14 +8,14 @@ the version numbers [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Collaborative playlist is gone from the tree menu with the other cloud
+  rows, rather than greyed: there is no cloud library behind this app.
+- The rail's ⟳ tip reads Launch Sync Manager, as rekordbox's does.
 - Updates install themselves. A new version found by the start-up check is
   downloaded and put in place in the background, with nothing to click, and
   is the one that runs the next time rbxport opens. On Windows the installer
   runs silently when rbxport quits. Help › Check for Updates… still shows
   what is happening and what changed, and offers Restart Now.
-- Collaborative playlist is gone from the tree menu with the other cloud
-  rows, rather than greyed: there is no cloud library behind this app.
-- The rail's ⟳ tip reads Launch Sync Manager, as rekordbox's does.
 
 ### Fixed
 - A CDJ browsing a playlist served over LINK no longer sees every track
@@ -37,23 +37,15 @@ the version numbers [Semantic Versioning](https://semver.org/).
   loaded track and master change, every database session a player opens
   and closes, every mount and file it reads, at the level each deserves;
   `trace` adds every packet, request and RPC call.
-- A Linux build. Each release now ships an AppImage, which the app can
-  update itself from, and a .deb, beside the macOS disk image and the
-  Windows installer.
-- The GRID panel edits the beat grid and saves it to the library: set the
-  beat marker, tap the tempo, shift the grid a millisecond either way,
-  widen or narrow it by 0.01 BPM, double or halve it, snap the nearest beat
-  to the playhead for the whole grid or from the playhead on, undo and
-  redo, and lock the grid against edits. CUT sets the point from which the
-  other edits apply, so a tempo change part-way through a DJ edit can be
-  gridded without moving the beats before it. The keys are rekordbox's:
-  command + G opens the panel, command + cursor left/right shift the grid,
-  option + command + \ snaps to the playhead. The metronome follows the
-  edited grid, and the first time a track's analysis files are rewritten
-  the originals are kept under the app's backups.
-- Preferences › Advanced › Send anonymous usage statistics: on by default,
-  an install id with the version and OS once per launch to rbxport.com,
-  and nothing about the library. Off means no request at all.
+- A stick carries what rekordbox's does: the artwork at rekordbox's two
+  sizes under its names, the My Tags in `exportExt.pdb` for a player's tag
+  browsing, and the sync record (`playlists3.sync`) rekordbox's own Sync
+  Manager reads back, so a stick written here opens on the same selection
+  there.
+- Automatic synchronization: a tick under each stick in the Sync Manager.
+  A ticked stick is written again with its playlists whenever it is
+  plugged in while rbxport is running — and a stick rekordbox synced from
+  the same library with its automatic sync on is treated the same way.
 - The track menu's Add To Playlist (the playlist tree), Import To
   Collection (over the Explorer's files), Analysis Lock, Reload Tag, Add
   To Tag List and Export Track (to a connected stick, on its own, kept
@@ -70,6 +62,26 @@ the version numbers [Semantic Versioning](https://semver.org/).
   rekordbox's properties, operators and all/any match.
 - File › Import iTunes Library xml… brings Music.app's Library.xml in —
   the files, the playlist folders and lists, ratings and comments.
+- Add Artwork writes the picture at the three sizes the library keeps, so
+  a stick gets rekordbox's small and medium copies rather than the
+  original to scale.
+- Preferences › Advanced › Send anonymous usage statistics: on by default,
+  an install id with the version and OS once per launch to rbxport.com,
+  and nothing about the library. Off means no request at all.
+- A Linux build. Each release now ships an AppImage, which the app can
+  update itself from, and a .deb, beside the macOS disk image and the
+  Windows installer.
+- The GRID panel edits the beat grid and saves it to the library: set the
+  beat marker, tap the tempo, shift the grid a millisecond either way,
+  widen or narrow it by 0.01 BPM, double or halve it, snap the nearest beat
+  to the playhead for the whole grid or from the playhead on, undo and
+  redo, and lock the grid against edits. CUT sets the point from which the
+  other edits apply, so a tempo change part-way through a DJ edit can be
+  gridded without moving the beats before it. The keys are rekordbox's:
+  command + G opens the panel, command + cursor left/right shift the grid,
+  option + command + \ snaps to the playhead. The metronome follows the
+  edited grid, and the first time a track's analysis files are rewritten
+  the originals are kept under the app's backups.
 
 ### Changed
 - Analyze reads the whole track instead of the first three minutes. The beat

@@ -31,6 +31,13 @@ pub fn now() -> String {
     format_utc(secs, since.subsec_millis())
 }
 
+/// Milliseconds since the epoch, as rekordbox stamps a stick's sync record.
+#[must_use]
+pub fn unix_millis() -> u64 {
+    let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Today's date where the machine is, `YYYY-MM-DD`.
 ///
 /// The one place rekordbox writes local time rather than UTC: the date an

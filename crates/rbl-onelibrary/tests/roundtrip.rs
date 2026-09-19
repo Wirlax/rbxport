@@ -52,7 +52,7 @@ fn built() -> (tempfile::TempDir, std::path::PathBuf) {
     for i in 0..3 {
         builder.add_to_playlist(1, i64::from(i) + 1, i64::from(i) + 1).unwrap();
     }
-    builder.finish("RBXPORT", "2026-09-07").unwrap();
+    builder.finish("RBXPORT", "2026-09-07", 0).unwrap();
     (dir, path)
 }
 
@@ -133,7 +133,7 @@ fn a_lookup_is_reused_rather_than_duplicated() {
 
     // An empty name is id 0, which is how the reference spells "none".
     assert_eq!(builder.intern(LookupTable::Album, "").unwrap(), 0);
-    builder.finish("X", "2026-09-07").unwrap();
+    builder.finish("X", "2026-09-07", 0).unwrap();
 
     let db = ExportLibrary::open_read_only(&path).unwrap();
     assert_eq!(db.count("artist").unwrap(), 2);
@@ -245,7 +245,7 @@ fn text_that_would_break_naive_sql_round_trips() {
             ..Track::default()
         })
         .unwrap();
-    builder.finish("X", "2026-09-07").unwrap();
+    builder.finish("X", "2026-09-07", 0).unwrap();
 
     let db = ExportLibrary::open_read_only(&path).unwrap();
     assert_eq!(db.count("content").unwrap(), 1, "the table survived");
@@ -296,7 +296,7 @@ fn the_stick_settings_read_back_as_the_reference_and_update_in_place() {
     // And a database rebuilt from them keeps every one of the changes.
     let rebuilt = dir.path().join("rebuilt.db");
     let builder = Builder::create_with(&rebuilt, &again).expect("create_with");
-    builder.finish(&again.device_name, "2026-09-09").unwrap();
+    builder.finish(&again.device_name, "2026-09-09", 0).unwrap();
     let carried = StickSettings::read(&rebuilt).expect("read rebuilt");
     assert_eq!(carried, again);
 }

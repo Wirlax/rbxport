@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::Result;
 
@@ -53,6 +53,20 @@ pub fn my_tags(conn: &Connection) -> Result<Vec<MyTagRow>> {
         })
     })?;
     Ok(rows.filter_map(std::result::Result::ok).filter(|t| !t.id.is_empty()).collect())
+}
+
+/// `djmdProperty.DBID`, the library's own id, which a stick's sync record
+/// names so rekordbox knows which library synced it. 0 when the row is
+/// missing or not a number.
+pub fn db_id(conn: &Connection) -> Result<u64> {
+    if !has_table(conn, "djmdProperty") {
+        return Ok(0);
+    }
+    let id: Option<String> = conn
+        .query_row("SELECT DBID FROM djmdProperty LIMIT 1", [], |r| r.get(0))
+        .optional()?
+        .flatten();
+    Ok(id.and_then(|id| id.parse().ok()).unwrap_or(0))
 }
 
 /// What one exported track needs that the index does not hold.

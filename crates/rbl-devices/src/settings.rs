@@ -16,7 +16,7 @@
 //!   0x00  u32 LE  0x60          length of the three strings below
 //!   0x04  [32]    "PIONEER DJ"  brand, NUL-padded
 //!   0x24  [32]    "rekordbox"   software
-//!   0x44  [32]    "7.2.8"       version, whatever wrote the file
+//!   0x44  [32]    "7.2.11"      version, whatever wrote the file
 //!   0x64  u32 LE  32            length of the body
 //!   0x68  [32]    body, below
 //!   0x88  u16 LE  CRC-16/XMODEM over the 32 body bytes
@@ -31,7 +31,11 @@
 //! values. The two `01` bytes whose meaning is not known are carried as read
 //! and never changed; one of them may be Waveform Divisions (TIMESCALE on
 //! that stick), which is `[UNKNOWN]` until a recording toggles it — so that
-//! control is drawn and inert.
+//! control is drawn and inert. Body bytes 14, 15 and 16 (file `0x76`–`0x78`)
+//! were `01 01 01` after rekordbox 7.2.11 had applied a change on each of
+//! its Category, Sort and Color tabs [OBS 2026-09-18 parity run], and `00`
+//! from us; the 2026-09-17 run saw only byte 16 vary. [Hypothesis: one flag
+//! per customised list.] Carried as read, never set.
 //!
 //! The CRC was checked against all four setting files on the stick: XMODEM
 //! over the body alone reproduces the stored value in `DEVSETTING`,
@@ -99,7 +103,9 @@ const BODY_AT: usize = 4 + STRINGS_LEN + 4;
 const BRAND: &str = "PIONEER DJ";
 const SOFTWARE: &str = "rekordbox";
 /// The version the real stick carried [OBS]; what a file we create says.
-const VERSION: &str = "7.2.8";
+// The rekordbox this file's layout was last checked against; what
+// rekordbox 7.2.11 itself writes here [OBS 2026-09-18 parity run].
+const VERSION: &str = "7.2.11";
 /// The body of the real stick's file, defaults for a file we create: the
 /// two unexplained `01` bytes as observed, and the four known ones at
 /// rekordbox's defaults (Half, BLUE, Classic, CENTER) [OBS]/[REF].
@@ -353,6 +359,7 @@ mod tests {
         assert_eq!(dev.color, WaveformColor::TriBand);
         assert_eq!(dev.key_display, KeyDisplay::Classic);
         assert_eq!(dev.position, WaveformPosition::Center);
+        // That stick was written by 7.2.8; a file this writes says 7.2.11.
         assert_eq!(dev.version, "7.2.8");
     }
 
@@ -379,9 +386,11 @@ mod tests {
         let out = DevSetting::default().encode();
         let parsed = DevSetting::parse(&out).expect("our own file parses");
         assert_eq!(parsed, DevSetting::default());
-        // Same everywhere except the one setting that stick had changed.
+        // Same everywhere except the one setting that stick had changed and
+        // the version, "7.2.8" there and "7.2.11" here (bytes 0x48, 0x49:
+        // "8" against "11").
         let differing: Vec<usize> = (0..REAL.len()).filter(|&i| out[i] != REAL[i]).collect();
-        assert_eq!(differing, vec![BODY_AT + COLOR_AT, 0x88, 0x89]);
+        assert_eq!(differing, vec![0x48, 0x49, BODY_AT + COLOR_AT, 0x88, 0x89]);
     }
 
     #[test]

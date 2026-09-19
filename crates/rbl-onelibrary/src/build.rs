@@ -404,13 +404,16 @@ impl Builder {
     ///
     /// `created` is a date, `YYYY-MM-DD`, which is what the reference export
     /// carries — not a full timestamp.
-    pub fn finish(self, device_name: &str, created: &str) -> Result<()> {
+    ///
+    /// `my_tag_master_db_id` is the number `exportExt.pdb` carries for the
+    /// tags; the two files agree on it.
+    pub fn finish(self, device_name: &str, created: &str, my_tag_master_db_id: u32) -> Result<()> {
         self.conn.execute(
             "INSERT INTO property
                 (deviceName, dbVersion, numberOfContents, createdDate,
                  backGroundColorType, myTagMasterDBID)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-            params![device_name, DB_VERSION, self.tracks, created, self.background_color_type],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![device_name, DB_VERSION, self.tracks, created, self.background_color_type, my_tag_master_db_id],
         )?;
         // A stick must not be left with pages only in the WAL: a device that
         // does not replay it would read a database missing everything written.

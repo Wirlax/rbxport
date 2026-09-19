@@ -324,6 +324,9 @@ pub struct DeviceSyncStateDto {
     /// The playlist names in its `export.pdb`, folders left out; empty
     /// when it holds no export.
     pub on_device: Vec<String>,
+    /// The stick's sync record asks to be synced again when it is plugged
+    /// in, and the record is this library's.
+    pub automatic: bool,
 }
 
 /// One step of a sync, as the `sync:progress` event carries it.

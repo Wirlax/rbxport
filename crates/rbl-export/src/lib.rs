@@ -11,12 +11,15 @@
 //! Nothing here touches the user's library: it reads from an already-loaded
 //! index and writes only under the destination directory.
 
+pub mod ext_pdb;
 pub mod manifest;
+pub mod sync_record;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub use manifest::{track_key, Manifest, ManifestPlaylist, ManifestTrack};
+pub use sync_record::{SyncNode, SyncRecord, SyncSource};
 
 use rbl_pdb::build::FileBuilder;
 use rbl_pdb::rows::{
@@ -363,7 +366,7 @@ pub fn export_with(
     playlists: &[SourcePlaylist],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
 ) -> Result<ExportReport> {
-    export_full(destination, tracks, playlists, &[], defaults, &mut |_| {})
+    export_full(destination, tracks, playlists, &[], defaults, None, &mut |_| {})
 }
 
 /// [`export_with`], with the library's My Tags listed on the stick as well.
@@ -379,6 +382,7 @@ pub fn export_full(
     playlists: &[SourcePlaylist],
     my_tags: &[SourceMyTag],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+    sync: Option<&SyncSource>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
     if tracks.is_empty() {
@@ -647,9 +651,12 @@ pub fn export_full(
     });
     report.pdb_bytes = pdb.len();
     std::fs::write(db_dir.join("export.pdb"), &pdb)?;
+    // The tags, for the player's My Tag browsing.
+    let master_db_id = my_tag_master_db_id(sync);
+    std::fs::write(db_dir.join("exportExt.pdb"), ext_pdb::build(my_tags, master_db_id))?;
 
     // A player never opens this; rekordbox does, to read the stick back.
-    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, &artwork_paths, my_tags, defaults)?;
+    write_one_library(&db_dir, &one_library_tracks, playlists, &export_ids, &artwork_paths, my_tags, defaults, master_db_id)?;
     report.one_library = true;
 
     // The DJ's My Settings, as rekordbox puts them on every stick it writes.
@@ -657,8 +664,24 @@ pub fn export_full(
         copy_my_settings(destination, &source)?;
     }
 
+    // The sync record, so rekordbox's Sync Manager opens on this selection
+    // too. A playlist that is not the library's has no id to record.
+    if let Some(sync) = sync {
+        let ticked: Vec<u64> = playlists.iter().map(|p| p.id).filter(|&id| id != 0).collect();
+        sync_record::write(destination, sync, &ticked, rbl_core::time::unix_millis())?;
+    }
+
     // Last, so a run that fails part way leaves the older record standing and
     // the next attempt re-copies rather than trusting a half-written stick.
+    // A track in no playlist was put on the stick on its own; the record
+    // says so, so the next sync keeps it.
+    let in_a_playlist: BTreeSet<usize> = playlists.iter().flat_map(|p| p.track_indices.iter().copied()).collect();
+    let loose: Vec<u64> = tracks
+        .iter()
+        .enumerate()
+        .filter(|(index, track)| !in_a_playlist.contains(index) && track.id != 0 && export_ids[*index].is_some())
+        .map(|(_, track)| track.id)
+        .collect();
     Manifest {
         version: manifest::MANIFEST_VERSION,
         written: rbl_core::time::now(),
@@ -667,6 +690,7 @@ pub fn export_full(
             .iter()
             .map(|p| manifest::ManifestPlaylist { library_id: p.id, name: p.name.clone() })
             .collect(),
+        loose,
     }
     .save(destination)?;
 
@@ -739,6 +763,8 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
 pub fn create_library(
     destination: &Path,
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+    my_tags: &[SourceMyTag],
+    sync: Option<&SyncSource>,
 ) -> Result<bool> {
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -762,8 +788,22 @@ pub fn create_library(
         artwork: &[],
     });
     std::fs::write(db_dir.join("export.pdb"), pdb)?;
-    write_one_library(&db_dir, &[], &[], &[], &[], &[], defaults)?;
+    // The library's tags go on even a stick with no tracks [OBS 7.2.11:
+    // the blank stick's `exportExt.pdb` held all 99].
+    let master_db_id = my_tag_master_db_id(sync);
+    std::fs::write(db_dir.join("exportExt.pdb"), ext_pdb::build(my_tags, master_db_id))?;
+    write_one_library(&db_dir, &[], &[], &[], &[], my_tags, defaults, master_db_id)?;
     Ok(true)
+}
+
+/// The number `exportExt.pdb` and `exportLibrary.db`'s `property` row both
+/// carry as the tags' master database id. rekordbox wrote 1744129535 for
+/// this library, whose `DBID` is 1912725212, on every export; how it gets
+/// from one to the other is [UNKNOWN] (not the DBID, nor CRC32/FNV/Adler/
+/// MD5/SHA of the DBID or the device id). The two files only have to
+/// agree with each other, so the library's own id stands in.
+fn my_tag_master_db_id(sync: Option<&SyncSource>) -> u32 {
+    sync.map_or(0, |s| u32::try_from(s.db_id & 0xffff_ffff).unwrap_or(0))
 }
 
 /// The subset of a track `exportLibrary.db` needs.
@@ -792,34 +832,48 @@ struct OneLibraryTrack {
 /// Where an image's files go on the stick, and what the databases name.
 ///
 /// rekordbox writes four files per image — `a<id>.jpg`, `a<id>_m.jpg`,
-/// `b<id>.jpg` and `b<id>_m.jpg` — a thousand images to a five-digit folder
-/// [OBS, 2026-09-17 parity test]. Which size each is, and whether the
-/// stick's copies are re-encoded from the library's, is not settled (they
-/// did not match the library's files byte for byte), so every one is the
-/// library's image as it is: a player that wants the small one gets a
-/// larger one to scale [ASSUME].
+/// `b<id>.jpg` and `b<id>_m.jpg` — twenty images to a five-digit folder,
+/// ids 1–19 in `00001`, 20–39 in `00002` and so on [OBS, 2026-09-17 parity
+/// test: 61 images over `00001`–`00004`]. `a<id>.jpg` is the library's own
+/// 80×80 `artwork_s.jpg` and `a<id>_m.jpg` its 240×240 `artwork_m.jpg`,
+/// byte for byte, and each `b` file is the same bytes as its `a` [OBS
+/// 2026-09-18, md5 of the stick's files against `share/PIONEER/Artwork`].
 fn artwork_path(id: u32, prefix: &str, medium: bool) -> String {
-    let folder = (id.saturating_sub(1)) / 1000 + 1;
+    let folder = id / ARTWORK_PER_FOLDER + 1;
     let suffix = if medium { "_m" } else { "" };
     format!("/PIONEER/Artwork/{folder:05}/{prefix}{id}{suffix}.jpg")
 }
 
-/// The four names an image is written under.
-fn artwork_names(id: u32) -> [String; 4] {
+/// Images to a stick artwork folder.
+const ARTWORK_PER_FOLDER: u32 = 20;
+
+/// The four names an image is written under, each with whether it is the
+/// medium size.
+fn artwork_names(id: u32) -> [(String, bool); 4] {
     [
-        artwork_path(id, "a", false),
-        artwork_path(id, "a", true),
-        artwork_path(id, "b", false),
-        artwork_path(id, "b", true),
+        (artwork_path(id, "a", false), false),
+        (artwork_path(id, "a", true), true),
+        (artwork_path(id, "b", false), false),
+        (artwork_path(id, "b", true), true),
     ]
+}
+
+/// The library's file for one size of an image: `artwork_s.jpg` or
+/// `artwork_m.jpg` beside the `artwork.jpg` the track names, when the
+/// library has it; otherwise the named file itself, so a track whose
+/// artwork was added by hand still gets a picture rather than none.
+fn artwork_source(image: &Path, medium: bool) -> PathBuf {
+    let sibling = image.with_file_name(if medium { "artwork_m.jpg" } else { "artwork_s.jpg" });
+    if sibling.is_file() { sibling } else { image.to_path_buf() }
 }
 
 /// Copies an image to its four places, skipping any already there at the
 /// same size. Returns how many files were written.
 fn write_artwork(destination: &Path, id: u32, image: &Path) -> Result<usize> {
-    let size = std::fs::metadata(image)?.len();
     let mut written = 0;
-    for name in artwork_names(id) {
+    for (name, medium) in artwork_names(id) {
+        let source = artwork_source(image, medium);
+        let size = std::fs::metadata(&source)?.len();
         let target = under(destination, &name);
         if std::fs::metadata(&target).is_ok_and(|m| m.len() == size) {
             continue;
@@ -827,7 +881,7 @@ fn write_artwork(destination: &Path, id: u32, image: &Path) -> Result<usize> {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        match std::fs::copy(image, &target) {
+        match copy_data(&source, &target) {
             Ok(_) => written += 1,
             Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
             Err(e) => return Err(e.into()),
@@ -846,6 +900,7 @@ fn write_one_library(
     artwork_paths: &[(u32, String)],
     my_tags: &[SourceMyTag],
     defaults: Option<&rbl_onelibrary::settings::StickSettings>,
+    master_db_id: u32,
 ) -> Result<()> {
     use rbl_onelibrary::build::{Builder, LookupTable, Track};
     use rbl_onelibrary::settings::StickSettings;
@@ -952,7 +1007,7 @@ fn write_one_library(
     // device name is the one the stick has been given, and empty until
     // then: rekordbox writes it empty on a fresh export [OBS 7.2.11].
     let created = rbl_core::time::local_date();
-    builder.finish(&settings.device_name, &created).map_err(|e| one_library_error(&e))
+    builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))
 }
 
 fn one_library_error(error: &rbl_onelibrary::Error) -> ExportError {

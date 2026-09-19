@@ -468,6 +468,7 @@ pub fn run() {
             preferences::open_preferences,
             sync_window::open_sync_window,
             commands::sync_devices,
+            commands::export_tracks_to_device,
             commands::device_sync_state,
             device_settings::reference_stick_settings,
             commands::create_playlist,

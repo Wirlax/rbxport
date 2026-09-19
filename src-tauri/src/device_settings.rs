@@ -301,9 +301,11 @@ fn bad_value(field: &str, value: &str) -> AppError {
 /// stick that already has a database is read and left as it is.
 #[tauri::command]
 pub async fn ensure_device_library(
+    state: tauri::State<'_, std::sync::Arc<crate::state::AppState>>,
     path: String,
     defaults: Option<StickDefaultsDto>,
 ) -> AppResult<DeviceSettingsDto> {
+    let state = std::sync::Arc::clone(&state);
     crate::commands::blocking("ensure_device_library", move || {
         let mount = Path::new(&path);
         if !mount.is_dir() {
@@ -313,7 +315,18 @@ pub async fn ensure_device_library(
             ));
         }
         let library = defaults.as_ref().map(library_defaults);
-        rbl_export::create_library(mount, library.as_ref())
+        // The library's tags go on the blank stick, as rekordbox puts them
+        // there the moment a drive is connected. A library not loaded yet
+        // gives none, and the stick gets its tags on its first export.
+        let (my_tags, db_id) = state
+            .read_db(|db| {
+                let conn = db.connection();
+                Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::db_id(conn)?))
+            })
+            .unwrap_or_default();
+        let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(crate::commands::source_my_tag).collect();
+        let sync = rbl_export::SyncSource { db_id, tree: Vec::new(), automatic: false };
+        rbl_export::create_library(mount, library.as_ref(), &my_tags, Some(&sync))
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         if let Some(defaults) = &defaults {
             write_dev_defaults(mount, defaults)?;

@@ -121,7 +121,7 @@ fn u1(b: &[u8], at: usize) -> u8 {
 fn u2(b: &[u8], at: usize) -> u16 {
     u16::from_le_bytes([u1(b, at), u1(b, at + 1)])
 }
-fn u4(b: &[u8], at: usize) -> u32 {
+pub(crate) fn u4(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([u1(b, at), u1(b, at + 1), u1(b, at + 2), u1(b, at + 3)])
 }
 

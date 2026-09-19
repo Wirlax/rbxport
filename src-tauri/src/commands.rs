@@ -656,7 +656,7 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
-        let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist))?;
+        let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist), false)?;
         // Per track, as `sync:progress` is per stick: the status bar follows
         // a long export rather than showing a busy flag alone.
         let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
@@ -667,7 +667,9 @@ pub async fn export_playlist<R: tauri::Runtime>(
                 ExportProgressDto { done: u32::try_from(p.done).unwrap_or(u32::MAX), total, title: p.title.clone() },
             );
         };
-        write_export(std::path::Path::new(&destination), &selection, defaults.as_ref(), &mut on_progress)
+        let destination = std::path::Path::new(&destination);
+        let selection = selection.for_stick(&state, &library, &share, destination)?;
+        write_export(destination, &selection, defaults.as_ref(), &mut on_progress)
     })
     .await?;
 
@@ -694,12 +696,16 @@ pub async fn sync_devices<R: tauri::Runtime>(
     // What a stick with no settings of its own is given; see the DJ System
     // pane. A stick that has settings keeps them.
     defaults: Option<crate::device_settings::StickDefaultsDto>,
+    // The Sync Manager's "Automatic synchronization": recorded on each
+    // stick, and read back when it is next plugged in.
+    automatic: Option<bool>,
 ) -> AppResult<Vec<SyncDeviceReportDto>> {
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
     blocking("sync_devices", move || {
-        let selection = ExportSelection::from_playlists(&state, &library, &share, &playlists)?;
+        let selection =
+            ExportSelection::from_playlists(&state, &library, &share, &playlists, automatic.unwrap_or(false))?;
         let mut reports = Vec::with_capacity(destinations.len());
         for destination in destinations {
             let progress = |state: &'static str| {
@@ -710,7 +716,10 @@ pub async fn sync_devices<R: tauri::Runtime>(
                 );
             };
             progress("writing");
-            let written = write_export(std::path::Path::new(&destination), &selection, defaults.as_ref(), &mut |_| {});
+            let stick = std::path::Path::new(&destination);
+            let written = selection
+                .for_stick(&state, &library, &share, stick)
+                .and_then(|selection| write_export(stick, &selection, defaults.as_ref(), &mut |_| {}));
             progress(if written.is_ok() { "done" } else { "failed" });
             reports.push(match written {
                 Ok(report) => SyncDeviceReportDto { path: destination, report: Some(report), error: None },
@@ -725,21 +734,76 @@ pub async fn sync_devices<R: tauri::Runtime>(
     .await
 }
 
+/// Export Track: puts tracks on a stick on their own, in no playlist,
+/// beside what the stick's record says it holds — its playlists, synced
+/// again from the library, and the tracks put there this way before.
+#[tauri::command]
+pub async fn export_tracks_to_device<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+    destination: String,
+    defaults: Option<crate::device_settings::StickDefaultsDto>,
+) -> AppResult<ExportReportDto> {
+    let library = state.library()?;
+    let share = state.share_root();
+    let state = Arc::clone(&state);
+    let report = blocking("export_tracks_to_device", move || {
+        let stick = std::path::Path::new(&destination);
+        if !stick.is_dir() {
+            return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
+        }
+        let record = rbl_export::Manifest::load(stick);
+        let (playlists, mut loose, automatic) = match record {
+            Some(m) => {
+                let ids: Vec<String> = m.playlists.iter().map(|p| p.library_id.to_string()).collect();
+                (ids, m.loose, rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic))
+            }
+            None => (Vec::new(), Vec::new(), false),
+        };
+        for id in tracks.iter().filter_map(|t| t.parse::<u64>().ok()) {
+            if !loose.contains(&id) {
+                loose.push(id);
+            }
+        }
+        let selection = ExportSelection::from_playlists_and_tracks(&state, &library, &share, &playlists, &loose, automatic)?;
+        write_export(stick, &selection, defaults.as_ref(), &mut |_| {})
+    })
+    .await?;
+    let _ = tauri::Emitter::emit(&app, "export:done", &report);
+    Ok(report)
+}
+
 /// What a stick was last synced with, and what it holds.
 ///
 /// The Sync Manager ticks a stick's last selection back on when the stick
 /// is ticked, so a weekly sync is two clicks rather than a hunt through the
-/// tree; that comes from our manifest, so a stick rekordbox wrote offers
-/// nothing. What it holds comes from `export.pdb` itself, whoever wrote it,
-/// because that is what the player will show.
+/// tree. That comes from our manifest, or failing that from the sync record
+/// rekordbox leaves (`playlists3.sync`), which names the playlists by their
+/// library ids — so a stick rekordbox synced from this library offers its
+/// selection too, and its "Automatic synchronization" tick. What it holds
+/// comes from `export.pdb` itself, whoever wrote it, because that is what
+/// the player will show.
 #[tauri::command]
-pub async fn device_sync_state(path: String) -> AppResult<DeviceSyncStateDto> {
+pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) -> AppResult<DeviceSyncStateDto> {
+    let library = state.library().ok();
+    let state = Arc::clone(&state);
     blocking("device_sync_state", move || {
         let mount = std::path::Path::new(&path);
         if !mount.is_dir() {
             return Err(AppError::new(ErrorKind::NotFound, "That device is no longer connected."));
         }
-        let selected = rbl_export::Manifest::load(mount)
+        let record = rbl_export::sync_record::read(mount);
+        // Only read when there is a record to match it against.
+        let db_id = if record.is_some() {
+            state.read_db(|db| rbl_db::export_info::db_id(db.connection())).unwrap_or(0)
+        } else {
+            0
+        };
+        // rekordbox's record names another library's playlists by ids this
+        // one does not have; only a record from this library is a selection.
+        let ours = record.as_ref().filter(|r| db_id != 0 && r.db_id == db_id);
+        let mut selected: Vec<SyncPlaylistDto> = rbl_export::Manifest::load(mount)
             .map(|manifest| {
                 manifest
                     .playlists
@@ -751,7 +815,24 @@ pub async fn device_sync_state(path: String) -> AppResult<DeviceSyncStateDto> {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(DeviceSyncStateDto { selected, on_device: playlists_on_device(mount) })
+        if selected.is_empty() {
+            if let (Some(record), Some(library)) = (ours, library.as_ref()) {
+                let playlists = library.playlists();
+                selected = record
+                    .ticked
+                    .iter()
+                    .filter_map(|&id| {
+                        let index = playlists.index_of(id)?;
+                        Some(SyncPlaylistDto { library_id: id.to_string(), name: playlists.name(index).to_owned() })
+                    })
+                    .collect();
+            }
+        }
+        Ok(DeviceSyncStateDto {
+            selected,
+            on_device: playlists_on_device(mount),
+            automatic: ours.is_some_and(|r| r.automatic),
+        })
     })
     .await
 }
@@ -769,15 +850,29 @@ fn playlists_on_device(mount: &std::path::Path) -> Vec<String> {
     nodes.into_iter().filter(|node| !node.is_folder).map(|node| node.name).collect()
 }
 
+/// A My Tag row as the export takes it.
+pub(crate) fn source_my_tag(tag: &rbl_db::export_info::MyTagRow) -> rbl_export::SourceMyTag {
+    rbl_export::SourceMyTag {
+        id: tag.id.parse().unwrap_or(0),
+        seq: u32::try_from(tag.seq.max(0)).unwrap_or(u32::MAX),
+        name: tag.name.clone(),
+        attribute: u8::try_from(tag.attribute.clamp(0, 255)).unwrap_or(0),
+        parent: tag.parent.parse().unwrap_or(0),
+    }
+}
+
 /// What an export is asked to write: the tracks, the playlists that name
 /// them by index, and the library's My Tags. Built once and written to as
 /// many sticks as asked.
+#[derive(Clone)]
 pub(crate) struct ExportSelection {
     pub tracks: Vec<rbl_export::SourceTrack>,
     pub playlists: Vec<rbl_export::SourcePlaylist>,
     /// Every My Tag of the library, listed on the stick whole as rekordbox
     /// lists them.
     pub my_tags: Vec<rbl_export::SourceMyTag>,
+    /// What the stick's sync record names: the library and its tree.
+    pub sync: rbl_export::SyncSource,
 }
 
 impl ExportSelection {
@@ -790,6 +885,23 @@ impl ExportSelection {
         library: &rbl_index::Library,
         share: &std::path::Path,
         playlist_ids: &[String],
+        // Written into the stick's sync record: whether it is to be synced
+        // again, on its own, when it is next plugged in.
+        automatic: bool,
+    ) -> AppResult<Self> {
+        Self::from_playlists_and_tracks(state, library, share, playlist_ids, &[], automatic)
+    }
+
+    /// [`from_playlists`](Self::from_playlists) with tracks that go on the
+    /// stick in no playlist: what Export Track put there, and what a
+    /// stick's record says was put there before.
+    pub(crate) fn from_playlists_and_tracks(
+        state: &AppState,
+        library: &rbl_index::Library,
+        share: &std::path::Path,
+        playlist_ids: &[String],
+        loose: &[u64],
+        automatic: bool,
     ) -> AppResult<Self> {
         // Named first and read after: `source_rows` takes the playlists
         // itself, so the guard is let go before it is asked.
@@ -809,30 +921,47 @@ impl ExportSelection {
             }
         }
         let rows_of: Vec<Vec<u32>> = named.iter().map(|(_, _, source)| library.source_rows(source)).collect();
+        // A loose track the library no longer has is left off without a
+        // word: the stick's record outlives the track.
+        let loose_rows: Vec<u32> = loose.iter().filter_map(|&id| library.row_of_id(id)).collect();
 
         // What the index does not hold: the My Tags, and the other places a
         // cloud-synced file may be. One read for the whole selection.
         let ids: Vec<String> = rows_of
             .iter()
             .flatten()
+            .chain(loose_rows.iter())
             .map(|&row| library.ids.get(row as usize).copied().unwrap_or(0).to_string())
             .collect();
-        let (my_tags, extras) = state
+        let (my_tags, extras, db_id) = state
             .read_db(|db| {
                 let conn = db.connection();
-                Ok((rbl_db::export_info::my_tags(conn)?, rbl_db::export_info::track_extras(conn, &ids)?))
+                Ok((
+                    rbl_db::export_info::my_tags(conn)?,
+                    rbl_db::export_info::track_extras(conn, &ids)?,
+                    rbl_db::export_info::db_id(conn)?,
+                ))
             })
             .map_err(write_error)?;
-        let my_tags: Vec<rbl_export::SourceMyTag> = my_tags
-            .iter()
-            .map(|tag| rbl_export::SourceMyTag {
-                id: tag.id.parse().unwrap_or(0),
-                seq: u32::try_from(tag.seq.max(0)).unwrap_or(u32::MAX),
-                name: tag.name.clone(),
-                attribute: u8::try_from(tag.attribute.clamp(0, 255)).unwrap_or(0),
-                parent: tag.parent.parse().unwrap_or(0),
-            })
-            .collect();
+        // The whole tree goes along; the record keeps the ticked playlists
+        // and the folders above them.
+        let tree = {
+            let playlists = library.playlists();
+            (0..playlists.len())
+                .map(|index| rbl_export::SyncNode {
+                    id: playlists.ids.get(index).copied().unwrap_or(0),
+                    parent: match playlists.parent.get(index).copied() {
+                        Some(parent) if parent != rbl_index::NO_ID => {
+                            playlists.ids.get(parent as usize).copied().unwrap_or(0)
+                        }
+                        _ => 0,
+                    },
+                    attribute: playlists.attribute.get(index).copied().unwrap_or(0),
+                })
+                .collect()
+        };
+        let sync = rbl_export::SyncSource { db_id, tree, automatic };
+        let my_tags: Vec<rbl_export::SourceMyTag> = my_tags.iter().map(source_my_tag).collect();
 
         let mut tracks: Vec<rbl_export::SourceTrack> = Vec::new();
         let mut position: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
@@ -850,10 +979,53 @@ impl ExportSelection {
             }
             source_playlists.push(rbl_export::SourcePlaylist { id, name, track_indices });
         }
+        for row in loose_rows {
+            position.entry(row).or_insert_with(|| {
+                let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
+                let extra = extras.get(&content).cloned().unwrap_or_default();
+                tracks.push(source_track(library, share, row, &extra));
+                tracks.len() - 1
+            });
+        }
         if tracks.is_empty() {
             return Err(AppError::new(ErrorKind::NotFound, "That playlist has no tracks to export."));
         }
-        Ok(Self { tracks, playlists: source_playlists, my_tags })
+        Ok(Self { tracks, playlists: source_playlists, my_tags, sync })
+    }
+
+    /// This selection with the loose tracks a stick's record names added,
+    /// so a sync keeps what Export Track put there. The selection itself
+    /// when the record names none it does not already hold.
+    pub(crate) fn for_stick<'a>(
+        &'a self,
+        state: &AppState,
+        library: &rbl_index::Library,
+        share: &std::path::Path,
+        destination: &std::path::Path,
+    ) -> AppResult<std::borrow::Cow<'a, Self>> {
+        let recorded = rbl_export::Manifest::load(destination).map(|m| m.loose).unwrap_or_default();
+        let held: std::collections::HashSet<u64> = self.tracks.iter().map(|t| t.id).collect();
+        let missing: Vec<u64> = recorded.into_iter().filter(|id| !held.contains(id)).collect();
+        if missing.is_empty() {
+            return Ok(std::borrow::Cow::Borrowed(self));
+        }
+        let playlist_ids: Vec<String> = self.playlists.iter().map(|p| p.id.to_string()).collect();
+        let loose: Vec<u64> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.playlists.iter().any(|p| p.track_indices.contains(index)))
+            .map(|(_, t)| t.id)
+            .chain(missing)
+            .collect();
+        Ok(std::borrow::Cow::Owned(Self::from_playlists_and_tracks(
+            state,
+            library,
+            share,
+            &playlist_ids,
+            &loose,
+            self.sync.automatic,
+        )?))
     }
 }
 
@@ -920,6 +1092,7 @@ pub(crate) fn write_export(
         &selection.playlists,
         &selection.my_tags,
         library_defaults.as_ref(),
+        Some(&selection.sync),
         progress,
     )
     .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
