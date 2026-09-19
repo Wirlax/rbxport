@@ -289,6 +289,14 @@ pub fn set_analysis_path(location: &LibraryLocation, index: usize, relative: &st
     Ok(())
 }
 
+/// Sets a fixture track's tempo, BPM x100 as the column holds it, so a row
+/// pointed at real audio can carry the tempo its analysis found.
+pub fn set_tempo(location: &LibraryLocation, index: usize, bpm_x100: u32) -> Result<()> {
+    let conn = open_fixture(location)?;
+    conn.execute("UPDATE djmdContent SET BPM = ?1 WHERE ID = ?2", params![bpm_x100, track_id(index)])?;
+    Ok(())
+}
+
 /// Writes the `options.json` rekordbox's agent would keep for this library,
 /// with `master_db_as` as the path it will have where it is read — the
 /// detector resolves `share/` beside it. What `RBXPORT_OPTIONS` points

@@ -26,3 +26,4 @@ e2e/**/__screenshots__/**/*-actual.png
 .perf-gate-stamp
 test-results/
 playwright-report/
+__pycache__/

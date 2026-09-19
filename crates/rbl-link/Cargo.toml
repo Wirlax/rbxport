@@ -33,6 +33,11 @@ if-addrs = "0.15"
 
 [dev-dependencies]
 if-addrs = "0.15"
+# The emulator fixture (`examples/emu_fixture.rs`) analyses its own WAVs so
+# the deck has a grid and waveforms to draw.
+rbl-analysis = { path = "../rbl-analysis" }
+rbl-audio = { path = "../rbl-audio" }
 rbl-fakecdj = { path = "../rbl-fakecdj" }
+serde_json = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
