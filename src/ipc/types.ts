@@ -457,6 +457,13 @@ export interface Backend {
   restartToUpdate(): Promise<void>;
   /** The download's progress, about ten times a second while it runs. */
   onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
+  /**
+   * Tells rbxport.com this launch happened: an install id, the version, the
+   * OS and the architecture, in the background, at most once per run. Only
+   * called while Preferences › Advanced allows it; resolves at once, and a
+   * ping that does not get through is nobody's concern.
+   */
+  reportLaunch(): Promise<void>;
   /** The master limiter as it stands. */
   masterLimiter(): Promise<Limiter>;
   /** Sets the master limiter; what comes back is what the engine could set. */

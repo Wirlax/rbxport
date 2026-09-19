@@ -48,6 +48,9 @@ the version numbers [Semantic Versioning](https://semver.org/).
   option + command + \ snaps to the playhead. The metronome follows the
   edited grid, and the first time a track's analysis files are rewritten
   the originals are kept under the app's backups.
+- Preferences › Advanced › Send anonymous usage statistics: on by default,
+  an install id with the version and OS once per launch to rbxport.com,
+  and nothing about the library. Off means no request at all.
 
 ### Changed
 - Analyze reads the whole track instead of the first three minutes. The beat

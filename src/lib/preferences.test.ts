@@ -64,6 +64,14 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ advanced: { checkUpdates: false } }).advanced.checkUpdates).toBe(false);
   });
 
+  it("sends the launch ping unless the store plainly says not to", () => {
+    // A store written before the switch existed has no such key.
+    expect(sanitisePreferences({ advanced: {} }).advanced.usageStats).toBe(true);
+    expect(sanitisePreferences({ advanced: { usageStats: "no" } }).advanced.usageStats).toBe(true);
+    expect(sanitisePreferences({ advanced: { usageStats: 0 } }).advanced.usageStats).toBe(true);
+    expect(sanitisePreferences({ advanced: { usageStats: false } }).advanced.usageStats).toBe(false);
+  });
+
   it("creates database folders on a blank drive unless the store plainly says not to", () => {
     expect(sanitisePreferences({ djSystem: {} }).djSystem.createDatabaseFolders).toBe(true);
     expect(sanitisePreferences({ djSystem: { createDatabaseFolders: "no" } }).djSystem.createDatabaseFolders).toBe(true);

@@ -1689,6 +1689,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         updateProgressListeners.delete(listener);
       };
     },
+    // A browser is not an install; nothing is counted.
+    reportLaunch: () => wait(undefined),
     masterLimiter: () => wait({ ...limiter }),
     setMasterLimiter: (wanted) => {
       limiter = {

@@ -177,6 +177,7 @@ async function realBackend(): Promise<Backend> {
     downloadUpdate: () => invoke<UpdateReady>("download_update"),
     restartToUpdate: () => invoke<void>("restart_to_update"),
     onUpdateProgress: (listener) => subscribe<UpdateProgress>("update:progress", listener),
+    reportLaunch: () => invoke<void>("report_launch"),
     masterLimiter: () => invoke<Limiter>("master_limiter"),
     setMasterLimiter: (limiter) => invoke<Limiter>("set_master_limiter", { limiter }),
     deckTempo: (deck, tempo) => invoke<void>("deck_tempo", { deck, tempo }),

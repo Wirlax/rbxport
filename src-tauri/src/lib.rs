@@ -21,6 +21,7 @@ mod preferences;
 mod protocol;
 mod relocate;
 mod sync_window;
+mod telemetry;
 mod device_settings;
 pub mod dto;
 mod error;
@@ -432,6 +433,7 @@ pub fn run() {
             update::check_for_update,
             update::download_update,
             update::restart_to_update,
+            telemetry::report_launch,
             commands::deck_tempo,
             commands::deck_metronome,
             commands::deck_key_shift,

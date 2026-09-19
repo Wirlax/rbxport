@@ -291,6 +291,18 @@ export function App() {
   // menu and Preferences ask by hand.
   const updater = useUpdater(advancedPrefs.checkUpdates, advancedPrefs.updateFrequency);
   const checkForUpdates = updater.check;
+  // The launch ping to rbxport.com, when Preferences › Advanced allows it.
+  // Asked for once from here and sent at most once by the shell, so a
+  // switch turned on later in the run sends then, and one turned off sends
+  // nothing more. A ping that fails is the shell's to log, not ours to show.
+  const launchReported = useRef(false);
+  useEffect(() => {
+    if (!advancedPrefs.usageStats || launchReported.current) return;
+    launchReported.current = true;
+    void getBackend()
+      .then((backend) => backend.reportLaunch())
+      .catch(() => undefined);
+  }, [advancedPrefs.usageStats]);
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;

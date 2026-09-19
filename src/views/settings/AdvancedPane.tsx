@@ -4,8 +4,8 @@
  *
  * Database holds the library's own facts and the missing-file manager,
  * with rekordbox's Auto Relocate Search Folders feeding it. Browse holds
- * Library Protection and Edit Library. Others holds BEAT/BPM SYNC and the
- * quantize beat value.
+ * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
+ * quantize beat value, the Update Manager and the usage-statistics switch.
  *
  * Not here: iTunes and rekordbox xml (neither is read), Auto Export and
  * Database management (neither is built), My Tag, colour names, display
@@ -131,6 +131,18 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
               Check for Updates…
             </Button>
           </div>
+        </Section>
+        <Section title="Usage statistics">
+          <Toggle
+            label="Send anonymous usage statistics"
+            checked={advanced.usageStats}
+            onChange={(usageStats) => set({ usageStats })}
+          />
+          <Note>
+            An install id, the app version and your OS, once per launch, so
+            rbxport.com can count installs and see which downloads become
+            users. Nothing about your library.
+          </Note>
         </Section>
       </>
     );
