@@ -270,12 +270,27 @@ export interface TreeViewProps {
   onExpand?: (node: TreeNode) => void;
   /** Opens the Sync Manager from the foot of the rail. */
   onOpenSync?: () => void;
+  /** Create New Intelligent Playlist under the node, and Edit the Intelligent Playlist. */
+  onCreateSmartPlaylist?: (parent: TreeNode) => void;
+  onEditSmartPlaylist?: (node: TreeNode) => void;
+  /** Add Artwork on a playlist or folder. */
+  onAddArtwork?: (node: TreeNode) => void;
+  /** Sort Items: a folder's children put in name order. */
+  onSortItems?: (folder: TreeNode) => void;
+  /** Add To Shortcut: the rail takes the node as a button of its own. */
+  onAddToShortcut?: (node: TreeNode) => void;
+  /** The rail's shortcut buttons, what opens one, and what deletes one. */
+  railShortcuts?: readonly { id: string; name: string; selected: boolean }[];
+  onOpenShortcut?: (id: string) => void;
+  onDeleteShortcut?: (id: string) => void;
 }
 
 export function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
+  onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
+  railShortcuts, onOpenShortcut, onDeleteShortcut,
 }: TreeViewProps) {
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
@@ -396,7 +411,15 @@ export function TreeView({
 
   return (
     <nav className={styles.tree} aria-label="Library">
-      <SourceRail selected={source} onSelect={jumpTo} empty={empty} onOpenSync={onOpenSync} />
+      <SourceRail
+        selected={source}
+        onSelect={jumpTo}
+        empty={empty}
+        onOpenSync={onOpenSync}
+        shortcuts={railShortcuts}
+        onOpenShortcut={onOpenShortcut}
+        onDeleteShortcut={onDeleteShortcut}
+      />
       <div className={styles.nodes} role="tree" ref={list}>
         {visible.map((node) => (
           <Row
@@ -455,6 +478,21 @@ export function TreeView({
                 break;
               case "createFolder":
                 onCreateFolder?.(menu.node);
+                break;
+              case "createSmartPlaylist":
+                onCreateSmartPlaylist?.(menu.node);
+                break;
+              case "editSmartPlaylist":
+                onEditSmartPlaylist?.(menu.node);
+                break;
+              case "addArtwork":
+                onAddArtwork?.(menu.node);
+                break;
+              case "addToShortcut":
+                onAddToShortcut?.(menu.node);
+                break;
+              case "sortItems":
+                onSortItems?.(menu.node);
                 break;
               case "rename":
                 setRenamingId(menu.node.id);

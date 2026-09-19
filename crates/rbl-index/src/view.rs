@@ -67,6 +67,8 @@ pub enum TrackSource {
     /// criterion. A `track` past the end of the library — no track loaded —
     /// opens empty.
     Related { track: Row, criterion: RelatedCriterion },
+    /// rekordbox's Tag List, in its own order.
+    TagList,
 }
 
 /// The Related Tracks section's criteria, the three rekordbox's Export
@@ -82,6 +84,14 @@ pub enum RelatedCriterion {
     SameGenreRecent,
     /// `Same artist`.
     SameArtist,
+    /// rekordbox's Track Suggestion: what was played after this track in
+    /// the histories, the most often first, then the most recently, and
+    /// with no history of the track, what goes with it by BPM and key.
+    /// rekordbox 7.2.11's own panel (captured 2026-09-18) is titled "Era",
+    /// takes its track from the list, the master or player A, and scopes
+    /// to the collection; what it ranks by is not shown and not
+    /// documented, so this is a stand-in, not a copy.
+    Suggestion,
 }
 
 #[derive(Debug, Clone)]

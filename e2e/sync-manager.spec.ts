@@ -23,8 +23,8 @@ test("the rail opens it with the library's playlists on the left and the devices
   await expect(tree.getByRole("checkbox", { name: "Melodic Vox" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: /All Tracks/ })).toHaveCount(0);
   const devices = dialog.getByRole("list", { name: "Devices" });
-  await expect(devices.getByRole("checkbox", { name: "DJ STICK" })).toBeVisible();
-  await expect(devices.getByRole("checkbox", { name: "TEST" })).toBeVisible();
+  await expect(devices.getByRole("checkbox", { name: "DJ STICK", exact: true })).toBeVisible();
+  await expect(devices.getByRole("checkbox", { name: "TEST", exact: true })).toBeVisible();
   // Nothing ticked yet, so nothing to sync.
   await expect(dialog.getByRole("button", { name: "SYNC" })).toBeDisabled();
 });
@@ -39,7 +39,7 @@ test("ticking a folder ticks its playlists, and a device shows what it holds", a
   await expect(tree.getByRole("checkbox", { name: "CURRENT" })).toHaveAttribute("aria-checked", "mixed");
 
   // TEST is rekordbox's stick: it holds playlists but remembers no selection.
-  await dialog.getByRole("checkbox", { name: "TEST" }).check();
+  await dialog.getByRole("checkbox", { name: "TEST", exact: true }).check();
   const library = dialog.getByLabel("TEST library");
   await expect(library).toContainText("Device Library");
   await expect(library).toContainText("Main Set");
@@ -50,8 +50,8 @@ test("SYNC writes the ticked playlists to both sticks, reports on each, and Clos
   const dialog = await openManager(page);
   const tree = dialog.getByRole("tree", { name: "Playlists" });
   await tree.getByRole("checkbox", { name: "Melodic Vox" }).check();
-  await dialog.getByRole("checkbox", { name: "DJ STICK" }).check();
-  await dialog.getByRole("checkbox", { name: "TEST" }).check();
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
+  await dialog.getByRole("checkbox", { name: "TEST", exact: true }).check();
   const sync = dialog.getByRole("button", { name: "SYNC" });
   await expect(sync).toBeEnabled();
   await sync.click();
@@ -78,14 +78,14 @@ test("ticking a stick again brings back what it was last synced with", async ({ 
   const dialog = await openManager(page);
   const tree = dialog.getByRole("tree", { name: "Playlists" });
   await tree.getByRole("checkbox", { name: "Hardstyle" }).check();
-  await dialog.getByRole("checkbox", { name: "DJ STICK" }).check();
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("button", { name: "SYNC" }).click();
   await expect(dialog.getByRole("status")).toContainText(/DJ STICK/);
 
   // Untick everything, tick the stick: its last selection comes back.
-  await dialog.getByRole("checkbox", { name: "DJ STICK" }).uncheck();
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).uncheck();
   await tree.getByRole("checkbox", { name: "Hardstyle" }).uncheck();
   await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).not.toBeChecked();
-  await dialog.getByRole("checkbox", { name: "DJ STICK" }).check();
+  await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await expect(tree.getByRole("checkbox", { name: "Hardstyle" })).toBeChecked();
 });

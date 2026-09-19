@@ -15,6 +15,7 @@ pub mod details;
 pub mod export_info;
 pub mod fixture;
 pub mod import;
+pub mod itunes;
 pub mod key;
 pub mod write;
 pub mod xml;

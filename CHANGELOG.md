@@ -13,6 +13,9 @@ the version numbers [Semantic Versioning](https://semver.org/).
   is the one that runs the next time rbxport opens. On Windows the installer
   runs silently when rbxport quits. Help › Check for Updates… still shows
   what is happening and what changed, and offers Restart Now.
+- Collaborative playlist is gone from the tree menu with the other cloud
+  rows, rather than greyed: there is no cloud library behind this app.
+- The rail's ⟳ tip reads Launch Sync Manager, as rekordbox's does.
 
 ### Fixed
 - A CDJ browsing a playlist served over LINK no longer sees every track
@@ -51,6 +54,22 @@ the version numbers [Semantic Versioning](https://semver.org/).
 - Preferences › Advanced › Send anonymous usage statistics: on by default,
   an install id with the version and OS once per launch to rbxport.com,
   and nothing about the library. Off means no request at all.
+- The track menu's Add To Playlist (the playlist tree), Import To
+  Collection (over the Explorer's files), Analysis Lock, Reload Tag, Add
+  To Tag List and Export Track (to a connected stick, on its own, kept
+  there by later syncs); the tree menu's Add Artwork and Add To Shortcut,
+  which puts a playlist on the rail as a button of its own (a right
+  click on the button offers Delete Shortcut, as rekordbox's does); the
+  deck menu's Export Loop As WAV and Export Track.
+- The Tag List: rekordbox's temporary list, a section of the tree,
+  kept in the library as rekordbox keeps it.
+- Track Suggestion under Related Tracks: what followed the loaded track in
+  past sets, or what goes with it by BPM and key when nothing did.
+- Intelligent playlists are made and edited here: Create New Intelligent
+  Playlist and Edit the Intelligent Playlist open a rule editor with
+  rekordbox's properties, operators and all/any match.
+- File › Import iTunes Library xml… brings Music.app's Library.xml in —
+  the files, the playlist folders and lists, ratings and comments.
 
 ### Changed
 - Analyze reads the whole track instead of the first three minutes. The beat

@@ -481,10 +481,11 @@ test("the column layout survives a reload", async ({ page }) => {
 test("the source rail switches which part of the library the tree shows", async ({ page }) => {
   await page.goto("/");
   const rail = page.getByRole("tablist", { name: "Library sources" });
-  // Five: Playlists, Related Tracks, Histories, Explorer, Devices. No
-  // Collection — All Tracks is at the top of the tree and always in sight, so
-  // a button that scrolls to it is a shortcut to where you already are.
-  await expect(rail.getByRole("tab")).toHaveCount(5);
+  // Six: Playlists, Related Tracks, Explorer, Devices, Histories, Tag List.
+  // No Collection — All Tracks is at the top of the tree and always in
+  // sight, so a button that scrolls to it is a shortcut to where you already
+  // are.
+  await expect(rail.getByRole("tab")).toHaveCount(6);
   await expect(rail.getByRole("tab", { name: "Collection" })).toHaveCount(0);
 
   // A filter, as rekordbox's is: the tree shows the lit section and nothing
@@ -2503,9 +2504,40 @@ test("right-clicking the tree opens the folder menu", async ({ page }) => {
   await expect(menu.getByRole("menuitem", { name: "Create New Playlist" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "Delete Playlist" })).toBeDisabled();
 
-  // And the entries rekordbox has that this does not are greyed either way.
+  // Add Artwork writes too, so it is refused here; Add To Shortcut is the
+  // window's own and always live; the one rekordbox has that this does not
+  // is greyed either way.
   await expect(menu.getByRole("menuitem", { name: "Add Artwork" })).toBeDisabled();
-  await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "Playlist display setting" })).toBeDisabled();
+});
+
+test("Add To Shortcut puts the playlist on the rail, and the shortcut's own menu deletes it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const playlist = page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first();
+  await playlist.click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Add To Shortcut" }).click();
+
+  // The rail takes the playlist as a button of its own, opening it.
+  const shortcut = page.getByRole("list", { name: "Shortcuts" }).getByRole("listitem", { name: "Melodic Vox" });
+  await expect(shortcut).toBeVisible();
+  await shortcut.click();
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+
+  // rekordbox 7.2.11 keeps "Add To Shortcut" on the playlist's menu once it
+  // is one; the shortcut goes from its own menu, whose one row is Delete
+  // Shortcut.
+  await playlist.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Playlist" });
+  await expect(menu.getByRole("menuitem", { name: "Add To Shortcut" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Remove from Shortcut" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await shortcut.click({ button: "right" });
+  const own = page.getByRole("menu", { name: "Shortcut" });
+  await expect(own.getByRole("menuitem")).toHaveText(["Delete Shortcut"]);
+  await own.getByRole("menuitem", { name: "Delete Shortcut" }).click();
+  await expect(shortcut).toHaveCount(0);
 });
 
 test("errors go to the status bar in red, not over the deck", async ({ page }) => {

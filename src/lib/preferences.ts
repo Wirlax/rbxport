@@ -90,6 +90,13 @@ export interface ViewPreferences {
   allTracks: boolean;
   /** Browser panel › Display the number of tracks in a playlist on the Tree View. */
   playlistCounts: boolean;
+  /**
+   * The tree rail's shortcuts: playlists put there by Add To Shortcut, by
+   * their ids, in the order they were added. Not a Preferences pane's
+   * choice, but kept with them because it is the same kind of thing: how
+   * this window is set up, for this person.
+   */
+  shortcuts: string[];
   /** Phrases › Phrase (Full Waveform): the phrase strip over the overview. */
   phraseFull: boolean;
   /** Phrases › Always show types of phrases: the labels in that strip. */
@@ -215,6 +222,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     previewCueMarkers: true,
     allTracks: true,
     playlistCounts: false,
+    shortcuts: [],
     phraseFull: true,
     phraseLabels: true,
     vocalFull: true,
@@ -363,6 +371,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       previewCueMarkers: bool(view.previewCueMarkers, d.view.previewCueMarkers),
       allTracks: bool(view.allTracks, d.view.allTracks),
       playlistCounts: bool(view.playlistCounts, d.view.playlistCounts),
+      shortcuts: strings(view.shortcuts),
       phraseFull: bool(view.phraseFull, d.view.phraseFull),
       phraseLabels: bool(view.phraseLabels, d.view.phraseLabels),
       vocalFull: bool(view.vocalFull, d.view.vocalFull),

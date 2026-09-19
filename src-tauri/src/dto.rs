@@ -124,6 +124,9 @@ pub enum TrackSourceDto {
     /// `bpmKey`, `genreRecent` or `artist`. An empty track opens empty.
     #[serde(rename = "related")]
     Related { track: String, criterion: String },
+    /// The Tag List.
+    #[serde(rename = "tagList")]
+    TagList,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -460,4 +463,30 @@ pub struct ExplorerChildrenDto {
     pub names: Vec<String>,
     /// How many there were: more than `names` holds when the cap cut it.
     pub total: u32,
+}
+
+/// An intelligent playlist's rule as the editor shows it: one group of
+/// conditions, all of them or any of them. rekordbox's own editor is flat
+/// too; a rule with groups inside it (which the reader keeps) is not
+/// offered for editing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartRuleDto {
+    /// `all` or `any`.
+    pub logic: String,
+    pub conditions: Vec<SmartConditionDto>,
+}
+
+/// One line of a rule, in rekordbox's own vocabulary: the property's
+/// internal name (`artist`, `name` for the title, `stockDate` for the date
+/// added…) and the operator's number (1 equal … 11 ends with).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartConditionDto {
+    pub property: String,
+    pub operator: String,
+    pub left: String,
+    pub right: String,
+    /// `day`, `week`, `month` or `year` for "in the last"; empty otherwise.
+    pub unit: String,
 }

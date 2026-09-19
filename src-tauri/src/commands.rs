@@ -18,7 +18,7 @@ use crate::dto::{
     ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
+    ExportProgressDto, FilterValuesDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -412,6 +412,8 @@ pub(crate) enum Touched {
     Playlists,
     /// A track column changed, so the ranks and the search arena are stale.
     Tracks,
+    /// Only the Tag List.
+    TagList,
 }
 
 /// Opens the library for writing, runs one action, and reloads the index.
@@ -436,7 +438,23 @@ where
     match touched {
         Touched::Playlists => reload_playlists(app, state).await,
         Touched::Tracks => reload(app, state).await,
+        Touched::TagList => reload_tag_list(app, state).await,
     }
+}
+
+/// Re-reads the Tag List only.
+async fn reload_tag_list<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
+    let generation = blocking("reload_tag_list", move || {
+        let db = state.open_read_only().map_err(write_error)?;
+        let library = state.library()?;
+        let rows = rbl_index::reload_tag_list(&db, &library)
+            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+        library.set_tag_list(rows);
+        Ok(state.invalidate_views())
+    })
+    .await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(generation)
 }
 
 /// Re-reads the playlist tree only, leaving the track columns in place.
@@ -1795,6 +1813,109 @@ pub async fn create_playlist<R: tauri::Runtime>(
     edit(app, state, "create_playlist", Touched::Playlists, move |w| w.create_playlist(&name, &parent).map(|_| ())).await
 }
 
+/// An intelligent playlist's rule, for the editor. Refused when the rule
+/// nests groups, which the editor cannot show without losing them.
+#[tauri::command]
+pub async fn smart_rule(state: State<'_, Arc<AppState>>, playlist: String) -> AppResult<SmartRuleDto> {
+    let library = state.library()?;
+    blocking("smart_rule", move || {
+        let playlists = library.playlists();
+        let Some(index) = playlist.parse::<u64>().ok().and_then(|id| playlists.index_of(id)) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That playlist is not in the library."));
+        };
+        let Some(rule) = playlists.smart_rule(index) else {
+            // A new intelligent playlist, or one whose rule does not parse,
+            // starts from an empty "all of the following".
+            return Ok(SmartRuleDto { logic: "all".to_owned(), conditions: Vec::new() });
+        };
+        rule_to_dto(&rule)
+    })
+    .await
+}
+
+fn rule_to_dto(rule: &rbl_index::SmartRule) -> AppResult<SmartRuleDto> {
+    use rbl_index::smart::{Item, Logic};
+    let mut conditions = Vec::with_capacity(rule.root.items.len());
+    for item in &rule.root.items {
+        match item {
+            Item::Condition(c) => conditions.push(SmartConditionDto {
+                property: c.property.name().to_owned(),
+                operator: c.operator.code().to_owned(),
+                left: c.left.clone(),
+                right: c.right.clone(),
+                unit: c.unit.clone(),
+            }),
+            Item::Group(_) => {
+                return Err(AppError::new(
+                    ErrorKind::Malformed,
+                    "This intelligent playlist nests groups of conditions, which this editor cannot show.",
+                ))
+            }
+        }
+    }
+    Ok(SmartRuleDto {
+        logic: match rule.root.logic {
+            Logic::All => "all",
+            Logic::Any => "any",
+        }
+        .to_owned(),
+        conditions,
+    })
+}
+
+fn rule_from_dto(dto: &SmartRuleDto) -> AppResult<rbl_index::SmartRule> {
+    use rbl_index::smart::{Condition, Group, Item, Logic, Operator, Property};
+    let mut items = Vec::with_capacity(dto.conditions.len());
+    for c in &dto.conditions {
+        let property = Property::from_name(&c.property);
+        if property == Property::Unsupported {
+            return Err(AppError::new(ErrorKind::Malformed, format!("{:?} is not a property a rule can use here.", c.property)));
+        }
+        let Some(operator) = Operator::from_code(&c.operator) else {
+            return Err(AppError::new(ErrorKind::Malformed, format!("{:?} is not an operator.", c.operator)));
+        };
+        items.push(Item::Condition(Condition {
+            property,
+            operator,
+            left: c.left.clone(),
+            right: c.right.clone(),
+            unit: c.unit.clone(),
+        }));
+    }
+    Ok(rbl_index::SmartRule {
+        root: Group { logic: if dto.logic == "any" { Logic::Any } else { Logic::All }, items },
+    })
+}
+
+/// Create New Intelligent Playlist: a rule under `parent`, named as given.
+#[tauri::command]
+pub async fn create_smart_playlist<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    parent: String,
+    rule: SmartRuleDto,
+) -> AppResult<u32> {
+    let rule = rule_from_dto(&rule)?;
+    edit(app, state, "create_smart_playlist", Touched::Playlists, move |w| {
+        w.create_smart_playlist(&name, &parent, |id| rule.to_xml(id.parse().unwrap_or(0))).map(|_| ())
+    })
+    .await
+}
+
+/// Replaces an intelligent playlist's rule.
+#[tauri::command]
+pub async fn set_smart_rule<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    rule: SmartRuleDto,
+) -> AppResult<u32> {
+    let rule = rule_from_dto(&rule)?;
+    let xml = rule.to_xml(playlist.parse().unwrap_or(0));
+    edit(app, state, "set_smart_rule", Touched::Playlists, move |w| w.set_smart_list(&playlist, &xml).map(|_| ())).await
+}
+
 #[tauri::command]
 pub async fn create_folder<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -1849,6 +1970,50 @@ pub async fn add_tracks_to_playlist<R: tauri::Runtime>(
         w.add_tracks(&playlist, &tracks).map(|_| ())
     })
     .await
+}
+
+/// Reload Tag: the file's tags read again over each track's row.
+#[tauri::command]
+pub async fn reload_tags<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "reload_tags", Touched::Tracks, move |w| {
+        for track in &tracks {
+            w.reload_tags(track)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Puts tracks on the Tag List, rekordbox's temporary list, on the end.
+#[tauri::command]
+pub async fn add_to_tag_list<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "add_to_tag_list", Touched::TagList, move |w| w.tag_list_add(&tracks).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn remove_from_tag_list<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    tracks: Vec<String>,
+) -> AppResult<u32> {
+    edit(app, state, "remove_from_tag_list", Touched::TagList, move |w| w.tag_list_remove(&tracks).map(|_| ()))
+        .await
+}
+
+#[tauri::command]
+pub async fn clear_tag_list<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<u32> {
+    edit(app, state, "clear_tag_list", Touched::TagList, move |w| w.tag_list_clear().map(|_| ())).await
 }
 
 #[tauri::command]
@@ -1928,17 +2093,48 @@ pub async fn import_xml<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> AppResult<XmlImportReportDto> {
-    let state_for_reload = Arc::clone(&state);
-    let writing = Arc::clone(&state);
-    let progress_app = app.clone();
-    let report = blocking("import_xml", move || {
-        let text = std::fs::read_to_string(&path).map_err(|e| {
-            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
-        })?;
-        let document = rbl_db::xml::XmlLibrary::parse(&text);
+    import_collection(app, state, path, "import_xml", |text| {
+        let document = rbl_db::xml::XmlLibrary::parse(text);
         if document.tracks.is_empty() && document.nodes.is_empty() {
             return Err(AppError::new(ErrorKind::Malformed, "That is not a rekordbox XML collection."));
         }
+        Ok(document)
+    })
+    .await
+}
+
+/// File › Import iTunes Library…: Music.app's `Library.xml`, its tracks
+/// and its playlist tree, through the same importer as a rekordbox XML
+/// collection.
+#[tauri::command]
+pub async fn import_itunes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<XmlImportReportDto> {
+    import_collection(app, state, path, "import_itunes", |text| {
+        rbl_db::itunes::parse(text)
+            .ok_or_else(|| AppError::new(ErrorKind::Malformed, "That is not an iTunes or Music library file."))
+    })
+    .await
+}
+
+/// Reads a collection file with `parse` and imports what it holds.
+async fn import_collection<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    name: &'static str,
+    parse: impl FnOnce(&str) -> AppResult<rbl_db::xml::XmlLibrary> + Send + 'static,
+) -> AppResult<XmlImportReportDto> {
+    let state_for_reload = Arc::clone(&state);
+    let writing = Arc::clone(&state);
+    let progress_app = app.clone();
+    let report = blocking(name, move || {
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::new(ErrorKind::NotFound, "That file could not be read.").with_detail(e.to_string())
+        })?;
+        let document = parse(&text)?;
         let mut on_progress = |done: usize, total: usize| {
             let _ = tauri::Emitter::emit(
                 &progress_app,
@@ -1967,6 +2163,27 @@ pub async fn import_xml<R: tauri::Runtime>(
         reload(app, state_for_reload).await?;
     }
     Ok(report)
+}
+
+/// Export Loop As WAV: the loop's stretch of the track, `in_ms` to
+/// `out_ms`, as a 16-bit WAV at `path`. Resolves to the frames written.
+#[tauri::command]
+pub async fn export_loop_wav(
+    state: State<'_, Arc<AppState>>,
+    track: String,
+    in_ms: f64,
+    out_ms: f64,
+    path: String,
+) -> AppResult<u64> {
+    let library = state.library()?;
+    blocking("export_loop_wav", move || {
+        let Some(source) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
+            return Err(AppError::new(ErrorKind::NotFound, "That track has no file to read."));
+        };
+        rbl_audio::write_range_wav(&source, in_ms / 1000.0, out_ms / 1000.0, std::path::Path::new(&path))
+            .map_err(|e| AppError::new(ErrorKind::Malformed, format!("The loop could not be written: {e}")))
+    })
+    .await
 }
 
 /// Export a playlist to a file: `m3u8`, which any player reads, or the

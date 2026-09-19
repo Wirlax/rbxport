@@ -27,10 +27,11 @@
 //!   no capture shows a non-empty Mix Name to confirm it.
 //! - **`HotCueAutoLoad`** is the text `"on"` on all 38,681 rows. What the
 //!   unticked box is spelled as has never been seen, so it is not written.
-//! - **`DeliveryControl`** is `"on"` on 220 rows, `""` on 805 and NULL on the
+//! - **`DeliveryControl`** is `"on"` on 220 rows, `""` on 825 and NULL on the
 //!   rest; **`DeliveryComment`** is never non-empty. These read as the
 //!   "Publish track information" box and the "Message" field — the KUVO
-//!   delivery pair — and are shown but not written.
+//!   delivery pair — and are shown but not written: KUVO publishing is not
+//!   a thing this app does, by Chris's word (2026-09-18).
 //! - **`DateCreated`** is `YYYY-MM-DD` on every row (length 10, all 38,681).
 //! - **`SearchStr`** is NULL on every track and every artist, so an edit that
 //!   leaves it alone stales nothing.

@@ -1681,6 +1681,29 @@ fn artwork_is_filed_in_the_share_tree_and_cleared_to_empty() {
     let cleared: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
     assert_eq!(cleared, "");
     assert!(filed.is_file(), "the file stays where it is");
+    // Not a picture, so no small sizes beside it.
+    assert!(!filed.with_file_name("artwork_s.jpg").exists());
+
+    // A real picture gets the two sizes a stick takes: 240 and 80 square,
+    // cut from the middle of a picture that is not.
+    let real = f._dir.path().join("wide.png");
+    let wide = image::RgbImage::from_fn(300, 100, |x, _| image::Rgb([u8::try_from(x % 256).unwrap_or(0), 0, 0]));
+    wide.save(&real).unwrap();
+    f.writer.set_artwork(&track_id(1), Some(&real)).unwrap();
+    let path: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&track_id(1)]);
+    let filed = location.share_root.join(path.trim_start_matches('/'));
+    for (name, side) in [("artwork_m.jpg", 240), ("artwork_s.jpg", 80)] {
+        let small = image::open(filed.with_file_name(name)).unwrap();
+        assert_eq!((small.width(), small.height()), (side, side), "{name}");
+    }
+
+    // A playlist takes a picture the same way.
+    f.writer.set_playlist_artwork(&playlist_id(1), Some(&real)).unwrap();
+    let path: String = f.one("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&playlist_id(1)]);
+    assert!(path.starts_with("/PIONEER/Artwork/") && path.ends_with("/artwork.png"), "{path}");
+    f.writer.set_playlist_artwork(&playlist_id(1), None).unwrap();
+    let cleared: String = f.one("SELECT ImagePath FROM djmdPlaylist WHERE ID = ?1", &[&playlist_id(1)]);
+    assert_eq!(cleared, "");
 }
 
 #[test]
@@ -1753,4 +1776,66 @@ fn my_tags_are_set_as_a_whole_and_read_back_on_the_details() {
 
     assert!(matches!(f.writer.set_my_tags(&id, &["nope".to_owned()]), Err(DbError::WriteRefused(_))));
     assert!(matches!(f.writer.set_my_tags("no-track", &[]), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn the_tag_list_takes_tracks_on_the_end_and_closes_up_when_one_comes_off() {
+    let mut f = fixture();
+    let changed = f.writer.tag_list_add(&[track_id(3), track_id(1), track_id(3)]).unwrap();
+    assert_eq!(changed.rows, 2, "a track already on the list is not added again");
+    let counter_before: i64 =
+        f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    // Numbered on from 1, with no update counter of their own, as rekordbox
+    // writes them.
+    let order = |f: &mut Fixture| -> Vec<(String, i64)> {
+        let conn = f.conn();
+        let mut stmt = conn
+            .prepare("SELECT ContentID, TrackNo FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    assert_eq!(order(&mut f), vec![(track_id(3), 1), (track_id(1), 2)]);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongTagList WHERE usn IS NULL AND rb_local_usn IS NULL"), 2);
+
+    f.writer.tag_list_add(&[track_id(2)]).unwrap();
+    f.writer.tag_list_remove(&[track_id(3)]).unwrap();
+    assert_eq!(order(&mut f), vec![(track_id(1), 1), (track_id(2), 2)], "the gap closes");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongTagList WHERE rb_local_deleted = 1"), 1);
+    let counter_after: i64 =
+        f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert_eq!(counter_before, counter_after, "the tag list does not move the update counter");
+
+    f.writer.tag_list_clear().unwrap();
+    assert!(order(&mut f).is_empty());
+    assert!(matches!(f.writer.tag_list_add(&["no-such-track".to_owned()]), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn reload_tag_reads_the_file_again_over_the_row() {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::{ItemKey, TagExt};
+    use lofty::tag::{Tag, TagType};
+
+    let audio = tempfile::tempdir().unwrap();
+    let path = audio.path().join("Tagged.wav");
+    write_wav(&path, 1);
+    let mut f = fixture();
+    let id = f.writer.import_file(&path).unwrap();
+    let title: String = f.one("SELECT Title FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert_eq!(title, "Tagged", "no tag, so the file's name");
+
+    // The file gains tags after the import; Reload Tag brings them in.
+    let mut tag = Tag::new(TagType::RiffInfo);
+    tag.insert_text(ItemKey::TrackTitle, "Retitled".to_owned());
+    tag.insert_text(ItemKey::TrackArtist, "Someone".to_owned());
+    tag.insert_text(ItemKey::Genre, "House".to_owned());
+    tag.insert_text(ItemKey::Comment, "a note".to_owned());
+    tag.insert_text(ItemKey::TrackNumber, "7".to_owned());
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    let changed = f.writer.reload_tags(&id).unwrap();
+    assert!(changed >= 4, "{changed}");
+    let read = rbl_db::details::track_details(f.conn(), &id).unwrap().unwrap();
+    assert_eq!((read.title.as_str(), read.artist.as_str(), read.genre.as_str()), ("Retitled", "Someone", "House"));
+    assert_eq!((read.comment.as_str(), read.track_number), ("a note", 7));
+    assert!(matches!(f.writer.reload_tags("no-such-track"), Err(DbError::WriteRefused(_))));
 }

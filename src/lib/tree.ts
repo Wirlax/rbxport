@@ -7,7 +7,7 @@
  * pass: once a node is collapsed, everything deeper than it is skipped until
  * the depth comes back up.
  */
-import { TREE_ROOT, type TreeNode } from "@/ipc/types";
+import { TREE_ROOT, type RelatedCriterion, type TreeNode } from "@/ipc/types";
 
 /**
  * Where a new playlist made from `node`'s menu goes: the folder itself, or
@@ -183,7 +183,7 @@ export function toggle(collapsed: ReadonlySet<string>, id: string): Set<string> 
  * sight, so a button whose whole job is to scroll to the first row is a
  * shortcut to where you already are.
  */
-export type Source = "playlists" | "related" | "histories" | "explorer" | "devices";
+export type Source = "playlists" | "related" | "histories" | "tagList" | "explorer" | "devices";
 
 /**
  * The Related Tracks section: rekordbox's three criteria under a heading,
@@ -196,21 +196,40 @@ export const RELATED_NODES: readonly TreeNode[] = [
   { id: "related:bpmKey", name: "BPM + KEY", kind: "relatedCriterion", depth: 1 },
   { id: "related:genreRecent", name: "Same genre in 30 days", kind: "relatedCriterion", depth: 1 },
   { id: "related:artist", name: "Same artist", kind: "relatedCriterion", depth: 1 },
+  // rekordbox's Track Suggestion is a window of its own from the icon
+  // column ("Display Track Suggestion window", captured 2026-09-18: a panel
+  // titled Era with LIST / MASTER / A source buttons and a Collection
+  // scope), which this app leaves at two boxes by request; it sits here as
+  // a fourth row about the loaded track.
+  { id: "related:suggestion", name: "Track Suggestion", kind: "relatedCriterion", depth: 1 },
 ];
 
 /** The criterion a Related Tracks node names, or `null` for the heading. */
-export function relatedCriterionOf(id: string): "bpmKey" | "genreRecent" | "artist" | null {
+export function relatedCriterionOf(id: string): RelatedCriterion | null {
   switch (id) {
     case "related:bpmKey": return "bpmKey";
     case "related:genreRecent": return "genreRecent";
     case "related:artist": return "artist";
+    case "related:suggestion": return "suggestion";
     default: return null;
   }
 }
 
-/** The backend's tree with the Related Tracks section after it. */
+/**
+ * The Tag List: rekordbox's one temporary list. rekordbox 7.2.11 shows it
+ * nowhere on its rail, its sub-browser rail or its icon column (all read
+ * off their tooltips 2026-09-18); this app gives it a rail source of its
+ * own. One row, since the list has no children: it opens as a view.
+ */
+export const TAG_LIST_NODE: TreeNode = { id: "tagList", name: "Tag List", kind: "tagList", depth: 0 };
+
+/** The backend's tree with the Related Tracks section and the Tag List after it. */
 export function withRelated(nodes: readonly TreeNode[]): TreeNode[] {
-  return [...nodes.filter((n) => n.kind !== "related" && n.kind !== "relatedCriterion"), ...RELATED_NODES];
+  return [
+    ...nodes.filter((n) => n.kind !== "related" && n.kind !== "relatedCriterion" && n.kind !== "tagList"),
+    ...RELATED_NODES,
+    TAG_LIST_NODE,
+  ];
 }
 
 /**
@@ -232,6 +251,8 @@ export function nodesForSource(nodes: readonly TreeNode[], source: Source): Tree
       return nodes.filter((n) => n.kind === "device");
     case "related":
       return nodes.filter((n) => n.kind === "related" || n.kind === "relatedCriterion");
+    case "tagList":
+      return nodes.filter((n) => n.kind === "tagList");
     case "explorer":
       // The heading first, as with histories: jumping there lands on the
       // section, which rekordbox opens as an empty Explorer. A note is the
@@ -281,6 +302,8 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
     case "related":
     case "relatedCriterion":
       return "related";
+    case "tagList":
+      return "tagList";
     default:
       return "playlists";
   }

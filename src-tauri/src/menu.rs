@@ -50,6 +50,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let missing = MenuItemBuilder::with_id("missing", label("Missing File Manager")).build(app)?;
     // rekordbox's own two, worded as its File menu words them.
     let import_xml = MenuItemBuilder::with_id("import-xml", "Import rekordbox xml…").build(app)?;
+    // rekordbox reads iTunes as a section of its tree; here it is an
+    // import of Music.app's Library.xml, worded like the one above.
+    let import_itunes = MenuItemBuilder::with_id("import-itunes", "Import iTunes Library xml…").build(app)?;
     let export_xml = MenuItemBuilder::with_id("export-xml", "Export Collection in xml format…").build(app)?;
     // rekordbox calls its own "Update Manager"; the item is worded the way
     // every other Mac app words it, since that is where people look for it.
@@ -71,6 +74,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let file = SubmenuBuilder::new(app, label("File"))
         .item(&import)
         .item(&import_xml)
+        .item(&import_itunes)
         .item(&export_xml)
         .item(&missing)
         .separator()

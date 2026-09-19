@@ -8,6 +8,10 @@
  * ticked device ends up holding exactly the ticked playlists, so two sticks
  * synced together are the same stick twice.
  *
+ * Under a ticked device sits rekordbox's "Automatic synchronization": ticked,
+ * it is written into the stick's sync record, and the shell writes the same
+ * playlists to that stick again whenever it is plugged in.
+ *
  * Nothing here holds the library: the tree is the same flat list the shell
  * fetches, and every count and name on a device comes from the backend
  * reading the stick.
@@ -91,6 +95,8 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedDevices, setTickedDevices] = useState<ReadonlySet<string>>(new Set());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
+  /** Devices to sync again on their own when plugged in. */
+  const [automatic, setAutomatic] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
@@ -151,6 +157,14 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     const backend = await getBackend();
     const read = await backend.deviceSyncState(path);
     setStates((current) => new Map(current).set(path, read));
+    if (restore) {
+      setAutomatic((current) => {
+        const next = new Set(current);
+        if (read.automatic) next.add(path);
+        else next.delete(path);
+        return next;
+      });
+    }
     if (restore && read.selected.length > 0) {
       setTicked((current) => {
         const next = new Set(current);
@@ -172,7 +186,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     // replacing it. Unticking takes nothing away.
     if (on) {
       void readDevice(path, true).catch(() => {
-        setStates((current) => new Map(current).set(path, { selected: [], onDevice: [] }));
+        setStates((current) => new Map(current).set(path, { selected: [], onDevice: [], automatic: false }));
       });
     }
   }, [readDevice]);
@@ -213,7 +227,14 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
       });
       try {
-        const reports: SyncDeviceReport[] = await backend.syncDevices(playlists, destinations, stickDefaults);
+        // The automatic tick is per stick, but a run writes every stick from
+        // one selection, so the sticks that differ on it go in a run of
+        // their own.
+        const reports: SyncDeviceReport[] = [];
+        for (const wanted of [true, false]) {
+          const these = destinations.filter((path) => automatic.has(path) === wanted);
+          if (these.length > 0) reports.push(...(await backend.syncDevices(playlists, these, stickDefaults, wanted)));
+        }
         setStatus(reports.map((r) => (r.report ? exportSummary(nameOf(r.path), r.report) : `${nameOf(r.path)}: ${r.error ?? "The sync failed."}`)));
         // What the sticks hold now, without touching the ticks.
         await refreshDevices();
@@ -226,7 +247,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         setBusy(false);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, refreshDevices, readDevice, onSynced]);
+  }, [canSync, nodes, ticked, devices, tickedDevices, automatic, stickDefaults, refreshDevices, readDevice, onSynced]);
 
   const body = (
     <div
@@ -344,6 +365,22 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                         </ul>
                       )}
                       <div className={styles.capacity}>{capacityText(device)}</div>
+                      <label className={styles.row}>
+                        <span className={styles.name}>Automatic synchronization</span>
+                        <TickBox
+                          state={automatic.has(device.path) ? "on" : "off"}
+                          label={`Automatic synchronization for ${device.name}`}
+                          disabled={busy}
+                          onChange={(on) =>
+                            setAutomatic((current) => {
+                              const next = new Set(current);
+                              if (on) next.add(device.path);
+                              else next.delete(device.path);
+                              return next;
+                            })
+                          }
+                        />
+                      </label>
                     </div>
                   ) : null}
                 </div>

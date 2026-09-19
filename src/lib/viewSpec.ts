@@ -67,7 +67,9 @@ export function specForNode(
               ? { kind: "folder", path: "" }
               : node?.kind === "relatedCriterion" || node?.kind === "related"
                 ? { kind: "related", track: relatedTo ?? "", criterion: relatedCriterionOf(node.id) ?? "bpmKey" }
-                : { kind: "collection" },
+                : node?.kind === "tagList"
+                  ? { kind: "tagList" }
+                  : { kind: "collection" },
     sort: order.column === "key" && keyDisplay === "alphanumeric" ? "keyCamelot" : order.column,
     descending: order.descending,
     query,

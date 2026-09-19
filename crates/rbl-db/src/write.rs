@@ -138,7 +138,7 @@ const ID_ATTEMPTS: usize = 64;
 /// Columns [`Writer::touch`] will set. A column name is interpolated into SQL,
 /// so the set of legal names is spelled out rather than trusted.
 const WRITABLE_COLUMNS: &[&str] = &[
-    "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL",
+    "Name", "Rating", "Commnt", "ColorID", "FolderPath", "FileNameL", "SmartList",
     // The tempo, which a grid edit changes with the `.DAT`'s grid.
     "BPM",
     // The information panel's Info tab.
@@ -322,7 +322,48 @@ impl Writer {
         self.create_node(name, parent, ATTRIBUTE_FOLDER)
     }
 
+    /// Creates an intelligent playlist with `smart_list`, its rule as
+    /// `djmdPlaylist.SmartList` holds one, and returns its id. The rule
+    /// names the playlist's own id inside it (`NODE Id`), which is only
+    /// known here, so `smart_list` is a function of that id.
+    pub fn create_smart_playlist(
+        &mut self,
+        name: &str,
+        parent: &str,
+        smart_list: impl FnOnce(&str) -> String,
+    ) -> Result<String> {
+        self.create_node_with(name, parent, ATTRIBUTE_SMART, Some(smart_list))
+    }
+
+    /// Replaces an intelligent playlist's rule.
+    pub fn set_smart_list(&mut self, id: &str, smart_list: &str) -> Result<Changed> {
+        self.prepare()?;
+        let is_smart: bool = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT Attribute = ?2 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![id, ATTRIBUTE_SMART],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if !is_smart {
+            return Err(DbError::WriteRefused(format!("{id} is not an intelligent playlist")));
+        }
+        self.touch_playlist(id, "SmartList", &Value::Text(smart_list.to_owned()))
+    }
+
     fn create_node(&mut self, name: &str, parent: &str, attribute: i64) -> Result<String> {
+        self.create_node_with(name, parent, attribute, None::<fn(&str) -> String>)
+    }
+
+    fn create_node_with(
+        &mut self,
+        name: &str,
+        parent: &str,
+        attribute: i64,
+        smart_list: Option<impl FnOnce(&str) -> String>,
+    ) -> Result<String> {
         self.prepare()?;
         let id = self.unused_id("djmdPlaylist")?;
         let uuid = self.rng.uuid4();
@@ -342,13 +383,14 @@ impl Writer {
             |r| r.get(0),
         )?;
         let usn = next_usn(&tx);
+        let smart_list: Option<String> = smart_list.map(|rule| rule(&id));
         tx.execute(
             "INSERT INTO djmdPlaylist
                 (ID, Seq, Name, ImagePath, Attribute, ParentID, SmartList, UUID,
                  rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
                  usn, rb_local_usn, created_at, updated_at)
-             VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, ?6, 0, 0, 0, 0, NULL, ?7, ?8, ?8)",
-            params![id, seq, name, attribute, parent, uuid, usn, stamp],
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?9, ?6, 0, 0, 0, 0, NULL, ?7, ?8, ?8)",
+            params![id, seq, name, attribute, parent, uuid, usn, stamp, smart_list],
         )?;
         set_counter(&tx, usn)?;
         tx.commit()?;
@@ -548,6 +590,106 @@ impl Writer {
         }
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    // ---------------------------------------------------------------- tag list
+
+    /// Adds tracks to the Tag List, rekordbox's one temporary list, on the
+    /// end in the order given; a track already on it stays where it is.
+    ///
+    /// Rows in the shape rekordbox 7.2.11 wrote its own [OBS: 45 rows of
+    /// `djmdSongTagList` in the reference library, 2026-09-13]: an id and a
+    /// UUID of their own, `TrackNo` running from 1, and both `usn` and
+    /// `rb_local_usn` NULL — the update counter is not moved for these,
+    /// since rekordbox did not.
+    pub fn tag_list_add(&mut self, contents: &[String]) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let mut ids: Vec<(String, String)> = Vec::with_capacity(contents.len());
+        for _ in contents {
+            ids.push((self.rng.uuid4(), self.rng.uuid4()));
+        }
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut track_no: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(TrackNo), 0) FROM djmdSongTagList WHERE rb_local_deleted = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        let mut rows = 0;
+        for (content, (row_id, uuid)) in contents.iter().zip(ids) {
+            if !content_exists(&tx, content)? {
+                return Err(DbError::WriteRefused(format!("no track {content}")));
+            }
+            let already: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM djmdSongTagList WHERE ContentID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )?;
+            if already > 0 {
+                continue;
+            }
+            track_no += 1;
+            rows += tx.execute(
+                "INSERT INTO djmdSongTagList
+                    (ID, ContentID, TrackNo, UUID,
+                     rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                     usn, rb_local_usn, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 0, NULL, NULL, ?5, ?5)",
+                params![row_id, content, track_no, uuid, stamp],
+            )?;
+        }
+        tx.commit()?;
+        Ok(Changed { rows, usn: 0 })
+    }
+
+    /// Takes tracks off the Tag List and closes the gaps in `TrackNo`.
+    /// Soft-deleted, as every other membership row is [ASSUME: no capture
+    /// of rekordbox taking one off].
+    pub fn tag_list_remove(&mut self, contents: &[String]) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut rows = 0;
+        for content in contents {
+            rows += tx.execute(
+                "UPDATE djmdSongTagList SET rb_local_deleted = 1, updated_at = ?1
+                 WHERE ContentID = ?2 AND rb_local_deleted = 0",
+                params![stamp, content],
+            )?;
+        }
+        if rows > 0 {
+            let mut stmt = tx.prepare(
+                "SELECT ID FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, created_at",
+            )?;
+            let remaining: Vec<String> =
+                stmt.query_map([], |r| r.get::<_, String>(0))?.filter_map(std::result::Result::ok).collect();
+            drop(stmt);
+            for (position, id) in remaining.iter().enumerate() {
+                let track_no = i64::try_from(position).unwrap_or(0) + 1;
+                tx.execute(
+                    "UPDATE djmdSongTagList SET TrackNo = ?1, updated_at = ?2 WHERE ID = ?3 AND TrackNo != ?1",
+                    params![track_no, stamp, id],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(Changed { rows, usn: 0 })
+    }
+
+    /// Empties the Tag List.
+    pub fn tag_list_clear(&mut self) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rows = tx.execute(
+            "UPDATE djmdSongTagList SET rb_local_deleted = 1, updated_at = ?1 WHERE rb_local_deleted = 0",
+            params![stamp],
+        )?;
+        tx.commit()?;
+        Ok(Changed { rows, usn: 0 })
     }
 
     /// Reorders a playlist to exactly this sequence of tracks.
@@ -1247,11 +1389,78 @@ impl Writer {
         let bucket = uuid.get(..3).unwrap_or("000").to_owned();
         let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
         let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
-        if let Some(dir) = target.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&target, bytes)?;
+        write_artwork_sizes(&target, &bytes)?;
         self.touch_content(content, "ImagePath", &Value::Text(relative))
+    }
+
+    /// Gives a playlist artwork, or takes it away with `None`. The image
+    /// goes where a track's does [ASSUME: the reference library has no
+    /// playlist with artwork to copy the path from].
+    pub fn set_playlist_artwork(&mut self, playlist: &str, image: Option<&Path>) -> Result<Changed> {
+        let Some(image) = image else {
+            return self.touch_playlist(playlist, "ImagePath", &Value::Text(String::new()));
+        };
+        let extension = image
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .filter(|e| matches!(e.as_str(), "jpg" | "jpeg" | "png"))
+            .ok_or_else(|| DbError::WriteRefused(format!("{} is not a JPEG or PNG", image.display())))?;
+        let bytes = std::fs::read(image)?;
+        let uuid = self.rng.uuid4();
+        let bucket = uuid.get(..3).unwrap_or("000").to_owned();
+        let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
+        let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
+        write_artwork_sizes(&target, &bytes)?;
+        self.touch_playlist(playlist, "ImagePath", &Value::Text(relative))
+    }
+
+    /// Reload Tag: reads the file's tags again and writes what they say
+    /// over the row — title, artist, album, genre, label, comment, year and
+    /// track number [ASSUME: which fields rekordbox's Reload Tag takes has
+    /// not been captured; these are the ones its import reads]. Fields the
+    /// file leaves empty are left as they are. Returns how many changed.
+    pub fn reload_tags(&mut self, content: &str) -> Result<usize> {
+        self.prepare()?;
+        let folder: Option<String> = self
+            .library
+            .connection()
+            .query_row(
+                "SELECT FolderPath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![content],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let Some(folder) = folder else {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        };
+        let path = crate::resolve_folder_path(&folder, None);
+        let tags = crate::import::read_tags(Path::new(&path))
+            .map_err(|e| DbError::WriteRefused(e.to_string()))?;
+        let mut changed = 0;
+        let texts: [(TrackField, &str); 5] = [
+            (TrackField::Title, &tags.title),
+            (TrackField::Artist, &tags.artist),
+            (TrackField::Album, &tags.album),
+            (TrackField::Genre, &tags.genre),
+            (TrackField::Label, &tags.label),
+        ];
+        for (field, value) in texts {
+            if !value.is_empty() {
+                changed += self.set_field(content, field, value)?.rows;
+            }
+        }
+        if !tags.comment.is_empty() {
+            changed += self.set_comment(content, &tags.comment)?.rows;
+        }
+        if tags.year != 0 {
+            changed += self.set_field(content, TrackField::Year, &tags.year.to_string())?.rows;
+        }
+        if tags.track_no != 0 {
+            changed += self.set_field(content, TrackField::TrackNumber, &tags.track_no.to_string())?.rows;
+        }
+        Ok(changed)
     }
 
     /// A BPM typed over the analysed one: `128`, `128.5`.
@@ -1742,6 +1951,36 @@ fn key_id_for(conn: &Connection, name: &str) -> Result<String> {
         |r| r.get(0),
     )
     .map_err(|_| DbError::WriteRefused(format!("no djmdKey row is named {name:?}")))
+}
+
+/// Writes an image where the library keeps one: the file as given, and
+/// beside it the two sizes rekordbox keeps and a stick takes, `artwork_m.jpg`
+/// at 240×240 and `artwork_s.jpg` at 80×80 [OBS: every folder under
+/// `share/PIONEER/Artwork` holds the three]. A picture that is not square
+/// is cut to its middle square first [ASSUME: which of a crop and a stretch
+/// rekordbox does has not been measured]. An image that does not decode
+/// still lands as given, with no small sizes: the track has its picture,
+/// the stick gets the big one to scale.
+fn write_artwork_sizes(target: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(dir) = target.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(target, bytes)?;
+    let Ok(decoded) = image::load_from_memory(bytes) else {
+        return Ok(());
+    };
+    let side = decoded.width().min(decoded.height());
+    let square = decoded.crop_imm((decoded.width() - side) / 2, (decoded.height() - side) / 2, side, side);
+    for (name, size) in [("artwork_m.jpg", 240_u32), ("artwork_s.jpg", 80_u32)] {
+        let small = square.resize_exact(size, size, image::imageops::FilterType::Lanczos3).to_rgb8();
+        let path = target.with_file_name(name);
+        let mut out = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+        if encoder.encode_image(&small).is_ok() {
+            std::fs::write(&path, &out)?;
+        }
+    }
+    Ok(())
 }
 
 fn next_usn(conn: &Connection) -> i64 {

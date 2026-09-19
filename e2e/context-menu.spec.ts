@@ -43,8 +43,9 @@ function rows(menu: Locator) {
 test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page }) => {
   const menu = await openTreeMenu(page);
   const items = await rows(menu);
-  // Thirteen in the capture, less three cloud rows, plus Rename.
-  expect(items).toHaveLength(11);
+  // Thirteen in the capture, less the three cloud rows and Collaborative
+  // playlist, plus Rename.
+  expect(items).toHaveLength(10);
   for (const item of items) {
     expect(item.height, item.label).toBe(25);
     expect(item.fontSize, item.label).toBe("12.5px");
@@ -58,7 +59,7 @@ test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page 
   const at = (label: string) => items.find((i) => i.label === label)!.top;
   expect(at("Create New Intelligent Playlist") - at("Create New Playlist")).toBe(25);
   expect(at("Create New Playlist") - at("Export Playlist")).toBe(36);
-  expect(at("Add To Shortcut") - at("Collaborative playlist")).toBe(36);
+  expect(at("Add To Shortcut") - at("Export a playlist to a file")).toBe(36);
 });
 
 test("the panel is a point of padding inside a one-point hairline", async ({ page }) => {
@@ -77,9 +78,10 @@ test("the panel is a point of padding inside a one-point hairline", async ({ pag
   expect(panel.paddingBottom).toBe("1px");
   expect(panel.paddingLeft).toBe("0px");
   expect(panel.border).toBe("1px");
-  // Eleven rows, seven separators, the padding and the hairline. The capture's
-  // panel is 812px tall at 2x: three cloud rows shorter, one Rename taller.
-  expect(panel.height).toBe(11 * 25 + 7 * 11 + 2 + 2);
+  // Ten rows, six separators, the padding and the hairline. The capture's
+  // panel is 812px tall at 2x: four cloud rows and a separator shorter, one
+  // Rename taller.
+  expect(panel.height).toBe(10 * 25 + 6 * 11 + 2 + 2);
 
   const separators = await menu.evaluate((m) => {
     const box = m.getBoundingClientRect();
@@ -88,7 +90,7 @@ test("the panel is a point of padding inside a one-point hairline", async ({ pag
       return { height: r.height, left: r.left - box.left, right: box.right - r.right };
     });
   });
-  expect(separators).toHaveLength(7);
+  expect(separators).toHaveLength(6);
   for (const s of separators) {
     expect(s.height).toBe(1);
     // 4pt in from the hairline on the left, 16pt on the right.
@@ -111,11 +113,7 @@ test("entries that open a submenu carry the arrow, 17pt in from the right", asyn
     });
   });
   const withArrow = arrows.filter((a) => a.arrow).map((a) => a.label);
-  expect(withArrow).toEqual([
-    "Export Playlist",
-    "Export a playlist to a file",
-    "Collaborative playlist",
-  ]);
+  expect(withArrow).toEqual(["Export Playlist", "Export a playlist to a file"]);
   for (const a of arrows) {
     if (!a.arrow) continue;
     // Drawn from borders, so the box is the triangle: 6 wide, 8 tall, its
@@ -128,12 +126,12 @@ test("entries that open a submenu carry the arrow, 17pt in from the right", asyn
 
 test("the greyed entries are said to be disabled, and the live ones are not", async ({ page }) => {
   const menu = await openTreeMenu(page);
-  // rekordbox has these and this does not: drawn, greyed, and announced so.
+  // Greyed and announced so: the one rekordbox has that this does not, and
+  // the writes the mock's read-only library refuses.
   const greyed = [
     "Create New Intelligent Playlist",
     "Playlist display setting",
     "Add Artwork",
-    "Add To Shortcut",
   ];
   for (const label of greyed) {
     const item = menu.getByRole("menuitem", { name: label });

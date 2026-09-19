@@ -6,7 +6,7 @@
  */
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
-  Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SyncDeviceReport, SyncProgress, UpdateCheck,
+  Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
@@ -97,6 +97,17 @@ async function realBackend(): Promise<Backend> {
       if (!Array.isArray(picked) || picked.length === 0) return null;
       return invoke<ImportReport>("import_files", { paths: picked });
     },
+    importPaths: (paths) => invoke<ImportReport>("import_files", { paths }),
+    exportLoopWav: async (track, title, inMs, outMs) => {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const picked = await save({
+        title: "Export the loop as WAV",
+        defaultPath: `${title} loop.wav`,
+        filters: [{ name: "WAV", extensions: ["wav"] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<number>("export_loop_wav", { track, inMs, outMs, path: picked });
+    },
     exportPlaylistFile: async (playlistId, name, format) => {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const picked = await save({
@@ -117,6 +128,17 @@ async function realBackend(): Promise<Backend> {
       });
       if (typeof picked !== "string") return null;
       return invoke<XmlImportReport>("import_xml", { path: picked });
+    },
+    importItunes: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Choose the iTunes or Music Library.xml",
+        filters: [{ name: "iTunes Library XML", extensions: ["xml"] }],
+      });
+      if (typeof picked !== "string") return null;
+      return invoke<XmlImportReport>("import_itunes", { path: picked });
     },
     exportXml: async () => {
       const { save } = await import("@tauri-apps/plugin-dialog");
@@ -147,6 +169,8 @@ async function realBackend(): Promise<Backend> {
         defaults: defaults ?? null,
       });
     },
+    exportTracksToDevice: (tracks, destination, defaults) =>
+      invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null }),
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
@@ -282,9 +306,15 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_sync_window");
       return true;
     },
-    syncDevices: (playlists, destinations, defaults) =>
-      invoke<SyncDeviceReport[]>("sync_devices", { playlists, destinations, defaults: defaults ?? null }),
+    syncDevices: (playlists, destinations, defaults, automatic) =>
+      invoke<SyncDeviceReport[]>("sync_devices", {
+        playlists,
+        destinations,
+        defaults: defaults ?? null,
+        automatic: automatic ?? false,
+      }),
     deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),
+    smartRule: (playlist) => invoke<SmartRule>("smart_rule", { playlist }),
     onSyncProgress: (listener) => subscribe<SyncProgress>("sync:progress", listener),
     deviceSettings: (path) => invoke<DeviceSettings>("device_settings", { path }),
     writeDeviceDefaults: (path, defaults) => invoke<DeviceSettings>("write_device_defaults", { path, defaults }),
@@ -311,12 +341,18 @@ async function realBackend(): Promise<Backend> {
     },
     edits: {
       createPlaylist: (name, parent) => invoke<number>("create_playlist", { name, parent }),
+      createSmartPlaylist: (name, parent, rule) => invoke<number>("create_smart_playlist", { name, parent, rule }),
+      setSmartRule: (playlist, rule) => invoke<number>("set_smart_rule", { playlist, rule }),
       createFolder: (name, parent) => invoke<number>("create_folder", { name, parent }),
       renamePlaylist: (id, name) => invoke<number>("rename_playlist", { id, name }),
       movePlaylist: (id, parent, index) => invoke<number>("move_playlist", { id, parent, index }),
       deletePlaylist: (id) => invoke<number>("delete_playlist", { id }),
       addTracksToPlaylist: (playlist, tracks) =>
         invoke<number>("add_tracks_to_playlist", { playlist, tracks }),
+      reloadTags: (tracks) => invoke<number>("reload_tags", { tracks }),
+      addToTagList: (tracks) => invoke<number>("add_to_tag_list", { tracks }),
+      removeFromTagList: (tracks) => invoke<number>("remove_from_tag_list", { tracks }),
+      clearTagList: () => invoke<number>("clear_tag_list"),
       removeTracksFromPlaylist: (playlist, tracks) =>
         invoke<number>("remove_tracks_from_playlist", { playlist, tracks }),
       resetPlayCount: (tracks) => invoke<number>("reset_play_count", { tracks }),
@@ -344,6 +380,7 @@ async function realBackend(): Promise<Backend> {
       setTrackField: (track, field, value) =>
         invoke<number>("set_track_field", { track, field, value }),
       addArtwork: (track, image) => invoke<number>("add_artwork", { track, image }),
+      addPlaylistArtwork: (playlist, image) => invoke<number>("add_playlist_artwork", { playlist, image }),
       setMyTags: (track, tags) => invoke<number>("set_my_tags", { track, tags }),
       clearArtwork: (track) => invoke<number>("clear_artwork", { track }),
     },

@@ -27,8 +27,14 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 # Tag reading for import. Default features pull in every format; the library
 # holds mp3, m4a, flac, wav and aiff, so only those are enabled.
 lofty = { version = "0.22", default-features = false }
+# Artwork: the library keeps every image at three sizes (the original, a
+# 240×240 and an 80×80), and a stick takes the two small ones.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
 # The cue-colour probe reads an export's analysis files beside the library.
 rbl-anlz = { path = "../rbl-anlz" }
 tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Writing tags into a test file, so Reload Tag has something to read.
+lofty = { version = "0.22", default-features = false }

@@ -113,6 +113,11 @@ export interface PlayerProps {
   onError?: (message: string | null) => void;
   /** Analyze Track from the deck's ≡ menu: the loaded track goes to the analyser. */
   onAnalyse?: (trackId: string, title: string) => void;
+  /** Export Track from the ≡ menu, to one of `devices`. */
+  onExportTrack?: (device: string, trackId: string) => void;
+  devices?: readonly { id: string; name: string }[];
+  /** Export Loop As WAV: the loop's stretch of the loaded track. */
+  onExportLoop?: (trackId: string, title: string, inMs: number, outMs: number) => void;
   /**
    * A track dropped onto the deck.
    *
@@ -675,6 +680,7 @@ const PANELS = [
 
 export const Player = memo(function Player({
   track, onEject, onError, onAnalyse, onDropTrack, onLoadSelected, selectedTrackId = null,
+  onExportTrack, devices = [], onExportLoop,
   dragging = false, deck = "a",
   simple = false, transportSlot, flipped = false, dual = false, publishZoom,
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
@@ -751,7 +757,16 @@ export const Player = memo(function Player({
   const [deckMenuAt, setDeckMenuAt] = useState<{ x: number; y: number } | null>(null);
   const chooseFromDeckMenu = useCallback(
     (action: DeckAction) => {
+      if (action.startsWith("exportTrack:")) {
+        if (track) onExportTrack?.(action.slice("exportTrack:".length), track.id);
+        return;
+      }
       switch (action) {
+        case "exportLoopWav":
+          if (track && playback.loop) {
+            onExportLoop?.(track.id, track.title, playback.loop.inSeconds * 1000, playback.loop.outSeconds * 1000);
+          }
+          break;
         case "waveformBlue": updatePreferences("view", { waveformColor: "blue" }); break;
         case "waveformRgb": updatePreferences("view", { waveformColor: "rgb" }); break;
         case "waveform3band": updatePreferences("view", { waveformColor: "3band" }); break;
@@ -764,7 +779,7 @@ export const Player = memo(function Player({
         default: break;
       }
     },
-    [updatePreferences, track, onAnalyse],
+    [updatePreferences, track, onAnalyse, onExportTrack, onExportLoop, playback.loop],
   );
   const tip = useTooltip();
   // QUANTIZE BEAT VALUE in Preferences: the grid every quantized cue snaps
@@ -2315,6 +2330,8 @@ export const Player = memo(function Player({
               waveformColor: viewPrefs.waveformColor,
               beatCount: viewPrefs.beatCount,
               waveformClick: viewPrefs.waveformClick,
+              hasLoop: playback.loop !== null && track !== null,
+              devices,
             })}
             label="Player menu"
             context={{ inPlaylist: false, hasFile: true, readOnly }}

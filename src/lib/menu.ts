@@ -11,6 +11,7 @@ export type MenuAction =
   | "settings"
   | "import"
   | "import-xml"
+  | "import-itunes"
   | "export-xml"
   | "missing"
   | "info"
@@ -31,6 +32,7 @@ const COMMANDS: Record<string, MenuCommand> = {
   settings: { action: "settings", writes: false },
   import: { action: "import", writes: true },
   "import-xml": { action: "import-xml", writes: true },
+  "import-itunes": { action: "import-itunes", writes: true },
   "export-xml": { action: "export-xml", writes: false },
   missing: { action: "missing", writes: true },
   info: { action: "info", writes: false },

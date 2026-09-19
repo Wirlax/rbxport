@@ -247,6 +247,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     load_cues(conn, &mut lib, &content_row)?;
     load_playlists(conn, &mut lib, &content_row, &mut stats)?;
     load_histories(conn, &mut lib, &content_row, &mut stats)?;
+    lib.set_tag_list(read_tag_list(conn, &content_row)?);
     lib.set_my_tags(read_my_tags(conn)?);
     stats.read_ms = t0.elapsed().as_millis();
 
@@ -357,6 +358,38 @@ fn load_histories(
     stats.plays = plays;
     lib.set_histories(histories);
     Ok(())
+}
+
+/// Reads the Tag List: `djmdSongTagList`, one row per track in `TrackNo`
+/// order [OBS: 45 rows in the reference library, written by rekordbox
+/// with `usn` and `rb_local_usn` NULL]. A library without the table has
+/// an empty one; a row naming a track that is not there is skipped.
+fn read_tag_list(conn: &Connection, content_row: &HashMap<u64, Row>) -> rusqlite::Result<Vec<Row>> {
+    if !has_table(conn, "djmdSongTagList") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT ContentID FROM djmdSongTagList WHERE rb_local_deleted = 0 ORDER BY TrackNo, created_at",
+    )?;
+    let rows = stmt.query_map([], |r| r.get::<_, Option<String>>(0))?;
+    let mut out = Vec::new();
+    for content in rows {
+        let Some(content) = content? else { continue };
+        if let Some(&row) = content.parse::<u64>().ok().and_then(|id| content_row.get(&id)) {
+            out.push(row);
+        }
+    }
+    Ok(out)
+}
+
+/// Re-reads the Tag List after an edit, reusing the track columns already
+/// indexed.
+pub fn reload_tag_list(db: &Db, library: &Library) -> rusqlite::Result<Vec<Row>> {
+    let mut content_row: HashMap<u64, Row> = HashMap::with_capacity(library.len());
+    for (row, id) in library.ids.iter().enumerate() {
+        content_row.insert(*id, u32::try_from(row).unwrap_or(u32::MAX));
+    }
+    read_tag_list(db.connection(), &content_row)
 }
 
 /// Re-reads only the playlist tree, reusing the track columns already indexed.

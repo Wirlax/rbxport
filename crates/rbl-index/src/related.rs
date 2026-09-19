@@ -96,7 +96,35 @@ impl Library {
                 rows.filter(|&r| r != track && self.artist.get(usize::try_from(r).unwrap_or(usize::MAX)).copied() == Some(artist))
                     .collect()
             }
+            RelatedCriterion::Suggestion => {
+                let followed = self.followed_in_history(track);
+                if followed.is_empty() {
+                    return self.related_rows(track, RelatedCriterion::BpmAndKey);
+                }
+                followed
+            }
         }
+    }
+
+    /// The tracks that came right after `track` in the history sessions,
+    /// the most often first and, among equals, the one played that way
+    /// most recently first. Sessions are in the histories' order, which is
+    /// by date, so a later session is a later play.
+    fn followed_in_history(&self, track: Row) -> Vec<Row> {
+        let histories = self.histories();
+        let mut count: std::collections::HashMap<Row, (u32, usize)> = std::collections::HashMap::new();
+        for (session, members) in histories.members.iter().enumerate() {
+            for pair in members.windows(2) {
+                if pair[0] == track && pair[1] != track {
+                    let entry = count.entry(pair[1]).or_insert((0, 0));
+                    entry.0 += 1;
+                    entry.1 = session;
+                }
+            }
+        }
+        let mut ranked: Vec<(Row, (u32, usize))> = count.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        ranked.into_iter().map(|(row, _)| row).collect()
     }
 }
 
@@ -118,5 +146,29 @@ mod tests {
         assert!(!keys_go_together(a1, a3));
         assert!(!keys_go_together(a1, camelot_rank("F#")));
         assert!(!keys_go_together(u32::MAX, a1));
+    }
+
+    #[test]
+    fn a_suggestion_is_what_followed_the_track_in_past_sets_or_its_bpm_and_key_matches() {
+        use crate::testing::{add_history, library_from, TestTrack};
+        let track = |id: u64, bpm: u32, key: &'static str| TestTrack { id, title: "t", artist: "a", bpm_x100: bpm, key, ..TestTrack::default() };
+        let mut lib = library_from(&[
+            track(1, 12800, "Am"),
+            track(2, 12800, "Am"),
+            track(3, 12800, "Em"),
+            track(4, 17000, "C"),
+            track(5, 12800, "Am"),
+        ]);
+        // Three sets: 0 was followed by 3 twice and by 1 once, the latest
+        // set having 3 after it; 4 was never followed.
+        add_history(&mut lib, "one", &[0, 3, 4]);
+        add_history(&mut lib, "two", &[2, 0, 1]);
+        add_history(&mut lib, "three", &[0, 3]);
+        assert_eq!(lib.related_rows(0, RelatedCriterion::Suggestion), vec![3, 1]);
+        // Never played after anything: what goes with it by BPM and key.
+        let fallback = lib.related_rows(1, RelatedCriterion::Suggestion);
+        assert_eq!(fallback, lib.related_rows(1, RelatedCriterion::BpmAndKey));
+        // Rows, not ids: the 170 BPM track is row 3.
+        assert_eq!(fallback, vec![0, 2, 4]);
     }
 }

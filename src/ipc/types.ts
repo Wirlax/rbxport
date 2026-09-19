@@ -51,10 +51,12 @@ export type TrackSource =
   /** A folder on disk, for the Explorer. An empty path is the heading, which lists nothing. */
   | { kind: "folder"; path: string }
   /** Related Tracks: what goes with `track` under a criterion. An empty track lists nothing. */
-  | { kind: "related"; track: string; criterion: RelatedCriterion };
+  | { kind: "related"; track: string; criterion: RelatedCriterion }
+  /** The Tag List, in its own order. */
+  | { kind: "tagList" };
 
 /** The Related Tracks section's criteria: rekordbox's own three. */
-export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist";
+export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist" | "suggestion";
 
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
@@ -99,6 +101,8 @@ export interface TreeNode {
     | "explorer" | "directory"
     /** The Related Tracks heading, and a criterion under it. */
     | "related" | "relatedCriterion"
+    /** rekordbox's Tag List: its one temporary list, kept in the library. */
+    | "tagList"
     /** A line of information in the tree, not a place: nothing opens when it is clicked. */
     | "note";
   depth: number;
@@ -276,6 +280,13 @@ export interface Backend {
    * tracks should import the rest.
    */
   importFiles(): Promise<ImportReport | null>;
+  /** Adds these files to the library: the Explorer's Import To Collection. */
+  importPaths(paths: string[]): Promise<ImportReport>;
+  /**
+   * Export Loop As WAV: asks where, then writes the loop's stretch of the
+   * track as a WAV. Resolves to the frames written, or null when cancelled.
+   */
+  exportLoopWav(track: string, title: string, inMs: number, outMs: number): Promise<number | null>;
   /**
    * Export a playlist to a file, where the platform's save dialog says:
    * `m3u8`, or rekordbox's tab-separated `txt`. Resolves to how many tracks,
@@ -288,6 +299,8 @@ export interface Backend {
    * track that landed. Null when the dialog is cancelled.
    */
   importXml(): Promise<XmlImportReport | null>;
+  /** Asks for Music.app's Library.xml and imports its tracks and playlists. */
+  importItunes(): Promise<XmlImportReport | null>;
   /**
    * Writes the collection as rekordbox's XML where the platform's save
    * dialog says; resolves to how many tracks, or null when cancelled.
@@ -307,6 +320,12 @@ export interface Backend {
     /** What a stick with no settings of its own is given; see `StickDefaults`. */
     defaults?: StickDefaults,
   ): Promise<ExportReport | null>;
+
+  /**
+   * Export Track: puts tracks on a stick on their own, in no playlist,
+   * beside what the stick already holds. A later sync keeps them there.
+   */
+  exportTracksToDevice(tracks: string[], destination: string, defaults?: StickDefaults): Promise<ExportReport>;
 
   /**
    * rekordbox's reference browse categories and sort options: what a
@@ -587,10 +606,21 @@ export interface Backend {
     destinations: string[],
     /** What a stick with no settings of its own is given; see `StickDefaults`. */
     defaults: StickDefaults | undefined,
+    /**
+     * Automatic synchronization: recorded on each stick, so that when it is
+     * next plugged in the same playlists are written to it again unasked.
+     */
+    automatic?: boolean,
   ): Promise<SyncDeviceReport[]>;
 
   /** What a stick was last synced with, and what it holds now. */
   deviceSyncState(path: string): Promise<DeviceSyncState>;
+
+  /**
+   * An intelligent playlist's rule, for the editor; an empty "all" for a
+   * rule that does not parse. Rejects a rule that nests groups.
+   */
+  smartRule(playlist: string): Promise<SmartRule>;
 
   /**
    * Each stick as a sync reaches it and leaves it, so a run over several
@@ -890,6 +920,11 @@ export interface DeviceSyncState {
   selected: SyncPlaylist[];
   /** The playlist names in its export, folders left out; empty without one. */
   onDevice: string[];
+  /**
+   * The stick asks to be synced again when it is plugged in — its sync
+   * record's Automatic synchronization, and the record is this library's.
+   */
+  automatic: boolean;
 }
 
 /** One step of a sync: a stick being written, then done or failed. */
@@ -1063,8 +1098,32 @@ export interface MissingTracks {
   tracks: MissingTrack[];
 }
 
+/**
+ * An intelligent playlist's rule, flat as rekordbox's editor has it: one
+ * group of conditions, all of them or any of them, in rekordbox's own
+ * vocabulary (see `SmartCondition`).
+ */
+export interface SmartRule {
+  logic: "all" | "any";
+  conditions: SmartCondition[];
+}
+
+/** One line of a rule: rekordbox's internal property name (`artist`, `name` for the title, `stockDate` for the date added…) and operator number (1 is … 11 ends with). */
+export interface SmartCondition {
+  property: string;
+  operator: string;
+  left: string;
+  right: string;
+  /** `day`, `week`, `month` or `year` for "is in the last"; empty otherwise. */
+  unit: string;
+}
+
 export interface Edits {
   createPlaylist(name: string, parent: string): Promise<number>;
+  /** Create New Intelligent Playlist: a rule under `parent`. */
+  createSmartPlaylist(name: string, parent: string, rule: SmartRule): Promise<number>;
+  /** Replaces an intelligent playlist's rule. */
+  setSmartRule(playlist: string, rule: SmartRule): Promise<number>;
   createFolder(name: string, parent: string): Promise<number>;
   renamePlaylist(id: string, name: string): Promise<number>;
   /**
@@ -1076,6 +1135,12 @@ export interface Edits {
   movePlaylist(id: string, parent: string, index?: number): Promise<number>;
   deletePlaylist(id: string): Promise<number>;
   addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  /** Reload Tag: the files' tags read again over the rows. */
+  reloadTags(tracks: string[]): Promise<number>;
+  /** The Tag List: tracks go on the end, come off, or it is emptied. */
+  addToTagList(tracks: string[]): Promise<number>;
+  removeFromTagList(tracks: string[]): Promise<number>;
+  clearTagList(): Promise<number>;
   removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;
   /** Reset DJ Play Count: back to zero on each track. */
   resetPlayCount(tracks: string[]): Promise<number>;
@@ -1099,6 +1164,8 @@ export interface Edits {
   setMyTags(track: string, tags: string[]): Promise<number>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
   addArtwork(track: string, image: string): Promise<number>;
+  /** Add Artwork on a playlist or folder, from the tree menu. */
+  addPlaylistArtwork(playlist: string, image: string): Promise<number>;
   /** Delete Artwork: the track points at no image; the file stays. */
   clearArtwork(track: string): Promise<number>;
 

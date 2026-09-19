@@ -136,6 +136,104 @@ pub fn decode_mono(path: &Path, max_secs: Option<f64>) -> Result<Audio> {
     Ok(Audio { samples, sample_rate, source_channels })
 }
 
+/// Writes the stretch of a file between `from_secs` and `to_secs` as a
+/// 16-bit PCM WAV at the file's own rate and channel count: rekordbox's
+/// Export Loop As WAV. Returns the frames written. Nothing is written when
+/// the range holds no audio.
+pub fn write_range_wav(source: &Path, from_secs: f64, to_secs: f64, out: &Path) -> Result<u64> {
+    if to_secs <= from_secs || from_secs < 0.0 || !to_secs.is_finite() {
+        return Err(AudioError::Unsupported("the range is empty".into()));
+    }
+    let file = std::fs::File::open(source)?;
+    let stream = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = source.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .ok_or(AudioError::NoTrack)?;
+    let track_id = track.id;
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| AudioError::Unsupported(e.to_string()))?;
+
+    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
+    let mut channels = track.codec_params.channels.map_or(2, |c| c.count().max(1));
+    // Interleaved frames of the range, as `i16`.
+    let mut pcm: Vec<i16> = Vec::new();
+    let mut buffer: Option<SampleBuffer<f32>> = None;
+    let mut frame_at: u64 = 0;
+    let mut first = (from_secs * f64::from(sample_rate)) as u64;
+    let mut last = (to_secs * f64::from(sample_rate)) as u64;
+    while let Ok(packet) = format.next_packet() {
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let frames = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(_) => break,
+        };
+        let spec = *frames.spec();
+        if spec.rate != sample_rate {
+            sample_rate = spec.rate;
+            first = (from_secs * f64::from(sample_rate)) as u64;
+            last = (to_secs * f64::from(sample_rate)) as u64;
+        }
+        channels = spec.channels.count().max(1);
+        let interleaved = buffer.get_or_insert_with(|| SampleBuffer::new(frames.capacity() as u64, spec));
+        interleaved.copy_interleaved_ref(frames);
+        let samples = interleaved.samples();
+        let count = (samples.len() / channels) as u64;
+        let packet_start = frame_at;
+        frame_at += count;
+        if frame_at <= first {
+            continue;
+        }
+        let take_from = first.saturating_sub(packet_start) as usize;
+        let take_to = (last.saturating_sub(packet_start) as usize).min(count as usize);
+        for frame in samples.chunks(channels).take(take_to).skip(take_from) {
+            for &sample in frame {
+                pcm.push((sample.clamp(-1.0, 1.0) * 32767.0) as i16);
+            }
+        }
+        if frame_at >= last {
+            break;
+        }
+    }
+    if pcm.is_empty() {
+        return Err(AudioError::Unsupported("no audio in the range".into()));
+    }
+    let channels_u16 = u16::try_from(channels).unwrap_or(2);
+    let block_align = channels_u16 * 2;
+    let data_len = u32::try_from(pcm.len() * 2).unwrap_or(u32::MAX);
+    let mut bytes = Vec::with_capacity(44 + pcm.len() * 2);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&channels_u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(block_align)).to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for sample in &pcm {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    std::fs::write(out, bytes)?;
+    Ok((pcm.len() / channels) as u64)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::pedantic)]
 mod tests {
@@ -164,6 +262,27 @@ mod tests {
             out.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
         }
         std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn a_range_is_written_as_a_wav_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("two.wav");
+        // Stereo, 1000 Hz, 2 seconds: the left channel a ramp, the right zero.
+        let mut samples = Vec::new();
+        for i in 0..2000 {
+            samples.push(i as f32 / 2000.0);
+            samples.push(0.0);
+        }
+        write_wav(&source, 1000, 2, &samples);
+        let out = dir.path().join("loop.wav");
+        let frames = write_range_wav(&source, 0.5, 1.0, &out).unwrap();
+        assert_eq!(frames, 500);
+        let back = decode_mono(&out, None).unwrap();
+        assert_eq!((back.sample_rate, back.source_channels, back.samples.len()), (1000, 2, 500));
+        // The mono mix of the ramp from 0.5 s: half of 0.25.
+        assert!((back.samples[0] - 0.125).abs() < 0.01, "{}", back.samples[0]);
+        assert!(write_range_wav(&source, 1.0, 0.5, &out).is_err());
     }
 
     #[test]

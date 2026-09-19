@@ -428,12 +428,14 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
                 })
             })
             .unwrap_or(TrackSource::Collection),
+        TrackSourceDto::TagList => TrackSource::TagList,
         TrackSourceDto::Related { track, criterion } => TrackSource::Related {
             // No such track, or none: past the end, which relates to nothing.
             track: library.row_of(track).unwrap_or(u32::MAX),
             criterion: match criterion.as_str() {
                 "genreRecent" => RelatedCriterion::SameGenreRecent,
                 "artist" => RelatedCriterion::SameArtist,
+                "suggestion" => RelatedCriterion::Suggestion,
                 _ => RelatedCriterion::BpmAndKey,
             },
         },

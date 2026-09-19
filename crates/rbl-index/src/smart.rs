@@ -58,7 +58,27 @@ pub enum Operator {
 }
 
 impl Operator {
-    fn from_code(code: &str) -> Option<Self> {
+    /// The number rekordbox stores.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Equal => "1",
+            Self::NotEqual => "2",
+            Self::Greater => "3",
+            Self::Less => "4",
+            Self::InRange => "5",
+            Self::InLast => "6",
+            Self::NotInLast => "7",
+            Self::Contains => "8",
+            Self::NotContains => "9",
+            Self::StartsWith => "10",
+            Self::EndsWith => "11",
+        }
+    }
+
+    /// The operator with this number.
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<Self> {
         Some(match code.trim() {
             "1" => Self::Equal,
             "2" => Self::NotEqual,
@@ -102,7 +122,35 @@ pub enum Property {
 }
 
 impl Property {
-    fn from_name(name: &str) -> Self {
+    /// rekordbox's internal name for the property, the one in the XML.
+    /// `Unsupported` has none; it is written as an empty name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Artist => "artist",
+            Self::Album => "album",
+            Self::Genre => "genre",
+            Self::Label => "label",
+            Self::Key => "key",
+            Self::Title => "name",
+            Self::Comment => "comments",
+            Self::FileName => "fileName",
+            Self::Bpm => "bpm",
+            Self::Rating => "rating",
+            Self::Color => "grouping",
+            Self::PlayCount => "counter",
+            Self::Duration => "duration",
+            Self::Year => "year",
+            Self::DateAdded => "stockDate",
+            Self::DateCreated => "dateCreated",
+            Self::DateReleased => "dateReleased",
+            Self::Unsupported => "",
+        }
+    }
+
+    /// The property rekordbox calls `name` in the XML.
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
         match name.trim() {
             "artist" => Self::Artist,
             "album" => Self::Album,
@@ -205,6 +253,51 @@ impl SmartRule {
             close_group(&mut stack, &mut root, group);
         }
         root.map(|root| Self { root })
+    }
+
+    /// The rule as `djmdPlaylist.SmartList` holds it, for the playlist with
+    /// `id`: the root `NODE` names the playlist, `AutomaticUpdate` is on,
+    /// and each condition is one `CONDITION`. The shape is the one parsed
+    /// above, written back without whitespace between the elements
+    /// [ASSUME: no rekordbox-written rule has been captured to copy its
+    /// spacing; the reader here and rekordbox's both ignore it].
+    #[must_use]
+    pub fn to_xml(&self, id: u64) -> String {
+        use std::fmt::Write as _;
+        fn write_group(out: &mut String, group: &Group, id: Option<u64>) {
+            let logic = match group.logic {
+                Logic::All => "1",
+                Logic::Any => "2",
+            };
+            match id {
+                Some(id) => {
+                    let _ = write!(out, "<NODE Id=\"{id}\" LogicalOperator=\"{logic}\" AutomaticUpdate=\"1\">");
+                }
+                None => {
+                    let _ = write!(out, "<NODE LogicalOperator=\"{logic}\">");
+                }
+            }
+            for item in &group.items {
+                match item {
+                    Item::Condition(c) => {
+                        let _ = write!(
+                            out,
+                            "<CONDITION PropertyName=\"{}\" Operator=\"{}\" ValueUnit=\"{}\" ValueLeft=\"{}\" ValueRight=\"{}\"/>",
+                            c.property.name(),
+                            c.operator.code(),
+                            rbl_core::xml::escape(&c.unit),
+                            rbl_core::xml::escape(&c.left),
+                            rbl_core::xml::escape(&c.right),
+                        );
+                    }
+                    Item::Group(g) => write_group(out, g, None),
+                }
+            }
+            out.push_str("</NODE>");
+        }
+        let mut out = String::with_capacity(128 + self.root.items.len() * 96);
+        write_group(&mut out, &self.root, Some(id));
+        out
     }
 
     /// How many conditions name something the index cannot answer.
@@ -599,6 +692,37 @@ mod tests {
         assert_eq!(rule.unsupported(), 1);
         assert!(SmartRule::parse("").is_none());
         assert!(SmartRule::parse("<NODE/>").is_some());
+    }
+
+    #[test]
+    fn a_rule_written_out_reads_back_the_same() {
+        let rule = SmartRule {
+            root: Group {
+                logic: Logic::Any,
+                items: vec![
+                    Item::Condition(Condition {
+                        property: Property::Genre,
+                        operator: Operator::Contains,
+                        left: "Tech & \"House\"".to_owned(),
+                        right: String::new(),
+                        unit: String::new(),
+                    }),
+                    Item::Group(Group {
+                        logic: Logic::All,
+                        items: vec![Item::Condition(Condition {
+                            property: Property::DateAdded,
+                            operator: Operator::InLast,
+                            left: "30".to_owned(),
+                            right: String::new(),
+                            unit: "day".to_owned(),
+                        })],
+                    }),
+                ],
+            },
+        };
+        let xml = rule.to_xml(4_290_236_987);
+        assert!(xml.starts_with("<NODE Id=\"4290236987\" LogicalOperator=\"2\" AutomaticUpdate=\"1\"><CONDITION PropertyName=\"genre\" Operator=\"8\""));
+        assert_eq!(SmartRule::parse(&xml).unwrap(), rule);
     }
 
     #[test]

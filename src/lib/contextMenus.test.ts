@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  deckMenu,
-  enabled,
-  entriesOf,
-  SEPARATOR,
-  TRACK_MENU,
-  trackMenuFor,
-  treeMenu,
-  type MenuContext,
-} from "./contextMenus";
+import { deckMenu, enabled, entriesOf, SEPARATOR, shortcutMenu, TRACK_MENU, trackMenuFor, treeMenu, type MenuContext } from "./contextMenus";
 
 const OPEN: MenuContext = { inPlaylist: true, hasFile: true, readOnly: false };
 
@@ -94,9 +85,10 @@ describe("trackMenuFor", () => {
 describe("treeMenu", () => {
   it("is rekordbox's own list over a playlist, in its own order, less the cloud", () => {
     // docs/screenshots context-menu-tree@2x: thirteen entries in eight groups.
-    // The three cloud rows shared the first group with Export Playlist, so
-    // leaving them out takes it to ten; Rename, which the capture has no row
-    // for, joins Delete's group and makes eleven in the same eight groups.
+    // The three cloud rows shared the first group with Export Playlist, and
+    // Collaborative playlist had a group of its own; leaving the four out
+    // takes it to nine in seven groups; Rename, which the capture has no row
+    // for, joins Delete's group and makes ten.
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
       "Export Playlist",
       "Create New Playlist",
@@ -107,10 +99,9 @@ describe("treeMenu", () => {
       "Rename Playlist",
       "Delete Playlist",
       "Export a playlist to a file",
-      "Collaborative playlist",
       "Add To Shortcut",
     ]);
-    expect(treeMenu("playlist").filter((row) => row === SEPARATOR)).toHaveLength(7);
+    expect(treeMenu("playlist").filter((row) => row === SEPARATOR)).toHaveLength(6);
   });
 
   it("draws no cloud entry at all, rather than a greyed one", () => {
@@ -118,15 +109,68 @@ describe("treeMenu", () => {
     expect(labels).not.toContain("Cloud Library Sync");
     expect(labels).not.toContain("Auto Upload");
     expect(labels).not.toContain("Batch Auto Upload setting");
+    expect(labels).not.toContain("Collaborative playlist");
   });
 
   it("marks the entries that open a submenu", () => {
     const arrows = entriesOf(treeMenu("playlist")).filter((e) => e.submenu).map((e) => e.label);
-    expect(arrows).toEqual([
-      "Export Playlist",
-      "Export a playlist to a file",
-      "Collaborative playlist",
+    expect(arrows).toEqual(["Export Playlist", "Export a playlist to a file"]);
+  });
+
+  it("offers the rule editor on an intelligent playlist, and a shortcut's removal only on the shortcut", () => {
+    expect(entriesOf(treeMenu("smartPlaylist")).map((e) => e.label)).toContain("Edit Intelligent Playlist");
+    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).not.toContain("Edit Intelligent Playlist");
+    // rekordbox 7.2.11 keeps "Add To Shortcut" on a playlist that is one
+    // already; the shortcut's own menu is the one row that deletes it.
+    expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).not.toContain("Remove from Shortcut");
+    expect(entriesOf(shortcutMenu()).map((e) => e.label)).toEqual(["Delete Shortcut"]);
+  });
+
+  it("fills Add To Playlist and Export Track with what there is, and imports only loose files", () => {
+    const rows = trackMenuFor(0, [{ id: "p1", name: "Sets › Warm Up" }], [{ id: "/Volumes/USB A", name: "USB A" }]);
+    const add = entriesOf(rows).find((e) => e.label === "Add To Playlist");
+    expect(add?.items && entriesOf(add.items).map((e) => e.action)).toEqual(["addToPlaylist:p1"]);
+    const stick = entriesOf(rows).find((e) => e.label === "Export Track");
+    expect(stick?.items && entriesOf(stick.items).map((e) => e.action)).toEqual(["exportTrack:/Volumes/USB A"]);
+    // With nothing to offer, the arrows are greyed as before.
+    const bare = entriesOf(trackMenuFor(0));
+    expect(bare.find((e) => e.label === "Add To Playlist")?.items).toBeUndefined();
+    const importRow = bare.find((e) => e.label === "Import To Collection") ?? { label: "", action: null };
+    expect(enabled(importRow, OPEN)).toBe(false);
+    expect(enabled(importRow, { ...OPEN, loose: true })).toBe(true);
+    // Over a loose file, a track's writes are off and loading stays on.
+    const lock = bare.find((e) => e.label === "Analysis Lock") ?? { label: "", action: null };
+    expect(enabled(lock, { ...OPEN, loose: true })).toBe(false);
+    const tagged = entriesOf(trackMenuFor(0, [], [], { tagList: true })).map((e) => e.label);
+    expect(tagged).toContain("Remove from Tag List");
+    expect(tagged).not.toContain("Remove from Playlist");
+  });
+
+  it("a folder's menu is rekordbox's own: no artwork or file export, and Sort Items", () => {
+    expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toEqual([
+      "Export Folder",
+      "Create New Playlist",
+      "Create New Intelligent Playlist",
+      "Create New Folder",
+      "Playlist display setting",
+      "Rename Folder",
+      "Delete Folder",
+      "Sort Items",
+      "Add To Shortcut",
     ]);
+  });
+
+  it("names rekordbox's submenu rows under Analysis Lock, Auto Load Hot Cue and Track information", () => {
+    const rows = (label: string) => {
+      const entry = entriesOf(TRACK_MENU).find((e) => e.label === label);
+      return entry?.items ? entriesOf(entry.items).map((e) => e.label) : [];
+    };
+    expect(rows("Analysis Lock")).toEqual(["On", "Off"]);
+    expect(rows("Auto Load Hot Cue")).toEqual(["Enable Auto Load Hot Cue", "Disable Auto Load Hot Cue"]);
+    expect(rows("Track information")).toEqual(["Publish", "Do not publish"]);
+    // Drawn but not done: the two KUVO rows and the two Auto Load rows.
+    const lock = entriesOf(TRACK_MENU).find((e) => e.label === "Track information");
+    expect(enabled(lock ?? { label: "", action: null }, OPEN)).toBe(false);
   });
 
   it("takes the node's own word for what is being deleted", () => {

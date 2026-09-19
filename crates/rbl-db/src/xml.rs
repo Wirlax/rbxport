@@ -159,7 +159,9 @@ impl XmlLibrary {
 
 /// The path a `Location` names: `file://localhost/Users/…`, percent-encoded.
 /// A URL to anything but a file is not a path.
-fn file_path(location: &str) -> Option<PathBuf> {
+/// The file a `file://` URL names, percent-decoded; `None` for another
+/// scheme or nothing.
+pub(crate) fn file_path(location: &str) -> Option<PathBuf> {
     let rest = location.strip_prefix("file://")?;
     // `file://localhost/x` and `file:///x` both mean `/x`.
     let path = rest.strip_prefix("localhost").unwrap_or(rest);
@@ -198,6 +200,11 @@ fn percent_decode(text: &str) -> String {
 fn stars(rating: &str) -> u8 {
     let value: u32 = rating.trim().parse().unwrap_or(0);
     u8::try_from((value + 25) / 51).unwrap_or(5).min(5)
+}
+
+/// Stars from iTunes's 0 to 100, twenty a star.
+pub(crate) fn stars_of_hundred(rating: u32) -> u8 {
+    u8::try_from((rating + 10) / 20).unwrap_or(5).min(5)
 }
 
 /// What importing a document did.

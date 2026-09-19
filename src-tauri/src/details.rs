@@ -214,6 +214,20 @@ pub async fn add_artwork<R: tauri::Runtime>(
     .await
 }
 
+/// Add Artwork on a playlist or folder: the tree menu's own.
+#[tauri::command]
+pub async fn add_playlist_artwork<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    playlist: String,
+    image: String,
+) -> AppResult<u32> {
+    edit(app, state, "add_playlist_artwork", Touched::Playlists, move |w| {
+        w.set_playlist_artwork(&playlist, Some(std::path::Path::new(&image))).map(|_| ())
+    })
+    .await
+}
+
 /// Delete Artwork: the track points at no image; the file stays.
 #[tauri::command]
 pub async fn clear_artwork<R: tauri::Runtime>(

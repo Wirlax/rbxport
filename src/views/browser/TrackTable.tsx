@@ -17,7 +17,7 @@ import {
   applyClick, clickSettles, emptySelection, modifierFor, pressSelects, type SelectionState,
 } from "@/lib/selection";
 import { ContextMenu } from "@/components/ContextMenu";
-import { trackMenuFor } from "@/lib/contextMenus";
+import { trackMenuFor, type MenuTarget } from "@/lib/contextMenus";
 import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
@@ -596,6 +596,21 @@ export interface TrackTableProps {
   /** Convert Memory Cues to Hot Cues, on the row under the pointer. */
   onConvertMemoryCues?: (row: RowDto) => void;
   onRemoveFromCollection?: (ids: readonly string[]) => void;
+  /** Import To Collection: the Explorer's files, by their `file:` ids. */
+  onImportToCollection?: (ids: readonly string[]) => void;
+  /** Analysis Lock › Lock and Unlock. */
+  onAnalysisLock?: (ids: readonly string[], on: boolean) => void;
+  /** Add To Playlist › one of `playlists`. */
+  onAddToPlaylist?: (playlist: string, ids: readonly string[]) => void;
+  onAddToTagList?: (ids: readonly string[]) => void;
+  onRemoveFromTagList?: (ids: readonly string[]) => void;
+  /** Reload Tag: the files' tags read again. */
+  onReloadTag?: (ids: readonly string[]) => void;
+  /** Export Track › one of `devices`. */
+  onExportTrack?: (device: string, ids: readonly string[]) => void;
+  /** What Add To Playlist and Export Track offer. */
+  playlists?: readonly MenuTarget[];
+  devices?: readonly MenuTarget[];
   /** rekordbox is running, so every write is refused rather than raced. */
   readOnly?: boolean;
   /**
@@ -648,6 +663,8 @@ export function TrackTable({
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
+  onImportToCollection, onAnalysisLock, onAddToPlaylist, onAddToTagList, onRemoveFromTagList, onExportTrack, onReloadTag,
+  playlists = [], devices = [],
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
@@ -1272,17 +1289,44 @@ export function TrackTable({
         <ContextMenu
           x={trackMenu.x}
           y={trackMenu.y}
-          rows={trackMenuFor(players)}
+          rows={trackMenuFor(players, playlists, devices, { tagList: spec.source.kind === "tagList" })}
           label="Track"
           context={{
             inPlaylist: spec.source.kind === "playlist",
             inHistory: spec.source.kind === "history",
             hasFile: true,
+            loose: spec.source.kind === "folder",
             readOnly,
           }}
           onChoose={(action) => {
             const ids = [...selection.ids];
+            if (action.startsWith("addToPlaylist:")) {
+              onAddToPlaylist?.(action.slice("addToPlaylist:".length), ids);
+              return;
+            }
+            if (action.startsWith("exportTrack:")) {
+              onExportTrack?.(action.slice("exportTrack:".length), ids);
+              return;
+            }
             switch (action) {
+              case "importToCollection":
+                onImportToCollection?.(ids);
+                break;
+              case "analysisLock":
+                onAnalysisLock?.(ids, true);
+                break;
+              case "analysisUnlock":
+                onAnalysisLock?.(ids, false);
+                break;
+              case "addToTagList":
+                onAddToTagList?.(ids);
+                break;
+              case "removeFromTagList":
+                onRemoveFromTagList?.(ids);
+                break;
+              case "reloadTag":
+                onReloadTag?.(ids);
+                break;
               case "analyse":
                 onAnalyse?.();
                 break;

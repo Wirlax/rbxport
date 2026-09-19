@@ -45,7 +45,7 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// 5 added the release year, and each playlist's attribute and rule: format
 /// 4 knew only whether a playlist was a folder, so an intelligent playlist
 /// read from the snapshot opened empty.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -219,6 +219,8 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     write_lists(&mut w, &library.playlists());
     // Format 4: the histories, the same shape as the playlists.
     write_lists(&mut w, &library.histories());
+    // Format 6: the Tag List's rows.
+    w.u32s(&library.tag_list());
 
     // Format 2: the My Tag categories, a string column per category whose
     // first row is the category's own name.
@@ -392,6 +394,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
 
     let playlists = read_lists(&mut r)?;
     let histories = read_lists(&mut r)?;
+    let tag_list = r.u32s()?;
 
     let categories = r.count(8)?;
     let mut my_tags = Vec::with_capacity(categories);
@@ -451,6 +454,11 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.set_cues(Cues::from_parts(cues, cue_index));
     lib.set_playlists(playlists);
     lib.set_histories(histories);
+    // A row past the end would be a track that is not there.
+    if tag_list.iter().any(|&row| row as usize >= count) {
+        return None;
+    }
+    lib.set_tag_list(tag_list);
     lib.set_my_tags(my_tags);
     // Derived, and cheap: rebuilding removes any chance of a stored rank array
     // disagreeing with the columns it claims to order.

@@ -242,7 +242,11 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
     "Change waveform color", "Analyze Track", "Beat Count Display", "Export Track", "Export Loop As WAV",
     "Active Loop Playback", "Click on the waveform for PLAY and CUE",
   ]);
-  for (const greyed of ["Export Track", "Export Loop As WAV", "Active Loop Playback"]) {
+  // Export Track lists the mock's sticks; Export Loop As WAV waits for a
+  // loop; Active Loop Playback is greyed for good (its column's "on" value
+  // has never been seen).
+  await expect(menu.getByRole("menuitem", { name: "Export Track" })).toBeEnabled();
+  for (const greyed of ["Export Loop As WAV", "Active Loop Playback"]) {
     await expect(menu.getByRole("menuitem", { name: greyed })).toBeDisabled();
   }
   // Analysis writes to the library, which the mock holds read-only here.

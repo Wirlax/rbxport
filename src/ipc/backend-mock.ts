@@ -12,7 +12,7 @@
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
-  StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
+  SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
@@ -341,6 +341,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * seeded slice; one made here starts empty, as a new one does.
    */
   const membership = new Map<string, string[]>();
+  /** The Tag List's track ids, in its order. */
+  const tagList: string[] = [];
+  /** Intelligent playlists' rules, by id. */
+  const smartRules = new Map<string, SmartRule>();
   let nextId = 1;
   const indexOfId = new Map(all.map((row, i) => [row.id, i] as const));
 
@@ -392,6 +396,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           return track.genre !== "" && row.genre === track.genre && Date.parse(row.dateAdded) >= since ? [i] : [];
         case "artist":
           return track.artist !== "" && row.artist === track.artist ? [i] : [];
+        // The mock keeps no play history, so its suggestions are the BPM
+        // and key matches, as the real backend's are without one.
+        case "suggestion": {
+          if (track.bpmX100 === 0 && rank(track.key) < 0) return [];
+          if (track.bpmX100 !== 0 && Math.abs(row.bpmX100 - track.bpmX100) > track.bpmX100 * 0.06) return [];
+          if (rank(track.key) >= 0 && !together(rank(track.key), rank(row.key))) return [];
+          return [i];
+        }
         default:
           return [];
       }
@@ -406,6 +418,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         : seededMembers(spec.source.id);
     } else if (spec.source.kind === "history") {
       candidates = seededMembers(spec.source.id);
+    } else if (spec.source.kind === "tagList") {
+      candidates = tagList.map((id) => indexOfId.get(id)).filter((i): i is number => i !== undefined);
     } else if (spec.source.kind === "related") {
       candidates = relatedTo(spec.source.track, spec.source.criterion);
     } else {
@@ -567,6 +581,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // rekordbox's, so it holds playlists but remembers no selection of ours;
   // DJ STICK holds nothing until something is written to it.
   const syncSelections = new Map<string, SyncPlaylist[]>();
+  /** Sticks whose record asks to be synced again when plugged in. */
+  const autoSync = new Set<string>();
   const deviceLibraries = new Map<string, string[]>([
     ["/Volumes/TEST", ["Main Set", "Warm Up", "Closing"]],
   ]);
@@ -647,6 +663,20 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       insertUnder(parent, { id: `made-${nextId++}`, name, kind: "folder", depth, expanded: true });
       return bump();
     },
+    // The mock keeps the rule and answers it back; it does not evaluate
+    // one, so a made intelligent playlist opens empty here.
+    createSmartPlaylist: (name, parent, rule) => {
+      const depth = parent === TREE_ROOT ? 1 : (findNode(parent)?.depth ?? 0) + 1;
+      const id = `made-${nextId++}`;
+      smartRules.set(id, rule);
+      membership.set(id, []);
+      insertUnder(parent, { id, name, kind: "smartPlaylist", depth, childCount: 0 });
+      return bump();
+    },
+    setSmartRule: (playlist, rule) => {
+      smartRules.set(playlist, rule);
+      return bump();
+    },
     renamePlaylist: (id, name) => {
       const node = findNode(id);
       if (node) node.name = name;
@@ -703,6 +733,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       membership.set(playlist, current);
       return bump();
     },
+    // The mock's rows have no files to read tags from.
+    reloadTags: () => bump(),
+    addToTagList: (tracks) => {
+      for (const track of tracks) if (!tagList.includes(track)) tagList.push(track);
+      return bump();
+    },
+    removeFromTagList: (tracks) => {
+      for (const track of tracks) {
+        const at = tagList.indexOf(track);
+        if (at >= 0) tagList.splice(at, 1);
+      }
+      return bump();
+    },
+    clearTagList: () => {
+      tagList.length = 0;
+      return bump();
+    },
     removeTracksFromPlaylist: (playlist, tracks) => {
       const current = membersOf(playlist).filter((t) => !tracks.includes(t));
       membership.set(playlist, current);
@@ -754,6 +801,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (row) detailsOf(row).myTags = [...tags];
       return bump();
     },
+    addPlaylistArtwork: () => bump(),
     addArtwork: (track) => {
       const row = all.find((r) => r.id === track);
       if (row) {
@@ -1455,13 +1503,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return wait(writeTo(device, [playlistId], defaults));
     },
+    exportTracksToDevice: (tracks, destination) => {
+      const device = devices.find((d) => d.path === destination);
+      if (!device) return Promise.reject(new Error("That device is no longer connected."));
+      const already = device.export?.tracks ?? 0;
+      const playlists = device.export?.playlists ?? 0;
+      device.export = { tracks: already + tracks.length, playlists, ours: true, written: new Date().toISOString() };
+      return wait({
+        tracks: already + tracks.length, playlists, bytesCopied: tracks.length * 8_000_000,
+        analysisFiles: tracks.length, reused: already, removed: 0, skipped: [], verified: true,
+      });
+    },
 
     // No windows in a browser: the shell draws the manager over itself.
     openSyncWindow: () => wait(false),
     // Stick after stick, each announced before and after, as the real run
     // is. A destination that is not a mock device is a stick that was
     // pulled: its entry carries the error and the others their reports.
-    syncDevices: async (playlists, destinations, defaults) => {
+    syncDevices: async (playlists, destinations, defaults, automatic) => {
       if (playlists.length === 0) throw new Error("That playlist has no tracks to export.");
       const reports = [];
       for (const path of destinations) {
@@ -1473,6 +1532,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         const device = devices.find((d) => d.path === path);
         if (device) {
           reports.push({ path, report: writeTo(device, playlists, defaults) });
+          if (automatic) autoSync.add(path);
+          else autoSync.delete(path);
           tell("done");
         } else {
           reports.push({ path, error: "That device is no longer connected." });
@@ -1481,6 +1542,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return reports;
     },
+    smartRule: (playlist) => wait(smartRules.get(playlist) ?? { logic: "all", conditions: [] }),
     deviceSyncState: (path) => {
       if (!devices.some((d) => d.path === path)) {
         return Promise.reject(new Error("That device is no longer connected."));
@@ -1488,6 +1550,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait({
         selected: (syncSelections.get(path) ?? []).map((p) => ({ ...p })),
         onDevice: [...(deviceLibraries.get(path) ?? [])],
+        automatic: autoSync.has(path),
       });
     },
     onSyncProgress: (listener) => {
@@ -1851,7 +1914,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No picker in a browser, so nothing can be chosen to import or written.
     importFiles: () => wait(null),
+    importPaths: (paths) => wait({ imported: 0, skipped: paths.map((p) => `${p}: the mock library takes no files`), tracks: [] }),
     importXml: () => wait(null),
+    exportLoopWav: () => wait(null),
+    importItunes: () => wait(null),
     // The mock's phrases are drawn from a table, not a file: nothing to cut.
     editPhrase: () => wait(false),
     exportPlaylistFile: () => wait(null),

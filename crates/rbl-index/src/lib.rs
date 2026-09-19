@@ -27,7 +27,7 @@ mod view;
 pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
-pub use load::{content_version, load, reload_cues_of, reload_playlists, LoadStats};
+pub use load::{content_version, load, reload_cues_of, reload_playlists, reload_tag_list, LoadStats};
 pub use smart::SmartRule;
 pub use xml_export::export_xml;
 pub use view::{RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};
@@ -99,6 +99,10 @@ pub struct Library {
     playlists: RwLock<Playlists>,
     /// The history tree, which is the same shape and read the same way.
     histories: RwLock<Playlists>,
+    /// The Tag List: rekordbox's one temporary list, `djmdSongTagList`,
+    /// as rows in `TrackNo` order. Behind a lock like the playlists, for
+    /// the same reason: adding a track to it changes nothing else.
+    tag_list: RwLock<Vec<Row>>,
 
     /// Row index by track id. Built on first lookup, not at load.
     by_id: OnceLock<HashMap<u64, Row>>,
@@ -467,6 +471,15 @@ impl Library {
 
     pub fn set_histories(&self, histories: Playlists) {
         *self.histories.write() = histories;
+    }
+
+    /// The Tag List's rows, in its order.
+    pub fn tag_list(&self) -> Vec<Row> {
+        self.tag_list.read().clone()
+    }
+
+    pub fn set_tag_list(&self, rows: Vec<Row>) {
+        *self.tag_list.write() = rows;
     }
 
     pub fn len(&self) -> usize {

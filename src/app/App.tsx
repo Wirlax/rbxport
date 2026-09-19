@@ -41,7 +41,7 @@ import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { isLooseId } from "@/lib/explorer";
-import { parentFor, withRelated } from "@/lib/tree";
+import { childrenOf, containerOf, parentFor, withRelated } from "@/lib/tree";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -50,11 +50,12 @@ import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
 import { Preferences, type Pane } from "@/views/settings/Preferences";
 import { SyncManager } from "@/views/sync/SyncManager";
+import { SmartPlaylistEditor } from "@/views/tree/SmartPlaylistEditor";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
-import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus } from "@/ipc/types";
+import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
 import { useTooltip } from "@/store/usePreferences";
 
 /**
@@ -834,6 +835,122 @@ export function App() {
     [write, tree],
   );
 
+  // The intelligent playlist editor: over a new rule under a node, or over
+  // an existing playlist's, read from the backend first.
+  const [smartEditor, setSmartEditor] = useState<
+    { mode: "create"; parent: string; name: string; rule: SmartRule } | { mode: "edit"; id: string; name: string; rule: SmartRule } | null
+  >(null);
+  const createSmartPlaylistIn = useCallback(
+    (node: TreeNode) => {
+      setSmartEditor({
+        mode: "create",
+        parent: parentFor(tree, node),
+        name: "Untitled Intelligent List",
+        rule: { logic: "all", conditions: [] },
+      });
+    },
+    [tree],
+  );
+  const editSmartPlaylist = useCallback(
+    (node: TreeNode) => {
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          const rule = await backend.smartRule(node.id);
+          setSmartEditor({ mode: "edit", id: node.id, name: node.name, rule });
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "That rule could not be read.");
+        }
+      })();
+    },
+    [refuse],
+  );
+  const saveSmartPlaylist = useCallback(
+    (name: string, rule: SmartRule) => {
+      const editing = smartEditor;
+      setSmartEditor(null);
+      if (editing === null) return;
+      write(async (backend) => {
+        if (editing.mode === "create") {
+          await backend.edits.createSmartPlaylist(name, editing.parent, rule);
+          return `Created ${name}.`;
+        }
+        await backend.edits.setSmartRule(editing.id, rule);
+        if (name !== editing.name) await backend.edits.renamePlaylist(editing.id, name);
+        return `Saved ${name}.`;
+      });
+    },
+    [smartEditor, write],
+  );
+
+  // Add Artwork on a playlist: pick a picture, file it with the playlist.
+  const addPlaylistArtwork = useCallback(
+    (node: TreeNode) => {
+      void (async () => {
+        const backend = await getBackend();
+        const image = await backend.pickImage("Choose the artwork");
+        if (image === null) return;
+        write(async (b) => {
+          await b.edits.addPlaylistArtwork(node.id, image);
+          return `Artwork added to ${node.name}.`;
+        });
+      })();
+    },
+    [write],
+  );
+
+  // Sort Items: the folder's children in name order, case and accents
+  // aside [ASSUME: whether rekordbox puts folders first is not captured],
+  // one move each, from the top.
+  const sortItems = useCallback(
+    (folder: TreeNode) => {
+      const children = childrenOf(tree, folder.id);
+      if (children.length < 2) return;
+      const sorted = [...children].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      write(async (backend) => {
+        for (const [index, node] of sorted.entries()) {
+          await backend.edits.movePlaylist(node.id, folder.id, index);
+        }
+        return `Sorted ${folder.name}.`;
+      });
+    },
+    [tree, write],
+  );
+
+  // Add To Shortcut: the rail takes the playlist as a button of its own.
+  // rekordbox 7.2.11 takes the same playlist twice; a second button that
+  // opens the same thing is nothing to a user, so this keeps one.
+  const addToShortcut = useCallback(
+    (node: TreeNode) => {
+      if (viewPrefs.shortcuts.includes(node.id)) return;
+      prefs.update("view", { shortcuts: [...viewPrefs.shortcuts, node.id] });
+    },
+    [prefs, viewPrefs.shortcuts],
+  );
+  const deleteShortcut = useCallback(
+    (id: string) => {
+      prefs.update("view", { shortcuts: viewPrefs.shortcuts.filter((other) => other !== id) });
+    },
+    [prefs, viewPrefs.shortcuts],
+  );
+  const railShortcuts = useMemo(
+    () =>
+      viewPrefs.shortcuts.flatMap((id) => {
+        // A playlist deleted since it was made a shortcut is not drawn; it
+        // is dropped from the list the next time one is added or removed.
+        const node = tree.find((n) => n.id === id);
+        return node ? [{ id, name: node.name, selected: selectedNode?.id === id }] : [];
+      }),
+    [viewPrefs.shortcuts, tree, selectedNode],
+  );
+  const openShortcut = useCallback(
+    (id: string) => {
+      const node = tree.find((n) => n.id === id);
+      if (node) setSelectedNode(node);
+    },
+    [tree],
+  );
+
   const deleteNode = useCallback(
     (node: TreeNode) => {
       write(async (backend) => {
@@ -953,6 +1070,153 @@ export function App() {
     [write],
   );
 
+  // Import To Collection, over the Explorer's files: their ids are their
+  // paths behind `file:`.
+  const importToCollection = useCallback(
+    (ids: readonly string[]) => {
+      const paths = ids.filter(isLooseId).map((id) => id.slice("file:".length));
+      if (paths.length === 0) return;
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          const imported = await backend.importPaths(paths);
+          const total = imported.imported + imported.skipped.length;
+          await afterWrite(
+            imported.skipped.length === 0
+              ? `Imported ${imported.imported} of ${total} files.`
+              : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped.`,
+          );
+          if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "Those files could not be imported.");
+        }
+      })();
+    },
+    [afterWrite, refuse, analysisPrefs.auto, analysis],
+  );
+
+  // Analysis Lock: the GRID panel's lock, set from the list on every
+  // selected track.
+  const analysisLock = useCallback(
+    (ids: readonly string[], on: boolean) => {
+      if (ids.length === 0) return;
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          for (const id of ids) await backend.edits.gridLock(id, on);
+          report(`${on ? "Locked" : "Unlocked"} the analysis of ${ids.length} track${ids.length === 1 ? "" : "s"}.`);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "The lock could not be set.");
+        }
+      })();
+    },
+    [report, refuse],
+  );
+
+  const addToPlaylist = useCallback(
+    (playlist: string, ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      const name = tree.find((n) => n.id === playlist)?.name ?? "the playlist";
+      write(async (backend) => {
+        const added = await backend.edits.addTracksToPlaylist(playlist, [...ids]);
+        return added === 0 ? `Already in ${name}.` : `Added ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}.`;
+      });
+    },
+    [write, tree],
+  );
+
+  const addToTagList = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.addToTagList([...ids]);
+        return `Added ${ids.length} track${ids.length === 1 ? "" : "s"} to the Tag List.`;
+      });
+    },
+    [write],
+  );
+
+  const reloadTag = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.reloadTags([...ids]);
+        return `Tags reloaded on ${ids.length} track${ids.length === 1 ? "" : "s"}.`;
+      });
+    },
+    [write],
+  );
+
+  const removeFromTagList = useCallback(
+    (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      write(async (backend) => {
+        await backend.edits.removeFromTagList([...ids]);
+        return `Removed ${ids.length} track${ids.length === 1 ? "" : "s"} from the Tag List.`;
+      });
+    },
+    [write],
+  );
+
+  // Export Track: onto a connected stick, in no playlist.
+  const exportTrackTo = useCallback(
+    (path: string, ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      const device = devices.find((d) => d.path === path);
+      const name = device?.name ?? "the device";
+      setSyncing(true);
+      report(`Writing ${ids.length} track${ids.length === 1 ? "" : "s"} to ${name}…`);
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          const written = await backend.exportTracksToDevice([...ids], path, stickDefaults);
+          report(exportSummary(name, written));
+          setDevices(await backend.listDevices());
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "That export could not be written.");
+        } finally {
+          setSyncing(false);
+        }
+      })();
+    },
+    [devices, report, refuse, stickDefaults],
+  );
+
+  // Export Loop As WAV: where to, then the loop's stretch of the track.
+  const exportLoop = useCallback(
+    (trackId: string, title: string, inMs: number, outMs: number) => {
+      void (async () => {
+        const backend = await getBackend();
+        try {
+          const frames = await backend.exportLoopWav(trackId, title, inMs, outMs);
+          if (frames === null) return;
+          report(`Loop written: ${((outMs - inMs) / 1000).toFixed(2)} s of ${title}.`);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "The loop could not be written.");
+        }
+      })();
+    },
+    [report, refuse],
+  );
+
+  // What the track menu's Add To Playlist and Export Track offer: the
+  // playlists under their folders, and the connected sticks.
+  const menuPlaylists = useMemo(() => {
+    // Folders' names accumulate down the tree, which is in order, so a
+    // playlist's container has been named by the time it is reached.
+    const names = new Map<string, string>();
+    const out: { id: string; name: string }[] = [];
+    for (const node of tree) {
+      if (node.kind !== "playlist" && node.kind !== "folder") continue;
+      const above = names.get(containerOf(tree, node)) ?? "";
+      const name = above === "" ? node.name : `${above} › ${node.name}`;
+      names.set(node.id, name);
+      if (node.kind === "playlist") out.push({ id: node.id, name });
+    }
+    return out;
+  }, [tree]);
+  const menuDevices = useMemo(() => devices.map((d) => ({ id: d.path, name: d.name })), [devices]);
+
   const removeFromPlaylist = useCallback(
     (ids: readonly string[]) => {
       const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
@@ -1033,11 +1297,11 @@ export function App() {
     }
   }, [report, refuse, analysisPrefs.auto, analysis]);
 
-  const importXmlFromMenu = useCallback(async () => {
-    report("Choosing a rekordbox XML file…");
+  const importXmlFromMenu = useCallback(async (source: "rekordbox" | "itunes" = "rekordbox") => {
+    report(source === "itunes" ? "Choosing the iTunes Library.xml…" : "Choosing a rekordbox XML file…");
     try {
       const backend = await getBackend();
-      const imported = await backend.importXml();
+      const imported = source === "itunes" ? await backend.importItunes() : await backend.importXml();
       if (imported === null) {
         setNote(null);
         return;
@@ -1089,6 +1353,10 @@ export function App() {
     }
     if (outcome.action === "import-xml") {
       void importXmlFromMenu();
+      return;
+    }
+    if (outcome.action === "import-itunes") {
+      void importXmlFromMenu("itunes");
       return;
     }
     if (outcome.action === "export-xml") {
@@ -1278,20 +1546,67 @@ export function App() {
     // itself is what is being corrected here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices]);
-  // A stick plugged in or pulled out: the shell says so, and the list follows.
+
+  // A stick plugged in whose sync record asks for it is written again with
+  // the playlists it was last given — rekordbox's "Automatic synchronization",
+  // which its Sync Manager sets per device and this one does too. Only a
+  // stick that the shell's mount watcher reports arriving while the app is
+  // running: the launch's own listing, and a focus refresh, are not
+  // arrivals (2026-09-18: the first listing after launch counted as one and
+  // rewrote a stick nobody had touched). Each volume is synced once per
+  // plugging-in.
+  const devicesNow = useRef<readonly Device[]>([]);
+  devicesNow.current = devices;
+  const autoSyncing = useRef(false);
+  const autoSyncArrivals = useCallback(
+    (arrived: readonly Device[]) => {
+      const candidates = arrived.filter((device) => device.export !== null);
+      if (candidates.length === 0 || autoSyncing.current) return;
+      autoSyncing.current = true;
+      void (async () => {
+        try {
+          const backend = await getBackend();
+          for (const device of candidates) {
+            const state = await backend.deviceSyncState(device.path).catch(() => null);
+            if (!state?.automatic || state.selected.length === 0) continue;
+            report(`Synchronizing ${device.name}…`);
+            const playlists = state.selected.map((playlist) => playlist.libraryId);
+            const [written] = await backend.syncDevices(playlists, [device.path], stickDefaults, true);
+            if (written?.report) report(exportSummary(device.name, written.report));
+            else refuse(`${device.name}: ${written?.error ?? "The sync could not be written."}`);
+          }
+          setDevices(await backend.listDevices());
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "The sync could not be written.");
+        } finally {
+          autoSyncing.current = false;
+        }
+      })();
+    },
+    [report, refuse, stickDefaults],
+  );
+  // The mount watcher's word: the list before and after says what arrived.
   useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
-      stop = backend.onDevicesChanged(refreshDevices);
+      stop = backend.onDevicesChanged(() => {
+        void (async () => {
+          const before = new Set(devicesNow.current.map((device) => device.volumeId));
+          const after = await backend.listDevices().catch(() => null);
+          if (after === null || !live) return;
+          setDevices(after);
+          autoSyncArrivals(after.filter((device) => !before.has(device.volumeId)));
+        })();
+      });
     })();
     return () => {
       live = false;
       stop?.();
     };
-  }, [refreshDevices]);
+  }, [autoSyncArrivals]);
 
   // Devices join the tree as nodes so the Devices section renders through the
   // same path as every other section, and the Explorer's folders after them.
@@ -1497,6 +1812,9 @@ export function App() {
             onEject={() => setPlayerTrack(null)}
             onError={setPlayerError}
             onAnalyse={analyseOne}
+            onExportTrack={(device, id) => exportTrackTo(device, [id])}
+            devices={menuDevices}
+            onExportLoop={exportLoop}
             simple={!isFullDeck(layout)}
             dragging={draggedTracks !== null}
             onDropTrack={loadDroppedInto.a}
@@ -1522,6 +1840,9 @@ export function App() {
               track={playerTrackB}
               onEject={() => setPlayerTrackB(null)}
               onAnalyse={analyseOne}
+              onExportTrack={(device, id) => exportTrackTo(device, [id])}
+              devices={menuDevices}
+              onExportLoop={exportLoop}
               onError={setPlayerError}
               simple={!isFullDeck(layout)}
               dragging={draggedTracks !== null}
@@ -1578,6 +1899,14 @@ export function App() {
           onExpand={explorer.expand}
           showCounts={viewPrefs.playlistCounts}
           onOpenSync={openSyncManager}
+          onCreateSmartPlaylist={createSmartPlaylistIn}
+          onEditSmartPlaylist={editSmartPlaylist}
+          onAddArtwork={addPlaylistArtwork}
+          onAddToShortcut={addToShortcut}
+          onSortItems={sortItems}
+          railShortcuts={railShortcuts}
+          onOpenShortcut={openShortcut}
+          onDeleteShortcut={deleteShortcut}
         />
         <div
           className={styles.splitter}
@@ -1617,6 +1946,15 @@ export function App() {
           onResetPlayCount={resetPlayCount}
           onConvertMemoryCues={convertMemoryCues}
           onRemoveFromCollection={removeFromCollection}
+          onImportToCollection={importToCollection}
+          onAnalysisLock={analysisLock}
+          onAddToPlaylist={addToPlaylist}
+          onAddToTagList={addToTagList}
+          onRemoveFromTagList={removeFromTagList}
+          onReloadTag={reloadTag}
+          onExportTrack={exportTrackTo}
+          playlists={menuPlaylists}
+          devices={menuDevices}
           readOnly={readOnly}
           trafficLight={trafficLight}
           onTrafficLight={setTrafficLight}
@@ -1741,6 +2079,15 @@ export function App() {
       ) : null}
       {syncOpen ? (
         <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} />
+      ) : null}
+      {smartEditor ? (
+        <SmartPlaylistEditor
+          title={smartEditor.mode === "create" ? "Create New Intelligent Playlist" : "Edit the Intelligent Playlist"}
+          name={smartEditor.name}
+          rule={smartEditor.rule}
+          onSave={saveSmartPlaylist}
+          onCancel={() => setSmartEditor(null)}
+        />
       ) : null}
 
       {/* The LINK strip: present from the moment a player or mixer is heard,
