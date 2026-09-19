@@ -29,6 +29,19 @@ pub mod item_type {
     pub const ORIGINAL_ARTIST: u32 = 0x28;
     pub const REMIXER: u32 = 0x29;
     pub const DATE_ADDED: u32 = 0x2e;
+    /// `djmdContent.FileType` (1 mp3, 4 m4a, 5 flac, 11 wav, 12 aiff), a
+    /// row of the delivery info only.
+    pub const FILE_TYPE: u32 = 0x12;
+    /// Two text rows of the delivery info rekordbox sends empty; what the
+    /// player would deliver in them is not known.
+    pub const DELIVERY_TEXT_36: u32 = 0x36;
+    pub const DELIVERY_TEXT_37: u32 = 0x37;
+    /// The delivery info's closing row: the track id, a `1` in the ninth
+    /// slot, and a KUVO id in the second text that rekordbox leaves empty.
+    pub const DELIVERY_ID: u32 = 0x4f;
+    /// A title-only track row, the shape the delivery info names the
+    /// track in (the full row is [`TRACK`]).
+    pub const TITLE: u32 = 0x04;
     /// A track row: title, the comment beside it, key, tempo.
     pub const TRACK: u32 = 0x2304;
     /// The `⟨ALL⟩` row that heads a sub-menu.

@@ -360,6 +360,12 @@ pub mod kind {
     pub const TRACK_INFO: u16 = 0x2102;
     /// The beat grid.
     pub const BEAT_GRID: u16 = 0x2204;
+    /// The track a player delivers to KUVO, as the firmware names it
+    /// (`CMD_GET_DELIVERY_INFO`): a 13-row menu much like [`METADATA`],
+    /// asked for after every load from a rekordbox source, once the user
+    /// info below has been answered. Captured from rekordbox 7.2.11
+    /// (`verification/link/kuvo-delivery-20260919.txt`).
+    pub const DELIVERY_INFO: u16 = 0x2602;
     /// Cues and loops.
     pub const CUES: u16 = 0x2504;
     /// The waveform detail.
@@ -372,6 +378,12 @@ pub mod kind {
     pub const ANLZ_TAG_2EX: u16 = 0x2d04;
     /// Asks for the rows of the menu just requested.
     pub const RENDER: u16 = 0x3000;
+    /// The KUVO user info (`CMD_GET_USER_INFO`), asked for after every load
+    /// from a rekordbox source. The player waits on the reply and sends no
+    /// other request until it has one: unanswered, its browser sits on
+    /// "Waiting…" for eighteen seconds, retries twice, and gives the source
+    /// up. Answered with [`USER_INFO_REPLY`].
+    pub const USER_INFO: u16 = 0x3006;
     /// The player tells us which of our tracks it has loaded.
     pub const LOADED: u16 = 0x3100;
     /// "Here is how many items your query matched."
@@ -389,6 +401,10 @@ pub mod kind {
     pub const CUES_REPLY: u16 = 0x4502;
     pub const BEAT_GRID_REPLY: u16 = 0x4602;
     pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;
+    /// `CMD_RET_USER_INFO`: `[0x3006, 0, 160, blob[160]]`, as rekordbox
+    /// sends it. The player copies the blob's first 32 bytes into the
+    /// delivery it makes to KUVO, and needs it at least that long.
+    pub const USER_INFO_REPLY: u16 = 0x4d02;
     pub const EXTENDED_CUES_REPLY: u16 = 0x4e02;
     pub const ANLZ_TAG_REPLY: u16 = 0x4f02;
 
@@ -418,6 +434,9 @@ pub mod kind {
             DAYS => "days".to_owned(),
             DATE_TRACKS => "date's tracks".to_owned(),
             METADATA => "metadata".to_owned(),
+            DELIVERY_INFO => "delivery info".to_owned(),
+            USER_INFO => "user info".to_owned(),
+            USER_INFO_REPLY => "user info reply".to_owned(),
             ARTWORK => "artwork".to_owned(),
             WAVEFORM_PREVIEW => "waveform preview".to_owned(),
             TRACK_INFO => "track info".to_owned(),

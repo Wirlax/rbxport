@@ -426,6 +426,7 @@ impl Catalog for IndexCatalog {
             remixer: details.as_ref().map(|d| d.remixer.clone()).unwrap_or_default(),
             path,
             file_size: u32::try_from(file_size).unwrap_or(u32::MAX),
+            file_type: details.as_ref().map_or(0, |d| d.file_type),
         })
     }
 

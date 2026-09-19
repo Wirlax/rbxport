@@ -53,6 +53,9 @@ impl Handler for CatalogHandler {
     }
 }
 
+/// The length of rekordbox's user-info blob.
+const USER_INFO_LEN: usize = 160;
+
 /// The rows of the menu a player last asked for, ready to render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Menu {
@@ -63,6 +66,8 @@ enum Menu {
     Library { query: Query, rows: Vec<Row> },
     Metadata(Box<TrackDetails>),
     TrackInfo(Box<TrackDetails>),
+    /// What the player delivers to KUVO about a track it loaded.
+    DeliveryInfo(Box<TrackDetails>),
     /// A request with no rows: `3007`, MATCHING, an unknown track.
     Empty,
 }
@@ -77,6 +82,7 @@ impl Menu {
             Self::Library { rows, .. } => rows.len(),
             Self::Metadata(_) => 16,
             Self::TrackInfo(_) => 7,
+            Self::DeliveryInfo(_) => 13,
             Self::Empty => 0,
         };
         u32::try_from(n).unwrap_or(u32::MAX)
@@ -169,6 +175,7 @@ impl LinkSession {
                 .collect(),
             Menu::Metadata(details) => window(metadata_rows(details, self.catalog.played(details.row.id))),
             Menu::TrackInfo(details) => window(track_info_rows(details)),
+            Menu::DeliveryInfo(details) => window(delivery_rows(details)),
             Menu::Empty => Vec::new(),
         }
     }
@@ -235,6 +242,16 @@ impl LinkSession {
 
     fn analysis(&self, message: &Message, track: u32, what: &Analysis, reply: u16, tail: Option<u32>) -> Vec<Message> {
         Self::blob(message, reply, self.catalog.analysis(track, what), tail)
+    }
+
+    /// A menu of one track's fields: metadata, track info or delivery info,
+    /// all `[ctx, track_id]` and all opened the same way.
+    fn track_menu(&mut self, message: &Message, make: fn(Box<TrackDetails>) -> Menu) -> Vec<Message> {
+        let track = Self::number(message, 1);
+        match self.catalog.track(track) {
+            Some(details) => self.menu(message, make(Box::new(details))),
+            None => self.menu(message, Menu::Empty),
+        }
     }
 
     /// The requests that open a menu: a count now, rows on render.
@@ -322,20 +339,9 @@ impl LinkSession {
                 let text = Self::text(message, 3);
                 self.tracks(message, TrackScope::Search(text))
             }
-            kind::METADATA => {
-                let track = Self::number(message, 1);
-                match self.catalog.track(track) {
-                    Some(details) => self.menu(message, Menu::Metadata(Box::new(details))),
-                    None => self.menu(message, Menu::Empty),
-                }
-            }
-            kind::TRACK_INFO => {
-                let track = Self::number(message, 1);
-                match self.catalog.track(track) {
-                    Some(details) => self.menu(message, Menu::TrackInfo(Box::new(details))),
-                    None => self.menu(message, Menu::Empty),
-                }
-            }
+            kind::METADATA => self.track_menu(message, Menu::Metadata),
+            kind::TRACK_INFO => self.track_menu(message, Menu::TrackInfo),
+            kind::DELIVERY_INFO => self.track_menu(message, Menu::DeliveryInfo),
             // `3007` after setup, MATCHING, and anything not built: a menu
             // with nothing in it, which a player takes in its stride.
             _ => self.menu(message, Menu::Empty),
@@ -345,6 +351,13 @@ impl LinkSession {
     /// The requests answered with a blob.
     fn handle_blob(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
+            // rekordbox's blob carries its own account's KUVO details; ours
+            // is zero, a user with nothing to say. Only its presence and
+            // length were seen to matter: the player's KUVO ticket waits
+            // for this reply, copies the first 32 bytes, and moves on to
+            // the delivery info. `[UNKNOWN]` what a KUVO user would put
+            // here; the capture is verification/link/kuvo-delivery-20260919.txt.
+            kind::USER_INFO => Self::blob(message, kind::USER_INFO_REPLY, Some(vec![0; USER_INFO_LEN]), None),
             kind::ARTWORK => {
                 let art = Self::number(message, 1);
                 Self::blob(message, kind::ARTWORK_REPLY, self.catalog.artwork(art), None)
@@ -418,7 +431,8 @@ impl Session for LinkSession {
             | kind::WAVEFORM_DETAIL
             | kind::EXTENDED_CUES
             | kind::ANLZ_TAG
-            | kind::ANLZ_TAG_2EX => self.handle_blob(message),
+            | kind::ANLZ_TAG_2EX
+            | kind::USER_INFO => self.handle_blob(message),
             _ => self.handle_menu(message),
         }
     }
@@ -464,6 +478,41 @@ fn metadata_rows(t: &TrackDetails, played: bool) -> Vec<Item> {
         Item::line(0, t.label_id, &t.label, item_type::LABEL),
         Item::line(0, 0, &t.original_artist, item_type::ORIGINAL_ARTIST),
         Item::line(0, 0, &t.remixer, item_type::REMIXER),
+    ]
+}
+
+/// The thirteen rows of a delivery-info reply, in rekordbox's order (captured
+/// from 7.2.11 answering a CDJ-3000 that had just loaded a track from it).
+/// The firmware's KUVO ticket reads them by type: the texts of ARTIST, ALBUM,
+/// GENRE, LABEL, COMMENT, 0x36 and 0x37; the ids of DURATION, TEMPO, KEY and
+/// `FILE_TYPE`; from the `TITLE` row its text, first slot and ninth slot; and
+/// from the closing 0x4f row its first slot, ninth slot and second text.
+fn delivery_rows(t: &TrackDetails) -> Vec<Item> {
+    let key_id = t.row.key;
+    vec![
+        Item::line(0, 0, "", item_type::DELIVERY_TEXT_36),
+        Item::line(0, t.artist_id, &t.artist, item_type::ARTIST),
+        Item::line(0, key_id, "", item_type::KEY),
+        Item::line(0, t.duration_s, "", item_type::DURATION),
+        Item {
+            a: t.row.id,
+            id: t.row.id,
+            text: t.row.title.clone(),
+            item_type: item_type::TITLE,
+            flags: track_flags::LISTED,
+            c: t.row.id,
+            e: 0x100,
+            f: t.row.bpm_x100,
+            ..Item::default()
+        },
+        Item::line(0, t.row.id, &t.row.comment, item_type::COMMENT),
+        Item::line(0, t.album_id, &t.album, item_type::ALBUM),
+        Item::line(0, t.row.bpm_x100, "", item_type::TEMPO),
+        Item::line(0, t.row.id, "", item_type::DELIVERY_TEXT_37),
+        Item::line(0, t.label_id, &t.label, item_type::LABEL),
+        Item::line(0, t.file_type, "", item_type::FILE_TYPE),
+        Item::line(0, t.genre_id, &t.genre, item_type::GENRE),
+        Item { a: t.row.id, item_type: item_type::DELIVERY_ID, c: 1, ..Item::default() },
     ]
 }
 

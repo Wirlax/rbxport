@@ -104,6 +104,8 @@ pub struct TrackDetails {
     /// The absolute host path a player opens over NFS.
     pub path: String,
     pub file_size: u32,
+    /// `djmdContent.FileType`; 0 when unknown.
+    pub file_type: u32,
 }
 
 /// The per-track blobs a player asks for.
