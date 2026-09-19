@@ -21,11 +21,12 @@ mod preferences;
 mod protocol;
 mod relocate;
 mod sync_window;
-mod telemetry;
 mod device_settings;
 pub mod dto;
 mod error;
 pub mod state;
+mod telemetry;
+mod test_port;
 mod update;
 
 pub use error::{AppError, AppResult, ErrorKind};
@@ -327,7 +328,10 @@ pub fn run() {
         .manage(Arc::new(crate::player::Player::default()))
         .manage(Arc::new(crate::grid::GridEditor::default()))
         .manage(Arc::new(crate::update::Updates::default()))
+        .manage(crate::test_port::TestPort::default())
         .setup(|app| {
+            // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
+            crate::test_port::start(app.handle());
             spawn_library_load(app.handle().clone());
             // Join the network on start: a passive watcher that hears every
             // player and mixer and reports them, so the shell can offer LINK
@@ -508,6 +512,8 @@ pub fn run() {
             details::add_artwork,
             details::set_my_tags,
             details::clear_artwork,
+            // Test-only: the page answering `RBXPORT_TEST_PORT`'s questions.
+            test_port::test_eval_result,
         ])
         .build(context);
 

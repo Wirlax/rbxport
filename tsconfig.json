@@ -24,6 +24,6 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "e2e", "e2e-win", "scripts", "design/measure"],
+  "include": ["src", "e2e", "e2e-win", "e2e-mac", "scripts", "design/measure"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
