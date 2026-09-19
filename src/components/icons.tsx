@@ -39,12 +39,6 @@ export const CommentIcon = (props: IconProps) => (
   </svg>
 );
 
-export const CutIcon = (props: IconProps) => (
-  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <path d="M4.2 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M11.8 2.6v10.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M13.4 3.4L2.6 12.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
-);
-
 export const DeviceIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <rect x="4.2" y="1.6" width="7.6" height="9.4" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.4 11v2.2h3.2V11" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M6.6 4.2h2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -78,6 +72,96 @@ export const FolderIcon = (props: IconProps) => (
 export const GearIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
     <g fill="currentColor"> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(0 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(45 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(90 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(135 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(180 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(225 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(270 8 8)"/> <rect x="6.9" y="0.6" width="2.2" height="3.2" transform="rotate(315 8 8)"/> <path fillRule="evenodd" d="M8 1.7A6.3 6.3 0 1 0 8 14.3 6.3 6.3 0 0 0 8 1.7zm0 2.7a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2z"/> </g>
+  </svg>
+);
+
+export const GridAlignAllIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect x="8.15" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="12.95" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="17.60" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="28.95" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="33.55" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="38.35" y="15" width="1.5" height="16" fill="currentColor"/> <rect className="dim" x="23" y="8.7" width="2" height="28.6" fill="currentColor"/> <polygon className="dim" points="21.3,8.7 26.7,8.7 24,13.2" fill="currentColor"/> <polygon className="dim" points="21.3,37.3 26.7,37.3 24,32.8" fill="currentColor"/>
+  </svg>
+);
+
+export const GridAlignHereIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect className="faint" x="8.15" y="15" width="1.5" height="16" fill="currentColor"/> <rect className="faint" x="12.95" y="15" width="1.5" height="16" fill="currentColor"/> <rect className="faint" x="17.60" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="28.95" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="33.55" y="15" width="1.5" height="16" fill="currentColor"/> <rect x="38.35" y="15" width="1.5" height="16" fill="currentColor"/> <polygon className="dim" points="21.3,8.7 26.7,8.7 24,13.2" fill="currentColor"/> <polygon className="dim" points="21.3,37.3 26.7,37.3 24,32.8" fill="currentColor"/>
+  </svg>
+);
+
+export const GridCutIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="21.5,10.2 30.8,10.2 32.9,12.3 32.9,13.3 22.4,13.3" fill="currentColor"/> <polygon points="29.7,13.3 32.9,13.3 33,20 33,34.1 30.3,34.1 30.3,20" fill="currentColor"/> <rect x="15" y="28.4" width="18" height="5.7" fill="currentColor"/> <polygon points="15.2,10.75 18.1,10.75 27.2,28.4 24.05,28.4" fill="currentColor"/> <path d="M15 19.1Q19.4 21.5 19.6 28.4L15 28.4Z" fill="currentColor"/>
+  </svg>
+);
+
+export const GridDoubleIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect className="dim" x="6.35" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="11.25" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="16.15" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <polygon points="20.6,18.2 23.6,18.2 30.0,27.8 27.0,27.8" fill="currentColor"/> <polygon points="27.0,18.2 30.0,18.2 23.6,27.8 20.6,27.8" fill="currentColor"/> <path d="M34.25 19.06A4.2 4.2 0 1 1 42.2 21.9L34.6 27.4" fill="none" stroke="currentColor" strokeWidth="2.4"/> <rect x="33.7" y="26.7" width="10" height="1.9" fill="currentColor"/>
+  </svg>
+);
+
+export const GridHalveIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect className="dim" x="4.91" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="9.59" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="14.36" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <polygon points="19.3,18.2 22.3,18.2 28.7,27.8 25.7,27.8" fill="currentColor"/> <polygon points="25.7,18.2 28.7,18.2 22.3,27.8 19.3,27.8" fill="currentColor"/> <polygon points="33.6,9 38.3,7.5 38.3,10 33.6,10" fill="currentColor"/> <rect x="36.9" y="7.5" width="1.4" height="10.6" fill="currentColor"/> <rect x="32" y="21.4" width="11" height="1.6" fill="currentColor"/> <path d="M33.5 31.7A3.4 3.4 0 1 1 39.7 32.5L34.1 37.9" fill="none" stroke="currentColor" strokeWidth="2.2"/> <rect x="32.1" y="37.3" width="9.4" height="1.9" fill="currentColor"/>
+  </svg>
+);
+
+export const GridLockOpenIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" d="M12 23H36V39H12ZM22 37V31.46A4 4 0 1 1 26 31.46V37Z" fill="currentColor"/> <path d="M14 17.2A10 10 0 0 1 34 17.2V23H30V17.2A6 6 0 0 0 18 17.2V19H14Z" fill="currentColor"/>
+  </svg>
+);
+
+export const GridLockIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" d="M12 23H36V39H12ZM22 37V31.46A4 4 0 1 1 26 31.46V37Z" fill="currentColor"/> <path d="M14 17.2A10 10 0 0 1 34 17.2V23H30V17.2A6 6 0 0 0 18 17.2V23H14Z" fill="currentColor"/>
+  </svg>
+);
+
+export const GridMarkIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect x="22.4" y="10.3" width="3.2" height="12.7" fill="currentColor"/> <rect className="head" x="22.4" y="23" width="3.2" height="12.85" fill="currentColor"/>
+  </svg>
+);
+
+export const GridMetronomeIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect x="15" y="18.2" width="3.1" height="7.9" fill="currentColor"/> <rect x="21.6" y="15" width="3.2" height="14.3" fill="currentColor"/> <rect x="28" y="11.9" width="3.4" height="22.2" fill="currentColor"/>
+  </svg>
+);
+
+export const GridNarrowIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="6.5,18.5 6.5,27.5 14,23" fill="currentColor"/> <rect className="dim" x="19.25" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="24.15" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="28.95" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <polygon points="43,18.5 43,27.5 35.5,23" fill="currentColor"/>
+  </svg>
+);
+
+export const GridRedoIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="31,16 23.5,11.8 23.5,20.5" fill="currentColor"/> <path d="M22.57 16.52A6.5 6.5 0 1 0 23.68 29.28" fill="none" stroke="currentColor" strokeWidth="4"/>
+  </svg>
+);
+
+export const GridShiftBackIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="15.5,18.5 15.5,27.5 8.5,23" fill="currentColor"/> <rect className="dim" x="24.15" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="28.95" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="33.55" y="13.4" width="1.5" height="19.2" fill="currentColor"/>
+  </svg>
+);
+
+export const GridShiftForwardIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <rect className="dim" x="12.95" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="17.55" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="22.35" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <polygon points="32.5,18.5 32.5,27.5 39.5,23" fill="currentColor"/>
+  </svg>
+);
+
+export const GridUndoIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="17,16 24.5,11.8 24.5,20.5" fill="currentColor"/> <path d="M25.43 16.52A6.5 6.5 0 1 1 24.32 29.28" fill="none" stroke="currentColor" strokeWidth="4"/>
+  </svg>
+);
+
+export const GridWidenIcon = (props: IconProps) => (
+  <svg viewBox="0 0 48 46" aria-hidden focusable="false" {...props}>
+    <polygon points="14.5,18.5 14.5,27.5 6.5,23" fill="currentColor"/> <rect className="dim" x="19.25" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="24.15" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <rect className="dim" x="28.95" y="13.4" width="1.5" height="19.2" fill="currentColor"/> <polygon points="35.5,18.5 35.5,27.5 42.5,23" fill="currentColor"/>
   </svg>
 );
 
@@ -147,20 +231,6 @@ export const ListIcon = (props: IconProps) => (
   </svg>
 );
 
-/** An intelligent playlist: a list with a rule's asterisk on it. */
-export const SmartListIcon = (props: IconProps) => (
-  <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
-    <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/>
-    <path d="M9 5.6v3.8M7.4 6.5l3.2 2M7.4 8.5l3.2-2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-  </svg>
-);
-
-export const LockIcon = (props: IconProps) => (
-  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <path d="M5.1 7.4V5.4a2.9 2.9 0 0 1 5.8 0v2.0" fill="none" stroke="currentColor" strokeWidth="1.5"/> <rect x="3.2" y="7.2" width="9.6" height="7.0" rx="1.1" fill="currentColor"/>
-  </svg>
-);
-
 export const LoopInIcon = (props: IconProps) => (
   <svg viewBox="0 0 15 6" aria-hidden focusable="false" {...props}>
     <path fill="currentColor" d="M0 3h3l3-3v3h9v3H0z"/>
@@ -182,12 +252,6 @@ export const MagnifierMinusIcon = (props: IconProps) => (
 export const MagnifierPlusIcon = (props: IconProps) => (
   <svg viewBox="0 0 14 14" aria-hidden focusable="false" {...props}>
     <circle cx="5.75" cy="5.75" r="4.75" fill="none" stroke="currentColor" strokeWidth="1.5"/> <path d="M9.4 9.4 13 13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/> <path d="M5.75 3.4v4.7M3.4 5.75h4.7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
-  </svg>
-);
-
-export const MetronomeIcon = (props: IconProps) => (
-  <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <rect x="2.6" y="8.4" width="2.4" height="5.4" fill="currentColor"/> <rect x="6.8" y="4.6" width="2.4" height="9.2" fill="currentColor"/> <rect x="11.0" y="6.8" width="2.4" height="7.0" fill="currentColor"/>
   </svg>
 );
 
@@ -248,6 +312,12 @@ export const RecordIcon = (props: IconProps) => (
 export const ReloadIcon = (props: IconProps) => (
   <svg viewBox="0 0 12 15" aria-hidden focusable="false" {...props}>
     <path d="M9.6 4.2A4.6 4.6 0 0 0 2 5.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M2.4 9.8A4.6 4.6 0 0 0 10 8.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> <path d="M8.2 1.2 10.2 4.4 6.6 4.6z" fill="currentColor"/> <path d="M3.8 13.8 1.8 10.6 5.4 10.4z" fill="currentColor"/>
+  </svg>
+);
+
+export const SmartListIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 12" aria-hidden focusable="false" {...props}>
+    <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.4"/> <path d="M1 4h12M4.5 4v7" stroke="currentColor" strokeWidth="1.4"/> <path d="M9 5.6v3.8M7.4 6.5l3.2 2M7.4 8.5l3.2-2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
   </svg>
 );
 

@@ -27,6 +27,7 @@ function toJsx(svg: string): string {
     .replace(/<\?xml[^>]*\?>\s*/g, "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\sxmlns="[^"]*"/g, "")
+    .replace(/\sclass=/g, " className=")
     .replace(/-([a-z])/g, (match, letter: string, offset: number, whole: string) => {
       // Only inside attribute names: a hyphen in path data must survive.
       const before = whole.slice(0, offset);

@@ -1,0 +1,13 @@
+<svg viewBox="0 0 48 46" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Double the tempo: three beat lines and x2.
+    Measured from docs/screenshots/grid-edit-row-2026-09-18@2x.png (rekordbox 7.2.11, 2x): the box is one grid-edit button, 48 x 46 at 2x, so the glyph sits where rekordbox puts it.
+  -->
+  <rect class="dim" x="6.35" y="13.4" width="1.5" height="19.2" fill="currentColor"/>
+  <rect class="dim" x="11.25" y="13.4" width="1.5" height="19.2" fill="currentColor"/>
+  <rect class="dim" x="16.15" y="13.4" width="1.5" height="19.2" fill="currentColor"/>
+  <polygon points="20.6,18.2 23.6,18.2 30.0,27.8 27.0,27.8" fill="currentColor"/>
+  <polygon points="27.0,18.2 30.0,18.2 23.6,27.8 20.6,27.8" fill="currentColor"/>
+  <path d="M34.25 19.06A4.2 4.2 0 1 1 42.2 21.9L34.6 27.4" fill="none" stroke="currentColor" stroke-width="2.4"/>
+  <rect x="33.7" y="26.7" width="10" height="1.9" fill="currentColor"/>
+</svg>

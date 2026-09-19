@@ -10,3 +10,10 @@ paintable attribute set to `currentColor` so the CSS token drives the colour.
 
 `pnpm icons` regenerates `src/components/icons.tsx` from this directory. Edit
 the SVGs, never the generated file.
+
+An icon with more than one colour still paints everything in `currentColor`
+and marks the other parts with a `class` — `dim` for beat lines, `faint` for
+the beats an edit leaves alone, `head` for the downbeat's red — which the
+stylesheet of whatever shows the icon maps to a token. The `grid-*` icons are
+drawn in their button's 48 x 46 box (2x), so they fill the button and land
+where the capture has them.

@@ -19,7 +19,11 @@ import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
 import { useElementSize } from "@/store/useElementSize";
 import { Artwork } from "@/components/Artwork";
-import { CutIcon, EjectIcon, LockIcon, MetronomeIcon, RecordIcon } from "@/components/icons";
+import {
+  EjectIcon, GridAlignAllIcon, GridAlignHereIcon, GridCutIcon, GridDoubleIcon, GridHalveIcon,
+  GridLockIcon, GridLockOpenIcon, GridMarkIcon, GridMetronomeIcon, GridNarrowIcon, GridRedoIcon,
+  GridShiftBackIcon, GridShiftForwardIcon, GridUndoIcon, GridWidenIcon, RecordIcon,
+} from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import {
   DETAIL_BARS,
@@ -485,49 +489,62 @@ const HOT_CUE_KEYS: Partial<Record<(typeof PADS)[number], string>> = { A: "1", B
  * What GRID puts in the pad row, read off `docs/screenshots`.
  *
  * Two labelled sections, GRID EDIT and PHRASE EDIT, with the buttons grouped
- * in pairs. The glyphs are ours — Pioneer's own are reference for geometry
- * only — so each carries an `aria-label` saying what it does.
+ * in pairs. Every button but TAP carries one of our icons, drawn to the
+ * grid-edit row capture; each carries an `aria-label` saying what it does.
  *
  * The grid buttons are live: what each does is `useGridEditor`'s, and the
  * edit is written to the track's analysis file by the backend, which
  * empties the `.EXT`'s `PQT2` rather than inventing one. The phrase
  * buttons are not: `PSSI` is rekordbox's to author.
  */
-const GRID_EDITS: readonly (readonly { id: string; label: string; text: string }[])[] = [
-  [{ id: "mark", label: "Mark the downbeat here", text: "▌" }],
-  [{ id: "tap", label: "Tap the tempo", text: "TAP" }],
+const GRID_EDITS: readonly (readonly { id: string; label: string }[])[] = [
+  [{ id: "mark", label: "Mark the downbeat here" }],
+  [{ id: "tap", label: "Tap the tempo" }],
   [
-    { id: "shift-back", label: "Shift the grid earlier", text: "◀|||" },
-    { id: "shift-forward", label: "Shift the grid later", text: "|||▶" },
+    { id: "shift-back", label: "Shift the grid earlier" },
+    { id: "shift-forward", label: "Shift the grid later" },
   ],
   [
-    { id: "widen", label: "Slow the grid", text: "◀|▶" },
-    { id: "narrow", label: "Speed the grid up", text: "▶|◀" },
+    { id: "widen", label: "Slow the grid" },
+    { id: "narrow", label: "Speed the grid up" },
   ],
   [
-    { id: "double", label: "Double the tempo", text: "×2" },
-    { id: "halve", label: "Halve the tempo", text: "×\u00bd" },
+    { id: "double", label: "Double the tempo" },
+    { id: "halve", label: "Halve the tempo" },
   ],
   [
-    { id: "snap-start", label: "Snap the grid to the start", text: "|↓|" },
-    { id: "snap-here", label: "Snap the grid here", text: "||↓" },
+    { id: "snap-start", label: "Snap the grid to the start" },
+    { id: "snap-here", label: "Snap the grid here" },
   ],
   [
-    { id: "undo", label: "Undo the last grid edit", text: "↺" },
-    { id: "redo", label: "Redo the last grid edit", text: "↻" },
+    { id: "undo", label: "Undo the last grid edit" },
+    { id: "redo", label: "Redo the last grid edit" },
   ],
   [
-    { id: "cut-grid", label: "Cut the grid here", text: "" },
-    { id: "metronome", label: "Metronome", text: "" },
-    { id: "lock", label: "Lock the grid", text: "" },
+    { id: "cut-grid", label: "Cut the grid here" },
+    { id: "metronome", label: "Metronome" },
+    { id: "lock", label: "Lock the grid" },
   ],
 ];
 
-/** Buttons whose face is one of our icons rather than a glyph. */
-const EDIT_ICONS: Record<string, (props: { className?: string | undefined }) => React.ReactElement> = {
-  "cut-grid": CutIcon,
-  metronome: MetronomeIcon,
-  lock: LockIcon,
+type IconComponent = (props: { className?: string | undefined }) => React.ReactElement;
+
+/** Each button's face; TAP is a word, and the lock changes with its state. */
+const EDIT_ICONS: Record<string, IconComponent> = {
+  mark: GridMarkIcon,
+  "shift-back": GridShiftBackIcon,
+  "shift-forward": GridShiftForwardIcon,
+  widen: GridWidenIcon,
+  narrow: GridNarrowIcon,
+  double: GridDoubleIcon,
+  halve: GridHalveIcon,
+  "snap-start": GridAlignAllIcon,
+  "snap-here": GridAlignHereIcon,
+  undo: GridUndoIcon,
+  redo: GridRedoIcon,
+  "cut-grid": GridCutIcon,
+  metronome: GridMetronomeIcon,
+  lock: GridLockOpenIcon,
 };
 
 /** What a grid-edit button does, is enabled by, and says on hover. */
@@ -1973,26 +1990,20 @@ export const Player = memo(function Player({
                         const button = gridButton(edit.id, gridEditor, hold, {
                           metronome, toggleMetronome, idle: playback.idle, readOnly,
                         });
+                        // The padlock closes when the grid is locked.
+                        const Icon = edit.id === "lock" && button.pressed ? GridLockIcon : EDIT_ICONS[edit.id];
                         return (
                           <button
                             key={edit.id}
                             type="button"
                             className={styles.editButton}
-                            data-mark={edit.id === "mark" || undefined}
                             aria-label={edit.label}
                             disabled={button.disabled}
                             aria-pressed={button.pressed}
                             title={tip(button.title)}
                             {...button.handlers}
                           >
-                            {EDIT_ICONS[edit.id]
-                              ? // Our own icons: Pioneer's are reference for
-                                // geometry only, and an emoji renders in colour.
-                                (() => {
-                                  const Icon = EDIT_ICONS[edit.id];
-                                  return Icon ? <Icon className={styles.editIcon} /> : null;
-                                })()
-                              : edit.text}
+                            {Icon ? <Icon className={styles.editIcon} /> : "TAP"}
                           </button>
                         );
                       })}

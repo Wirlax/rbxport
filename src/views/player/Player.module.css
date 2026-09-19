@@ -905,22 +905,32 @@
 .editButton {
   width: var(--s-pad-edit-w);
   height: var(--s-pad-edit-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-text);
+  background: var(--c-deck-button);
+  color: var(--c-icon-on);
   font-size: var(--f-size-xs);
   line-height: 1;
   cursor: default;
   padding: 0;
 }
-.editButton:disabled { color: var(--c-pad-label); }
-/* Lit while the metronome clicks, the way the pads light for a set cue. */
-.editButton[aria-pressed="true"] { background: var(--c-pad-active); color: var(--c-icon-on); }
-.editIcon { width: 12px; height: 12px; }
-/* The mark button carries rekordbox's red bar rather than a glyph. */
-.editButton[data-mark] { color: var(--c-downbeat); font-size: var(--f-size-ui); }
-.editButton[data-mark]:disabled { color: var(--c-downbeat); }
+/* A button that cannot act sinks into the panel, its glyph and beat lines
+   each a step dimmer, as the capture's undo and redo are. */
+.editButton:disabled { background: var(--c-pad-edit-off); color: var(--c-pad-edit-off-glyph); }
+/* On — the metronome clicking, the grid cut or locked — the icon goes blue
+   on the button's own grey, as rekordbox's metronome does. */
+.editButton[aria-pressed="true"] { color: var(--c-pad-edit-on); }
+/* Each icon is drawn in its button's box, so it fills the button. */
+.editIcon { width: 100%; height: 100%; }
+.editIcon :global(.dim) { fill: var(--c-pad-label); }
+.editIcon :global(.faint) { fill: var(--c-pad-edit-faint); }
+.editButton:disabled .editIcon :global(.dim),
+.editButton:disabled .editIcon :global(.faint) { fill: var(--c-pad-edit-off-bar); }
+/* The mark's red half, the colour of a downbeat's head on the waveform. */
+.editIcon :global(.head) { fill: var(--c-downbeat-head); }
 
 .bpmField {
   width: var(--s-pad-field-w);
