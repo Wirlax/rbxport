@@ -45,7 +45,7 @@ fn exports(dir: &std::path::Path) -> Exports {
 fn a_player_mounts_browses_and_fetches_a_whole_track() {
     let dir = tempfile::tempdir().unwrap();
     let track: Vec<u8> = (0..40_000_u32).map(|i| (i % 251) as u8).collect();
-    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None).unwrap();
+    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None, None).unwrap();
 
     let mut mounted = mount(bound.portmap_address(), "/").unwrap();
 
@@ -68,7 +68,7 @@ fn a_player_mounts_browses_and_fetches_a_whole_track() {
 #[test]
 fn a_player_cannot_reach_outside_the_export_over_the_wire() {
     let dir = tempfile::tempdir().unwrap();
-    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None).unwrap();
+    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None, None).unwrap();
     let mut mounted = mount(bound.portmap_address(), "/").unwrap();
     let root = *mounted.root();
 
@@ -90,7 +90,7 @@ fn a_player_cannot_reach_outside_the_export_over_the_wire() {
 #[test]
 fn mounting_an_export_that_is_not_offered_fails_before_any_lookup() {
     let dir = tempfile::tempdir().unwrap();
-    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None).unwrap();
+    let bound = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None, None).unwrap();
     assert!(matches!(mount(bound.portmap_address(), "/C/"), Err(CdjError::NoExport(_))));
     bound.shutdown();
 }
@@ -252,7 +252,7 @@ fn an_unknown_request_is_answered_with_an_error_not_silence() {
 #[test]
 fn the_servers_stop_cleanly_and_release_their_ports() {
     let dir = tempfile::tempdir().unwrap();
-    let nfs = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None).unwrap();
+    let nfs = NfsBound::start(exports(dir.path()), LOOPBACK, 0, 0, 0, None, None).unwrap();
     let addresses = [nfs.portmap_address(), nfs.mount_address(), nfs.nfs_address()];
     nfs.shutdown();
 

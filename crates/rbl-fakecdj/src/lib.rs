@@ -280,15 +280,22 @@ impl Mounted {
             if status != nfs_status::OK {
                 return Err(CdjError::Nfs(status));
             }
-            // The attributes: seventeen 32-bit fields we do not need here.
-            for _ in 0..17 {
-                reader.u32()?;
+            // The attributes: seventeen 32-bit fields, the sixth the size.
+            // A player reads up to the size it was told and no further —
+            // rekordbox answers a read at the end with IO, not an empty
+            // success.
+            let mut size = 0_u32;
+            for field in 0..17 {
+                let value = reader.u32()?;
+                if field == 5 {
+                    size = value;
+                }
             }
             let chunk = reader.opaque()?;
-            if chunk.is_empty() {
+            out.extend_from_slice(chunk);
+            if chunk.is_empty() || u32::try_from(out.len()).unwrap_or(u32::MAX) >= size {
                 return Ok(out);
             }
-            out.extend_from_slice(chunk);
         }
     }
 }

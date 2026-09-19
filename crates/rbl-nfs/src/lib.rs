@@ -20,10 +20,12 @@ pub mod rpc;
 pub mod vfs;
 pub mod xdr;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub use vfs::{Attributes, Exports, Handle, NodeKind, Vfs, HANDLE_LEN, MAX_READ};
 use xdr::{Reader, Writer};
@@ -39,6 +41,11 @@ pub const NFS_PORT: u16 = 2049;
 pub const PROGRAM_PORTMAP: u32 = 100_000;
 pub const PROGRAM_MOUNT: u32 = 100_005;
 pub const PROGRAM_NFS: u32 = 100_003;
+/// Portmap's DUMP procedure, the mapping table.
+const PORTMAP_DUMP: u32 = 4;
+/// The network lock manager and status monitor, which rekordbox drops.
+pub const PROGRAM_NLM: u32 = 100_021;
+pub const PROGRAM_NSM: u32 = 100_024;
 
 pub const VERSION_PORTMAP: u32 = 2;
 pub const VERSION_MOUNT: u32 = 1;
@@ -177,7 +184,33 @@ pub struct Server {
     /// pieces, and opening the file for each piece is a syscall and a
     /// directory walk per piece. Most recently used last.
     open: Mutex<Vec<OpenFile>>,
+    /// Non-zero once the link is up. rekordbox adds its export list only
+    /// on link-up, so until then the EXPORT reply lists nothing and a mount
+    /// is refused; a server made without a gate is up from the start.
+    up: Option<Arc<std::sync::atomic::AtomicU8>>,
+    /// Who has each export mounted, by export name: rekordbox keeps a host
+    /// list per export, filled by MNT and emptied by UMNT, and counts the
+    /// mounts to know when a player is ready to be sent a track.
+    mounts: Mutex<HashMap<String, Vec<Ipv4Addr>>>,
+    /// The last replies, by who asked and the call's first 24 bytes (xid,
+    /// message type, RPC version, program, version, procedure): a
+    /// retransmitted call gets the same reply again rather than a second
+    /// execution, as libFilSiNE's twenty-entry cache does.
+    replies: Mutex<std::collections::VecDeque<(ReplyKey, Vec<u8>)>>,
 }
+
+/// What tells one call from another in the reply cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplyKey {
+    from: Ipv4Addr,
+    port: u16,
+    head: Vec<u8>,
+}
+
+/// How many replies are kept for retransmits.
+const REPLY_CACHE: usize = 20;
+/// The bytes of a call that identify it in the cache.
+const REPLY_KEY_LEN: usize = 24;
 
 #[derive(Debug)]
 struct OpenFile {
@@ -195,7 +228,53 @@ const OPEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Server {
     pub fn new(exports: Exports, nfs_port: u16, mount_port: u16) -> Self {
-        Self { exports, nfs_port, mount_port, export_host: None, open: Mutex::new(Vec::with_capacity(OPEN_FILES)) }
+        Self {
+            exports,
+            nfs_port,
+            mount_port,
+            export_host: None,
+            open: Mutex::new(Vec::with_capacity(OPEN_FILES)),
+            up: None,
+            mounts: Mutex::new(HashMap::new()),
+            replies: Mutex::new(std::collections::VecDeque::with_capacity(REPLY_CACHE)),
+        }
+    }
+
+    /// Offers the exports only while `up` is non-zero: the link's device
+    /// number, settled by the join.
+    #[must_use]
+    pub fn with_gate(mut self, up: Arc<std::sync::atomic::AtomicU8>) -> Self {
+        self.up = Some(up);
+        self
+    }
+
+    fn is_up(&self) -> bool {
+        self.up.as_ref().is_none_or(|up| up.load(std::sync::atomic::Ordering::Relaxed) != 0)
+    }
+
+    /// Whether `host` is in the export's subnet — the one permission entry
+    /// rekordbox adds, its own `<ip>/<netmask>`; every host is allowed when
+    /// no group was set (loopback tests).
+    fn allows(&self, host: Ipv4Addr) -> bool {
+        let Some(group) = self.export_host.as_deref() else { return true };
+        let Some((ip, mask)) = group.split_once('/') else { return true };
+        let (Ok(ip), Ok(mask)) = (ip.parse::<Ipv4Addr>(), mask.parse::<Ipv4Addr>()) else { return true };
+        (u32::from(host) ^ u32::from(ip)) & u32::from(mask) == 0
+    }
+
+    /// The hosts with an export mounted, each once.
+    pub fn mounted_hosts(&self) -> Vec<Ipv4Addr> {
+        let mounts = self.mounts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut hosts: Vec<Ipv4Addr> = mounts.values().flatten().copied().collect();
+        hosts.sort_unstable();
+        hosts.dedup();
+        hosts
+    }
+
+    /// Whether `host` has any export mounted: what gates a load command.
+    pub fn is_mounted(&self, host: Ipv4Addr) -> bool {
+        let mounts = self.mounts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        mounts.values().any(|hosts| hosts.contains(&host))
     }
 
     /// Sets the host group the exports are offered to (`<ip>/<netmask>`), which
@@ -236,12 +315,42 @@ impl Server {
         &self.exports
     }
 
-    /// Answers one request datagram.
+    /// Answers one request datagram from an unnamed peer: loopback, for the
+    /// tests.
+    pub fn handle(&self, datagram: &[u8]) -> Option<Vec<u8>> {
+        self.handle_from(datagram, Ipv4Addr::LOCALHOST, 0)
+    }
+
+    /// Answers one request datagram from `from:port`.
     ///
     /// `None` means "say nothing": the datagram was not an RPC call we can
-    /// even address a reply to. A malformed call we *can* identify still gets
-    /// a reply, because silence is what a client times out on.
-    pub fn handle(&self, datagram: &[u8]) -> Option<Vec<u8>> {
+    /// even address a reply to, or one of the lock-manager calls rekordbox
+    /// drops without a word. A malformed call we *can* identify still gets a
+    /// reply, because silence is what a client times out on. A call seen
+    /// before from the same peer gets the reply it got then.
+    pub fn handle_from(&self, datagram: &[u8], from: Ipv4Addr, port: u16) -> Option<Vec<u8>> {
+        let key = datagram
+            .get(..REPLY_KEY_LEN)
+            .map(|head| ReplyKey { from, port, head: head.to_vec() });
+        if let Some(key) = &key {
+            let replies = self.replies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((_, reply)) = replies.iter().find(|(k, _)| k == key) {
+                tracing::debug!(%from, port, "call seen before; its reply sent again");
+                return Some(reply.clone());
+            }
+        }
+        let reply = self.answer(datagram, from)?;
+        if let Some(key) = key {
+            let mut replies = self.replies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if replies.len() >= REPLY_CACHE {
+                replies.pop_front();
+            }
+            replies.push_back((key, reply.clone()));
+        }
+        Some(reply)
+    }
+
+    fn answer(&self, datagram: &[u8], from: Ipv4Addr) -> Option<Vec<u8>> {
         let call = match rpc::Call::decode(datagram) {
             Ok(call) => call,
             Err(rpc::RpcError::Version(version)) => {
@@ -270,8 +379,14 @@ impl Server {
 
         let reply = match call.program {
             PROGRAM_PORTMAP => self.portmap(&call),
-            PROGRAM_MOUNT => self.mount(&call),
+            PROGRAM_MOUNT => self.mount(&call, from),
             PROGRAM_NFS => self.nfs(&call),
+            // The lock and status monitors: rekordbox says nothing at all
+            // to these, and a client that asks stops asking.
+            PROGRAM_NLM | PROGRAM_NSM => {
+                tracing::debug!(xid = call.xid, program = call.program, "lock-manager call; dropped without a reply");
+                return None;
+            }
             _ => {
                 tracing::warn!(xid = call.xid, program = call.program, "RPC call for a program this server does not have");
                 rpc::accepted_empty(call.xid, rpc::accept::PROG_UNAVAIL)
@@ -287,6 +402,22 @@ impl Server {
         }
         match call.procedure {
             portmap_proc::NULL => rpc::accepted_empty(call.xid, rpc::accept::SUCCESS),
+            // The mapping table, as libFilSiNE lists it. SET and UNSET, which
+            // it honours from any host with no credential, are not: a host
+            // on the LAN redirecting a player's file reads is nothing a
+            // player needs.
+            PORTMAP_DUMP => {
+                let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
+                for (program, version, port) in [
+                    (PROGRAM_PORTMAP, VERSION_PORTMAP, REKORDBOX_PORTMAP_PORT),
+                    (PROGRAM_NFS, VERSION_NFS, self.nfs_port),
+                    (PROGRAM_MOUNT, VERSION_MOUNT, self.mount_port),
+                ] {
+                    writer.some().u32(program).u32(version).u32(IPPROTO_UDP).u32(u32::from(port));
+                }
+                writer.none();
+                writer.into_bytes()
+            }
             portmap_proc::GETPORT => {
                 let mut reader = call.reader();
                 let (Ok(program), Ok(_version), Ok(protocol)) =
@@ -314,16 +445,22 @@ impl Server {
         }
     }
 
-    fn mount(&self, call: &rpc::Call<'_>) -> Vec<u8> {
+    fn mount(&self, call: &rpc::Call<'_>, from: Ipv4Addr) -> Vec<u8> {
         if call.version != VERSION_MOUNT {
             return rpc::program_mismatch(call.xid, VERSION_MOUNT, VERSION_MOUNT);
         }
         match call.procedure {
-            // Unmounting has nothing to undo: we hold no per-client state, so
-            // a client that never unmounts costs us nothing.
-            mount_proc::NULL | mount_proc::UMNT | mount_proc::UMNTALL => {
-                if call.procedure != mount_proc::NULL {
-                    tracing::debug!(xid = call.xid, "unmount; nothing held, acknowledged");
+            mount_proc::NULL => rpc::accepted_empty(call.xid, rpc::accept::SUCCESS),
+            // rekordbox takes the caller off the export's host list; with
+            // nothing held per mount here, the list is the whole of it.
+            mount_proc::UMNT | mount_proc::UMNTALL => {
+                let mut mounts = self.mounts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let path = if call.procedure == mount_proc::UMNT { call.reader().utf16().ok() } else { None };
+                for (export, hosts) in mounts.iter_mut() {
+                    if path.as_deref().is_none_or(|p| p == export) && hosts.contains(&from) {
+                        hosts.retain(|h| *h != from);
+                        tracing::info!(xid = call.xid, host = %from, %export, "player unmounted an export");
+                    }
                 }
                 rpc::accepted_empty(call.xid, rpc::accept::SUCCESS)
             }
@@ -334,12 +471,28 @@ impl Server {
                     return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
                 };
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
-                if let Some(handle) = self.exports.get(&path).and_then(|vfs| vfs.handle(vfs.root())) {
-                    tracing::info!(xid = call.xid, %path, "player mounted an export");
-                    writer.u32(nfs_status::OK).opaque_fixed(handle.as_bytes());
-                } else {
-                    tracing::warn!(xid = call.xid, %path, exports = ?self.exports.names(), "mount of a path that is not exported");
-                    writer.u32(nfs_status::NOENT);
+                // Denied and unknown alike are `ACCES`, as libFilSiNE answers
+                // them; before the link is up there is no export to mount.
+                let export = self.is_up().then(|| self.exports.get(&path)).flatten();
+                match export.and_then(|vfs| vfs.handle(vfs.root())) {
+                    Some(handle) if self.allows(from) => {
+                        let mut mounts = self.mounts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let hosts = mounts.entry(path.clone()).or_default();
+                        if !hosts.contains(&from) {
+                            hosts.push(from);
+                        }
+                        let now: usize = mounts.values().map(Vec::len).sum();
+                        tracing::info!(xid = call.xid, host = %from, %path, mounts = now, "player mounted an export");
+                        writer.u32(nfs_status::OK).opaque_fixed(handle.as_bytes());
+                    }
+                    Some(_) => {
+                        tracing::warn!(xid = call.xid, host = %from, %path, "mount from outside the export's subnet; refused");
+                        writer.u32(nfs_status::ACCES);
+                    }
+                    None => {
+                        tracing::warn!(xid = call.xid, host = %from, %path, up = self.is_up(), exports = ?self.exports.names(), "mount of a path that is not exported");
+                        writer.u32(nfs_status::ACCES);
+                    }
                 }
                 writer.into_bytes()
             }
@@ -348,10 +501,12 @@ impl Server {
                     xid = call.xid,
                     exports = ?self.exports.names(),
                     host = self.export_host.as_deref().unwrap_or("-"),
+                    up = self.is_up(),
                     "export list asked for"
                 );
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
-                for name in self.exports.names() {
+                let names = if self.is_up() { self.exports.names() } else { Vec::new() };
+                for name in names {
                     // Each entry is an optional-list link: present, the export
                     // name, then its group list. rekordbox 7.2.11 lists one
                     // group, `<ip>/<netmask>` for its own subnet (measured on
@@ -386,18 +541,17 @@ impl Server {
             nfs_proc::READ => self.read(call),
             nfs_proc::READDIR => self.readdir(call),
             nfs_proc::STATFS => self.statfs(call),
-            // Every mutating procedure, answered rather than ignored.
+            // Every mutating procedure, answered as libFilSiNE's stubs answer
+            // it: STALE for the writes, ACCES for links and readlink — not
+            // the ROFS a read-only server would say.
             nfs_proc::SETATTR
             | nfs_proc::WRITE
             | nfs_proc::CREATE
             | nfs_proc::REMOVE
             | nfs_proc::RENAME
-            | nfs_proc::LINK
-            | nfs_proc::SYMLINK
             | nfs_proc::MKDIR
-            | nfs_proc::RMDIR => Self::status_only(call.xid, nfs_status::ROFS),
-            // Nothing in an export is a symlink, so a readlink is always wrong.
-            nfs_proc::READLINK => Self::status_only(call.xid, nfs_status::PERM),
+            | nfs_proc::RMDIR => Self::status_only(call.xid, nfs_status::STALE),
+            nfs_proc::LINK | nfs_proc::SYMLINK | nfs_proc::READLINK => Self::status_only(call.xid, nfs_status::ACCES),
             _ => rpc::accepted_empty(call.xid, rpc::accept::PROC_UNAVAIL),
         }
     }
@@ -507,6 +661,11 @@ impl Server {
                 return Self::status_only(call.xid, nfs_status::IO);
             }
         };
+        // At or past the end libFilSiNE answers IO, not an empty success.
+        if data.is_empty() && wanted > 0 {
+            tracing::debug!(xid = call.xid, offset, size = attributes.size, "read at the end of the file; IO, as rekordbox answers");
+            return Self::status_only(call.xid, nfs_status::IO);
+        }
         tracing::trace!(xid = call.xid, offset, wanted, got = data.len(), "read served");
 
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
@@ -532,34 +691,43 @@ impl Server {
         }
 
         let children = vfs.children(index);
+
+        // The cookie is the file id of the last entry sent, as libFilSiNE
+        // sets it, so a resumed listing continues after that child; zero
+        // starts over, and a cookie naming no child is IO, as there.
+        let start = if cookie == 0 {
+            0
+        } else if let Some(position) =
+            children.iter().position(|child| vfs.attributes(*child).is_some_and(|a| a.fileid == cookie))
+        {
+            position + 1
+        } else {
+            tracing::warn!(xid = call.xid, cookie, "readdir cookie names no child; IO");
+            return Self::status_only(call.xid, nfs_status::IO);
+        };
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
         writer.u32(nfs_status::OK);
-
-        // The cookie is the index of the next child to send, so a resumed
-        // listing continues exactly where the previous reply stopped.
         let budget = (count as usize).clamp(512, 8192);
-        let mut at = cookie as usize;
+        let mut at = start;
         while let Some(child) = children.get(at) {
-            let (Some(name), Some(attributes)) = (vfs.name(*child), vfs.attributes(*child)) else {
+            let (Some(name), Some(attributes)) = (vfs.wire_name(*child), vfs.attributes(*child)) else {
                 break;
             };
             // Entry size: present flag, fileid, name (length + padded UTF-16LE),
             // cookie. Stop before overrunning what the client asked for.
-            let entry_len = 4 + 4 + 4 + xdr::padded(name.len() * 2) + 4;
+            let entry_len = 4 + 4 + 4 + xdr::padded(name.encode_utf16().count() * 2) + 4;
             if writer.len() + entry_len + 8 > budget {
                 break;
             }
             at += 1;
-            writer.some().u32(attributes.fileid).utf16(name).u32(
-                u32::try_from(at).unwrap_or(u32::MAX),
-            );
+            writer.some().u32(attributes.fileid).utf16(&name).u32(attributes.fileid);
         }
         let eof = at >= children.len();
         tracing::debug!(
             xid = call.xid,
             directory = %vfs.name(index).unwrap_or(""),
             cookie,
-            sent = at.saturating_sub(cookie as usize),
+            sent = at - start,
             of = children.len(),
             eof,
             "readdir served"
@@ -573,45 +741,75 @@ impl Server {
         let Some(handle) = Self::read_handle(&mut reader) else {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
-        if self.locate(&handle).is_none() {
+        let Some((vfs, index)) = self.locate(&handle) else {
             return Self::status_only(call.xid, nfs_status::STALE);
-        }
+        };
+        // The host filesystem's own figures, as libFilSiNE reports them:
+        // `tsize` its preferred I/O size (a mebibyte on APFS, which is more
+        // than a READ may carry), the block size and counts from `statfs`
+        // of the file behind the node — or of the export's root, where a
+        // directory of the tree has no file behind it.
+        let host = vfs
+            .source(index)
+            .map(std::path::Path::to_path_buf)
+            .or_else(|| Some(PathBuf::from(vfs.export_name())))
+            .and_then(|path| host_statfs(&path));
+        let (tsize, bsize, blocks, bfree, bavail) = host.unwrap_or((u32::try_from(MAX_READ).unwrap_or(8192), 4096, 0, 0, 0));
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
-        // Sizes are advisory. Free space is reported as zero, which is honest:
-        // the export is read-only, so nothing can be written into it.
-        writer
-            .u32(nfs_status::OK)
-            .u32(u32::try_from(MAX_READ).unwrap_or(8192)) // tsize
-            .u32(4096) // bsize
-            .u32(u32::MAX) // blocks
-            .u32(0) // bfree
-            .u32(0); // bavail
+        writer.u32(nfs_status::OK).u32(tsize).u32(bsize).u32(blocks).u32(bfree).u32(bavail);
         writer.into_bytes()
     }
 }
 
-/// Writes an `NFSv2` `fattr`: seventeen 32-bit fields, no padding.
+/// `statfs` of the host path: `tsize`, `bsize`, `blocks`, `bfree`,
+/// `bavail`, each in its low 32 bits, as libFilSiNE reports them.
+#[cfg(unix)]
+fn host_statfs(path: &Path) -> Option<(u32, u32, u32, u32, u32)> {
+    let stat = nix::sys::statfs::statfs(path).ok()?;
+    // The figures' types differ by platform (signed on some, wider on
+    // others); each is taken in its low 32 bits, as libFilSiNE takes them.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::cast_lossless, clippy::unnecessary_cast)]
+    let low = |v: i128| (v as u64 & u64::from(u32::MAX)) as u32;
+    #[allow(clippy::cast_lossless, clippy::unnecessary_cast)]
+    Some((
+        low(stat.optimal_transfer_size() as i128),
+        low(stat.block_size() as i128),
+        low(stat.blocks() as i128),
+        low(stat.blocks_free() as i128),
+        low(stat.blocks_available() as i128),
+    ))
+}
+
+/// Windows has no `statfs`; the figures fall back to what the caller
+/// substitutes.
+#[cfg(not(unix))]
+fn host_statfs(_path: &Path) -> Option<(u32, u32, u32, u32, u32)> {
+    None
+}
+
+/// Writes an `NFSv2` `fattr`: seventeen 32-bit fields, no padding. The
+/// figures are the host's, as libFilSiNE hands them out, with `fsid` 2.
 fn write_attributes(writer: &mut Writer, attributes: &Attributes) {
-    let (kind, mode, nlink) = match attributes.kind {
-        // 0o40555 and 0o100444: readable and traversable, never writable.
-        NodeKind::Directory => (file_type::DIRECTORY, 0o040_555, 2),
-        NodeKind::File => (file_type::REGULAR, 0o100_444, 1),
+    let kind = match attributes.kind {
+        NodeKind::Directory => file_type::DIRECTORY,
+        NodeKind::File => file_type::REGULAR,
     };
+    let stat = &attributes.stat;
     let size = u32::try_from(attributes.size).unwrap_or(u32::MAX);
     writer
         .u32(kind)
-        .u32(mode)
-        .u32(nlink)
-        .u32(0) // uid
-        .u32(0) // gid
+        .u32(stat.mode)
+        .u32(stat.nlink)
+        .u32(stat.uid)
+        .u32(stat.gid)
         .u32(size)
-        .u32(4096) // blocksize
-        .u32(0) // rdev
-        .u32(size.div_ceil(512)) // blocks
-        .u32(1) // fsid
+        .u32(stat.blocksize)
+        .u32(stat.rdev)
+        .u32(stat.blocks)
+        .u32(2) // fsid
         .u32(attributes.fileid);
-    for _ in 0..3 {
-        writer.u32(attributes.modified).u32(0);
+    for seconds in [stat.accessed, stat.modified, stat.changed] {
+        writer.u32(seconds).u32(0);
     }
 }
 

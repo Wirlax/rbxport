@@ -35,9 +35,13 @@ fn fixture() -> (tempfile::TempDir, Server) {
     (dir, Server::new(exports, NFS_PORT, MOUNT_PORT))
 }
 
+/// Each call its own xid, as a client sends them: the server answers a
+/// call it has seen before with the reply it gave then.
+static XID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x1234);
+
 fn call(program: u32, version: u32, procedure: u32, arguments: Vec<u8>) -> Vec<u8> {
     Call {
-        xid: 0x1234,
+        xid: XID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         program,
         version,
         procedure,
@@ -55,7 +59,7 @@ fn ask(server: &Server, program: u32, version: u32, procedure: u32, args: Vec<u8
 fn ok_reader(reply: &[u8]) -> Reader<'_> {
     let parsed = Reply::decode(reply).unwrap();
     assert!(parsed.is_success(), "{parsed:?}");
-    assert_eq!(parsed.xid, 0x1234);
+    assert!(parsed.xid >= 0x1234, "the reply carries the call's xid");
     parsed.reader()
 }
 
@@ -246,6 +250,30 @@ fn rekordbox_answers_portmap_on_its_own_port() {
     assert_eq!(rbl_nfs::NFS_PORT, 2049);
 }
 
+#[test]
+fn portmap_set_and_unset_are_refused_so_no_host_can_hijack_the_mapping() {
+    // libFilSiNE honours SET and UNSET from any host with no credential, which
+    // lets a machine on the LAN redirect a player's file reads to itself. We
+    // answer both PROC_UNAVAIL and leave the real mapping untouched. SET is
+    // procedure 1, UNSET 2 in portmap v2.
+    let (_dir, server) = fixture();
+    for procedure in [1_u32, 2] {
+        let mut args = Writer::new();
+        args.u32(PROGRAM_NFS).u32(2).u32(IPPROTO_UDP).u32(9999);
+        let reply = ask(&server, PROGRAM_PORTMAP, VERSION_PORTMAP, procedure, args.into_bytes());
+        assert_eq!(
+            Reply::decode(&reply).unwrap().accept_status,
+            rpc::accept::PROC_UNAVAIL,
+            "portmap procedure {procedure} must be refused"
+        );
+    }
+    // The NFS mapping still points at the real port, not the 9999 a SET tried.
+    let mut args = Writer::new();
+    args.u32(PROGRAM_NFS).u32(2).u32(IPPROTO_UDP).u32(0);
+    let reply = ask(&server, PROGRAM_PORTMAP, VERSION_PORTMAP, portmap_proc::GETPORT, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), u32::from(NFS_PORT));
+}
+
 // ---------------------------------------------------------------- mount
 
 #[test]
@@ -282,7 +310,8 @@ fn mounting_an_export_that_does_not_exist_says_so() {
     let mut args = Writer::new();
     args.utf16("/D/");
     let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
-    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::NOENT);
+    // `ACCES`, as rekordbox's libFilSiNE answers an unknown path.
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::ACCES);
 }
 
 #[test]
@@ -353,8 +382,10 @@ fn a_forged_handle_is_stale_not_a_node() {
     let (_dir, server) = fixture();
     let root = mount_root(&server);
 
+    // A handle is three file ids — the node's, its parent's, the root's —
+    // and one whose parent is not the node's is not one we issued.
     let mut forged = *root.as_bytes();
-    forged[3] = 5; // a plausible index, but the tag will not match
+    forged[7] = 5;
     let handle = Handle::from_slice(&forged).unwrap();
     let mut args = Writer::new();
     args.opaque_fixed(handle.as_bytes());
@@ -382,11 +413,16 @@ fn attributes_describe_a_read_only_tree() {
     let mut reader = ok_reader(&reply);
     assert_eq!(reader.u32().unwrap(), nfs_status::OK);
     assert_eq!(reader.u32().unwrap(), 1, "regular file");
-    assert_eq!(reader.u32().unwrap(), 0o100_444, "no write bit anywhere");
+    // The host's own mode and owner, as rekordbox hands them to a player.
+    assert_eq!(reader.u32().unwrap() & 0o170_000, 0o100_000, "a regular file's mode");
     assert_eq!(reader.u32().unwrap(), 1, "nlink");
-    assert_eq!(reader.u32().unwrap(), 0, "uid");
-    assert_eq!(reader.u32().unwrap(), 0, "gid");
+    reader.u32().unwrap(); // uid: the host's
+    reader.u32().unwrap(); // gid: the host's
     assert_eq!(reader.u32().unwrap(), 40_000, "size");
+    reader.u32().unwrap(); // blocksize: the host's
+    reader.u32().unwrap(); // rdev: the host's
+    reader.u32().unwrap(); // blocks: the host's
+    assert_eq!(reader.u32().unwrap(), 2, "fsid, as rekordbox reports it");
 
     // A directory reports the directory type and mode.
     let dir = lookup(&server, &root, "Contents").unwrap();
@@ -396,10 +432,12 @@ fn attributes_describe_a_read_only_tree() {
     let mut reader = ok_reader(&reply);
     assert_eq!(reader.u32().unwrap(), nfs_status::OK);
     assert_eq!(reader.u32().unwrap(), 2, "directory");
-    assert_eq!(reader.u32().unwrap(), 0o040_555);
+    assert_eq!(reader.u32().unwrap(), 0o040_755, "rekordbox's export root showed 041ed");
 }
 
-/// Reads a whole file the way a player does: 32 KB at a time until it is short.
+/// Reads a whole file the way a player does: as much as a read may carry
+/// at a time, until the read at the end is answered `IO`, as rekordbox's
+/// libFilSiNE answers one at or past the end.
 fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
@@ -410,14 +448,16 @@ fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
             .u32(0);
         let reply = ask(server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
         let mut reader = ok_reader(&reply);
-        assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+        let status = reader.u32().unwrap();
+        if status == nfs_status::IO {
+            return out;
+        }
+        assert_eq!(status, nfs_status::OK);
         for _ in 0..17 {
             reader.u32().unwrap(); // the attributes
         }
         let chunk = reader.opaque().unwrap();
-        if chunk.is_empty() {
-            return out;
-        }
+        assert!(!chunk.is_empty(), "a read within the file carries bytes");
         out.extend_from_slice(chunk);
     }
 }
@@ -448,23 +488,22 @@ fn a_read_is_capped_at_the_protocol_limit_however_much_is_asked_for() {
     for _ in 0..17 {
         reader.u32().unwrap();
     }
-    assert_eq!(reader.opaque().unwrap().len(), MAX_READ);
+    // The cap is rekordbox's 0xfc00; the fixture's file is shorter.
+    assert_eq!(MAX_READ, 0xfc00);
+    assert_eq!(reader.opaque().unwrap().len(), 40_000.min(MAX_READ));
 }
 
 #[test]
-fn reading_past_the_end_returns_nothing_rather_than_failing() {
+fn reading_at_or_past_the_end_is_io_as_rekordbox_answers_it() {
     let (_dir, server) = fixture();
     let root = mount_root(&server);
     let file = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
-    let mut args = Writer::new();
-    args.opaque_fixed(file.as_bytes()).u32(1_000_000).u32(4096).u32(0);
-    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
-    let mut reader = ok_reader(&reply);
-    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
-    for _ in 0..17 {
-        reader.u32().unwrap();
+    for offset in [1_000_000, 40_000] {
+        let mut args = Writer::new();
+        args.opaque_fixed(file.as_bytes()).u32(offset).u32(4096).u32(0);
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+        assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::IO, "offset {offset}");
     }
-    assert!(reader.opaque().unwrap().is_empty());
 }
 
 #[test]
@@ -552,40 +591,48 @@ fn every_mutating_procedure_is_refused_as_read_only() {
     args.opaque_fixed(root.as_bytes());
     let args = args.into_bytes();
 
+    // As libFilSiNE's stubs answer them: STALE for the writes, ACCES for
+    // links and readlink.
     for procedure in [
         nfs_proc::SETATTR,
         nfs_proc::WRITE,
         nfs_proc::CREATE,
         nfs_proc::REMOVE,
         nfs_proc::RENAME,
-        nfs_proc::LINK,
-        nfs_proc::SYMLINK,
         nfs_proc::MKDIR,
         nfs_proc::RMDIR,
     ] {
         let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, procedure, args.clone());
         assert_eq!(
             ok_reader(&reply).u32().unwrap(),
-            nfs_status::ROFS,
+            nfs_status::STALE,
             "procedure {procedure} must be refused, not ignored"
         );
+    }
+    for procedure in [nfs_proc::LINK, nfs_proc::SYMLINK, nfs_proc::READLINK] {
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, procedure, args.clone());
+        assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::ACCES, "procedure {procedure}");
     }
 }
 
 #[test]
-fn statfs_reports_no_free_space_on_a_read_only_export() {
+fn statfs_reports_the_host_filesystems_figures() {
     let (_dir, server) = fixture();
     let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "PIONEER/rekordbox/export.pdb").unwrap();
     let mut args = Writer::new();
-    args.opaque_fixed(root.as_bytes());
+    args.opaque_fixed(file.as_bytes());
     let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::STATFS, args.into_bytes());
     let mut reader = ok_reader(&reply);
     assert_eq!(reader.u32().unwrap(), nfs_status::OK);
-    assert_eq!(reader.u32().unwrap(), u32::try_from(MAX_READ).unwrap(), "tsize");
-    reader.u32().unwrap(); // bsize
-    reader.u32().unwrap(); // blocks
-    assert_eq!(reader.u32().unwrap(), 0, "bfree");
-    assert_eq!(reader.u32().unwrap(), 0, "bavail");
+    // rekordbox hands a player the host's own transfer and block sizes and
+    // counts (a mebibyte `tsize` on APFS, more than a READ carries).
+    let tsize = reader.u32().unwrap();
+    let bsize = reader.u32().unwrap();
+    let blocks = reader.u32().unwrap();
+    if cfg!(unix) {
+        assert!(tsize > 0 && bsize > 0 && blocks > 0, "tsize {tsize} bsize {bsize} blocks {blocks}");
+    }
 }
 
 #[test]
@@ -620,13 +667,26 @@ fn handles_survive_a_rebuild_of_the_same_tree() {
 
 #[test]
 fn a_handle_from_another_export_is_not_accepted() {
-    let mut other = Vfs::new("/B/");
-    other.add_file("Contents/x.mp3", "/dev/null", 1, 0);
-    let foreign = other.handle(1).unwrap();
+    // Every export's nodes are numbered from one table, so a handle from
+    // another export names ids this one does not have — or, for the first
+    // export in a set, ids past the end of this one's.
+    let mut exports = rbl_nfs::Exports::new();
+    let mut a = Vfs::new("/A/");
+    a.add_file("Contents/x.mp3", "/dev/null", 1, 0);
+    let mut b = Vfs::new("/B/");
+    b.add_file("Contents/y.mp3", "/dev/null", 1, 0);
+    exports.insert(a);
+    exports.insert(b);
+    let server = Server::new(exports, 2049, 0);
+    let a = server.exports().get("/A/").unwrap();
+    let b = server.exports().get("/B/").unwrap();
+    assert_ne!(a.handle(1), b.handle(1), "the same index in two exports is two handles");
+    assert_eq!(a.node_of(&b.handle(1).unwrap()), None);
+    assert_eq!(b.node_of(&a.handle(1).unwrap()), None);
 
     let (_dir, server) = fixture();
     let mut args = Writer::new();
-    args.opaque_fixed(foreign.as_bytes());
+    args.opaque_fixed(b.handle(1).unwrap().as_bytes());
     let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
     assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::STALE);
 }
@@ -657,4 +717,135 @@ fn building_the_tree_ignores_traversal_in_a_path() {
     // The components that could climb out are dropped, not honoured.
     assert!(vfs.resolve("etc/passwd").is_some());
     assert_eq!(vfs.resolve(".."), Some(vfs.root()));
+}
+
+// ---------------------------------------------------------------- as rekordbox's libFilSiNE does
+
+#[test]
+fn a_call_seen_before_gets_the_reply_it_got_then() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes());
+    let bytes = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+    let first = server.handle(&bytes).unwrap();
+    let again = server.handle(&bytes).unwrap();
+    assert_eq!(first, again, "a retransmit is answered from the cache, not re-executed");
+    // From another peer it is a new call.
+    assert_eq!(server.handle_from(&bytes, std::net::Ipv4Addr::new(192, 168, 1, 152), 700).unwrap(), first);
+}
+
+#[test]
+fn lock_manager_calls_are_dropped_without_a_reply() {
+    let (_dir, server) = fixture();
+    for program in [rbl_nfs::PROGRAM_NLM, rbl_nfs::PROGRAM_NSM] {
+        assert!(server.handle(&call(program, 1, 0, Vec::new())).is_none(), "program {program}");
+    }
+    // Any other unknown program is still told it is unavailable.
+    assert!(server.handle(&call(100_099, 1, 0, Vec::new())).is_some());
+}
+
+#[test]
+fn the_export_list_is_empty_and_a_mount_refused_until_the_link_is_up() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.mp3"), b"x").unwrap();
+    let mut vfs = Vfs::new("/");
+    vfs.add_file("Music/a.mp3", dir.path().join("a.mp3"), 1, 0);
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    let up = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let server = Server::new(exports, NFS_PORT, MOUNT_PORT).with_gate(up.clone());
+
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORT, Vec::new());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), 0, "no export listed before the link is up");
+    let mut args = Writer::new();
+    args.utf16("/");
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::ACCES);
+
+    up.store(0x11, std::sync::atomic::Ordering::Relaxed);
+    let reply = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORT, Vec::new());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), 1, "the export is listed once the link is up");
+    assert_eq!(reader.utf16().unwrap(), "/");
+    let root = mount_root(&server);
+    assert!(server.is_mounted(std::net::Ipv4Addr::LOCALHOST));
+    assert_eq!(server.mounted_hosts(), vec![std::net::Ipv4Addr::LOCALHOST]);
+
+    // Unmounting takes the host off the list.
+    let mut args = Writer::new();
+    args.utf16("/");
+    ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::UMNT, args.into_bytes());
+    assert!(!server.is_mounted(std::net::Ipv4Addr::LOCALHOST));
+    let _ = root;
+}
+
+#[test]
+fn a_mount_from_outside_the_export_subnet_is_refused() {
+    let (_dir, server) = fixture();
+    let server = server.with_export_host("192.168.1.14/255.255.255.0");
+    let mut args = Writer::new();
+    args.utf16("/");
+    let bytes = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
+    let inside = server.handle_from(&bytes, std::net::Ipv4Addr::new(192, 168, 1, 152), 700).unwrap();
+    assert_eq!(ok_reader(&inside).u32().unwrap(), nfs_status::OK);
+    let outside = server.handle_from(&bytes, std::net::Ipv4Addr::new(10, 0, 0, 5), 700).unwrap();
+    assert_eq!(ok_reader(&outside).u32().unwrap(), nfs_status::ACCES);
+    assert_eq!(server.mounted_hosts(), vec![std::net::Ipv4Addr::new(192, 168, 1, 152)]);
+}
+
+#[test]
+fn a_decomposed_name_finds_the_composed_file_and_listings_go_out_decomposed_on_apple() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("e.mp3"), b"x").unwrap();
+    let mut vfs = Vfs::new("/");
+    vfs.add_file("Music/caf\u{e9}.mp3", dir.path().join("e.mp3"), 1, 0);
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    let server = Server::new(exports, NFS_PORT, MOUNT_PORT);
+    let root = mount_root(&server);
+    let music = lookup(&server, &root, "Music").unwrap();
+    assert!(lookup(&server, &music, "cafe\u{301}.mp3").is_ok(), "NFD, as a player sends a name it read");
+    assert!(lookup(&server, &music, "caf\u{e9}.mp3").is_ok(), "NFC, as the library wrote it");
+    let listed = list(&server, &music, 8192);
+    let expected = if cfg!(target_vendor = "apple") { "cafe\u{301}.mp3" } else { "caf\u{e9}.mp3" };
+    assert_eq!(listed, vec![expected]);
+}
+
+#[test]
+fn readdir_cookies_are_file_ids_and_an_unknown_one_is_io() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes()).u32(0).u32(8192);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READDIR, args.into_bytes());
+    let mut reader = ok_reader(&reply);
+    assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+    assert_eq!(reader.u32().unwrap(), 1, "an entry");
+    let fileid = reader.u32().unwrap();
+    reader.utf16().unwrap();
+    assert_eq!(reader.u32().unwrap(), fileid, "the cookie is the entry's file id");
+
+    let mut args = Writer::new();
+    args.opaque_fixed(root.as_bytes()).u32(0xdead).u32(8192);
+    let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READDIR, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::IO);
+}
+
+#[test]
+fn portmap_dumps_its_three_mappings() {
+    let (_dir, server) = fixture();
+    let reply = ask(&server, PROGRAM_PORTMAP, VERSION_PORTMAP, 4, Vec::new());
+    let mut reader = ok_reader(&reply);
+    let mut seen = Vec::new();
+    while reader.u32().unwrap() == 1 {
+        let program = reader.u32().unwrap();
+        reader.u32().unwrap(); // version
+        reader.u32().unwrap(); // protocol
+        seen.push((program, reader.u32().unwrap()));
+    }
+    assert_eq!(seen.len(), 3);
+    assert!(seen.contains(&(PROGRAM_NFS, u32::from(NFS_PORT))));
+    assert!(seen.contains(&(PROGRAM_MOUNT, u32::from(MOUNT_PORT))));
 }

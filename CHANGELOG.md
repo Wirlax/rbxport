@@ -38,6 +38,11 @@ the version numbers [Semantic Versioning](https://semver.org/).
   has mounted the library, and the link goes off with the reason when the
   interface loses its address. Preferences › PRO DJ LINK says which
   device number LINK is on as.
+- The file server answers as rekordbox's does: reads up to 64,512 bytes
+  and IO at the end of a file, the host's own file attributes and
+  filesystem figures, rekordbox's status codes for what cannot be done,
+  lock-manager calls dropped, retransmitted calls answered from a cache,
+  decomposed (NFD) names on the wire, and handles laid out as its are.
 - A log file: everything the app reports goes to stdout and to a daily file
   under the app's data directory (`rbxport/logs`, seven days kept), so a
   LINK session with a player can be read back afterwards. `LOG_LEVEL`

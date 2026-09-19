@@ -50,7 +50,11 @@ pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -
             Err(error) => return Err(error),
         };
         tracing::trace!(%from, len, "RPC datagram received");
-        let Some(reply) = server.handle(buffer.get(..len).unwrap_or(&[])) else {
+        let peer = match from {
+            SocketAddr::V4(v4) => *v4.ip(),
+            SocketAddr::V6(v6) => v6.ip().to_ipv4_mapped().unwrap_or(std::net::Ipv4Addr::UNSPECIFIED),
+        };
+        let Some(reply) = server.handle_from(buffer.get(..len).unwrap_or(&[]), peer, from.port()) else {
             continue;
         };
         if let Err(error) = socket.send_to(&reply, from) {
@@ -77,6 +81,7 @@ pub struct Bound {
     portmap: SocketAddr,
     mount: SocketAddr,
     nfs: SocketAddr,
+    server: Arc<Server>,
 }
 
 impl Bound {
@@ -90,6 +95,7 @@ impl Bound {
         mount_port: u16,
         nfs_port: u16,
         export_host: Option<String>,
+        up: Option<Arc<std::sync::atomic::AtomicU8>>,
     ) -> io::Result<Self> {
         let portmap_socket = UdpSocket::bind(SocketAddr::new(address, portmap_port))?;
         let mount_socket = UdpSocket::bind(SocketAddr::new(address, mount_port))?;
@@ -107,6 +113,9 @@ impl Bound {
         let mut server = Server::new(exports, nfs.port(), mount.port());
         if let Some(host) = export_host {
             server = server.with_export_host(host);
+        }
+        if let Some(up) = up {
+            server = server.with_gate(up);
         }
         let server = Arc::new(server);
         let stop = Arc::new(AtomicBool::new(false));
@@ -126,7 +135,17 @@ impl Bound {
             }));
         }
 
-        Ok(Self { stop, threads, portmap, mount, nfs })
+        Ok(Self { stop, threads, portmap, mount, nfs, server })
+    }
+
+    /// Whether `host` has an export mounted.
+    pub fn is_mounted(&self, host: std::net::Ipv4Addr) -> bool {
+        self.server.is_mounted(host)
+    }
+
+    /// The hosts with an export mounted.
+    pub fn mounted_hosts(&self) -> Vec<std::net::Ipv4Addr> {
+        self.server.mounted_hosts()
     }
 
     pub const fn portmap_address(&self) -> SocketAddr {
