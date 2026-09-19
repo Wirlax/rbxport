@@ -37,10 +37,31 @@ impl LibraryFacts for Facts {
     }
 }
 
-/// A socket standing in for the player, and the beacon told to answer it there.
+/// A socket standing in for the player, and the beacon told to answer it
+/// there, on the link as 17.
 fn start() -> (Beacon, UdpSocket) {
     let (beacon, player, _) = start_on(None);
+    join(&beacon, &player);
     (beacon, player)
+}
+
+/// Says nothing into an empty network: the player's keep-alive is what
+/// starts the join, which settles on 17 about four seconds later.
+fn join(beacon: &Beacon, player: &UdpSocket) {
+    use rbl_link::LinkState;
+    assert_eq!(beacon.link_state(), LinkState::Waiting);
+    assert_eq!(beacon.number(), None);
+    let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
+    player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
+    wait_for_link(beacon, &LinkState::Up { number: 0x11 });
+}
+
+fn wait_for_link(beacon: &Beacon, wanted: &rbl_link::LinkState) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while beacon.link_state() != *wanted {
+        assert!(Instant::now() < deadline, "the link did not reach {wanted:?}: {:?}", beacon.link_state());
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// The same, with the beacon's sockets pinned to `interface`.
@@ -94,10 +115,9 @@ fn wait_for(beacon: &Beacon, ready: impl Fn(&[rbl_link::Player]) -> bool) -> Vec
 #[test]
 fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     let (beacon, player, facts) = start_on(None);
-    let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
     let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
 
-    player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
+    join(&beacon, &player);
     let players = wait_for(&beacon, |p| !p.is_empty());
     assert_eq!(players.len(), 1);
     assert_eq!(players[0].name, "CDJ-3000");
@@ -167,10 +187,9 @@ fn a_beacon_pinned_to_an_interface_still_hears_and_answers_a_player() {
         .map(|i| i.name)
         .expect("a loopback interface");
     let (beacon, player, _) = start_on(Some(loopback));
-    let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
     let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
 
-    player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
+    join(&beacon, &player);
     let players = wait_for(&beacon, |p| !p.is_empty());
     assert_eq!(players.len(), 1, "the keep-alive was heard through the pin");
     let greeting = receive(&player, 0x16);
@@ -181,6 +200,54 @@ fn a_beacon_pinned_to_an_interface_still_hears_and_answers_a_player() {
     player.send_to(&query, status).unwrap();
     assert_eq!(receive(&player, 0x06).len(), 0xc0);
 
+    beacon.stop();
+}
+
+#[test]
+fn nothing_is_said_until_a_player_is_heard_and_the_join_settles_on_seventeen() {
+    let (beacon, player, _) = start_on(None);
+    // Silence: no status for a second on an empty network.
+    let mut buffer = [0_u8; 2048];
+    player.set_read_timeout(Some(Duration::from_millis(1000))).unwrap();
+    assert!(player.recv_from(&mut buffer).is_err(), "a packet before any player was heard");
+    player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+
+    // The keep-alive starts the join: three claims and six rounds of six
+    // probes at 100 ms, then 17 — about four seconds.
+    let started = Instant::now();
+    join(&beacon, &player);
+    let took = started.elapsed();
+    assert!((Duration::from_millis(3500)..Duration::from_millis(6000)).contains(&took), "{took:?}");
+    assert_eq!(beacon.number(), Some(0x11));
+    let status = receive(&player, 0x29);
+    assert_eq!(status[0x21], 0x11);
+    beacon.stop();
+}
+
+#[test]
+fn a_number_answered_for_is_left_to_its_holder() {
+    let (beacon, player, _) = start_on(None);
+    let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
+    player.send_to(&hex(CDJ_KEEP_ALIVE), announce).unwrap();
+    // Another rekordbox holds 17: it answers every probe of it with `03`,
+    // sent to the prober. The join skips 17 from then on and takes 18.
+    let in_use = rbl_prolink::number_in_use_reply("rekordbox", 0x11);
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < deadline {
+        player.send_to(&in_use, announce).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    wait_for_link(&beacon, &rbl_link::LinkState::Up { number: 0x12 });
+    let status = receive(&player, 0x29);
+    assert_eq!(status[0x21], 0x12, "the status carries the number taken");
+    // And 18 is answered for when probed.
+    let probe = rbl_prolink::rekordbox_claim_stage2([1, 2, 3, 4, 5, 6], Ipv4Addr::new(127, 0, 0, 2), 0x12, 1);
+    player.send_to(&probe, announce).unwrap();
+    // The reply goes to the prober's address on the announce port, which
+    // on loopback is the beacon's own socket; what can be checked here is
+    // that the beacon stays up and keeps its number.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(beacon.number(), Some(0x12));
     beacon.stop();
 }
 
@@ -198,11 +265,28 @@ fn the_status_beacon_runs_at_five_hertz_with_no_tempo_until_a_master_reports() {
         receive(&player, 0x29);
     }
     assert!(started.elapsed() < Duration::from_millis(1200), "{:?}", started.elapsed());
-    assert!(beacon.players().is_empty());
+    assert_eq!(beacon.players().len(), 1, "the player whose keep-alive brought the link up");
     beacon.stop();
 }
 
 /// Receives until a packet of `kind` arrives, reporting who sent it.
+/// A status packet (`0x29`) whose master flag matches `want_master`, skipping
+/// any stale ones still buffered from before a `set_master` call took effect —
+/// the beacon keeps sending at 5 Hz, so up to one status built before the flag
+/// flipped can already be in flight. Bounded by a deadline so a beacon that
+/// never reaches the wanted state fails instead of hanging.
+fn receive_status(player: &UdpSocket, want_master: bool) -> Vec<u8> {
+    let mut buffer = [0_u8; 2048];
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        let Ok((len, _)) = player.recv_from(&mut buffer) else { continue };
+        let packet = &buffer[..len];
+        if packet_kind(packet) == Ok(0x29) && (packet[0x27] == 0xe0) == want_master {
+            return packet.to_vec();
+        }
+    }
+    panic!("no status with master={want_master} arrived");
+}
 fn receive_from(player: &UdpSocket, kind: u8) -> (Vec<u8>, std::net::SocketAddr) {
     let mut buffer = [0_u8; 2048];
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -270,6 +354,7 @@ fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
         Arc::new(Facts::default()),
     )
     .unwrap();
+    join(&beacon, &player);
     (beacon, player, beats)
 }
 
@@ -296,8 +381,9 @@ fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
     );
 
     // The status now says we are master, at our tempo. Read one addressed to
-    // the player's port on 50002.
-    let s = receive(&player, 0x29);
+    // the player's port on 50002, skipping any non-master status still in
+    // flight from before set_master took effect.
+    let s = receive_status(&player, true);
     assert_eq!(s[0x27], 0xe0, "the master status flag");
     assert_eq!(s[0x34], 0x01, "Mm master");
     assert_eq!(u16::from_be_bytes([s[0x2e], s[0x2f]]), 12_800);
@@ -310,7 +396,7 @@ fn as_master_the_beacon_drives_beats_and_says_it_is_master() {
     let mut buffer = [0_u8; 2048];
     while beats.recv_from(&mut buffer).is_ok() {}
     assert!(beats.recv_from(&mut buffer).is_err(), "no beats once master is off");
-    let s = receive(&player, 0x29);
+    let s = receive_status(&player, false);
     assert_eq!(s[0x27], 0xc0, "not master again");
 
     beacon.stop();

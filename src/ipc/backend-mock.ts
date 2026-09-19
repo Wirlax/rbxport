@@ -1221,6 +1221,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     interfaces: [],
     master: false,
     masterBpm: mockMaster.bpm,
+    state: "off",
+    number: null,
   });
 
   /** A network to look at, from `?link=`; null in a plain browser. */
@@ -1244,12 +1246,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         loaded: { id: "1", title: "GIN AND TONIC (Extended Mix)", artist: "DONT BLINK" },
         playing: true,
         master: true,
+        mounted: true,
       },
-      { number: 2, name: "CDJ-3000", kind: "player", address: "192.168.1.153", loaded: null, playing: false, master: false },
-      { number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155", loaded: null, playing: false, master: false },
+      { number: 2, name: "CDJ-3000", kind: "player", address: "192.168.1.153", loaded: null, playing: false, master: false, mounted: true },
+      { number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155", loaded: null, playing: false, master: false, mounted: false },
     ],
     master: mockMaster.on,
     masterBpm: mockMaster.bpm,
+    state: "up",
+    number: 17,
   });
   const mockLinkStatus = (): LinkStatus => {
     if (linkMode === "on") return mockLinkOn();

@@ -40,9 +40,11 @@ const off = (players: LinkStatus["players"] = []): LinkStatus => ({
   interfaces: [],
   master: false,
   masterBpm: 120,
+  state: "off",
+  number: null,
 });
 
-const on = (players: LinkStatus["players"] = []): LinkStatus => ({ ...off(players), on: true });
+const on = (players: LinkStatus["players"] = []): LinkStatus => ({ ...off(players), on: true, state: "up", number: 17 });
 
 const peer = (over: Partial<LinkPeerSeen> = {}): LinkPeerSeen => ({
   number: 1,
@@ -60,6 +62,7 @@ const cdj = (over: Partial<LinkStatus["players"][number]> = {}): LinkStatus["pla
   loaded: null,
   playing: false,
   master: false,
+  mounted: true,
   ...over,
 });
 

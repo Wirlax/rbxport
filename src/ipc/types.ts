@@ -987,6 +987,8 @@ export interface LinkPlayer {
   loaded: { id: string; title: string; artist: string } | null;
   playing: boolean;
   master: boolean;
+  /** The player has mounted the library, so a track can be sent to it. */
+  mounted: boolean;
 }
 
 export interface LinkStatus {
@@ -1002,6 +1004,14 @@ export interface LinkStatus {
   master: boolean;
   /** The master tempo we would drive, in BPM; shown whether or not we are master. */
   masterBpm: number;
+  /**
+   * Where the join is while on: `waiting` (nothing announced until a player
+   * or mixer is heard, as rekordbox does), `joining` (probing for a device
+   * number), `up`, or `down` (with `problem`). `off` while off.
+   */
+  state: "off" | "waiting" | "joining" | "up" | "down";
+  /** The device number the join settled on — 17, or 18 when another rekordbox holds 17. */
+  number: number | null;
 }
 
 /** One backup of the library. */

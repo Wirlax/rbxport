@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,23 +24,22 @@ use alphatheta_connect::types::MediaSlot;
 use parking_lot::Mutex;
 use rbl_prolink::{
     announce_kind_name, connect_greeting, connect_identity, hex, link_handshake_reply, packet_kind,
-    status_kind_name, DeviceTable, DeviceType, KeepAlive, MediaQuery, MediaResponse, Status,
-    DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, LOAD_TRACK_ACK_KIND, PLAYER_STATUS_KIND,
-    REKORDBOX_DEVICE_NUMBER, REKORDBOX_NAME, SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY,
+    status_kind_name, AnnounceKind, DeviceTable, DeviceType, KeepAlive, MediaQuery, MediaResponse, NumberProbe,
+    NumberReply, Status, DEVICE_IDENTITY_QUERY_KIND, LINK_HANDSHAKE_KIND, LOAD_TRACK_ACK_KIND, PLAYER_STATUS_KIND,
+    REKORDBOX_NAME, SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY,
 };
+
+use crate::join::{self, Join};
 
 /// How many bytes of a packet a trace line shows.
 const TRACE_BYTES: usize = 64;
 
 /// rekordbox's keep-alive interval, measured.
 const KEEP_ALIVE_EVERY: Duration = Duration::from_millis(2000);
-/// The startup ladder's spacing: `0a` ×3, `00` ×3, `02` ×3, `04` ×3, as
-/// alphatheta-connect sends it (verified against a CDJ-3000 as a virtual
-/// player). A CDJ-3000 that only ever hears keep-alives from a new device
-/// does not list it; it listed rekordbox only after this. `[ASSUME]` the
-/// layouts for a device of rekordbox's type — the capture began with
-/// rekordbox already up.
-const STARTUP_STAGE_EVERY: Duration = Duration::from_millis(300);
+/// rekordbox's network monitor: once a second it checks the interface it
+/// came up on is still there with the same address, and takes the link
+/// down when it is not.
+const NETWORK_MONITOR_EVERY: Duration = Duration::from_secs(1);
 /// rekordbox's status interval, measured.
 const STATUS_EVERY: Duration = Duration::from_millis(200);
 /// How long a receive blocks before the thread looks at the clock again.
@@ -142,6 +141,12 @@ struct Shared {
     to_greet: Vec<Ipv4Addr>,
     /// Our tempo-master state; the beat clock and the status loop share it.
     master: MasterState,
+    /// The join: nothing announced until a player is heard, then the number
+    /// probe, then a number. `None` until the announce loop makes it.
+    join: Option<Join>,
+    /// Why the link went down, when it did: the interface lost its address,
+    /// or the join failed.
+    down: Option<String>,
 }
 
 /// The running beacon.
@@ -157,6 +162,22 @@ pub struct Beacon {
     commands: UdpSocket,
     /// Where the players listen: 50002 on the link, a test's own port.
     player_port: u16,
+    /// Our device number once the join settles it, `0` before: what every
+    /// packet we send carries, and what the database server answers with.
+    number: Arc<AtomicU8>,
+}
+
+/// The join and the link as the app sees them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkState {
+    /// Listening for a player or mixer; nothing announced yet.
+    Waiting,
+    /// Probing for a device number.
+    Joining,
+    /// On the link as this number.
+    Up { number: u8 },
+    /// Off the link, with why.
+    Down(String),
 }
 
 impl Beacon {
@@ -206,15 +227,17 @@ impl Beacon {
 
         let stop = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(Mutex::new(Shared::default()));
+        let number = Arc::new(AtomicU8::new(0));
         let mut threads = Vec::with_capacity(3);
         {
-            let (stop, shared, config) = (Arc::clone(&stop), Arc::clone(&shared), config.clone());
-            threads.push(std::thread::spawn(move || announce_loop(&announce, &config, &stop, &shared)));
+            let (stop, shared, config, number) =
+                (Arc::clone(&stop), Arc::clone(&shared), config.clone(), Arc::clone(&number));
+            threads.push(std::thread::spawn(move || announce_loop(&announce, &config, &stop, &shared, &number)));
         }
         {
-            let (stop, shared) = (Arc::clone(&stop), Arc::clone(&shared));
+            let (stop, shared, number) = (Arc::clone(&stop), Arc::clone(&shared), Arc::clone(&number));
             let config = config.clone();
-            threads.push(std::thread::spawn(move || status_loop(&status, &config, &stop, &shared, &facts)));
+            threads.push(std::thread::spawn(move || status_loop(&status, &config, &stop, &shared, &facts, &number)));
         }
         // The beat clock broadcasts a beat on its own socket, tempo-locked,
         // only while we are master; a bind failure loses only the beats, not
@@ -223,12 +246,40 @@ impl Beacon {
             s.set_broadcast(true)?;
             Ok(s)
         }) {
-            let (stop, shared, config) = (Arc::clone(&stop), Arc::clone(&shared), config.clone());
-            threads.push(std::thread::spawn(move || beat_clock(&beats, &config, &stop, &shared)));
+            let (stop, shared, config, number) =
+                (Arc::clone(&stop), Arc::clone(&shared), config.clone(), Arc::clone(&number));
+            threads.push(std::thread::spawn(move || beat_clock(&beats, &config, &stop, &shared, &number)));
         } else {
             tracing::warn!("beat clock socket could not bind; LINK master will not drive tempo");
         }
-        Ok(Self { stop, threads, shared, announce_port, status_port, commands, player_port })
+        Ok(Self { stop, threads, shared, announce_port, status_port, commands, player_port, number })
+    }
+
+    /// Our device number, once the join has settled one.
+    pub fn number(&self) -> Option<u8> {
+        match self.number.load(Ordering::Relaxed) {
+            0 => None,
+            number => Some(number),
+        }
+    }
+
+    /// The cell the number lives in, for the servers that answer with it.
+    pub fn number_cell(&self) -> Arc<AtomicU8> {
+        Arc::clone(&self.number)
+    }
+
+    /// Where the link is: waiting, joining, up, or down and why.
+    pub fn link_state(&self) -> LinkState {
+        let shared = self.shared.lock();
+        if let Some(why) = &shared.down {
+            return LinkState::Down(why.clone());
+        }
+        match shared.join.as_ref().map(Join::state) {
+            None | Some(join::State::Waiting) => LinkState::Waiting,
+            Some(join::State::Running { number }) => LinkState::Up { number: *number },
+            Some(join::State::Failed(why)) => LinkState::Down(why.clone()),
+            Some(_) => LinkState::Joining,
+        }
     }
 
     pub const fn announce_port(&self) -> u16 {
@@ -249,6 +300,9 @@ impl Beacon {
     /// Tells player `player_number` to load `track_id` from our library.
     /// Returns an error when the player is unknown or the packet cannot be sent.
     pub fn load_track(&self, player_number: u8, track_id: u32) -> io::Result<()> {
+        let Some(number) = self.number() else {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "not on the link yet: no device number"));
+        };
         let address = self.shared.lock().players.get(&player_number).map(|p| p.address);
         let Some(address) = address else {
             return Err(io::Error::new(
@@ -256,12 +310,7 @@ impl Beacon {
                 format!("player {player_number} is not on the link"),
             ));
         };
-        let packet = rbl_prolink::load_track_command(
-            REKORDBOX_NAME,
-            REKORDBOX_DEVICE_NUMBER,
-            player_number,
-            track_id,
-        );
+        let packet = rbl_prolink::load_track_command(REKORDBOX_NAME, number, player_number, track_id);
         let to = SocketAddr::V4(SocketAddrV4::new(address, self.player_port));
         let sent = self.commands.send_to(&packet, to)?;
         tracing::info!(player_number, track_id, %address, sent, "load track sent");
@@ -392,50 +441,68 @@ fn now_ms(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-/// The startup ladder, then keep-alives every two seconds; everyone else's
-/// packets into the peer table.
-fn announce_loop(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shared: &Mutex<Shared>) {
+/// The join, then keep-alives every two seconds; everyone else's packets
+/// into the peer table; the interface watched once a second.
+fn announce_loop(
+    socket: &UdpSocket,
+    config: &BeaconConfig,
+    stop: &AtomicBool,
+    shared: &Mutex<Shared>,
+    number: &AtomicU8,
+) {
     let started = Instant::now();
-    let to = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.announce_port));
+    let broadcast = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.announce_port));
     let mut buffer = [0_u8; DATAGRAM];
+    shared.lock().join = Some(Join::new(config.mac, config.address, started));
 
-    // rekordbox's own startup ladder, not the generic virtual-CDJ one: a
-    // CDJ-3000 mounts rekordbox's library only after this exact sequence
-    // (`rbl_prolink::rekordbox_startup_ladder`, measured on the wire).
-    let mut ladder = rbl_prolink::rekordbox_startup_ladder(config.mac, config.address).into_iter();
-
-    let mut next_send = Instant::now();
+    let mut next_keep_alive: Option<Instant> = None;
+    let mut next_monitor = Instant::now() + NETWORK_MONITOR_EVERY;
     while !stop.load(Ordering::Relaxed) {
-        // Send when due, but never stop reading: incoming keep-alives must be
-        // heard throughout the startup ladder, not only after it.
-        if Instant::now() >= next_send {
-            if let Some(rung) = ladder.next() {
-                next_send += STARTUP_STAGE_EVERY;
-                match socket.send_to(&rung, to) {
-                    Ok(_) => tracing::debug!(
-                        kind = %rung.get(0x0a).map_or_else(|| "?".to_owned(), |k| announce_kind_name(*k)),
-                        len = rung.len(),
-                        %to,
-                        "startup rung sent"
-                    ),
-                    Err(error) => tracing::warn!(%error, "startup packet not sent"),
+        let now = Instant::now();
+        // The join's packets when due, and the number the moment it settles.
+        let outgoing = {
+            let mut shared = shared.lock();
+            let outgoing = shared.join.as_mut().and_then(|join| join.tick(now));
+            let settled = shared.join.as_ref().and_then(Join::number).unwrap_or(0);
+            if settled != number.load(Ordering::Relaxed) {
+                number.store(settled, Ordering::Relaxed);
+                next_keep_alive = (settled != 0).then_some(now);
+            }
+            if let Some(join::State::Failed(why)) = shared.join.as_ref().map(Join::state) {
+                if shared.down.is_none() {
+                    shared.down = Some(why.clone());
                 }
-            } else {
-                next_send += KEEP_ALIVE_EVERY;
+            }
+            outgoing
+        };
+        if let Some(out) = outgoing {
+            send_announce(socket, &out, broadcast, config.announce_port);
+        }
+        // Keep-alives only with a number: rekordbox announces nothing into
+        // an empty network, and nothing before its number is settled.
+        if let Some(due) = next_keep_alive {
+            if now >= due {
+                next_keep_alive = Some(due + KEEP_ALIVE_EVERY);
                 // The count of *other* devices we see, not counting ourselves:
                 // captured 2026-09-12 against rekordbox 7.2.11, which sent 0x02
                 // at keep-alive offset 0x30 with a deck and one other client on
                 // the LAN (two peers), where rbxport had been sending 0x03.
                 let peers = u8::try_from(shared.lock().peers.len()).unwrap_or(u8::MAX);
-                let packet = KeepAlive::rekordbox(config.mac, config.address, peers).encode();
-                match socket.send_to(&packet, to) {
-                    Ok(_) => tracing::trace!(peers, %to, "keep-alive sent"),
+                let ours = number.load(Ordering::Relaxed);
+                let packet = KeepAlive::rekordbox_as(ours, config.mac, config.address, peers).encode();
+                match socket.send_to(&packet, broadcast) {
+                    Ok(_) => tracing::trace!(number = ours, peers, %broadcast, "keep-alive sent"),
                     Err(error) => tracing::warn!(%error, "keep-alive not sent"),
                 }
             }
         }
         match socket.recv_from(&mut buffer) {
-            Ok((len, from)) => hear_announce(buffer.get(..len).unwrap_or(&[]), from, config, shared, started),
+            Ok((len, from)) => {
+                let reply = hear_announce(buffer.get(..len).unwrap_or(&[]), from, config, shared, started);
+                if let Some(out) = reply {
+                    send_announce(socket, &out, broadcast, config.announce_port);
+                }
+            }
             Err(error) if is_timeout(&error) => {}
             Err(error) => {
                 tracing::error!(%error, "announce socket stopped; the link will not hear new devices");
@@ -449,27 +516,119 @@ fn announce_loop(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, s
             }
             alive
         });
+        if Instant::now() >= next_monitor {
+            next_monitor += NETWORK_MONITOR_EVERY;
+            if let Some(why) = interface_lost(config) {
+                let mut shared = shared.lock();
+                if shared.down.is_none() {
+                    tracing::error!("{why}; the link is down");
+                    shared.down = Some(why);
+                    if let Some(join) = shared.join.as_mut() {
+                        join.reset(Instant::now());
+                    }
+                    number.store(0, Ordering::Relaxed);
+                    next_keep_alive = None;
+                }
+            }
+        }
     }
     tracing::debug!("announce loop stopped");
 }
 
-/// A packet off the announce port: a keep-alive into the peer table and the
-/// player list, a first-heard player queued for the greeting.
-fn hear_announce(packet: &[u8], from: SocketAddr, config: &BeaconConfig, shared: &Mutex<Shared>, started: Instant) {
+/// Sends what the join asks for: to the broadcast, or to the one device
+/// named, on the announce port.
+fn send_announce(socket: &UdpSocket, out: &join::Outgoing, broadcast: SocketAddr, port: u16) {
+    let to = out.to.map_or(broadcast, |ip| SocketAddr::V4(SocketAddrV4::new(ip, port)));
+    match socket.send_to(&out.packet, to) {
+        Ok(_) => tracing::debug!(what = out.what, len = out.packet.len(), %to, "sent"),
+        Err(error) => tracing::warn!(%error, what = out.what, %to, "not sent"),
+    }
+}
+
+/// rekordbox's network monitor: the interface the link came up on, still
+/// there with the address it announced? `None` while it is; on loopback
+/// (no interface named) nothing is watched.
+fn interface_lost(config: &BeaconConfig) -> Option<String> {
+    let name = config.interface.as_deref()?;
+    // Every interface, loopback included: a test pins to lo0.
+    let present = alphatheta_connect::utils::network_interfaces()
+        .into_iter()
+        .any(|i| i.name == name && i.address == config.address);
+    (!present).then(|| format!("{name} no longer has the address {}", config.address))
+}
+
+/// A packet off the announce port: a keep-alive into the peer table, the
+/// player list and the join; a probe or a reply to the join; a first-heard
+/// player queued for the greeting. What the join wants sent back, if
+/// anything.
+fn hear_announce(
+    packet: &[u8],
+    from: SocketAddr,
+    config: &BeaconConfig,
+    shared: &Mutex<Shared>,
+    started: Instant,
+) -> Option<join::Outgoing> {
     let len = packet.len();
+    let kind = packet_kind(packet).ok();
     tracing::trace!(
         %from,
         len,
-        kind = %packet_kind(packet).map_or_else(|_| "not a link packet".to_owned(), announce_kind_name),
+        kind = %kind.map_or_else(|| "not a link packet".to_owned(), announce_kind_name),
         bytes = %hex(packet, TRACE_BYTES),
         "announce port received"
     );
+    let SocketAddr::V4(from) = from else { return None };
+    match kind.map(AnnounceKind::from_u8) {
+        Some(AnnounceKind::ClaimStage2) => {
+            let probe = NumberProbe::decode(packet).ok()?;
+            return shared.lock().join.as_mut().and_then(|join| join.hear_probe(&probe));
+        }
+        Some(AnnounceKind::Other(0x03)) => {
+            if let Ok(reply) = NumberReply::decode(packet) {
+                if let Some(join) = shared.lock().join.as_mut() {
+                    join.hear_reply(&reply);
+                }
+            }
+            return None;
+        }
+        // rekordbox drops every member, stops its timers and starts over
+        // on a compatibility response (`readCompatiRes`).
+        Some(AnnounceKind::Other(0x0b)) => {
+            tracing::warn!(%from, "compatibility response; leaving the link and starting over");
+            let mut shared = shared.lock();
+            shared.peers = DeviceTable::new();
+            shared.players.clear();
+            if let Some(join) = shared.join.as_mut() {
+                join.reset(Instant::now());
+            }
+            return None;
+        }
+        // A disconnect names the device leaving.
+        Some(AnnounceKind::Other(0x07 | 0x08)) => {
+            let mut shared = shared.lock();
+            let leaving: Vec<u8> =
+                shared.players.iter().filter(|(_, p)| p.address == *from.ip()).map(|(n, _)| *n).collect();
+            for number in leaving {
+                tracing::info!(number, address = %from.ip(), "device said goodbye; gone from the link");
+                shared.players.remove(&number);
+            }
+            return None;
+        }
+        Some(AnnounceKind::KeepAlive) => {}
+        _ => {
+            tracing::trace!(%from, len, "announce port packet is not one the join or the peer table reads");
+            return None;
+        }
+    }
     if let Ok(keep_alive) = KeepAlive::decode(packet) {
-        if keep_alive.device_number == REKORDBOX_DEVICE_NUMBER && keep_alive.ip == config.address {
-            return; // our own broadcast, echoed back
+        if keep_alive.ip == config.address && keep_alive.mac == config.mac {
+            return None; // our own broadcast, echoed back
         }
         let mut shared = shared.lock();
         let now = now_ms(started);
+        if let Some(join) = shared.join.as_mut() {
+            join.hear_keep_alive(&keep_alive, Instant::now());
+        }
         let known = shared.peers.peers().iter().any(|p| p.device_number == keep_alive.device_number);
         shared.peers.observe(&keep_alive, now);
         let expired = shared.peers.expire(now);
@@ -488,7 +647,6 @@ fn hear_announce(packet: &[u8], from: SocketAddr, config: &BeaconConfig, shared:
         }
         // A device is listed from its keep-alive; its status
         // fills in the rest when it comes.
-        let SocketAddr::V4(from) = from else { return };
         shared.players.entry(keep_alive.device_number).or_insert_with(|| Player {
             number: keep_alive.device_number,
             name: keep_alive.name.clone(),
@@ -514,9 +672,8 @@ fn hear_announce(packet: &[u8], from: SocketAddr, config: &BeaconConfig, shared:
             tracing::debug!(player = %from.ip(), "player heard for the first time; greeting queued");
             shared.to_greet.push(*from.ip());
         }
-    } else {
-        tracing::trace!(%from, len, "announce port packet is not a keep-alive");
     }
+    None
 }
 
 /// Status out five times a second, players' status in, the questions a
@@ -527,6 +684,7 @@ fn status_loop(
     stop: &AtomicBool,
     shared: &Mutex<Shared>,
     facts: &Arc<dyn LibraryFacts>,
+    number: &AtomicU8,
 ) {
     // Status goes where the players listen, which on the link is the same
     // port we listen on.
@@ -552,9 +710,18 @@ fn status_loop(
     let mut next_send = Instant::now();
     let mut beat: u8 = 1;
     while !stop.load(Ordering::Relaxed) {
+        // Nothing said and nothing answered until the join has a number:
+        // rekordbox's status starts on LINKUP, and its receive path is gated
+        // until then.
+        let ours = number.load(Ordering::Relaxed);
+        if ours == 0 {
+            std::thread::sleep(POLL);
+            next_send = Instant::now();
+            continue;
+        }
         if Instant::now() >= next_send {
             next_send += STATUS_EVERY;
-            let packet = status_packet(&shared.lock(), beat);
+            let packet = status_packet(&shared.lock(), ours, beat);
             beat = if beat >= 4 { 1 } else { beat + 1 };
             match out.send_to(&packet, broadcast) {
                 Ok(_) => tracing::trace!(len = packet.len(), bytes = %hex(&packet, TRACE_BYTES), "status sent"),
@@ -568,7 +735,7 @@ fn status_loop(
             pending
         };
         for player in pending {
-            let greeting = connect_greeting(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER);
+            let greeting = connect_greeting(REKORDBOX_NAME, ours);
             send(socket, &greeting, player, config.player_port, "greeting");
         }
         let (len, from) = match socket.recv_from(&mut buffer) {
@@ -603,13 +770,13 @@ fn status_loop(
                 // go on to the media query and the mount. Sent to the status
                 // port, as rekordbox sends it, not the player's source port.
                 tracing::debug!(player = %from.ip(), "device identity query; answering with ours");
-                let identity = connect_identity(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, &config.computer_name);
+                let identity = connect_identity(REKORDBOX_NAME, ours, &config.computer_name);
                 send(socket, &identity, *from.ip(), config.player_port, "identity");
             }
-            0x05 => answer_media_query(socket, packet, config, facts.as_ref()),
+            0x05 => answer_media_query(socket, packet, config, facts.as_ref(), ours),
             LINK_HANDSHAKE_KIND => {
                 tracing::debug!(player = %from.ip(), "link handshake; answering");
-                let reply = link_handshake_reply(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER);
+                let reply = link_handshake_reply(REKORDBOX_NAME, ours);
                 send(socket, &reply, *from.ip(), config.player_port, "handshake reply");
             }
             // A player that accepts a load command says so with `1a`; the
@@ -617,7 +784,7 @@ fn status_loop(
             LOAD_TRACK_ACK_KIND => {
                 tracing::info!(from = %from.ip(), "player accepted a load track command");
             }
-            PLAYER_STATUS_KIND => hear_player_status(packet, from, len, socket, config, shared, facts),
+            PLAYER_STATUS_KIND => hear_player_status(packet, from, socket, config, shared, facts, ours),
             _ => {
                 if from.ip() != &config.address {
                     tracing::trace!(%from, kind = %status_kind_name(kind), "status port packet not handled");
@@ -633,99 +800,100 @@ fn status_loop(
 fn hear_player_status(
     packet: &[u8],
     from: SocketAddrV4,
-    len: usize,
     socket: &UdpSocket,
     config: &BeaconConfig,
     shared: &Mutex<Shared>,
     facts: &Arc<dyn LibraryFacts>,
+    ours: u8,
 ) {
-        let state = match status_from_packet(packet) {
-            Ok(Some(state)) => state,
-            Ok(None) => {
-                tracing::trace!(%from, len, "status packet not a player's; ignored");
-                return;
-            }
-            Err(error) => {
-                tracing::warn!(%from, len, %error, "status packet could not be read");
-                return;
-            }
-        };
-        tracing::trace!(
-            %from,
-            device = state.device_id,
-            track_id = state.track_id,
+    let len = packet.len();
+    let state = match status_from_packet(packet) {
+        Ok(Some(state)) => state,
+        Ok(None) => {
+            tracing::trace!(%from, len, "status packet not a player's; ignored");
+            return;
+        }
+        Err(error) => {
+            tracing::warn!(%from, len, %error, "status packet could not be read");
+            return;
+        }
+    };
+    tracing::trace!(
+        %from,
+        device = state.device_id,
+        track_id = state.track_id,
+        track_device = state.track_device_id,
+        track_slot = ?state.track_slot,
+        play_state = ?state.play_state,
+        master = state.is_master,
+        bpm = ?state.track_bpm,
+        pitch = state.effective_pitch,
+        "player status"
+    );
+    let mut shared = shared.lock();
+    if !shared.greeted.contains(from.ip()) {
+        // The first status from a player is what rekordbox
+        // answers with the greeting `[ASSUME]`; it sent one just
+        // before the player's portmap query.
+        tracing::debug!(player = %from.ip(), "first status from a player; greeting it");
+        shared.greeted.push(*from.ip());
+        let greeting = connect_greeting(REKORDBOX_NAME, ours);
+        send(socket, &greeting, *from.ip(), config.player_port, "greeting");
+    }
+    // The player names the source device and the slot; a track
+    // of ours is one it took from our device number. The slot byte says
+    // `Rb` for a rekordbox source in the community analysis, but
+    // the player's media query about us asks for slot 3 (USB), so
+    // the slot is not relied on.
+    let from_us = state.track_device_id == ours
+        && matches!(state.track_slot, MediaSlot::Rb | MediaSlot::Usb)
+        && state.track_id != 0;
+    let playing = matches!(state.play_state, PlayState::Playing | PlayState::Looping);
+    // The status packet does not name the device kind; the
+    // keep-alive does. Read it from the peer table by number so a
+    // mixer is shown as a mixer, not a player.
+    let kind = peer_kind(&shared, state.device_id);
+    let player = shared.players.entry(state.device_id).or_insert_with(|| {
+        let name = rbl_prolink::status_device_name(packet).unwrap_or_default();
+        tracing::debug!(number = state.device_id, %name, address = %from.ip(), "player listed from its status");
+        Player {
+            number: state.device_id,
+            name,
+            address: *from.ip(),
+            kind,
+            loaded: None,
+            playing: false,
+            master: false,
+            bpm_x100: 0,
+            last_seen: Instant::now(),
+        }
+    });
+    let loaded = from_us.then_some(state.track_id);
+    if player.loaded != loaded {
+        tracing::info!(
+            number = player.number,
+            was = player.loaded,
+            now = loaded,
             track_device = state.track_device_id,
             track_slot = ?state.track_slot,
-            play_state = ?state.play_state,
-            master = state.is_master,
-            bpm = ?state.track_bpm,
-            pitch = state.effective_pitch,
-            "player status"
+            "player's loaded track of ours changed"
         );
-        let mut shared = shared.lock();
-        if !shared.greeted.contains(from.ip()) {
-            // The first status from a player is what rekordbox
-            // answers with the greeting `[ASSUME]`; it sent one just
-            // before the player's portmap query.
-            tracing::debug!(player = %from.ip(), "first status from a player; greeting it");
-            shared.greeted.push(*from.ip());
-            let greeting = connect_greeting(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER);
-            send(socket, &greeting, *from.ip(), config.player_port, "greeting");
+        if let Some(track) = loaded {
+            facts.track_loaded(track);
         }
-        // The player names the source device and the slot; a track
-        // of ours is one it took from device 17. The slot byte says
-        // `Rb` for a rekordbox source in the community analysis, but
-        // the player's media query about us asks for slot 3 (USB), so
-        // the slot is not relied on.
-        let from_us = state.track_device_id == REKORDBOX_DEVICE_NUMBER
-            && matches!(state.track_slot, MediaSlot::Rb | MediaSlot::Usb)
-            && state.track_id != 0;
-        let playing = matches!(state.play_state, PlayState::Playing | PlayState::Looping);
-        // The status packet does not name the device kind; the
-        // keep-alive does. Read it from the peer table by number so a
-        // mixer is shown as a mixer, not a player.
-        let kind = peer_kind(&shared, state.device_id);
-        let player = shared.players.entry(state.device_id).or_insert_with(|| {
-            let name = rbl_prolink::status_device_name(packet).unwrap_or_default();
-            tracing::debug!(number = state.device_id, %name, address = %from.ip(), "player listed from its status");
-            Player {
-                number: state.device_id,
-                name,
-                address: *from.ip(),
-                kind,
-                loaded: None,
-                playing: false,
-                master: false,
-                bpm_x100: 0,
-                last_seen: Instant::now(),
-            }
-        });
-        let loaded = from_us.then_some(state.track_id);
-        if player.loaded != loaded {
-            tracing::info!(
-                number = player.number,
-                was = player.loaded,
-                now = loaded,
-                track_device = state.track_device_id,
-                track_slot = ?state.track_slot,
-                "player's loaded track of ours changed"
-            );
-            if let Some(track) = loaded {
-                facts.track_loaded(track);
-            }
-        }
-        if player.playing != playing {
-            tracing::debug!(number = player.number, playing, play_state = ?state.play_state, "player play state changed");
-        }
-        if player.master != state.is_master {
-            tracing::info!(number = player.number, master = state.is_master, "player master state changed");
-        }
-        player.kind = kind;
-        player.loaded = loaded;
-        player.playing = playing;
-        player.master = state.is_master;
-        player.bpm_x100 = tempo_x100(state.track_bpm, state.effective_pitch);
-        player.last_seen = Instant::now();
+    }
+    if player.playing != playing {
+        tracing::debug!(number = player.number, playing, play_state = ?state.play_state, "player play state changed");
+    }
+    if player.master != state.is_master {
+        tracing::info!(number = player.number, master = state.is_master, "player master state changed");
+    }
+    player.kind = kind;
+    player.loaded = loaded;
+    player.playing = playing;
+    player.master = state.is_master;
+    player.bpm_x100 = tempo_x100(state.track_bpm, state.effective_pitch);
+    player.last_seen = Instant::now();
 }
 
 /// The status packet to broadcast now. When we are master we say so, at our
@@ -733,7 +901,7 @@ fn hear_player_status(
 /// tempo with a beat that free-runs at the status rate (rekordbox echoes the
 /// master's; with no master on the link it is `[UNKNOWN]`, so zero). The
 /// status flag and Mm say which of the two this is.
-fn status_packet(shared: &Shared, free_beat: u8) -> Vec<u8> {
+fn status_packet(shared: &Shared, ours: u8, free_beat: u8) -> Vec<u8> {
     let master = shared.master;
     let (bpm_x100, beat, we_master) = if master.on {
         (master.bpm_x100, master.bar_beat, true)
@@ -745,7 +913,7 @@ fn status_packet(shared: &Shared, free_beat: u8) -> Vec<u8> {
             .map_or(0, |p| u16::try_from(p.bpm_x100).unwrap_or(u16::MAX));
         (mirror, if mirror == 0 { 0 } else { free_beat }, false)
     };
-    Status { name: REKORDBOX_NAME.to_owned(), device_number: REKORDBOX_DEVICE_NUMBER, bpm_x100, beat, master: we_master }
+    Status { name: REKORDBOX_NAME.to_owned(), device_number: ours, bpm_x100, beat, master: we_master }
         .encode()
 }
 
@@ -755,7 +923,7 @@ fn status_packet(shared: &Shared, free_beat: u8) -> Vec<u8> {
 /// The next beat is scheduled from the last rather than from a fresh sleep,
 /// so the tempo does not drift with the OS's sleep granularity; a nudge is
 /// picked up on the next beat because the interval is read each time.
-fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shared: &Mutex<Shared>) {
+fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shared: &Mutex<Shared>, number: &AtomicU8) {
     let to = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.beat_port));
     let mut next_beat = Instant::now();
     while !stop.load(Ordering::Relaxed) {
@@ -764,7 +932,8 @@ fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shar
             (s.master.on, s.master.bpm_x100, s.master.bar_beat)
         };
         let now = Instant::now();
-        if !on {
+        let ours = number.load(Ordering::Relaxed);
+        if !on || ours == 0 {
             // The first beat on becoming master falls at once.
             next_beat = now;
             std::thread::sleep(POLL);
@@ -774,7 +943,7 @@ fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shar
             std::thread::sleep((next_beat - now).min(POLL));
             continue;
         }
-        let packet = rbl_prolink::beat_packet(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER, bpm_x100, bar_beat);
+        let packet = rbl_prolink::beat_packet(REKORDBOX_NAME, ours, bpm_x100, bar_beat);
         match socket.send_to(&packet, to) {
             Ok(_) => tracing::trace!(bpm_x100, bar_beat, %to, "beat sent"),
             Err(error) => tracing::warn!(%error, "beat not sent"),
@@ -795,7 +964,7 @@ fn beat_clock(socket: &UdpSocket, config: &BeaconConfig, stop: &AtomicBool, shar
 /// counts, naming back whichever slot number it used for us — `04` from a
 /// current CDJ-3000, `03` from the EP122 emulator — as rekordbox does. A
 /// question about any other device or slot is not ours to answer.
-fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, facts: &dyn LibraryFacts) {
+fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, facts: &dyn LibraryFacts, ours: u8) {
     let query = match MediaQuery::decode(packet) {
         Ok(query) => query,
         Err(error) => {
@@ -803,7 +972,7 @@ fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, 
             return;
         }
     };
-    if query.device_number != REKORDBOX_DEVICE_NUMBER || ![SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY].contains(&query.slot) {
+    if query.device_number != ours || ![SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY].contains(&query.slot) {
         tracing::trace!(
             from = %query.from,
             device = query.device_number,
@@ -816,7 +985,7 @@ fn answer_media_query(socket: &UdpSocket, packet: &[u8], config: &BeaconConfig, 
     tracing::debug!(from = %query.from, slot = query.slot, tracks, playlists, "media query about our slot; answering");
     let response = MediaResponse {
         name: REKORDBOX_NAME.to_owned(),
-        device_number: REKORDBOX_DEVICE_NUMBER,
+        device_number: ours,
         slot: query.slot,
         tracks,
         playlists,

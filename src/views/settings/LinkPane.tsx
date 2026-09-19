@@ -99,8 +99,13 @@ export function LinkPane() {
         <>
           <Note>
             On as <b>rekordbox</b>
+            {link.number !== null ? ` (device ${link.number})` : ""}
             {link.interface ? ` on ${link.interface.name} (${link.interface.address})` : ""}.
-            Players list the library under LINK.
+            {link.state === "waiting"
+              ? " Listening for a player or mixer: nothing is announced into an empty network, as rekordbox announces nothing."
+              : link.state === "joining"
+                ? " Joining: probing the link for a free device number."
+                : " Players list the library under LINK."}
           </Note>
           {link.players.length === 0 ? (
             <Note>No players have announced themselves yet.</Note>

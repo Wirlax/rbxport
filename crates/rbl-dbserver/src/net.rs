@@ -33,6 +33,13 @@ const MAX_PENDING: usize = 64 * 1024;
 /// as a trait so the codec and the socket layer can be tested without one.
 pub trait Handler: Send + Sync {
     fn open(&self) -> Box<dyn Session>;
+
+    /// Whether the server is up for players: rekordbox starts its database
+    /// server after its link is up and its exports are in, so before that
+    /// a port query gets no answer. Serving from the start by default.
+    fn serving(&self) -> bool {
+        true
+    }
 }
 
 /// One player's conversation. A menu request is answered with a count and
@@ -184,8 +191,15 @@ impl Bound {
         {
             let stop = Arc::clone(&stop);
             let port = database.port();
+            let gate = Arc::clone(&handler);
             threads.push(std::thread::spawn(move || {
                 accept_loop(&query_listener, &stop, move |stream| {
+                    if !gate.serving() {
+                        // rekordbox has no listener at all before its link is
+                        // up; the nearest thing here is a silent close.
+                        tracing::debug!("port query before the link is up; closed unanswered");
+                        return Ok(());
+                    }
                     answer_port_query(stream, port)
                 });
             }));

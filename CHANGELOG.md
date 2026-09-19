@@ -29,6 +29,15 @@ the version numbers [Semantic Versioning](https://semver.org/).
   list without art.
 
 ### Added
+- LINK joins the network the way rekordbox 7.2.11 does: nothing is
+  announced until a player or mixer is heard, then the number probe —
+  three claims and six rounds through 17, 18, 41–44 at 100 ms, taking 17
+  or, when another rekordbox holds it, 18 — and a probe of our number is
+  answered. The library and the database server open to players only
+  once the number is settled, a player can be sent a track only once it
+  has mounted the library, and the link goes off with the reason when the
+  interface loses its address. Preferences › PRO DJ LINK says which
+  device number LINK is on as.
 - A log file: everything the app reports goes to stdout and to a daily file
   under the app's data directory (`rbxport/logs`, seven days kept), so a
   LINK session with a player can be read back afterwards. `LOG_LEVEL`

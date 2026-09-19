@@ -58,7 +58,31 @@ fn serve() -> Served {
     let track = u32::try_from(library.ids[0]).unwrap();
     let source = Arc::new(StaticSource { library: Arc::new(library), share_root: location.share_root.clone() });
     let link = LinkExport::start(source, Interface::loopback(), Ports::EPHEMERAL).unwrap();
+    bring_up(&link);
     Served { _dir: dir, link, audio, track, path: path.to_str().unwrap().to_owned() }
+}
+
+/// A CDJ-3000's keep-alive, the one the beacon tests use.
+const CDJ_KEEP_ALIVE: &str =
+    "5173707431576d4a4f4c060043444a2d333030300000000000000000000000000103003601012497ed0b4043c0a80198030000000164";
+
+/// Until a player is heard rekordbox serves nothing: the port query goes
+/// unanswered and the export list is empty. A keep-alive from a player
+/// starts the join, which settles on 17 about four seconds later.
+fn bring_up(link: &LinkExport) {
+    use std::net::{Ipv4Addr, UdpSocket};
+    use std::time::{Duration, Instant};
+    assert_eq!(link.link_state(), rbl_link::LinkState::Waiting);
+    assert!(database_port(link.query_address()).is_err(), "no port query answer before the link is up");
+    let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let packet: Vec<u8> =
+        (0..CDJ_KEEP_ALIVE.len()).step_by(2).map(|i| u8::from_str_radix(&CDJ_KEEP_ALIVE[i..i + 2], 16).unwrap()).collect();
+    player.send_to(&packet, (Ipv4Addr::LOCALHOST, link.beacon_ports().0)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while link.link_state() != (rbl_link::LinkState::Up { number: 0x11 }) {
+        assert!(Instant::now() < deadline, "the link did not come up: {:?}", link.link_state());
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn numbers(args: &[u32]) -> Vec<Argument> {

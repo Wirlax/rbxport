@@ -5,6 +5,7 @@
 //! it was last asked for. Every layout here is the one rekordbox 7.2.11
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::catalog::{Analysis, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
@@ -12,24 +13,43 @@ use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
 use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
 
-/// Our device number on the link: rekordbox's, so a player treats us as it
-/// treats rekordbox.
+/// Our device number on the link when nothing has settled one: rekordbox's
+/// first choice, so a player treats us as it treats rekordbox.
 pub const DEVICE: u8 = 0x11;
 
 /// Serves a catalog to every player that connects.
 pub struct CatalogHandler {
     catalog: Arc<dyn Catalog>,
+    /// The device number the beacon's join settled on — 17, or 18 when
+    /// another rekordbox holds 17 — and `0` while there is none, which is
+    /// also what keeps the port query unanswered until the link is up.
+    device: Arc<AtomicU8>,
 }
 
 impl CatalogHandler {
     pub fn new(catalog: Arc<dyn Catalog>) -> Self {
-        Self { catalog }
+        Self { catalog, device: Arc::new(AtomicU8::new(DEVICE)) }
+    }
+
+    /// Answers with the number in `device` rather than the fixed 17.
+    #[must_use]
+    pub fn with_device(mut self, device: Arc<AtomicU8>) -> Self {
+        self.device = device;
+        self
     }
 }
 
 impl Handler for CatalogHandler {
     fn open(&self) -> Box<dyn Session> {
-        Box::new(LinkSession::new(Arc::clone(&self.catalog)))
+        let device = match self.device.load(Ordering::Relaxed) {
+            0 => DEVICE,
+            number => number,
+        };
+        Box::new(LinkSession::new(Arc::clone(&self.catalog)).as_device(device))
+    }
+
+    fn serving(&self) -> bool {
+        self.device.load(Ordering::Relaxed) != 0
     }
 }
 
@@ -68,11 +88,20 @@ pub struct LinkSession {
     menu: Menu,
     /// The player's device number, from its setup message.
     player: u8,
+    /// Our own, in the setup reply.
+    device: u8,
 }
 
 impl LinkSession {
     pub fn new(catalog: Arc<dyn Catalog>) -> Self {
-        Self { catalog, menu: Menu::Empty, player: 0 }
+        Self { catalog, menu: Menu::Empty, player: 0, device: DEVICE }
+    }
+
+    /// The session answering as `device` rather than 17.
+    #[must_use]
+    pub fn as_device(mut self, device: u8) -> Self {
+        self.device = device;
+        self
     }
 
     fn number(message: &Message, index: usize) -> u32 {
@@ -362,7 +391,7 @@ impl Session for LinkSession {
         match message.kind {
             kind::SETUP => {
                 self.player = u8::try_from(Self::number(message, 0)).unwrap_or(0);
-                vec![setup_reply(tx, DEVICE)]
+                vec![setup_reply(tx, self.device)]
             }
             kind::TEARDOWN => Vec::new(),
             kind::RENDER => {

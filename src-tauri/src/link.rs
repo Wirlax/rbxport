@@ -88,6 +88,9 @@ pub struct PlayerDto {
     pub loaded: Option<LoadedDto>,
     pub playing: bool,
     pub master: bool,
+    /// The player has mounted the library: a track can be sent to it.
+    /// rekordbox refuses a drag to a player until then.
+    pub mounted: bool,
 }
 
 /// Whether LINK is on, on what, and who is listening.
@@ -108,6 +111,14 @@ pub struct LinkStatusDto {
     /// The master tempo we would drive, in BPM. Shown on the master control
     /// whether or not we are master, as rekordbox shows the last value.
     pub master_bpm: f64,
+    /// Where the join is while on: `waiting` (nothing announced until a
+    /// player or mixer is heard, as rekordbox does), `joining` (probing for
+    /// a device number), `up`, or `down` (the interface lost its address;
+    /// `problem` says so). `off` while off.
+    pub state: String,
+    /// The device number the join settled on — 17, or 18 when another
+    /// rekordbox holds 17 — once it has.
+    pub number: Option<u8>,
 }
 
 impl LinkStatusDto {
@@ -120,6 +131,8 @@ impl LinkStatusDto {
             interfaces: interfaces(),
             master: false,
             master_bpm: 120.0,
+            state: "off".to_owned(),
+            number: None,
         }
     }
 }
@@ -200,13 +213,26 @@ impl Session {
         let reporter = {
             let stop = Arc::clone(&stop);
             std::thread::spawn(move || {
-                let mut last: Option<Vec<PlayerDto>> = None;
+                let mut last: Option<(String, Option<u8>, Vec<PlayerDto>)> = None;
                 while !stop.load(Ordering::Relaxed) {
                     std::thread::sleep(REPORT_EVERY);
                     let Some(state) = weak.upgrade() else { return };
                     let Some(status) = state.link_status() else { return };
-                    if last.as_ref() != Some(&status.players) {
-                        last = Some(status.players.clone());
+                    // The link went down — the interface lost its address,
+                    // or no device number could be had: LINK goes off with
+                    // the reason, as rekordbox's LINKDOWN takes its button
+                    // back to grey. The session is dropped on a thread of
+                    // its own, since dropping it joins this one.
+                    if status.state == "down" {
+                        tracing::warn!(problem = status.problem.as_deref().unwrap_or(""), "the link went down; LINK off");
+                        let session = state.set_link(None);
+                        std::thread::spawn(move || drop(session));
+                        report(LinkStatusDto::off(status.problem));
+                        return;
+                    }
+                    let now = (status.state.clone(), status.number, status.players.clone());
+                    if last.as_ref() != Some(&now) {
+                        last = Some(now);
                         report(status);
                     }
                 }
@@ -223,14 +249,31 @@ impl Session {
             return LinkStatusDto::off(None);
         };
         let snapshot = export.snapshot();
+        let (state, number, problem) = match &snapshot.link {
+            rbl_link::LinkState::Waiting => ("waiting", None, None),
+            rbl_link::LinkState::Joining => ("joining", None, None),
+            rbl_link::LinkState::Up { number } => ("up", Some(*number), None),
+            rbl_link::LinkState::Down(why) => ("down", None, Some(why.clone())),
+        };
         LinkStatusDto {
             on: true,
-            problem: None,
+            problem,
             interface: Some(InterfaceDto::from(&snapshot.interface)),
             players: players(library, &snapshot),
             interfaces: interfaces(),
             master: snapshot.master.on,
             master_bpm: f64::from(snapshot.master.bpm_x100) / 100.0,
+            state: state.to_owned(),
+            number,
+        }
+    }
+
+    /// Why the link went down, once it has: the app stops the session and
+    /// shows the reason.
+    pub fn down(&self) -> Option<String> {
+        match self.export.as_ref()?.link_state() {
+            rbl_link::LinkState::Down(why) => Some(why),
+            _ => None,
         }
     }
 
@@ -311,6 +354,7 @@ fn players(library: Option<&rbl_index::Library>, snapshot: &Snapshot) -> Vec<Pla
             }),
             playing: player.playing,
             master: player.master,
+            mounted: snapshot.mounted.contains(&player.address),
         })
         .collect()
 }

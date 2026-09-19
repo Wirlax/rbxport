@@ -2,12 +2,16 @@
 //! rekordbox serves it.
 //!
 //! Three servers and a beacon, all measured against rekordbox 7.2.11 and a
-//! CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`): the
-//! keep-alive and status packets that put us on the network as `rekordbox`
-//! (`beacon`), the database server a player browses (`rbl-dbserver`, fed by
-//! `catalog`), and the NFS server it reads the audio file from (`rbl-nfs`,
-//! fed by `files`). `blobs` builds the analysis replies out of the ANLZ
-//! files. [`LinkExport::start`] binds all of it; dropping it unbinds.
+//! CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`) and
+//! built to rekordbox's own join and file service as read out of its
+//! binary (`docs/pre-release/rekordbox/link-export-internals.md`): the
+//! join and the keep-alive and status packets that put us on the network
+//! as `rekordbox` (`join`, `beacon`), the database server a player browses
+//! (`rbl-dbserver`, fed by `catalog`), and the NFS server it reads the
+//! audio file from (`rbl-nfs`, fed by `files`). `blobs` builds the
+//! analysis replies out of the ANLZ files. [`LinkExport::start`] binds all
+//! of it; nothing is announced or served until the join hears a player and
+//! settles a number; dropping it unbinds.
 //!
 //! The player's side of the protocol comes from
 //! [alphatheta-connect](https://github.com/chrisle/alphatheta-connect-rs):
@@ -20,6 +24,7 @@ pub mod beacon;
 pub mod blobs;
 pub mod catalog;
 pub mod files;
+pub mod join;
 pub mod watch;
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -28,7 +33,7 @@ use std::sync::Arc;
 use rbl_dbserver::session::CatalogHandler;
 use rbl_index::Library;
 
-pub use beacon::Player;
+pub use beacon::{LinkState, Player};
 pub use watch::Watcher;
 pub use catalog::{IndexCatalog, Played, Source};
 pub use rbl_prolink::DeviceType;
@@ -132,6 +137,12 @@ pub struct Snapshot {
     pub players: Vec<Player>,
     /// Our tempo-master state: whether we are master and at what BPM.
     pub master: beacon::MasterState,
+    /// Where the join is: waiting for a player, probing, up as a number,
+    /// or down and why.
+    pub link: LinkState,
+    /// The players that have mounted the library, by address: the ones a
+    /// track can be sent to.
+    pub mounted: Vec<Ipv4Addr>,
 }
 
 /// A running link export: the beacon and both servers, bound.
@@ -170,18 +181,12 @@ impl LinkExport {
         let library = source.library().ok_or(LinkError::NoLibrary)?;
         let played = Played::default();
         let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), played.clone()));
-        let handler: Arc<dyn rbl_dbserver::net::Handler> = Arc::new(CatalogHandler::new(catalog.clone()));
 
-        let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
-        let database = rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
-            .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
-        // The mount EXPORT reply must offer the export to the player's subnet,
-        // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
-        // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
-        let export_host = (!interface.address.is_loopback())
-            .then(|| format!("{}/{}", interface.address, interface.netmask));
-        let files = rbl_nfs::net::Bound::start(files::exports(&library), listen_on, ports.portmap, ports.mount, ports.nfs, export_host)
-            .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
+        // Bound first, as rekordbox binds its link stack at launch; but the
+        // beacon's join decides when they serve. Its device number, `0`
+        // until settled, is what the database server answers with and what
+        // opens the port query and the export list to players — rekordbox
+        // adds its exports and starts its database server on link-up.
         let beacon = beacon::Beacon::start(
             beacon::BeaconConfig {
                 interface: (!interface.address.is_loopback()).then(|| interface.name.clone()),
@@ -197,6 +202,28 @@ impl LinkExport {
             Arc::new(Facts { source, played }),
         )
         .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.announce)))?;
+        let number = beacon.number_cell();
+
+        let handler: Arc<dyn rbl_dbserver::net::Handler> =
+            Arc::new(CatalogHandler::new(catalog.clone()).with_device(Arc::clone(&number)));
+        let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
+        let database = rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
+            .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
+        // The mount EXPORT reply must offer the export to the player's subnet,
+        // which rekordbox names as its own `<ip>/<netmask>`; without it a CDJ
+        // mounts nothing. Loopback tests have no meaningful subnet, so skip it.
+        let export_host = (!interface.address.is_loopback())
+            .then(|| format!("{}/{}", interface.address, interface.netmask));
+        let files = rbl_nfs::net::Bound::start(
+            files::exports(&library),
+            listen_on,
+            ports.portmap,
+            ports.mount,
+            ports.nfs,
+            export_host,
+            Some(number),
+        )
+        .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.portmap)))?;
 
         tracing::info!(
             interface = %interface.name,
@@ -219,7 +246,14 @@ impl LinkExport {
             database_port: self.database.database_address().port(),
             players: self.beacon.players(),
             master: self.beacon.master_state(),
+            link: self.beacon.link_state(),
+            mounted: self.files.mounted_hosts(),
         }
+    }
+
+    /// Where the join is.
+    pub fn link_state(&self) -> LinkState {
+        self.beacon.link_state()
     }
 
     /// Become the network's tempo master, or resign.
@@ -267,7 +301,20 @@ impl LinkExport {
     }
 
     /// Tells a CDJ to load a specific track from our library.
+    ///
+    /// Refused until the player has mounted the export, as rekordbox refuses
+    /// a drag to a player (`NG mnt not complete`): a load command to a
+    /// player with nothing mounted is a command it cannot follow.
     pub fn load_track(&self, player_number: u8, track_id: u32) -> std::io::Result<()> {
+        let address = self.beacon.players().into_iter().find(|p| p.number == player_number).map(|p| p.address);
+        if let Some(address) = address {
+            if !self.files.is_mounted(address) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    format!("player {player_number} has not mounted the library yet"),
+                ));
+            }
+        }
         self.beacon.load_track(player_number, track_id)
     }
 

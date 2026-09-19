@@ -270,9 +270,15 @@ impl KeepAlive {
     /// rekordbox's own keep-alive for a given address: device 17, type 4,
     /// generation 3, and the tail bytes rekordbox 7.2.11 sends.
     pub fn rekordbox(mac: [u8; 6], ip: Ipv4Addr, peers: u8) -> Self {
+        Self::rekordbox_as(REKORDBOX_DEVICE_NUMBER, mac, ip, peers)
+    }
+
+    /// The same under the number the join settled on: 17 when it is free,
+    /// 18 when another rekordbox holds 17.
+    pub fn rekordbox_as(device_number: u8, mac: [u8; 6], ip: Ipv4Addr, peers: u8) -> Self {
         Self {
             name: REKORDBOX_NAME.to_owned(),
-            device_number: REKORDBOX_DEVICE_NUMBER,
+            device_number,
             device_type: DeviceType::Rekordbox,
             mac,
             ip,
@@ -435,6 +441,18 @@ pub fn connect_identity(name: &str, device_number: u8, computer_name: &str) -> V
 /// and the shape; why rekordbox reserves that particular block is `[UNKNOWN]`.
 pub const REKORDBOX_CLAIM_NUMBERS: [u8; 6] = [0x11, 0x12, 0x29, 0x2a, 0x2b, 0x2c];
 
+/// The device types whose keep-alive brings rekordbox's link up: a player
+/// (1), an older mixer (2), a DJM (3) or type 7; a keep-alive from anything
+/// else, or from a `CDJ-2000` or `CDJ-900` reporting minor version 0, does
+/// not (`readConfigNotify`, `linkUpFunc` in the decompilation).
+pub fn brings_link_up(keep_alive: &KeepAlive) -> bool {
+    let kind = keep_alive.device_type.to_u8();
+    if ![1, 2, 3, 7].contains(&kind) {
+        return false;
+    }
+    !(keep_alive.generation == 0 && (keep_alive.name == "CDJ-2000" || keep_alive.name == "CDJ-900"))
+}
+
 /// One first-stage claim (`00`, 44 bytes): the counter, `04`, then the MAC.
 pub fn rekordbox_claim_stage1(mac: [u8; 6], counter: u8) -> Vec<u8> {
     let mut out = Vec::with_capacity(0x2c);
@@ -462,8 +480,120 @@ pub fn rekordbox_claim_stage2(mac: [u8; 6], ip: Ipv4Addr, number: u8, counter: u
     out
 }
 
+/// The subtype (byte `0x0b`) of a `02` packet: a probe of a number, a
+/// request to be assigned one, or a block of numbers a device holds
+/// (`docs/pre-release/rekordbox/link-export-internals.md`).
+pub const PROBE_SUBTYPE_PROBE: u8 = 0x00;
+pub const PROBE_SUBTYPE_ASSIGN: u8 = 0x01;
+pub const PROBE_SUBTYPE_BLOCK: u8 = 0x02;
+
+/// A device number probe (`02`, 50 bytes) as rekordbox 7.2.11 sends and
+/// reads it: who is asking (IP, MAC), which number, which round.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberProbe {
+    /// `PROBE_SUBTYPE_PROBE`, `PROBE_SUBTYPE_ASSIGN` or `PROBE_SUBTYPE_BLOCK`.
+    pub subtype: u8,
+    pub name: String,
+    pub ip: Ipv4Addr,
+    pub mac: [u8; 6],
+    /// The number being probed or asked for.
+    pub number: u8,
+    /// Byte `0x2f`: the round, counted from one.
+    pub round: u8,
+    pub device_type: DeviceType,
+    /// Byte `0x31`: `01` when the sender takes any free number.
+    pub auto_assign: bool,
+}
+
+/// Byte length of a number probe.
+pub const NUMBER_PROBE_LEN: usize = 0x32;
+
+impl NumberProbe {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < NUMBER_PROBE_LEN {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if AnnounceKind::from_u8(kind) != AnnounceKind::ClaimStage2 {
+            return Err(PacketError::WrongKind(kind));
+        }
+        let at = |i: usize| packet.get(i).copied().unwrap_or(0);
+        let mut mac = [0_u8; 6];
+        for (slot, byte) in mac.iter_mut().zip(packet.get(0x28..0x2e).unwrap_or(&[])) {
+            *slot = *byte;
+        }
+        Ok(Self {
+            subtype: at(0x0b),
+            name: device_name(packet)?,
+            ip: Ipv4Addr::new(at(0x24), at(0x25), at(0x26), at(0x27)),
+            mac,
+            number: at(0x2e),
+            round: at(0x2f),
+            device_type: DeviceType::from_u8(at(0x30)),
+            auto_assign: at(0x31) == 1,
+        })
+    }
+}
+
+/// rekordbox's request to be assigned `number` (`02` subtype `01`, 50
+/// bytes), sent when every number it probes is taken; the same bytes as a
+/// probe but for the subtype.
+pub fn rekordbox_assign_request(mac: [u8; 6], ip: Ipv4Addr, number: u8, counter: u8) -> Vec<u8> {
+    let mut out = rekordbox_claim_stage2(mac, ip, number, counter);
+    if let Some(subtype) = out.get_mut(0x0b) {
+        *subtype = PROBE_SUBTYPE_ASSIGN;
+    }
+    out
+}
+
+/// The answer to a probe of a number the answering device holds (`03`
+/// subtype `00`, 39 bytes): the number at `0x24`, `01` at `0x26`. rekordbox
+/// both sends this for its own number and reads it to mark a number in use
+/// (`readIdUseRequest`, `readIdUseResponse`). `[ASSUME]` byte `0x25` is
+/// zero: the decompilation names `0x24` and `0x26` only.
+pub const NUMBER_IN_USE_LEN: usize = 0x27;
+
+/// The status byte (`0x26`) of a `03` reply: `01` in use / accepted.
+pub const NUMBER_REPLY_IN_USE: u8 = 0x01;
+
+pub fn number_in_use_reply(name: &str, number: u8) -> Vec<u8> {
+    let mut out = Vec::with_capacity(NUMBER_IN_USE_LEN);
+    write_header(&mut out, 0x03, PROBE_SUBTYPE_PROBE, name);
+    out.extend_from_slice(&[0x01, 0x03, 0x00, 0x27]);
+    out.extend_from_slice(&[number, 0x00, NUMBER_REPLY_IN_USE]);
+    debug_assert_eq!(out.len(), NUMBER_IN_USE_LEN);
+    out
+}
+
+/// A `03` reply: to a probe (subtype `00`, the number is in use) or to an
+/// assign request (subtype `01`: status `0` accepts the number at `0x24`,
+/// `2` asks for a retry).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberReply {
+    pub subtype: u8,
+    pub name: String,
+    pub number: u8,
+    pub status: u8,
+}
+
+impl NumberReply {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < NUMBER_IN_USE_LEN {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if kind != 0x03 {
+            return Err(PacketError::WrongKind(kind));
+        }
+        let at = |i: usize| packet.get(i).copied().unwrap_or(0);
+        Ok(Self { subtype: at(0x0b), name: device_name(packet)?, number: at(0x24), status: at(0x26) })
+    }
+}
+
 /// rekordbox's whole startup ladder in order: `00`×3, then `02` for each
-/// reserved number with counter 1..=6.
+/// reserved number with counter 1..=6 — what a join sends when no device
+/// answers a probe (`rbl-link`'s beacon skips the numbers that are answered
+/// for).
 pub fn rekordbox_startup_ladder(mac: [u8; 6], ip: Ipv4Addr) -> Vec<Vec<u8>> {
     let mut ladder = Vec::with_capacity(3 + REKORDBOX_CLAIM_NUMBERS.len() * 6);
     for counter in 1..=3 {
