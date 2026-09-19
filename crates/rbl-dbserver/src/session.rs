@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use crate::catalog::{Analysis, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
-use crate::item::{item_type, root_menu, sort_menu, Item};
+use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
 use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
 
@@ -138,7 +138,7 @@ impl LinkSession {
                 .take(limit)
                 .filter_map(|row| self.item(query, row))
                 .collect(),
-            Menu::Metadata(details) => window(metadata_rows(details)),
+            Menu::Metadata(details) => window(metadata_rows(details, self.catalog.played(details.row.id))),
             Menu::TrackInfo(details) => window(track_info_rows(details)),
             Menu::Empty => Vec::new(),
         }
@@ -167,13 +167,15 @@ impl LinkSession {
             }
             (Query::Tracks { scope, .. }, Row::Track { id, position }) => {
                 let track = self.catalog.track_row(*id)?;
-                // The flags differ by list (measured); what they mean is not
-                // known, so each list gets the value rekordbox gave it.
-                let flags = match scope {
-                    TrackScope::Artist { .. } | TrackScope::Album(_) => 0x0100_0000,
-                    TrackScope::Playlist(_) | TrackScope::History(_) => 0x100,
+                let listed = match scope {
+                    TrackScope::Artist { .. } | TrackScope::Album(_) | TrackScope::Playlist(_) => track_flags::LISTED,
                     _ => 0,
                 };
+                // A history's rows are all played; elsewhere only the tracks
+                // a player has loaded this session are, or every row of a
+                // playlist greys.
+                let played = matches!(scope, TrackScope::History(_)) || self.catalog.played(*id);
+                let flags = listed | if played { track_flags::PLAYED } else { 0 };
                 Item::track(&track, flags, *position)
             }
             (_, Row::Track { .. }) => return None,
@@ -414,10 +416,10 @@ fn extended_cue_count(blob: &[u8]) -> u32 {
 }
 
 /// The sixteen rows of a metadata reply, one per column, in rekordbox's order.
-fn metadata_rows(t: &TrackDetails) -> Vec<Item> {
+fn metadata_rows(t: &TrackDetails, played: bool) -> Vec<Item> {
     let key_id = t.row.key;
     vec![
-        Item::track(&t.row, 0x100, 0),
+        Item::track(&t.row, if played { track_flags::PLAYED } else { 0 }, 0),
         Item::line(1, t.artist_id, &t.artist, item_type::ARTIST),
         Item::line(1, t.album_id, &t.album, item_type::ALBUM),
         Item::line(0, t.duration_s, "", item_type::DURATION),

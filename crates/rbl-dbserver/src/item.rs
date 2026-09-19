@@ -53,6 +53,17 @@ pub mod item_type {
     pub const MENU_MATCHING: u32 = 0xaa;
 }
 
+/// Bits of a track row's flags, measured from rekordbox 7.2.11 serving a
+/// CDJ-3000.
+pub mod track_flags {
+    /// The track has been loaded on a player this session; the player greys
+    /// the row. Set on every row of a history, and on a metadata row.
+    pub const PLAYED: u32 = 0x100;
+    /// Set on the rows of an artist's, an album's or a playlist's tracks and
+    /// on no other list; what it tells the player is not known.
+    pub const LISTED: u32 = 0x0100_0000;
+}
+
 /// The sixteen arguments of one row.
 ///
 /// `text`, `text2` and `text3` each go out preceded by their byte length in

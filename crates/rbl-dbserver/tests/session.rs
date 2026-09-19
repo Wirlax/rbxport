@@ -20,8 +20,9 @@ fn hex(s: &str) -> Vec<u8> {
 }
 
 /// A library of one artist with one album and one track — the first rows
-/// of the capture — plus the playlist folders it listed.
-struct Small;
+/// of the capture — plus the playlist folders it listed. The bool says
+/// whether a player has loaded the track.
+struct Small(bool);
 
 const AALIYAH: u32 = 0x6d5c_28f2;
 const ALBUM: u32 = 0xdc0d_0bca;
@@ -40,6 +41,9 @@ fn the_track() -> TrackRow {
 }
 
 impl Catalog for Small {
+    fn played(&self, track: u32) -> bool {
+        self.0 && track == TRACK
+    }
     fn list(&self, query: &Query) -> Vec<Row> {
         match query {
             Query::Artists(_) => vec![Row::Named { id: AALIYAH, name: "Aaliyah".into() }],
@@ -89,7 +93,11 @@ impl Catalog for Small {
 }
 
 fn session() -> Box<dyn Session> {
-    let handler = CatalogHandler::new(Arc::new(Small));
+    session_with(Small(false))
+}
+
+fn session_with(catalog: Small) -> Box<dyn Session> {
+    let handler = CatalogHandler::new(Arc::new(catalog));
     let mut session = handler.open();
     session.handle(&setup_request(1));
     session
@@ -192,8 +200,11 @@ fn playlists_histories_and_dates_are_shaped_as_captured() {
     let (_, items) = browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0, 1]);
     assert_eq!(args(&items[0]), "0x0, 0xaa1f785f, 0x10, \"CURRENT\", 0x2, \"\", 0x1, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(args(&items[1]), "0x0, 0xffb7d23b, 0x1a, \"NP3-TEST-MP3\", 0x2, \"\", 0x8, 0x0, 0x0, 0xb, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
-    // A playlist's tracks: flag 0x100 and the play order.
+    // A playlist's tracks: flag 0x1000000 and the play order.
     let (_, items) = browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0xffb7_d23b, 0]);
+    assert!(args(&items[0]).contains("0x2304, 0x1000000, 0x475f, 0x0, 0x100"));
+    // A history's tracks are all played.
+    let (_, items) = browse(&mut s, kind::HISTORY_TRACKS, &[CTX, 0, 0x68ef_cd5c]);
     assert!(args(&items[0]).contains("0x2304, 0x100, 0x475f, 0x0, 0x100"));
 
     let (_, items) = browse(&mut s, kind::HISTORY_MENU, &[CTX, 0]);
@@ -213,7 +224,7 @@ fn metadata_and_track_info_have_the_captured_rows() {
     let (count, items) = browse(&mut s, kind::METADATA, &[0x0102_0301, TRACK]);
     assert_eq!(count, 16);
     let rows: Vec<String> = items.iter().map(args).collect();
-    assert_eq!(rows[0], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x100, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
+    assert_eq!(rows[0], "0x475f, 0x475f, 0x38, \"At Your Best (You Are Love)\", 0x12, \"Em - 156\", 0x2304, 0x0, 0x475f, 0x0, 0x100, 0x14, 0x14, 0x4, \"D\", 0x1e80");
     assert_eq!(rows[1], "0x1, 0x6d5c28f2, 0x10, \"Aaliyah\", 0x2, \"\", 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[2], "0x1, 0x0, 0x2, \"\", 0x2, \"\", 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[3], "0x0, 0x122, 0x2, \"\", 0x2, \"\", 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
@@ -232,6 +243,22 @@ fn metadata_and_track_info_have_the_captured_rows() {
     assert_eq!(rows[4], "0xb11858, 0x475f, 0x90, \"/Volumes/SD/RB/Aaliyah/Unknown Album/70 at your best (you are love).mp3\", 0x2, \"\", 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[5], "0x0, 0x1, 0x2, \"\", 0x2, \"\", 0x2f, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
     assert_eq!(rows[6], "0x0, 0x14, 0x4, \"D\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+}
+
+/// In the capture the track a player had loaded carried bit 0x100 in every
+/// list and in its metadata; the tracks it had not, did not. A list that set
+/// it on every row greyed the whole playlist on a CDJ.
+#[test]
+fn a_played_track_carries_the_played_bit_everywhere() {
+    let mut s = session_with(Small(true));
+    let (_, items) = browse(&mut s, kind::ARTIST_ALBUM_TRACKS, &[CTX, 0, AALIYAH, 0xffff_ffff]);
+    assert!(args(&items[0]).contains("0x2304, 0x1000100, 0x475f, 0x0, 0x100"));
+    let (_, items) = browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0xffb7_d23b, 0]);
+    assert!(args(&items[0]).contains("0x2304, 0x1000100, 0x475f, 0x0, 0x100"));
+    let (_, items) = browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    assert!(args(&items[0]).contains("0x2304, 0x100, 0x475f, 0x0, 0x100"));
+    let (_, items) = browse(&mut s, kind::METADATA, &[0x0102_0301, TRACK]);
+    assert!(args(&items[0]).contains("0x2304, 0x100, 0x475f, 0x0, 0x100"));
 }
 
 #[test]
@@ -282,7 +309,7 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
 
 #[test]
 fn the_setup_reply_and_the_unknown_requests_answer_as_rekordbox_does() {
-    let handler = CatalogHandler::new(Arc::new(Small));
+    let handler = CatalogHandler::new(Arc::new(Small(false)));
     let mut s = handler.open();
     let reply = s.handle(&setup_request(1));
     assert_eq!(reply[0].encode(), hex("11872349ae11fffffffe1000000f021400000002060611000000111100000014"));

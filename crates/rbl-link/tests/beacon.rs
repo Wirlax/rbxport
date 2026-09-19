@@ -4,7 +4,7 @@
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rbl_link::beacon::{Beacon, BeaconConfig, LibraryFacts};
@@ -22,7 +22,9 @@ fn hex(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-struct Facts;
+/// Library facts, remembering the tracks the beacon reports loaded.
+#[derive(Default)]
+struct Facts(Mutex<Vec<u32>>);
 impl LibraryFacts for Facts {
     fn track_count(&self) -> u16 {
         38_681
@@ -30,15 +32,20 @@ impl LibraryFacts for Facts {
     fn playlist_count(&self) -> u16 {
         627
     }
+    fn track_loaded(&self, track: u32) {
+        self.0.lock().unwrap().push(track);
+    }
 }
 
 /// A socket standing in for the player, and the beacon told to answer it there.
 fn start() -> (Beacon, UdpSocket) {
-    start_on(None)
+    let (beacon, player, _) = start_on(None);
+    (beacon, player)
 }
 
 /// The same, with the beacon's sockets pinned to `interface`.
-fn start_on(interface: Option<String>) -> (Beacon, UdpSocket) {
+fn start_on(interface: Option<String>) -> (Beacon, UdpSocket, Arc<Facts>) {
+    let facts = Arc::new(Facts::default());
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     player.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     let beacon = Beacon::start(
@@ -53,10 +60,10 @@ fn start_on(interface: Option<String>) -> (Beacon, UdpSocket) {
             beat_port: player.local_addr().unwrap().port(),
             computer_name: "test-mac".to_owned(),
         },
-        Arc::new(Facts),
+        facts.clone(),
     )
     .unwrap();
-    (beacon, player)
+    (beacon, player, facts)
 }
 
 /// Receives until a packet of `kind` arrives; the beacon's own broadcasts
@@ -86,7 +93,7 @@ fn wait_for(beacon: &Beacon, ready: impl Fn(&[rbl_link::Player]) -> bool) -> Vec
 
 #[test]
 fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
-    let (beacon, player) = start();
+    let (beacon, player, facts) = start_on(None);
     let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
     let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
 
@@ -137,11 +144,12 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     let ours = receive(&player, 0x29);
     assert_eq!(u16::from_be_bytes([ours[0x2e], ours[0x2f]]), 12_539);
 
-    // Unloading clears it.
+    // Unloading clears it; the load was reported once, not per status packet.
     player.send_to(STATUS_EMPTY, status).unwrap();
     let players = wait_for(&beacon, |p| p[0].loaded.is_none());
     assert_eq!(players[0].loaded, None);
     assert!(!players[0].playing);
+    assert_eq!(*facts.0.lock().unwrap(), vec![17_181]);
 
     beacon.stop();
 }
@@ -158,7 +166,7 @@ fn a_beacon_pinned_to_an_interface_still_hears_and_answers_a_player() {
         .find(|i| i.is_loopback() && i.ip().is_ipv4())
         .map(|i| i.name)
         .expect("a loopback interface");
-    let (beacon, player) = start_on(Some(loopback));
+    let (beacon, player, _) = start_on(Some(loopback));
     let announce = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.announce_port());
     let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
 
@@ -259,7 +267,7 @@ fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
             beat_port: beats.local_addr().unwrap().port(),
             computer_name: "test-mac".to_owned(),
         },
-        Arc::new(Facts),
+        Arc::new(Facts::default()),
     )
     .unwrap();
     (beacon, player, beats)

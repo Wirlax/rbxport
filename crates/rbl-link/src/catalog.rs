@@ -41,6 +41,14 @@ pub trait Source: Send + Sync {
 /// one reply, and a player draws a thumbnail.
 const MAX_ARTWORK: u64 = 4 * 1024 * 1024;
 
+/// rekordbox keeps each artwork three ways beside `djmdContent.ImagePath`:
+/// the file it names (`artwork.jpg`, up to a few hundred KB), a medium
+/// `artwork_m.jpg` and a small `artwork_s.jpg`. It serves a player the medium
+/// one (measured: rekordbox 7.2.11's 127 artwork replies to a CDJ-3000 ran
+/// 2.5–32 KB, the `_m` files' range); sent the full file, a CDJ-3000 left
+/// much of its list without art.
+const MEDIUM_ARTWORK_SUFFIX: &str = "_m";
+
 /// A player asks for a dozen blobs when it loads a track and two for every
 /// row it draws; this many parsed analysis files stay in memory so each is
 /// read once per track, not once per blob.
@@ -54,16 +62,34 @@ struct Parsed {
     two_ex: Option<Anlz>,
 }
 
+/// The tracks players have loaded from us since the link started. The
+/// beacon marks them from the players' status; the catalog greys their rows,
+/// the way rekordbox greys what is in its link history. Cloned handles share
+/// one set.
+#[derive(Clone, Default)]
+pub struct Played(Arc<Mutex<HashSet<u32>>>);
+
+impl Played {
+    pub fn mark(&self, track: u32) {
+        self.0.lock().insert(track);
+    }
+
+    pub fn contains(&self, track: u32) -> bool {
+        self.0.lock().contains(&track)
+    }
+}
+
 /// The library as a player browses it.
 pub struct IndexCatalog {
     source: Arc<dyn Source>,
+    played: Played,
     /// Most recently used last.
     analysis: Mutex<Vec<Arc<Parsed>>>,
 }
 
 impl IndexCatalog {
-    pub fn new(source: Arc<dyn Source>) -> Self {
-        Self { source, analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)) }
+    pub fn new(source: Arc<dyn Source>, played: Played) -> Self {
+        Self { source, played, analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)) }
     }
 
     fn row_of(library: &Library, id: u32) -> Option<rbl_index::Row> {
@@ -410,7 +436,12 @@ impl Catalog for IndexCatalog {
         if relative.is_empty() {
             return None;
         }
-        let path = resolve_under(&self.source.share_root(), relative)?;
+        let share = self.source.share_root();
+        // The medium file, or the named one where rekordbox has not made it.
+        let path = [medium_artwork(relative), relative.to_owned()]
+            .iter()
+            .filter_map(|candidate| resolve_under(&share, candidate))
+            .find(|candidate| candidate.is_file())?;
         let meta = std::fs::metadata(&path).ok()?;
         if meta.len() > MAX_ARTWORK {
             return None;
@@ -452,6 +483,20 @@ impl Catalog for IndexCatalog {
         // a track — so it is not what tells us a track is on a deck; the
         // player's status packets do that (see `beacon`).
         tracing::debug!(player, item, "player entered an item");
+    }
+
+    fn played(&self, track: u32) -> bool {
+        self.played.contains(track)
+    }
+}
+
+/// The medium file beside the artwork `ImagePath` names: `_m` before the
+/// extension. A path with no extension is returned as it is.
+fn medium_artwork(relative: &str) -> String {
+    let stem_end = relative.rfind('.').filter(|&dot| !relative[dot..].contains(['/', '\\']));
+    match stem_end {
+        Some(dot) => format!("{}{MEDIUM_ARTWORK_SUFFIX}{}", &relative[..dot], &relative[dot..]),
+        None => relative.to_owned(),
     }
 }
 
@@ -510,7 +555,7 @@ mod tests {
     }
 
     fn catalog() -> IndexCatalog {
-        IndexCatalog::new(Arc::new(Fixed(Arc::new(library()))))
+        IndexCatalog::new(Arc::new(Fixed(Arc::new(library()))), Played::default())
     }
 
     fn ids(rows: &[Row]) -> Vec<u32> {
@@ -635,5 +680,12 @@ mod tests {
         // cues; the extended list (2b04) carries the real ones.
         assert_eq!(c.analysis(10, &Wanted::CueList).unwrap(), vec![0_u8; 1604]);
         assert_eq!(c.analysis(10, &Wanted::ExtendedCueList).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn artwork_is_the_medium_file_beside_the_one_the_library_names() {
+        assert_eq!(medium_artwork("/PIONEER/Artwork/5ba/0a225-f6b2/artwork.jpg"), "/PIONEER/Artwork/5ba/0a225-f6b2/artwork_m.jpg");
+        assert_eq!(medium_artwork("art.v2.png"), "art.v2_m.png");
+        assert_eq!(medium_artwork("/a.b/artwork"), "/a.b/artwork");
     }
 }

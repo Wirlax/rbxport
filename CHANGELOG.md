@@ -14,6 +14,17 @@ the version numbers [Semantic Versioning](https://semver.org/).
   runs silently when rbxport quits. Help › Check for Updates… still shows
   what is happening and what changed, and offers Restart Now.
 
+### Fixed
+- A CDJ browsing a playlist served over LINK no longer sees every track
+  greyed as played: only the tracks a player has loaded this session are,
+  and a history's rows, as rekordbox greys them.
+- A CDJ's list no longer vanishes while it browses: rekordbox never hangs
+  up a player's database session, and now neither does this — it lasts
+  until the player ends it, with TCP keepalive catching one that vanished.
+- Artwork goes to a player at rekordbox's medium size (`artwork_m.jpg`),
+  not the full file; sent the full file, a CDJ-3000 left much of its
+  list without art.
+
 ### Added
 - A log file: everything the app reports goes to stdout and to a daily file
   under the app's data directory (`rbxport/logs`, seven days kept), so a

@@ -30,7 +30,7 @@ use rbl_index::Library;
 
 pub use beacon::Player;
 pub use watch::Watcher;
-pub use catalog::{IndexCatalog, Source};
+pub use catalog::{IndexCatalog, Played, Source};
 pub use rbl_prolink::DeviceType;
 
 /// The ports rekordbox uses, which a player expects.
@@ -143,14 +143,20 @@ pub struct LinkExport {
     catalog: Arc<IndexCatalog>,
 }
 
-struct Facts(Arc<dyn Source>);
+struct Facts {
+    source: Arc<dyn Source>,
+    played: Played,
+}
 
 impl beacon::LibraryFacts for Facts {
     fn track_count(&self) -> u16 {
-        self.0.library().map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
+        self.source.library().map_or(0, |l| u16::try_from(l.len()).unwrap_or(u16::MAX))
     }
     fn playlist_count(&self) -> u16 {
-        self.0.library().map_or(0, |l| u16::try_from(l.playlists().len()).unwrap_or(u16::MAX))
+        self.source.library().map_or(0, |l| u16::try_from(l.playlists().len()).unwrap_or(u16::MAX))
+    }
+    fn track_loaded(&self, track: u32) {
+        self.played.mark(track);
     }
 }
 
@@ -162,7 +168,8 @@ impl LinkExport {
     /// socket its connection arrives at.
     pub fn start(source: Arc<dyn Source>, interface: Interface, ports: Ports) -> Result<Self, LinkError> {
         let library = source.library().ok_or(LinkError::NoLibrary)?;
-        let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source)));
+        let played = Played::default();
+        let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), played.clone()));
         let handler: Arc<dyn rbl_dbserver::net::Handler> = Arc::new(CatalogHandler::new(catalog.clone()));
 
         let listen_on = if interface.address.is_loopback() { IpAddr::V4(Ipv4Addr::LOCALHOST) } else { IpAddr::V4(Ipv4Addr::UNSPECIFIED) };
@@ -187,7 +194,7 @@ impl LinkExport {
                 beat_port: rbl_prolink::PORT_BEAT,
                 computer_name: computer_name(),
             },
-            Arc::new(Facts(source)),
+            Arc::new(Facts { source, played }),
         )
         .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.announce)))?;
 

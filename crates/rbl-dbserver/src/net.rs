@@ -11,10 +11,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{Message, GREETING, PORT_QUERY_REQUEST};
+use socket2::{SockRef, TcpKeepalive};
 
-/// How long a session may sit idle before we close it.
-const IDLE: Duration = Duration::from_secs(30);
+use crate::{kind, Message, GREETING, PORT_QUERY_REQUEST};
+
+/// A player opens its session the moment it finds us and keeps it, idle
+/// between one touch of the browser and the next (captured on a CDJ-3000).
+/// rekordbox never hangs up on it; when we did after 30 s of quiet, the
+/// deck tore the session down and the list it was showing went with it. So
+/// a session lasts until the player ends it, and a player that vanished is
+/// caught by TCP keepalive: a probe after this long with nothing heard, then
+/// one every `KEEPALIVE_INTERVAL` until the stack gives up.
+const KEEPALIVE_AFTER: Duration = Duration::from_secs(10);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 /// How long a single read may block. Short enough to notice a shutdown.
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 /// A session's reassembly buffer never legitimately grows past this.
@@ -42,34 +51,41 @@ pub fn serve_session(
 ) -> io::Result<()> {
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_nodelay(true)?;
+    SockRef::from(&*stream)
+        .set_tcp_keepalive(&TcpKeepalive::new().with_time(KEEPALIVE_AFTER).with_interval(KEEPALIVE_INTERVAL))?;
+    let peer = stream.peer_addr().map_or_else(|_| "?".to_owned(), |a| a.to_string());
+    tracing::info!(%peer, "player connected to the database server");
 
     let mut session = handler.open();
     let mut pending: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0_u8; 4096];
-    let mut idle_since = std::time::Instant::now();
     // Both sides open with the same five bytes before any message (measured);
     // ours goes out as soon as the player's has arrived.
     let mut greeted = false;
 
     while !stop.load(Ordering::Relaxed) {
         match stream.read(&mut chunk) {
-            Ok(0) => return Ok(()), // the peer closed
+            Ok(0) => {
+                tracing::info!(%peer, "player closed its database session");
+                return Ok(());
+            }
             Ok(len) => {
-                idle_since = std::time::Instant::now();
+                tracing::trace!(%peer, len, "database bytes received");
                 pending.extend_from_slice(chunk.get(..len).unwrap_or(&[]));
             }
-            Err(error) if is_timeout(&error) => {
-                if idle_since.elapsed() > IDLE {
-                    return Ok(());
-                }
-                continue;
+            Err(error) if is_timeout(&error) => continue,
+            Err(error) => {
+                // A keepalive that went unanswered ends here too, as a
+                // timed-out or reset connection.
+                tracing::warn!(%peer, %error, "database session read failed");
+                return Err(error);
             }
-            Err(error) => return Err(error),
         }
 
         // A buffer that keeps growing without yielding a message means the
         // peer is not speaking this protocol; drop it rather than grow forever.
         if pending.len() > MAX_PENDING {
+            tracing::warn!(%peer, pending = pending.len(), "no message in the bytes received; not this protocol, dropped");
             return Ok(());
         }
 
@@ -79,22 +95,57 @@ pub fn serve_session(
             }
             if !pending.starts_with(GREETING) {
                 // Not a player; say nothing rather than guess.
+                tracing::warn!(%peer, first = %hex(pending.get(..GREETING.len()).unwrap_or(&[])), "not the database greeting; dropped");
                 return Ok(());
             }
             pending.drain(..GREETING.len());
             stream.write_all(GREETING)?;
             greeted = true;
+            tracing::debug!(%peer, "database greeting exchanged");
         }
 
         let (messages, used) = Message::decode_all(&pending);
         pending.drain(..used);
+        if !pending.is_empty() {
+            tracing::trace!(%peer, pending = pending.len(), "partial message held for the next read");
+        }
         for message in messages {
-            for reply in session.handle(&message) {
-                stream.write_all(&reply.encode())?;
+            tracing::debug!(
+                %peer,
+                tx = message.transaction,
+                kind = %kind::name(message.kind),
+                args = %describe(&message),
+                "database request"
+            );
+            let replies = session.handle(&message);
+            tracing::debug!(%peer, tx = message.transaction, replies = replies.len(), "database reply");
+            for reply in &replies {
+                let bytes = reply.encode();
+                tracing::trace!(
+                    %peer,
+                    tx = reply.transaction,
+                    kind = %kind::name(reply.kind),
+                    args = %describe(reply),
+                    len = bytes.len(),
+                    "database message sent"
+                );
+                stream.write_all(&bytes)?;
             }
         }
     }
+    tracing::debug!(%peer, "database session stopped with the server");
     Ok(())
+}
+
+/// A message's arguments, one after another, for a log line.
+fn describe(message: &Message) -> String {
+    let parts: Vec<String> = message.arguments.iter().map(crate::Argument::describe).collect();
+    format!("[{}]", parts.join(", "))
+}
+
+/// Bytes as hex pairs, for a log line.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
 }
 
 fn is_timeout(error: &io::Error) -> bool {
@@ -124,6 +175,7 @@ impl Bound {
         let query_listener = TcpListener::bind(SocketAddr::new(address, query_port))?;
         let database_listener = TcpListener::bind(SocketAddr::new(address, database_port))?;
         let (query, database) = (query_listener.local_addr()?, database_listener.local_addr()?);
+        tracing::debug!(%query, %database, "database server bound");
 
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::with_capacity(2);
@@ -168,6 +220,7 @@ impl Bound {
         for thread in self.threads.drain(..) {
             drop(thread.join());
         }
+        tracing::debug!("database server stopped");
     }
 }
 
@@ -182,18 +235,23 @@ where
     F: Fn(&mut TcpStream) -> io::Result<()> + Send + Clone + 'static,
 {
     while !stop.load(Ordering::Relaxed) {
-        let Ok((mut stream, peer)) = listener.accept() else {
-            continue;
+        let (mut stream, peer) = match listener.accept() {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                tracing::warn!(%error, "accept failed on the database server");
+                continue;
+            }
         };
         if stop.load(Ordering::Relaxed) {
             return;
         }
+        tracing::trace!(%peer, "connection accepted");
         let session = session.clone();
         // One thread per player. A link network has at most a handful, and a
         // slow session must not stall the others.
         drop(std::thread::spawn(move || {
             if let Err(error) = session(&mut stream) {
-                tracing::debug!(%peer, %error, "session ended");
+                tracing::warn!(%peer, %error, "session ended with an error");
             }
         }));
     }
@@ -202,11 +260,14 @@ where
 /// Reads the fixed port-query request and answers with a two-byte port.
 fn answer_port_query(stream: &mut TcpStream, port: u16) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let peer = stream.peer_addr().map_or_else(|_| "?".to_owned(), |a| a.to_string());
     let mut request = vec![0_u8; PORT_QUERY_REQUEST.len()];
     stream.read_exact(&mut request)?;
     if request != PORT_QUERY_REQUEST {
         // Not the request we know; say nothing rather than guess.
+        tracing::warn!(%peer, request = %hex(&request), "not the port query; unanswered");
         return Ok(());
     }
+    tracing::debug!(%peer, port, "port query answered");
     stream.write_all(&port.to_be_bytes())
 }

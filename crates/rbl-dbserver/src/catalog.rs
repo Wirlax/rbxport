@@ -138,4 +138,10 @@ pub trait Catalog: Send + Sync {
 
     /// A player loaded (`Some`) or unloaded (`None`) one of our tracks.
     fn loaded(&self, _player: u8, _track: Option<u32>) {}
+
+    /// Whether a player has loaded this track since the session began: the
+    /// rows a player greys as played.
+    fn played(&self, _track: u32) -> bool {
+        false
+    }
 }
