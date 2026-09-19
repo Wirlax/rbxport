@@ -167,18 +167,30 @@ impl Session {
         F: Fn(LinkStatusDto) + Send + 'static,
     {
         let available = rbl_link::interfaces();
-        let chosen = match interface {
-            Some(name) => available.iter().find(|i| i.name == name).cloned(),
-            None => state
-                .link_peers()
+        tracing::debug!(
+            interfaces = ?available.iter().map(|i| format!("{} {}/{}", i.name, i.address, i.netmask)).collect::<Vec<_>>(),
+            "interfaces LINK could run on"
+        );
+        let chosen = if let Some(name) = interface {
+            available.iter().find(|i| i.name == name).cloned()
+        } else {
+            let peers = state.link_peers();
+            let toward = peers
                 .iter()
-                .find_map(|peer| rbl_link::interface_toward(&available, peer.address))
-                .or_else(|| available.first().cloned()),
+                .find_map(|peer| rbl_link::interface_toward(&available, peer.address).map(|i| (peer.address, i)));
+            if let Some((peer, i)) = toward {
+                tracing::debug!(interface = %i.name, %peer, "interface chosen: the one that reaches a device already heard");
+                Some(i)
+            } else {
+                tracing::debug!(peers = peers.len(), "no device heard on any interface; taking the first");
+                available.first().cloned()
+            }
         }
         .ok_or_else(|| match interface {
             Some(name) => format!("No network interface called {name}."),
             None => "No network interface to run LINK on.".to_owned(),
         })?;
+        tracing::info!(interface = %chosen.name, address = %chosen.address, "LINK running on an interface");
 
         let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state)));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
@@ -246,6 +258,8 @@ impl Session {
     pub fn set_master(&self, on: bool) {
         if let Some(export) = &self.export {
             export.set_master(on);
+        } else {
+            tracing::debug!(on, "master asked while LINK is off; nothing to do");
         }
     }
 
@@ -311,9 +325,12 @@ where
     match rbl_link::Watcher::start(rbl_link::Ports::REKORDBOX.announce, move |players| {
         report(players.iter().map(PeerDto::from_player).collect());
     }) {
-        Ok(watcher) => Some(watcher),
+        Ok(watcher) => {
+            tracing::info!("watching the network for players");
+            Some(watcher)
+        }
         Err(error) => {
-            tracing::info!(%error, "network watcher not started (rekordbox may hold the port)");
+            tracing::warn!(%error, "network watcher not started (rekordbox may hold the port)");
             None
         }
     }

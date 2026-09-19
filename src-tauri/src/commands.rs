@@ -523,11 +523,14 @@ pub async fn start_link_export<R: tauri::Runtime>(
     interface: Option<String>,
 ) -> AppResult<LinkStatusDto> {
     if let Some(status) = state.link_status() {
+        tracing::debug!("LINK asked to start while running; the running session stands");
         return Ok(status);
     }
     if let Some(problem) = crate::link::refusal() {
+        tracing::warn!(%problem, "LINK refused");
         return Ok(LinkStatusDto::off(Some(problem)));
     }
+    tracing::info!(interface = interface.as_deref().unwrap_or("auto"), "LINK starting");
     let owner = Arc::clone(&state);
     let emitter = app.clone();
     let started = blocking("start_link_export", move || {
@@ -545,7 +548,10 @@ pub async fn start_link_export<R: tauri::Runtime>(
             let _ = tauri::Emitter::emit(&app, "link:status", status.clone());
             Ok(status)
         }
-        Err(problem) => Ok(LinkStatusDto::off(Some(problem))),
+        Err(problem) => {
+            tracing::error!(%problem, "LINK could not start");
+            Ok(LinkStatusDto::off(Some(problem)))
+        }
     }
 }
 
@@ -558,6 +564,11 @@ pub async fn stop_link_export<R: tauri::Runtime>(
     // Dropped outside the lock, and off the async thread: stopping joins
     // the servers' threads.
     let session = state.set_link(None);
+    if session.is_some() {
+        tracing::info!("LINK stopping");
+    } else {
+        tracing::debug!("LINK asked to stop while off");
+    }
     blocking("stop_link_export", move || {
         drop(session);
         Ok(())
@@ -576,7 +587,11 @@ pub async fn link_load_track(
     track_id: String,
 ) -> AppResult<()> {
     let id: u32 = track_id.parse().map_err(|_| AppError::internal(format!("bad track id: {track_id}")))?;
-    state.link_load_track(player_number, id).map_err(AppError::internal)
+    tracing::info!(player_number, track_id = id, "asking a player to load a track");
+    state.link_load_track(player_number, id).map_err(|reason| {
+        tracing::warn!(player_number, track_id = id, %reason, "the player could not be asked");
+        AppError::internal(reason)
+    })
 }
 
 /// Becomes the network's tempo master, or resigns, and returns LINK's fresh

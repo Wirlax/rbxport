@@ -14,6 +14,7 @@ pub mod grid;
 mod diagnostics;
 mod explorer;
 mod link;
+pub mod logging;
 pub mod menu;
 pub mod player;
 mod preferences;
@@ -269,21 +270,6 @@ fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
     }
 }
 
-/// Logging, and a panic hook that puts the panic in the log rather than on a
-/// stderr nobody is watching.
-fn install_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rbxport=info,rbl_db=info,rbl_index=info".into()),
-        )
-        .init();
-
-    std::panic::set_hook(Box::new(|info| {
-        tracing::error!(%info, "panic");
-    }));
-}
-
 /// Names a port for `WebView2`'s remote debugging, on Windows.
 ///
 /// Set, the webviews accept a Chrome `DevTools` Protocol connection on
@@ -310,7 +296,7 @@ pub fn browser_args() -> Option<String> {
 
 #[allow(clippy::too_many_lines, reason = "the command list is one line per command, and that is the whole function")]
 pub fn run() {
-    install_tracing();
+    logging::install();
 
     let mut context = tauri::generate_context!();
     if let Some(args) = browser_args() {

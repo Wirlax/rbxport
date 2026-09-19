@@ -39,6 +39,7 @@ impl Watcher {
         let socket = shared_udp(announce_port)?;
         socket.set_broadcast(true)?;
         socket.set_read_timeout(Some(POLL))?;
+        tracing::debug!(port = socket.local_addr().map_or(announce_port, |a| a.port()), "watching the announce port");
 
         let stop = Arc::new(AtomicBool::new(false));
         let peers = Arc::new(Mutex::new(Vec::new()));
@@ -51,12 +52,26 @@ impl Watcher {
                 let mut buffer = [0_u8; DATAGRAM];
                 while !stop.load(Ordering::Relaxed) {
                     let now = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    if let Ok((len, _)) = socket.recv_from(&mut buffer) {
-                        if let Ok(keep_alive) = KeepAlive::decode(buffer.get(..len).unwrap_or(&[])) {
+                    if let Ok((len, from)) = socket.recv_from(&mut buffer) {
+                        let packet = buffer.get(..len).unwrap_or(&[]);
+                        tracing::trace!(%from, len, bytes = %rbl_prolink::hex(packet, 64), "announce port received");
+                        if let Ok(keep_alive) = KeepAlive::decode(packet) {
+                            if !table.peers().iter().any(|p| p.device_number == keep_alive.device_number) {
+                                tracing::info!(
+                                    number = keep_alive.device_number,
+                                    name = %keep_alive.name,
+                                    kind = ?keep_alive.device_type,
+                                    ip = %keep_alive.ip,
+                                    "device heard on the network"
+                                );
+                            }
                             table.observe(&keep_alive, now);
                         }
                     }
-                    table.expire(now);
+                    let expired = table.expire(now);
+                    if expired > 0 {
+                        tracing::info!(expired, "devices silent too long; gone from the network");
+                    }
                     if last_report.elapsed() >= REPORT_EVERY {
                         last_report = Instant::now();
                         let list: Vec<Player> = table
@@ -93,6 +108,7 @@ impl Watcher {
         if let Some(thread) = self.thread.take() {
             drop(thread.join());
         }
+        tracing::debug!("announce port watcher stopped");
     }
 }
 

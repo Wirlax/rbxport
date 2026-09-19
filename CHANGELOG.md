@@ -15,6 +15,14 @@ the version numbers [Semantic Versioning](https://semver.org/).
   what is happening and what changed, and offers Restart Now.
 
 ### Added
+- A log file: everything the app reports goes to stdout and to a daily file
+  under the app's data directory (`rbxport/logs`, seven days kept), so a
+  LINK session with a player can be read back afterwards. `LOG_LEVEL`
+  picks the level (`error`, `warn`, `info`, `debug`, `trace`).
+- LINK says what it is doing: every device heard and lost, every player's
+  loaded track and master change, every database session a player opens
+  and closes, every mount and file it reads, at the level each deserves;
+  `trace` adds every packet, request and RPC call.
 - A Linux build. Each release now ships an AppImage, which the app can
   update itself from, and a .deb, beside the macOS disk image and the
   Windows installer.

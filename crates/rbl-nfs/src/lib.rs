@@ -63,6 +63,61 @@ pub mod mount_proc {
     pub const EXPORT: u32 = 5;
 }
 
+/// What a call is, for a log line: `mount MNT`, `nfs READ`, `portmap
+/// GETPORT`; a number for what has no name.
+pub fn call_name(program: u32, procedure: u32) -> String {
+    let (program_name, procedure_name) = match program {
+        PROGRAM_PORTMAP => (
+            "portmap",
+            match procedure {
+                portmap_proc::NULL => Some("NULL"),
+                portmap_proc::GETPORT => Some("GETPORT"),
+                _ => None,
+            },
+        ),
+        PROGRAM_MOUNT => (
+            "mount",
+            match procedure {
+                mount_proc::NULL => Some("NULL"),
+                mount_proc::MNT => Some("MNT"),
+                mount_proc::DUMP => Some("DUMP"),
+                mount_proc::UMNT => Some("UMNT"),
+                mount_proc::UMNTALL => Some("UMNTALL"),
+                mount_proc::EXPORT => Some("EXPORT"),
+                _ => None,
+            },
+        ),
+        PROGRAM_NFS => (
+            "nfs",
+            match procedure {
+                nfs_proc::NULL => Some("NULL"),
+                nfs_proc::GETATTR => Some("GETATTR"),
+                nfs_proc::SETATTR => Some("SETATTR"),
+                nfs_proc::LOOKUP => Some("LOOKUP"),
+                nfs_proc::READLINK => Some("READLINK"),
+                nfs_proc::READ => Some("READ"),
+                nfs_proc::WRITE => Some("WRITE"),
+                nfs_proc::CREATE => Some("CREATE"),
+                nfs_proc::REMOVE => Some("REMOVE"),
+                nfs_proc::RENAME => Some("RENAME"),
+                nfs_proc::LINK => Some("LINK"),
+                nfs_proc::SYMLINK => Some("SYMLINK"),
+                nfs_proc::MKDIR => Some("MKDIR"),
+                nfs_proc::RMDIR => Some("RMDIR"),
+                nfs_proc::READDIR => Some("READDIR"),
+                nfs_proc::STATFS => Some("STATFS"),
+                _ => None,
+            },
+        ),
+        _ => ("program", None),
+    };
+    match (program, procedure_name) {
+        (PROGRAM_PORTMAP | PROGRAM_MOUNT | PROGRAM_NFS, Some(name)) => format!("{program_name} {name}"),
+        (PROGRAM_PORTMAP | PROGRAM_MOUNT | PROGRAM_NFS, None) => format!("{program_name} procedure {procedure}"),
+        _ => format!("program {program} procedure {procedure}"),
+    }
+}
+
 /// NFS version 2 procedures.
 pub mod nfs_proc {
     pub const NULL: u32 = 0;
@@ -189,7 +244,7 @@ impl Server {
     pub fn handle(&self, datagram: &[u8]) -> Option<Vec<u8>> {
         let call = match rpc::Call::decode(datagram) {
             Ok(call) => call,
-            Err(rpc::RpcError::Version(_)) => {
+            Err(rpc::RpcError::Version(version)) => {
                 // We can still read the xid: tell it which version we speak.
                 let xid = u32::from_be_bytes([
                     *datagram.first()?,
@@ -197,17 +252,33 @@ impl Server {
                     *datagram.get(2)?,
                     *datagram.get(3)?,
                 ]);
+                tracing::warn!(xid, version, "RPC call of a version this server does not speak");
                 return Some(rpc::rpc_mismatch(xid, rpc::RPC_VERSION, rpc::RPC_VERSION));
             }
-            Err(_) => return None,
+            Err(error) => {
+                tracing::debug!(%error, len = datagram.len(), "datagram is not an RPC call; ignored");
+                return None;
+            }
         };
+        tracing::trace!(
+            xid = call.xid,
+            call = %call_name(call.program, call.procedure),
+            version = call.version,
+            args = call.arguments.len(),
+            "RPC call"
+        );
 
-        Some(match call.program {
+        let reply = match call.program {
             PROGRAM_PORTMAP => self.portmap(&call),
             PROGRAM_MOUNT => self.mount(&call),
             PROGRAM_NFS => self.nfs(&call),
-            _ => rpc::accepted_empty(call.xid, rpc::accept::PROG_UNAVAIL),
-        })
+            _ => {
+                tracing::warn!(xid = call.xid, program = call.program, "RPC call for a program this server does not have");
+                rpc::accepted_empty(call.xid, rpc::accept::PROG_UNAVAIL)
+            }
+        };
+        tracing::trace!(xid = call.xid, len = reply.len(), "RPC reply");
+        Some(reply)
     }
 
     fn portmap(&self, call: &rpc::Call<'_>) -> Vec<u8> {
@@ -234,6 +305,7 @@ impl Server {
                 } else {
                     0
                 };
+                tracing::debug!(xid = call.xid, program, protocol, port, "portmap GETPORT answered");
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
                 writer.u32(u32::from(port));
                 writer.into_bytes()
@@ -250,25 +322,34 @@ impl Server {
             // Unmounting has nothing to undo: we hold no per-client state, so
             // a client that never unmounts costs us nothing.
             mount_proc::NULL | mount_proc::UMNT | mount_proc::UMNTALL => {
+                if call.procedure != mount_proc::NULL {
+                    tracing::debug!(xid = call.xid, "unmount; nothing held, acknowledged");
+                }
                 rpc::accepted_empty(call.xid, rpc::accept::SUCCESS)
             }
             mount_proc::MNT => {
                 let mut reader = call.reader();
                 let Ok(path) = reader.utf16() else {
+                    tracing::warn!(xid = call.xid, "mount request with an unreadable path");
                     return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
                 };
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
-                match self.exports.get(&path).and_then(|vfs| vfs.handle(vfs.root())) {
-                    Some(handle) => {
-                        writer.u32(nfs_status::OK).opaque_fixed(handle.as_bytes());
-                    }
-                    None => {
-                        writer.u32(nfs_status::NOENT);
-                    }
+                if let Some(handle) = self.exports.get(&path).and_then(|vfs| vfs.handle(vfs.root())) {
+                    tracing::info!(xid = call.xid, %path, "player mounted an export");
+                    writer.u32(nfs_status::OK).opaque_fixed(handle.as_bytes());
+                } else {
+                    tracing::warn!(xid = call.xid, %path, exports = ?self.exports.names(), "mount of a path that is not exported");
+                    writer.u32(nfs_status::NOENT);
                 }
                 writer.into_bytes()
             }
             mount_proc::DUMP | mount_proc::EXPORT => {
+                tracing::debug!(
+                    xid = call.xid,
+                    exports = ?self.exports.names(),
+                    host = self.export_host.as_deref().unwrap_or("-"),
+                    "export list asked for"
+                );
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
                 for name in self.exports.names() {
                     // Each entry is an optional-list link: present, the export
@@ -287,7 +368,10 @@ impl Server {
                 writer.none();
                 writer.into_bytes()
             }
-            _ => rpc::accepted_empty(call.xid, rpc::accept::PROC_UNAVAIL),
+            _ => {
+                tracing::warn!(xid = call.xid, procedure = call.procedure, "mount procedure this server does not have");
+                rpc::accepted_empty(call.xid, rpc::accept::PROC_UNAVAIL)
+            }
         }
     }
 
@@ -364,20 +448,25 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         if name.len() > MAX_NAME {
+            tracing::warn!(xid = call.xid, len = name.len(), "lookup of a name too long");
             return Self::status_only(call.xid, nfs_status::NAMETOOLONG);
         }
         let Some((vfs, parent)) = self.locate(&handle) else {
+            tracing::warn!(xid = call.xid, %name, "lookup under a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         if vfs.kind(parent) != Some(NodeKind::Directory) {
+            tracing::warn!(xid = call.xid, %name, "lookup under a file, not a directory");
             return Self::status_only(call.xid, nfs_status::NOTDIR);
         }
         let found = vfs
             .child(parent, &name)
             .and_then(|index| Some((vfs.handle(index)?, vfs.attributes(index)?)));
         let Some((child_handle, attributes)) = found else {
+            tracing::debug!(xid = call.xid, parent = %vfs.name(parent).unwrap_or(""), %name, "lookup found nothing");
             return Self::status_only(call.xid, nfs_status::NOENT);
         };
+        tracing::debug!(xid = call.xid, %name, size = attributes.size, "lookup found a node");
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
         writer.u32(nfs_status::OK).opaque_fixed(child_handle.as_bytes());
         write_attributes(&mut writer, &attributes);
@@ -393,21 +482,32 @@ impl Server {
             return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
         };
         let Some((vfs, index)) = self.locate(&handle) else {
+            tracing::warn!(xid = call.xid, offset, count, "read through a stale handle");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
         if vfs.kind(index) == Some(NodeKind::Directory) {
+            tracing::warn!(xid = call.xid, "read of a directory");
             return Self::status_only(call.xid, nfs_status::ISDIR);
         }
         let (Some(source), Some(attributes)) = (vfs.source(index), vfs.attributes(index)) else {
+            tracing::warn!(xid = call.xid, "read of a node with no file behind it");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
 
         let wanted = (count as usize).min(MAX_READ);
+        if offset == 0 {
+            tracing::info!(xid = call.xid, file = %source.display(), size = attributes.size, "player started reading a file");
+        }
         // A file that vanished between the export and the read is the normal
         // case here, not an I/O fault worth distinguishing.
-        let Ok(data) = self.read_at(source, u64::from(offset), wanted) else {
-            return Self::status_only(call.xid, nfs_status::IO);
+        let data = match self.read_at(source, u64::from(offset), wanted) {
+            Ok(data) => data,
+            Err(error) => {
+                tracing::warn!(xid = call.xid, file = %source.display(), offset, wanted, %error, "read failed");
+                return Self::status_only(call.xid, nfs_status::IO);
+            }
         };
+        tracing::trace!(xid = call.xid, offset, wanted, got = data.len(), "read served");
 
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
         writer.u32(nfs_status::OK);
@@ -455,6 +555,15 @@ impl Server {
             );
         }
         let eof = at >= children.len();
+        tracing::debug!(
+            xid = call.xid,
+            directory = %vfs.name(index).unwrap_or(""),
+            cookie,
+            sent = at.saturating_sub(cookie as usize),
+            of = children.len(),
+            eof,
+            "readdir served"
+        );
         writer.none().u32(u32::from(eof));
         writer.into_bytes()
     }

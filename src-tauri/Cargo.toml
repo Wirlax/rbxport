@@ -27,6 +27,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The daily log file (`logging.rs`), written off the calling thread.
+tracing-appender = "0.2"
 rbl-core = { path = "../crates/rbl-core" }
 rbl-db = { path = "../crates/rbl-db" }
 rbl-index = { path = "../crates/rbl-index" }

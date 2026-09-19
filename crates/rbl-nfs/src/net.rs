@@ -43,14 +43,18 @@ pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -
             Err(error) if is_timeout(&error) => continue,
             // A datagram whose peer has vanished surfaces here on some
             // platforms; it says nothing about the socket's health.
-            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => continue,
+            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => {
+                tracing::trace!(%error, "a peer went away; ignored");
+                continue;
+            }
             Err(error) => return Err(error),
         };
+        tracing::trace!(%from, len, "RPC datagram received");
         let Some(reply) = server.handle(buffer.get(..len).unwrap_or(&[])) else {
             continue;
         };
         if let Err(error) = socket.send_to(&reply, from) {
-            tracing::debug!(%from, %error, "could not send an RPC reply");
+            tracing::warn!(%from, %error, len = reply.len(), "could not send an RPC reply");
         }
     }
     Ok(())
@@ -96,6 +100,7 @@ impl Bound {
             mount_socket.local_addr()?,
             nfs_socket.local_addr()?,
         );
+        tracing::debug!(%portmap, %mount, %nfs, "file server bound");
 
         // Portmap must report the ports actually bound, which with ephemeral
         // ports are not known until now.
@@ -116,7 +121,7 @@ impl Bound {
             let stop = Arc::clone(&stop);
             threads.push(std::thread::spawn(move || {
                 if let Err(error) = serve(&server, &socket, &stop) {
-                    tracing::warn!(program = name, %error, "RPC socket stopped");
+                    tracing::error!(program = name, %error, "RPC socket stopped; players cannot read files");
                 }
             }));
         }
@@ -144,6 +149,7 @@ impl Bound {
             // recover here, and the caller is shutting down either way.
             drop(thread.join());
         }
+        tracing::debug!("file server stopped");
     }
 }
 

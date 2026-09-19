@@ -62,6 +62,16 @@ pub enum Argument {
 }
 
 impl Argument {
+    /// The argument for a log line: a number as is, text quoted, a blob by
+    /// its length.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Number(n) => n.to_string(),
+            Self::String(s) => format!("{s:?}"),
+            Self::Blob(b) => format!("<{} bytes>", b.len()),
+        }
+    }
+
     /// The tag that appears in the header's type list.
     fn arg_tag(&self) -> u8 {
         match self {
@@ -381,6 +391,59 @@ pub mod kind {
     pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;
     pub const EXTENDED_CUES_REPLY: u16 = 0x4e02;
     pub const ANLZ_TAG_REPLY: u16 = 0x4f02;
+
+    /// What a message kind is called, for a log line; `kind 0x....` for one
+    /// this server has no name for.
+    pub fn name(kind: u16) -> String {
+        match kind {
+            SETUP => "setup".to_owned(),
+            TEARDOWN => "teardown".to_owned(),
+            ROOT_MENU => "root menu".to_owned(),
+            ARTIST_MENU => "artist menu".to_owned(),
+            ALBUM_MENU => "album menu".to_owned(),
+            TRACK_MENU => "track menu".to_owned(),
+            HISTORY_MENU => "history menu".to_owned(),
+            KEY_MENU => "key menu".to_owned(),
+            ARTIST_ALBUMS => "artist's albums".to_owned(),
+            ALBUM_TRACKS => "album's tracks".to_owned(),
+            PLAYLIST_MENU => "playlist menu".to_owned(),
+            HISTORY_TRACKS => "history's tracks".to_owned(),
+            RELATED_KEYS => "related keys".to_owned(),
+            ARTIST_ALBUM_TRACKS => "artist's album tracks".to_owned(),
+            KEY_TRACKS => "key's tracks".to_owned(),
+            SEARCH => "search".to_owned(),
+            SORT_MENU => "sort menu".to_owned(),
+            YEARS => "years".to_owned(),
+            MONTHS => "months".to_owned(),
+            DAYS => "days".to_owned(),
+            DATE_TRACKS => "date's tracks".to_owned(),
+            METADATA => "metadata".to_owned(),
+            ARTWORK => "artwork".to_owned(),
+            WAVEFORM_PREVIEW => "waveform preview".to_owned(),
+            TRACK_INFO => "track info".to_owned(),
+            BEAT_GRID => "beat grid".to_owned(),
+            CUES => "cues".to_owned(),
+            WAVEFORM_DETAIL => "waveform detail".to_owned(),
+            EXTENDED_CUES => "extended cues".to_owned(),
+            ANLZ_TAG => "anlz tag (EXT)".to_owned(),
+            ANLZ_TAG_2EX => "anlz tag (2EX)".to_owned(),
+            RENDER => "render".to_owned(),
+            LOADED => "loaded".to_owned(),
+            MENU_HEADER => "menu header".to_owned(),
+            RENDER_HEADER => "render header".to_owned(),
+            ARTWORK_REPLY => "artwork reply".to_owned(),
+            ERROR => "error".to_owned(),
+            MENU_ITEM => "menu item".to_owned(),
+            MENU_FOOTER => "menu footer".to_owned(),
+            WAVEFORM_PREVIEW_REPLY => "waveform preview reply".to_owned(),
+            CUES_REPLY => "cues reply".to_owned(),
+            BEAT_GRID_REPLY => "beat grid reply".to_owned(),
+            WAVEFORM_DETAIL_REPLY => "waveform detail reply".to_owned(),
+            EXTENDED_CUES_REPLY => "extended cues reply".to_owned(),
+            ANLZ_TAG_REPLY => "anlz tag reply".to_owned(),
+            other => format!("kind {other:#06x}"),
+        }
+    }
 }
 
 

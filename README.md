@@ -24,6 +24,16 @@ pnpm test
 cargo test
 ```
 
+### Logs
+
+The app logs to stdout and to a daily file under
+`~/Library/Application Support/rbxport/logs` (macOS) or
+`%APPDATA%\rbxport\logs` (Windows), the last seven days kept. `LOG_LEVEL`
+sets the level for the app's own crates — `error`, `warn`, `info`, `debug`
+(the default) or `trace`, which adds LINK's packet-by-packet lines.
+`RUST_LOG` replaces the whole filter when a per-crate mix is wanted
+(`RUST_LOG=rbl_link=trace,rbxport=info`); `RBXPORT_LOG_DIR` moves the file.
+
 ## License
 
 rbxport is licensed under GPL-2.0-or-later. See [LICENSE](LICENSE) and

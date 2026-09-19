@@ -212,6 +212,60 @@ pub fn packet_kind(packet: &[u8]) -> Result<u8> {
     Ok(packet.get(0x0a).copied().unwrap_or(0))
 }
 
+/// What a packet kind on the announce port (50000) is called, for a log
+/// line; `kind 0x..` for one nobody has named.
+pub fn announce_kind_name(kind: u8) -> String {
+    match AnnounceKind::from_u8(kind) {
+        AnnounceKind::ClaimStage1 => "number claim 1".to_owned(),
+        AnnounceKind::ClaimStage2 => "number claim 2".to_owned(),
+        AnnounceKind::ClaimFinal => "number claim 3".to_owned(),
+        AnnounceKind::KeepAlive => "keep-alive".to_owned(),
+        AnnounceKind::Conflict => "number in use".to_owned(),
+        AnnounceKind::Announce => "announce".to_owned(),
+        AnnounceKind::Other(other) => format!("kind {other:#04x}"),
+    }
+}
+
+/// What a packet kind on the status port (50002) or the beat port (50001)
+/// is called, for a log line: the names the community analysis uses,
+/// `kind 0x..` for one it has no name for.
+pub fn status_kind_name(kind: u8) -> String {
+    match kind {
+        0x05 => "media query".to_owned(),
+        0x06 => "media response".to_owned(),
+        PLAYER_STATUS_KIND => "player status".to_owned(),
+        DEVICE_IDENTITY_QUERY_KIND => "device identity query".to_owned(),
+        0x11 => "device identity reply".to_owned(),
+        LOAD_TRACK_KIND => "load track".to_owned(),
+        LOAD_TRACK_ACK_KIND => "load track ack".to_owned(),
+        MASTER_HANDOFF_REQUEST_KIND => "master handoff request".to_owned(),
+        0x27 => "master handoff reply".to_owned(),
+        BEAT_KIND => "beat".to_owned(),
+        0x29 => "mixer status".to_owned(),
+        0x2a => "sync control".to_owned(),
+        LINK_HANDSHAKE_KIND => "link handshake".to_owned(),
+        _ => format!("kind {kind:#04x}"),
+    }
+}
+
+/// `packet` as hex pairs, for a trace line. Cut at `limit` bytes with a
+/// `…`, so a status packet does not fill a line on its own.
+pub fn hex(packet: &[u8], limit: usize) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(limit * 3 + 1);
+    for (i, byte) in packet.iter().take(limit).enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        // Writing to a `String` cannot fail.
+        let _ = write!(out, "{byte:02x}");
+    }
+    if packet.len() > limit {
+        out.push('…');
+    }
+    out
+}
+
 impl KeepAlive {
     /// rekordbox's own keep-alive for a given address: device 17, type 4,
     /// generation 3, and the tail bytes rekordbox 7.2.11 sends.
