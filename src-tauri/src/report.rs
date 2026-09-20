@@ -1,6 +1,7 @@
 //! Local support reports. The attachment is captured once for preview and
 //! passed unchanged into the ZIP; saving never reads additional logs.
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::fmt::Write as _;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::error::{AppError, AppResult};
 
@@ -36,7 +37,6 @@ pub async fn report_attachment(player: State<'_, std::sync::Arc<crate::player::P
             sysinfo::System::os_version().unwrap_or_default(), std::env::consts::ARCH,
             health.load * 100.0, health.xruns);
         let sample = crate::diagnostics::sample_shared();
-        use std::fmt::Write as _;
         let _ = writeln!(text, "Process CPU: {:.1}% of one core\nResident memory: {:.1} MiB", sample.cpu, sample.memory_mb);
         text.push_str("\nApplication log (latest file, last 1 MiB)\n");
         text.push_str(&log_tail(&crate::logging::log_dir())?);
@@ -47,7 +47,7 @@ pub async fn report_attachment(player: State<'_, std::sync::Arc<crate::player::P
 fn log_tail(dir: &std::path::Path) -> AppResult<String> {
     let mut paths: Vec<_> = match std::fs::read_dir(dir) {
         Ok(entries) => entries.filter_map(Result::ok).map(|entry| entry.path())
-            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rbxport") && n.ends_with(".log"))).collect(),
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rbxport")) && p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("log"))).collect(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok("No application log available.\n".into()),
         Err(e) => return Err(AppError::internal(format!("The log directory could not be read: {e}"))),
     };
