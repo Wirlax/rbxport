@@ -56,6 +56,7 @@ import {
   type PadMode,
   beatAtMs,
   beatLoopRange,
+  tempoAtMs,
 } from "@/lib/player";
 import { type DeckLoop, usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
@@ -704,6 +705,11 @@ export const Player = memo(function Player({
   // The tempo, from the grid where there is one: an edit that changes it
   // reaches here before the browser's row is re-read.
   const bpmX100 = gridState?.bpmX100 ?? track?.bpmX100 ?? 0;
+  // The tempo under the playhead, for the GRID panel's field: a grid that
+  // changes tempo partway through has to read as the tempo where the edits
+  // would land, not as the one it started at. The state's tempo is the first
+  // beat's, which is all there is before the grid arrives.
+  const gridBpmX100 = tempoAtMs(grid, playback.position * 1000) || bpmX100;
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [ownBars, setOwnBars] = useState<number>(DETAIL_BARS);
   // Linked or its own, and the setter follows whichever it is: a controlled
@@ -1991,14 +1997,14 @@ export const Player = memo(function Player({
                   {GRID_EDITS.map((group, at) => (
                     <div key={group[0]?.id ?? at} className={styles.editPair}>
                       {at === 1 ? (
-                        // The tempo the grid has — or, while tapping, the
-                        // tempo the taps so far describe.
+                        // The tempo the grid has under the playhead — or,
+                        // while tapping, the tempo the taps so far describe.
                         <span
                           className={styles.bpmField}
                           data-testid="grid-bpm"
                           data-tapping={gridEditor.tapBpmX100 !== null || undefined}
                         >
-                          {formatBpm(gridEditor.tapBpmX100 ?? bpmX100)}
+                          {formatBpm(gridEditor.tapBpmX100 ?? gridBpmX100)}
                         </span>
                       ) : null}
                       {group.map((edit) => {

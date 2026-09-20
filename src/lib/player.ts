@@ -326,6 +326,12 @@ export interface BeatGrid {
   times: Uint32Array;
   /** Each beat's number within its bar, 1 to 4. */
   numbers: Uint8Array;
+  /**
+   * The tempo x100 at each beat. A grid may change tempo partway through —
+   * an edit from a CUT point, or a track that simply speeds up — so this is
+   * per beat rather than one number for the track.
+   */
+  tempos: Uint16Array;
 }
 
 /**
@@ -340,27 +346,38 @@ export function subdivideGrid(grid: BeatGrid, divisions: number): BeatGrid {
   const beats = grid.times.length;
   const times = new Uint32Array((beats - 1) * steps + 1);
   const numbers = new Uint8Array(times.length);
+  const tempos = new Uint16Array(times.length);
   let at = 0;
   for (let i = 0; i < beats - 1; i++) {
     const from = grid.times[i] ?? 0;
     const to = grid.times[i + 1] ?? from;
     const number = grid.numbers[i] ?? 1;
+    const tempo = grid.tempos[i] ?? 0;
     for (let step = 0; step < steps; step++) {
       times[at] = Math.round(from + ((to - from) * step) / steps);
       numbers[at] = number;
+      tempos[at] = tempo;
       at++;
     }
   }
   times[at] = grid.times[beats - 1] ?? 0;
   numbers[at] = grid.numbers[beats - 1] ?? 1;
-  return { times, numbers };
+  tempos[at] = grid.tempos[beats - 1] ?? 0;
+  return { times, numbers, tempos };
 }
 
-/** Bytes one beat takes on the wire: a little-endian `u32`, then its number. */
-const BEAT_BYTES = 5;
+/**
+ * Bytes one beat takes on the wire: a little-endian `u32` of milliseconds,
+ * its number in the bar, then a little-endian `u16` of the tempo there x100.
+ */
+const BEAT_BYTES = 7;
 
 /** An empty grid, so a track without analysis is still a `BeatGrid`. */
-export const NO_BEATS: BeatGrid = { times: new Uint32Array(), numbers: new Uint8Array() };
+export const NO_BEATS: BeatGrid = {
+  times: new Uint32Array(),
+  numbers: new Uint8Array(),
+  tempos: new Uint16Array(),
+};
 
 /**
  * Reads the backend's beat bytes.
@@ -374,12 +391,14 @@ export function parseBeatGrid(bytes: Uint8Array): BeatGrid {
   if (count === 0) return NO_BEATS;
   const times = new Uint32Array(count);
   const numbers = new Uint8Array(count);
+  const tempos = new Uint16Array(count);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let i = 0; i < count; i++) {
     times[i] = view.getUint32(i * BEAT_BYTES, true);
     numbers[i] = view.getUint8(i * BEAT_BYTES + 4);
+    tempos[i] = view.getUint16(i * BEAT_BYTES + 5, true);
   }
-  return { times, numbers };
+  return { times, numbers, tempos };
 }
 
 /**
@@ -422,6 +441,24 @@ export function beatsIn(
     out.push({ timeMs, downbeat: grid.numbers[i] === 1 });
   }
   return out;
+}
+
+/**
+ * The tempo x100 the grid holds at `ms`, or 0 when there is no grid.
+ *
+ * The tempo of the last beat at or before `ms`, so a grid that changes tempo
+ * partway through reads as the new one from the beat it changes at. Before
+ * the first beat it is the first beat's: the run-in to a track belongs to the
+ * tempo it starts at.
+ */
+export function tempoAtMs(grid: BeatGrid, ms: number): number {
+  const { times, tempos } = grid;
+  if (times.length === 0) return 0;
+  const at = lowerBound(times, ms);
+  // `lowerBound` gives the first beat at or after `ms`; the tempo runs from
+  // the beat before it, except at or before the first beat.
+  const beat = (times[at] ?? Number.POSITIVE_INFINITY) <= ms ? at : Math.max(at - 1, 0);
+  return tempos[beat] ?? 0;
 }
 
 /**

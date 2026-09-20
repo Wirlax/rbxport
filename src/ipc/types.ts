@@ -252,8 +252,9 @@ export interface Backend {
   analyseTrack(trackId: string): Promise<AnalysisResult>;
 
   /**
-   * A track's whole beat grid, as raw bytes: five per beat, a little-endian
-   * `u32` of milliseconds and the beat's number in its bar.
+   * A track's whole beat grid, as raw bytes: seven per beat, a little-endian
+   * `u32` of milliseconds, the beat's number in its bar, and a little-endian
+   * `u16` of the tempo there x100.
    *
    * Whole and once per track rather than a window at a time. Windowing it
    * still re-read and re-parsed the entire analysis file on every fetch, which

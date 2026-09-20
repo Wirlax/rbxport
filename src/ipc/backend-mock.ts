@@ -1436,16 +1436,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The track's grid as the store holds it — a steady grid at the row's
     // own BPM until the GRID panel edits it — so the detail waveform has
     // beats to draw without an analysis file behind it. Encoded as the
-    // backend encodes it: five bytes a beat, milliseconds then the beat's
-    // number.
+    // backend encodes it: seven bytes a beat, milliseconds, the beat's
+    // number, then the tempo there x100.
     trackBeats: (trackId) => {
       const held = gridOf(trackId);
       if (!held) return wait(new Uint8Array());
-      const bytes = new Uint8Array(held.beats.length * 5);
+      const bytes = new Uint8Array(held.beats.length * 7);
       const view = new DataView(bytes.buffer);
       held.beats.forEach((beat, n) => {
-        view.setUint32(n * 5, beat.timeMs, true);
-        view.setUint8(n * 5 + 4, beat.number);
+        view.setUint32(n * 7, beat.timeMs, true);
+        view.setUint8(n * 7 + 4, beat.number);
+        view.setUint16(n * 7 + 5, beat.tempoX100, true);
       });
       return wait(bytes);
     },

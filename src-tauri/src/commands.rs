@@ -1190,16 +1190,18 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> Vec<(String, Vec<u8
 
 /// A track's whole beat grid, as raw bytes.
 ///
-/// Read from the `PQTZ` tag of the track's analysis file. Five bytes a beat —
-/// a little-endian `u32` of milliseconds and the beat's number in its bar —
-/// so a four-minute track costs about 2.5 KB and one fetch per track replaces
-/// a fetch per window. Windowing it meant re-reading and re-parsing the whole
-/// analysis file every time the playhead moved on, which is the expensive part
-/// whatever slice comes back.
+/// Read from the `PQTZ` tag of the track's analysis file. Seven bytes a beat —
+/// a little-endian `u32` of milliseconds, the beat's number in its bar, and a
+/// little-endian `u16` of the tempo there x100 — so a four-minute track costs
+/// about 3.5 KB and one fetch per track replaces a fetch per window. Windowing
+/// it meant re-reading and re-parsing the whole analysis file every time the
+/// playhead moved on, which is the expensive part whatever slice comes back.
 ///
-/// The beat number rather than a downbeat flag: it is what the tag holds, it
-/// is the same five bytes, and bar-aligned sync needs the position in the bar
-/// rather than only whether the bar started.
+/// The beat number rather than a downbeat flag: it is what the tag holds, and
+/// bar-aligned sync needs the position in the bar rather than only whether the
+/// bar started. The tempo is per beat rather than one for the track because a
+/// grid can change tempo partway through, and a track that speeds up at bar
+/// 135 has to read as its new tempo from there on.
 #[tauri::command]
 pub async fn track_beats(
     state: State<'_, Arc<AppState>>,
@@ -1215,9 +1217,10 @@ pub async fn track_beats(
         }
         let beats = read_beat_grid(&share, relative);
         let mut out: Vec<u8> = Vec::with_capacity(beats.len() * BEAT_BYTES);
-        for (time_ms, number) in beats {
+        for (time_ms, number, tempo_x100) in beats {
             out.extend_from_slice(&time_ms.to_le_bytes());
             out.push(number);
+            out.extend_from_slice(&tempo_x100.to_le_bytes());
         }
         Ok(out)
     })
@@ -1225,10 +1228,10 @@ pub async fn track_beats(
     .map(tauri::ipc::Response::new)
 }
 
-/// A track's beat grid from its `.DAT`: milliseconds and the beat's number
-/// in the bar (1 is the downbeat), at most `MAX_BEATS` of them. Empty for a
-/// track without one.
-fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8)> {
+/// A track's beat grid from its `.DAT`: milliseconds, the beat's number in
+/// the bar (1 is the downbeat) and the tempo there x100, at most `MAX_BEATS`
+/// of them. Empty for a track without one.
+fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8, u16)> {
     let path = share.join(relative.trim_start_matches(['/', '\\']));
     let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
     let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };
@@ -1239,14 +1242,17 @@ fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8)> {
             beats
                 .iter()
                 .take(MAX_BEATS)
-                .map(|beat| (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0)))
+                .map(|beat| {
+                    (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0), beat.tempo_x100)
+                })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-/// Bytes one beat takes in that encoding: `u32` milliseconds, then its number.
-const BEAT_BYTES: usize = 5;
+/// Bytes one beat takes in that encoding: `u32` milliseconds, its number, then
+/// a `u16` of the tempo there x100.
+const BEAT_BYTES: usize = 7;
 
 /// Points a deck at a track and starts loading it.
 ///
@@ -1283,7 +1289,7 @@ pub async fn deck_load<R: tauri::Runtime>(
     .await?;
     engine.set_metronome_grid(
         which,
-        &grid.iter().map(|&(ms, number)| (ms, number == 1)).collect::<Vec<_>>(),
+        &grid.iter().map(|&(ms, number, _)| (ms, number == 1)).collect::<Vec<_>>(),
     );
     Ok(())
 }

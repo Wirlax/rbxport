@@ -9,12 +9,13 @@ import {
 function grid(bpm: number, beats: number, offsetMs = 0) {
   const times = new Uint32Array(beats);
   const numbers = new Uint8Array(beats);
+  const tempos = new Uint16Array(beats).fill(Math.round(bpm * 100));
   const beatMs = 60_000 / bpm;
   for (let i = 0; i < beats; i++) {
     times[i] = Math.round(offsetMs + i * beatMs);
     numbers[i] = (i % BEATS_PER_BAR) + 1;
   }
-  return { times, numbers };
+  return { times, numbers, tempos };
 }
 
 function deck(bpm: number, position: number, offsetMs = 0): Deck {
@@ -66,7 +67,11 @@ describe("tempoFor", () => {
 
 describe("syncTo", () => {
   it("BPM SYNC matches the tempo and leaves the playhead where it is", () => {
-    const grid = { times: Uint32Array.from([0, 500, 1000, 1500, 2000]), numbers: Uint8Array.from([1, 2, 3, 4, 1]) };
+    const grid = {
+      times: Uint32Array.from([0, 500, 1000, 1500, 2000]),
+      numbers: Uint8Array.from([1, 2, 3, 4, 1]),
+      tempos: Uint16Array.from([12_000, 12_000, 12_000, 12_000, 12_000]),
+    };
     const leader: Deck = { bpmX100: 12000, position: 0, grid };
     const follower: Deck = { bpmX100: 12800, position: 0.25, grid };
     expect(syncTo(leader, follower, { type: "beat" }).nudge).not.toBe(0);

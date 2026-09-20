@@ -39,6 +39,7 @@ import {
   releaseCue,
   parseBeatGrid,
   subdivideGrid,
+  tempoAtMs,
   windowAround,
 } from "./player";
 
@@ -277,21 +278,31 @@ describe("cuesFor", () => {
 });
 
 describe("parseBeatGrid", () => {
-  /** The backend's encoding: a little-endian `u32` of ms, then the beat's number. */
-  const encode = (beats: readonly [number, number][]): Uint8Array => {
-    const bytes = new Uint8Array(beats.length * 5);
+  /**
+   * The backend's encoding: a little-endian `u32` of ms, the beat's number,
+   * then a little-endian `u16` of the tempo there x100.
+   */
+  const encode = (beats: readonly [number, number, number?][]): Uint8Array => {
+    const bytes = new Uint8Array(beats.length * 7);
     const view = new DataView(bytes.buffer);
-    beats.forEach(([ms, number], i) => {
-      view.setUint32(i * 5, ms, true);
-      view.setUint8(i * 5 + 4, number);
+    beats.forEach(([ms, number, tempo], i) => {
+      view.setUint32(i * 7, ms, true);
+      view.setUint8(i * 7 + 4, number);
+      view.setUint16(i * 7 + 5, tempo ?? 12_800, true);
     });
     return bytes;
   };
 
-  it("reads the five-byte records the backend writes", () => {
+  it("reads the seven-byte records the backend writes", () => {
     const grid = parseBeatGrid(encode([[0, 1], [469, 2], [938, 3], [1407, 4]]));
     expect(Array.from(grid.times)).toEqual([0, 469, 938, 1407]);
     expect(Array.from(grid.numbers)).toEqual([1, 2, 3, 4]);
+    expect(Array.from(grid.tempos)).toEqual([12_800, 12_800, 12_800, 12_800]);
+  });
+
+  it("keeps each beat's own tempo, so a grid can change tempo partway", () => {
+    const grid = parseBeatGrid(encode([[0, 1, 13_800], [435, 2, 13_800], [870, 3, 16_000]]));
+    expect(Array.from(grid.tempos)).toEqual([13_800, 13_800, 16_000]);
   });
 
   it("holds a whole track without turning it into objects", () => {
@@ -304,14 +315,14 @@ describe("parseBeatGrid", () => {
   });
 
   it("drops a truncated last record rather than reading past it", () => {
-    const grid = parseBeatGrid(encode([[0, 1], [469, 2]]).subarray(0, 7));
+    const grid = parseBeatGrid(encode([[0, 1], [469, 2]]).subarray(0, 10));
     expect(Array.from(grid.times)).toEqual([0]);
   });
 
   it("reads a view into a larger buffer, which is what the IPC hands back", () => {
-    const whole = new Uint8Array(15);
+    const whole = new Uint8Array(20);
     whole.set(encode([[1_000, 1]]), 5);
-    const grid = parseBeatGrid(whole.subarray(5, 10));
+    const grid = parseBeatGrid(whole.subarray(5, 12));
     expect(Array.from(grid.times)).toEqual([1_000]);
   });
 
@@ -323,11 +334,12 @@ describe("parseBeatGrid", () => {
 describe("beatsIn", () => {
   const grid = parseBeatGrid(
     (() => {
-      const bytes = new Uint8Array(1_000 * 5);
+      const bytes = new Uint8Array(1_000 * 7);
       const view = new DataView(bytes.buffer);
       for (let i = 0; i < 1_000; i++) {
-        view.setUint32(i * 5, i * 500, true);
-        view.setUint8(i * 5 + 4, (i % 4) + 1);
+        view.setUint32(i * 7, i * 500, true);
+        view.setUint8(i * 7 + 4, (i % 4) + 1);
+        view.setUint16(i * 7 + 5, 12_000, true);
       }
       return bytes;
     })(),
@@ -386,8 +398,34 @@ describe("releaseCue", () => {
   });
 });
 
+describe("tempoAtMs", () => {
+  // Castles In The Sky (EDCLV23 Closer): 138 to bar 135, then 160.
+  const grid = {
+    times: new Uint32Array([216, 651, 1086, 233_260, 233_635]),
+    numbers: new Uint8Array([1, 2, 3, 1, 2]),
+    tempos: new Uint16Array([13_800, 13_800, 13_800, 16_000, 16_000]),
+  };
+
+  it("is the tempo of the beat the head is standing on or has passed", () => {
+    expect(tempoAtMs(grid, 216)).toBe(13_800);
+    expect(tempoAtMs(grid, 900)).toBe(13_800);
+    expect(tempoAtMs(grid, 233_260)).toBe(16_000);
+    expect(tempoAtMs(grid, 233_500)).toBe(16_000);
+    expect(tempoAtMs(grid, 900_000)).toBe(16_000);
+  });
+
+  it("is the first beat's before the grid starts, and 0 without a grid", () => {
+    expect(tempoAtMs(grid, 0)).toBe(13_800);
+    expect(tempoAtMs(NO_BEATS, 1_000)).toBe(0);
+  });
+});
+
 describe("nearestBeatMs", () => {
-  const grid = { times: new Uint32Array([0, 500, 1000, 1500]), numbers: new Uint8Array([1, 2, 3, 4]) };
+  const grid = {
+    times: new Uint32Array([0, 500, 1000, 1500]),
+    numbers: new Uint8Array([1, 2, 3, 4]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000, 12_000]),
+  };
 
   it("snaps to whichever beat is closer", () => {
     expect(nearestBeatMs(grid, 460)).toBe(500);
@@ -410,7 +448,11 @@ describe("nearestBeatMs", () => {
 });
 
 describe("pressCue with quantize on", () => {
-  const grid = { times: new Uint32Array([0, 500, 1000, 1500]), numbers: new Uint8Array([1, 2, 3, 4]) };
+  const grid = {
+    times: new Uint32Array([0, 500, 1000, 1500]),
+    numbers: new Uint8Array([1, 2, 3, 4]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000, 12_000]),
+  };
 
   it("puts a new cue point on the nearest beat, and the playhead with it", () => {
     // The head has to move too: a cue point it is not standing on reads as
@@ -603,6 +645,7 @@ describe("subdivideGrid", () => {
   const grid = {
     times: Uint32Array.from([0, 500, 1000, 1500]),
     numbers: Uint8Array.from([1, 2, 3, 4]),
+    tempos: Uint16Array.from([12_000, 12_000, 12_000, 12_000]),
   };
 
   it("splits every beat into equal steps that keep their beat's number", () => {
@@ -620,7 +663,11 @@ describe("subdivideGrid", () => {
   it("leaves a whole-beat value, an empty grid and one beat alone", () => {
     expect(subdivideGrid(grid, 1)).toBe(grid);
     expect(subdivideGrid(NO_BEATS, 4)).toBe(NO_BEATS);
-    const one = { times: Uint32Array.from([100]), numbers: Uint8Array.from([1]) };
+    const one = {
+      times: Uint32Array.from([100]),
+      numbers: Uint8Array.from([1]),
+      tempos: Uint16Array.from([12_000]),
+    };
     expect(subdivideGrid(one, 4)).toBe(one);
   });
 });
@@ -714,7 +761,11 @@ describe("the tempo fader", () => {
 });
 
 describe("beatLoopRange", () => {
-  const grid = { times: new Uint32Array([1000, 1500, 2000, 2500, 3000]), numbers: new Uint8Array([1, 2, 3, 4, 1]) };
+  const grid = {
+    times: new Uint32Array([1000, 1500, 2000, 2500, 3000]),
+    numbers: new Uint8Array([1, 2, 3, 4, 1]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000, 12_000, 12_000]),
+  };
   it("runs from the snapped beat for the asked number of beats on the grid", () => {
     expect(beatLoopRange(grid, grid, 1620, 2)).toEqual([1500, 2500]);
     // Off the grid's end, the average beat carries the loop on.
@@ -725,19 +776,23 @@ describe("beatLoopRange", () => {
     expect(beatLoopRange(grid, grid, 1000, 0.5)).toEqual([1000, 1250]);
   });
   it("has nothing to count on without a grid", () => {
-    expect(beatLoopRange({ times: new Uint32Array(), numbers: new Uint8Array() }, null, 100, 4)).toBeNull();
+    expect(beatLoopRange(NO_BEATS, null, 100, 4)).toBeNull();
     expect(beatLoopRange(grid, grid, 1000, 0)).toBeNull();
   });
 });
 
 describe("beatAtMs", () => {
-  const grid = { times: new Uint32Array([1000, 1500, 2000]), numbers: new Uint8Array([1, 2, 3]) };
+  const grid = {
+    times: new Uint32Array([1000, 1500, 2000]),
+    numbers: new Uint8Array([1, 2, 3]),
+    tempos: new Uint16Array([12_000, 12_000, 12_000]),
+  };
   it("is the last beat at or before the head, 1-based", () => {
     expect(beatAtMs(grid, 1000)).toBe(1);
     expect(beatAtMs(grid, 1700)).toBe(2);
     expect(beatAtMs(grid, 2000)).toBe(3);
     expect(beatAtMs(grid, 9000)).toBe(3);
     expect(beatAtMs(grid, 10)).toBe(1);
-    expect(beatAtMs({ times: new Uint32Array(), numbers: new Uint8Array() }, 500)).toBe(1);
+    expect(beatAtMs(NO_BEATS, 500)).toBe(1);
   });
 });

@@ -104,14 +104,45 @@ test("CUT marks the point the edits apply from and clears on a second press", as
   await expect(page.getByTestId("grid-cut")).toBeVisible();
   await expect(button(page, "Double the tempo")).toHaveAttribute("title", /from the CUT point on/);
   // A tempo edit from the cut on leaves the grid's own tempo — the first
-  // beat's — where it was.
+  // beat's — where it was, which is what the browser's row shows.
   const original = await bpm(page);
   await button(page, "Double the tempo").click();
   await expect(button(page, "Undo the last grid edit")).toBeEnabled();
-  await expect(bpmField(page)).toHaveText(`${original.toFixed(2)}`);
+  await expect(page.locator('[role="gridcell"][data-col="bpm"]').nth(3)).toHaveText(
+    `${original.toFixed(2)}`,
+  );
+  // The field, though, reads the tempo under the playhead: run on past the
+  // cut and it is the doubled half's.
+  await playAWhile(page);
+  await expect(bpmField(page)).toHaveText(`${(original * 2).toFixed(2)}`);
   await cut.click();
   await expect(cut).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("grid-cut")).toHaveCount(0);
+});
+
+test("the BPM field reads the tempo under the playhead, not the grid's first beat", async ({ page }) => {
+  await load(page);
+  const original = await bpm(page);
+  const overview = await page.getByTestId("player-overview").boundingBox();
+  /** Seeks by clicking the overview `fraction` of the way along it. */
+  const seekTo = async (fraction: number) => {
+    await page.mouse.click(
+      (overview?.x ?? 0) + (overview?.width ?? 0) * fraction,
+      (overview?.y ?? 0) + (overview?.height ?? 0) / 2,
+    );
+  };
+
+  // Half way in, cut, and double from there: the second half of the track
+  // now runs at twice the tempo the first half does.
+  await seekTo(0.5);
+  await button(page, "Cut the grid here").click();
+  await button(page, "Double the tempo").click();
+  await expect(button(page, "Undo the last grid edit")).toBeEnabled();
+
+  await seekTo(0.75);
+  await expect(bpmField(page)).toHaveText(`${(original * 2).toFixed(2)}`);
+  await seekTo(0.1);
+  await expect(bpmField(page)).toHaveText(`${original.toFixed(2)}`);
 });
 
 test("tapping shows the taps' tempo and writes it once the tapping stops", async ({ page }) => {
