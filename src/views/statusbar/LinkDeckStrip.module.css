@@ -140,8 +140,8 @@
   background: var(--c-link-loaded);
   color: var(--c-black);
 }
-/* CUE or PLAY, lit orange once a track is loaded; its place is kept so
-   MASTER SYNC stand still. */
+/* CUE or PLAY: CUE is orange while sitting at the cue point; PLAY is green
+   while playing. The slot stays, so MASTER and SYNC do not move. */
 .lamp {
   flex: none;
   box-sizing: border-box;
@@ -150,6 +150,7 @@
   padding-right: 6px;
   color: var(--c-link-loaded);
 }
+.deck[data-playing] .lamp { color: var(--c-play-ring-on); }
 .lamp,
 .master,
 .sync {
@@ -162,6 +163,7 @@
 .sync { color: var(--c-link-dim); }
 .sync { margin-left: 8px; }
 .master[data-on] { color: var(--c-link-loaded); }
+.sync[data-on] { color: var(--c-link-loaded); }
 
 /* The track window: 6pt in from the box's sides, black; empty, the jog
    well at its left; loaded, the sleeve in the well and the title. */
@@ -255,6 +257,16 @@
   white-space: nowrap;
 }
 .mixerMaster[data-on] { color: var(--c-link-loaded); }
+.mixerLinkCue {
+  position: absolute;
+  bottom: 6px;
+  left: 10.5px;
+  color: var(--c-link-dim);
+  font-size: var(--f-size-link-lamp);
+  line-height: 1;
+  white-space: nowrap;
+}
+.mixerLinkCue[data-on] { color: var(--c-link-loaded); }
 
 /* Why LINK is unavailable, above the button. */
 .explain {
@@ -291,14 +303,6 @@
   display: flex;
   align-items: center;
   gap: var(--s-link-mc-gap);
-}
-.mcNumber {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--s-link-mc-number-w);
-  font-size: var(--f-size-link-label);
-  line-height: 1;
 }
 /* The BPM box: the tempo, then − and +. Orange outline as master, grey when
    not; the tempo takes the same colour. */

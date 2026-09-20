@@ -115,6 +115,7 @@ pub trait LibraryFacts: Send + Sync {
 
 /// A player as its packets describe it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools, reason = "independent flags off one status packet")]
 pub struct Player {
     pub number: u8,
     pub name: String,
@@ -124,6 +125,10 @@ pub struct Player {
     pub loaded: Option<u32>,
     pub playing: bool,
     pub master: bool,
+    /// The player has SYNC on: it is tracking the master's tempo.
+    pub sync: bool,
+    /// The player is sitting at its cue point (play state Cued or Cuing).
+    pub cued: bool,
     /// Tempo × 100 as the player reports it — its track's, at its pitch.
     pub bpm_x100: u32,
     pub last_seen: Instant,
@@ -655,6 +660,8 @@ fn hear_announce(
             loaded: None,
             playing: false,
             master: false,
+            sync: false,
+            cued: false,
             bpm_x100: 0,
             last_seen: Instant::now(),
         });
@@ -864,11 +871,14 @@ fn hear_player_status(
             loaded: None,
             playing: false,
             master: false,
+            sync: false,
+            cued: false,
             bpm_x100: 0,
             last_seen: Instant::now(),
         }
     });
     let loaded = from_us.then_some(state.track_id);
+    let cued = matches!(state.play_state, PlayState::Cued | PlayState::Cuing);
     if player.loaded != loaded {
         tracing::info!(
             number = player.number,
@@ -892,6 +902,8 @@ fn hear_player_status(
     player.loaded = loaded;
     player.playing = playing;
     player.master = state.is_master;
+    player.sync = state.is_sync;
+    player.cued = cued;
     player.bpm_x100 = tempo_x100(state.track_bpm, state.effective_pitch);
     player.last_seen = Instant::now();
 }

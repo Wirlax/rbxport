@@ -987,6 +987,12 @@ export interface LinkPlayer {
   loaded: { id: string; title: string; artist: string } | null;
   playing: boolean;
   master: boolean;
+  /** The player has SYNC on. */
+  sync: boolean;
+  /** The player is sitting at its cue point (play state Cued or Cuing). */
+  cued: boolean;
+  /** The mixer's Link Cue button. Always false; the backend cannot reach it yet. */
+  linkCue: boolean;
   /** The player has mounted the library, so a track can be sent to it. */
   mounted: boolean;
 }

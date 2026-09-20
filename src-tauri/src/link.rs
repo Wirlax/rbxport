@@ -80,6 +80,7 @@ impl PeerDto {
 /// A player on the link, as the window shows it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the player's lamps, sent together")]
 pub struct PlayerDto {
     pub number: u8,
     pub name: String,
@@ -88,6 +89,16 @@ pub struct PlayerDto {
     pub loaded: Option<LoadedDto>,
     pub playing: bool,
     pub master: bool,
+    /// The player has SYNC on.
+    pub sync: bool,
+    /// The player is sitting at its cue point (play state Cued or Cuing).
+    pub cued: bool,
+    /// The mixer's Link Cue button. Always false: it rides in the Touch Audio
+    /// timing packet (kind 0x20, byte 0x28) on UDP 50004, which a mixer only
+    /// unicasts to a device that asked for it with bit 5 of status byte 0xcd —
+    /// past the 0x38 our status packet is. Reaching it means binding 50004 and
+    /// growing that packet, not wiring up a field.
+    pub link_cue: bool,
     /// The player has mounted the library: a track can be sent to it.
     /// rekordbox refuses a drag to a player until then.
     pub mounted: bool,
@@ -354,6 +365,9 @@ fn players(library: Option<&rbl_index::Library>, snapshot: &Snapshot) -> Vec<Pla
             }),
             playing: player.playing,
             master: player.master,
+            sync: player.sync,
+            cued: player.cued,
+            link_cue: false,
             mounted: snapshot.mounted.contains(&player.address),
         })
         .collect()

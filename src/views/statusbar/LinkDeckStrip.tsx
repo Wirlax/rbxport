@@ -189,6 +189,7 @@ function PlayerDeck({
       className={styles.deck}
       data-master={player.master || undefined}
       data-loaded={loaded || undefined}
+      data-playing={player.playing || undefined}
       data-drop-target={droppable ? true : undefined}
       aria-label={`Player ${player.number}`}
       onDragOver={
@@ -210,15 +211,15 @@ function PlayerDeck({
     >
       <div className={styles.deckHead}>
         <span className={styles.deckNo}>{player.number}</span>
-        {/* rekordbox lights CUE beside a loaded deck's number; a playing
-            deck says so instead, since that is what a drop would interrupt.
-            The slot stays, so MASTER and SYNC do not move as tracks come
-            and go. */}
-        <span className={styles.lamp}>{loaded ? (player.playing ? "PLAY" : "CUE") : ""}</span>
+        {/* PLAY while playing; CUE while sitting at the cue point; blank
+            otherwise. The slot stays so MASTER and SYNC do not move. */}
+        <span className={styles.lamp}>
+          {player.playing ? "PLAY" : player.cued ? "CUE" : ""}
+        </span>
         <span className={styles.master} data-on={player.master || undefined}>
           MASTER
         </span>
-        <span className={styles.sync}>SYNC</span>
+        <span className={styles.sync} data-on={player.sync || undefined}>SYNC</span>
       </div>
       <div className={styles.deckBody}>
         {player.loaded ? (
@@ -265,7 +266,6 @@ function MasterClock({
   return (
     <div className={styles.masterClock} data-master={master || undefined}>
       <div className={styles.mcTop}>
-        <span className={styles.mcNumber}>1</span>
         <div className={styles.mcBpm}>
           <span className={styles.mcBpmValue}>{bpm.toFixed(2)}</span>
           <button
@@ -337,6 +337,9 @@ function MixerCell({ device }: { device: LinkPlayer }) {
       <span className={styles.mixerLabel}>{device.kind === "mixer" ? "MIXER" : device.name}</span>
       <span className={styles.mixerMaster} data-on={device.master || undefined}>
         MASTER
+      </span>
+      <span className={styles.mixerLinkCue} data-on={device.linkCue || undefined}>
+        LINK CUE
       </span>
     </div>
   );

@@ -85,6 +85,8 @@ impl Watcher {
                                 loaded: None,
                                 playing: false,
                                 master: false,
+                                sync: false,
+                                cued: false,
                                 bpm_x100: 0,
                                 last_seen: Instant::now(),
                             })

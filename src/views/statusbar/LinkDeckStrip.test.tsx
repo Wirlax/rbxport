@@ -62,6 +62,9 @@ const cdj = (over: Partial<LinkStatus["players"][number]> = {}): LinkStatus["pla
   loaded: null,
   playing: false,
   master: false,
+  sync: false,
+  cued: false,
+  linkCue: false,
   mounted: true,
   ...over,
 });
@@ -109,10 +112,64 @@ describe("LinkDeckStrip", () => {
     expect(host.querySelectorAll('[aria-label^="Player "]').length).toBe(2);
     expect(host.textContent).toContain("Bora Bora");
     expect(host.textContent).toContain("MASTER");
-    // The loaded deck lights its lamp: PLAY while playing, CUE otherwise.
+    // A playing deck says PLAY.
     expect(host.querySelector('[aria-label="Player 1"]')?.textContent).toContain("PLAY");
     expect(host.querySelector('[aria-label="Player 1"]')?.hasAttribute("data-loaded")).toBe(true);
     expect(host.querySelector('[aria-label="Player 2"]')?.hasAttribute("data-loaded")).toBe(false);
+  });
+
+  it("lights each lamp from what the player reports", () => {
+    const deck = (n: number) => host.querySelector(`[aria-label="Player ${n}"]`);
+    const lit = (n: number, lamp: string) =>
+      [...(deck(n)?.querySelectorAll("[data-on]") ?? [])].some((el) => el.textContent === lamp);
+
+    render({
+      peers: [peer()],
+      link: on([
+        // Playing: PLAY, and the deck is marked so the lamp goes green.
+        cdj({ number: 1, loaded: { id: "1", title: "A", artist: "X" }, playing: true }),
+        // Cued at its cue point: CUE.
+        cdj({ number: 2, address: "192.168.1.153", loaded: { id: "2", title: "B", artist: "Y" }, cued: true }),
+        // Loaded but neither playing nor cued: no lamp at all. This is the
+        // case that used to read CUE regardless.
+        cdj({ number: 3, address: "192.168.1.154", loaded: { id: "3", title: "C", artist: "Z" } }),
+      ]),
+      onToggle: () => {},
+    });
+
+    expect(deck(1)?.textContent).toContain("PLAY");
+    expect(deck(1)?.hasAttribute("data-playing")).toBe(true);
+    expect(deck(2)?.textContent).toContain("CUE");
+    expect(deck(2)?.hasAttribute("data-playing")).toBe(false);
+    expect(deck(3)?.textContent).not.toContain("CUE");
+    expect(deck(3)?.textContent).not.toContain("PLAY");
+
+    // MASTER and SYNC light independently of the track.
+    render({
+      peers: [peer()],
+      link: on([
+        cdj({ number: 1, master: true }),
+        cdj({ number: 2, address: "192.168.1.153", sync: true }),
+      ]),
+      onToggle: () => {},
+    });
+    expect(lit(1, "MASTER")).toBe(true);
+    expect(lit(1, "SYNC")).toBe(false);
+    expect(lit(2, "SYNC")).toBe(true);
+    expect(lit(2, "MASTER")).toBe(false);
+  });
+
+  it("shows the mixer's LINK CUE lamp, lit only when it is on", () => {
+    const mixer = () => host.querySelector('[aria-label="Mixer 33"]');
+    const djm = (over = {}) =>
+      cdj({ number: 33, name: "DJM-V5", kind: "mixer", address: "192.168.1.155", ...over });
+
+    render({ peers: [peer()], link: on([cdj({ number: 1 }), djm()]), onToggle: () => {} });
+    expect(mixer()?.textContent).toContain("LINK CUE");
+    expect([...(mixer()?.querySelectorAll("[data-on]") ?? [])].some((el) => el.textContent === "LINK CUE")).toBe(false);
+
+    render({ peers: [peer()], link: on([cdj({ number: 1 }), djm({ linkCue: true })]), onToggle: () => {} });
+    expect([...(mixer()?.querySelectorAll("[data-on]") ?? [])].some((el) => el.textContent === "LINK CUE")).toBe(true);
   });
 
   it("seats the mixer between the decks, as rekordbox does", () => {
