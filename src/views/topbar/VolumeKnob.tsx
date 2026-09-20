@@ -5,22 +5,22 @@
  * Dragged rather than clicked — a knob is a knob — and vertical, which is what
  * every mixer does: sideways on a control 18pt across is unusable.
  *
- * The scale is `volume.ts`'s: 0 at half past seven, 10 at five o'clock a
- * decibel under full, and past a notch 11 at half past five, full. While the
- * knob turns its reading is shown beside it. Reaching 10 the knob holds
- * there; keep pulling, through the notch, and it lets go to 11.
+ * The scale is `volume.ts`'s: 0 at 125° left of twelve, 5 straight up, 10
+ * at 125° right a decibel under full, and past a notch 11 at 140°, full.
+ * While the knob turns its reading is shown beside it. Reaching 10 the knob
+ * holds there; keep pulling, through the notch, and it lets go to 11.
  */
 import { useCallback, useRef, useState } from "react";
 
 import { gainToKnob, KNOB_FULL, KNOB_TOP, knobLabel, knobToGain } from "@/lib/volume";
 import styles from "./TopBar.module.css";
 
-/** Degrees the travel sweeps, from half past seven to five o'clock. */
-const SWEEP = 285;
+/** Degrees the travel sweeps, centred on twelve o'clock. */
+const SWEEP = 250;
 /** Where that sweep starts, measured clockwise from twelve o'clock. */
-const START = -135;
-/** Where 11 sits: half past five, a notch past the end of the travel. */
-const FULL_ANGLE = 165;
+const START = -SWEEP / 2;
+/** Where 11 sits: a notch of 15° past the end of the travel. */
+const FULL_ANGLE = START + SWEEP + 15;
 /** Pixels of drag for the whole travel. A short throw is a twitchy knob. */
 const THROW = 120;
 /**

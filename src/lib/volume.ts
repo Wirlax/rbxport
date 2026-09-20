@@ -3,7 +3,7 @@
  *
  * The knob reads 0 to 10, and 10 is a decibel under full: the headroom
  * every output is given. Past 10 is a notch, and past the notch is 11,
- * full level, drawn at half past five beyond the five o'clock 10. Between 0
+ * full level, drawn a notch beyond the 10 at the end of the travel. Between 0
  * and 10 the taper is logarithmic, forty decibels across the last decade,
  * so the bottom of the travel is quiet rather than silent-until-nine.
  */
