@@ -94,6 +94,26 @@ pub enum RelatedCriterion {
     Suggestion,
 }
 
+/// Search categories in the order shown by the browser's search menu.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchField {
+    #[default]
+    All, Title, Artist, Album, Genre, Year, Bpm, Composer, AlbumArtist,
+    Remixer, Label, Comment, OriginalArtist, MixName,
+}
+
+impl SearchField {
+    fn index(self) -> Option<usize> {
+        match self {
+            Self::All => None, Self::Title => Some(0), Self::Artist => Some(1), Self::Album => Some(2),
+            Self::Genre => Some(3), Self::Year => Some(4), Self::Bpm => Some(5), Self::Composer => Some(6),
+            Self::AlbumArtist => Some(7), Self::Remixer => Some(8), Self::Label => Some(9),
+            Self::Comment => Some(10), Self::OriginalArtist => Some(11), Self::MixName => Some(12),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ViewSpec {
     pub source: TrackSource,
@@ -128,11 +148,15 @@ impl View {
 impl Library {
     /// Builds a view. This is the only place ordering is decided.
     pub fn open_view(&self, spec: &ViewSpec) -> View {
+        self.open_view_scoped(spec, SearchField::All)
+    }
+
+    pub fn open_view_scoped(&self, spec: &ViewSpec, field: SearchField) -> View {
         let mut rows: Vec<Row> = self.source_rows(&spec.source);
 
         let query = fold(spec.query.trim());
         if !query.is_empty() {
-            rows.retain(|&r| self.row_matches(r, &query));
+            rows.retain(|&r| self.row_matches_in(r, &query, field));
         }
 
         // The filter bar, in the same pass as the search: a handful of integer
@@ -172,7 +196,12 @@ impl Library {
     }
 
     pub(crate) fn row_matches(&self, row: Row, folded_query: &str) -> bool {
-        let hay = self.search.get(row as usize);
+        self.row_matches_in(row, folded_query, SearchField::All)
+    }
+
+    pub(crate) fn row_matches_in(&self, row: Row, folded_query: &str, field: SearchField) -> bool {
+        let all = self.search.get(row as usize);
+        let hay = field.index().map_or(all, |index| all.split('\t').nth(index).unwrap_or(""));
         // Every token must appear, so "artbat 128" narrows as a user expects.
         folded_query.split_whitespace().all(|token| {
             memchr::memmem::find(hay.as_bytes(), token.as_bytes()).is_some()
@@ -253,14 +282,18 @@ impl Library {
     pub(crate) fn build_search(&mut self) {
         let mut search = crate::strings::StrColumn::with_capacity(self.count, self.count * 64);
         for row in 0..self.count {
-            let mut hay = String::with_capacity(96);
-            hay.push_str(self.title_folded.get(row));
-            hay.push(' ');
-            hay.push_str(self.artists.folded(self.artist.get(row).copied().unwrap_or(crate::NO_ID)));
-            hay.push(' ');
-            hay.push_str(self.albums.folded(self.album.get(row).copied().unwrap_or(crate::NO_ID)));
-            hay.push(' ');
-            hay.push_str(&fold(self.comment.get(row)));
+            let year = self.year.get(row).filter(|&&n| n != 0).map_or_else(String::new, u16::to_string);
+            let bpm = self.bpm_x100.get(row).filter(|&&n| n != 0).map_or_else(String::new, |n| format!("{}.{:02}", n / 100, n % 100));
+            let values = [
+                self.title.get(row), self.artists.name(self.artist.get(row).copied().unwrap_or(crate::NO_ID)),
+                self.albums.name(self.album.get(row).copied().unwrap_or(crate::NO_ID)),
+                self.genres.name(self.genre.get(row).copied().unwrap_or(crate::NO_ID)), &year, &bpm,
+                self.search_extra[0].get(row), self.search_extra[1].get(row), self.search_extra[2].get(row),
+                self.labels.name(self.label.get(row).copied().unwrap_or(crate::NO_ID)), self.comment.get(row),
+                self.search_extra[3].get(row), self.search_extra[4].get(row),
+            ];
+            // Tabs delimit fields; embedded tabs are whitespace inside a value.
+            let hay = values.iter().map(|value| fold(&value.replace('\t', " "))).collect::<Vec<_>>().join("\t");
             search.push(&hay);
         }
         self.search = search;

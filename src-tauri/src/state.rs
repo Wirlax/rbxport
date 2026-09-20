@@ -292,8 +292,12 @@ impl AppState {
 
     /// Opens a view and returns `(view_id, len, generation)`.
     pub fn open_view(&self, spec: &ViewSpec) -> AppResult<(u32, u32, u32)> {
+        self.open_view_scoped(spec, rbl_index::SearchField::All)
+    }
+
+    pub fn open_view_scoped(&self, spec: &ViewSpec, field: rbl_index::SearchField) -> AppResult<(u32, u32, u32)> {
         let library = self.library()?;
-        let view = library.open_view(spec);
+        let view = library.open_view_scoped(spec, field);
         let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
 
         let mut inner = self.inner.write();

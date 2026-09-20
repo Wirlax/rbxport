@@ -87,6 +87,7 @@ pub async fn open_folder(
         query: spec.query.clone(),
         filter: rbl_index::TrackFilter::default(),
     };
+    let field = spec.search_field;
     blocking("open_view", move || {
         let listing = if path.is_empty() {
             rbl_devices::explorer::Listing::default()
@@ -95,7 +96,7 @@ pub async fn open_folder(
         };
         let truncated = listing.truncated();
         let files = listing.entries.into_iter().map(|entry| (entry.name, entry.path)).collect();
-        let mut view = library.open_folder(files, &parsed);
+        let mut view = library.open_folder_scoped(files, &parsed, field);
         view.truncated = truncated;
         let (view_id, len, generation) = handle.open_folder_view(view);
         Ok(ViewHandleDto { view_id, len, gen: generation })

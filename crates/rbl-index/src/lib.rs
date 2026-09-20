@@ -30,7 +30,7 @@ pub use filter::{
 pub use load::{content_version, load, reload_cues_of, reload_playlists, reload_tag_list, LoadStats};
 pub use smart::SmartRule;
 pub use xml_export::export_xml;
-pub use view::{RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};
+pub use view::{SearchField, RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};
 
 use strings::{Interner, StrColumn};
 use parking_lot::RwLock;
@@ -53,6 +53,8 @@ pub struct Library {
     pub title: StrColumn,
     pub title_folded: StrColumn,
     pub comment: StrColumn,
+    /// Composer, album artist, remixer, original artist and mix name.
+    pub(crate) search_extra: [StrColumn; 5],
     pub folder_path: StrColumn,
     pub file_name: StrColumn,
     pub analysis_path: StrColumn,
@@ -122,7 +124,7 @@ pub struct Library {
     /// touching strings during a sort.
     pub(crate) ranks: Vec<Vec<u32>>,
 
-    /// One folded haystack per row: title, artist, album, comment.
+    /// One folded haystack per row, with tab-delimited search fields.
     pub(crate) search: StrColumn,
 
     /// The My Tag categories and their tags, by name only.
@@ -525,7 +527,7 @@ impl Library {
             + self.file_name.heap_bytes() + self.analysis_path.heap_bytes()
             + self.artwork_path.heap_bytes()
             + self.date_added.heap_bytes() + self.release_date.heap_bytes()
-            + self.search.heap_bytes();
+            + self.search.heap_bytes() + self.search_extra.iter().map(StrColumn::heap_bytes).sum::<usize>();
         let interners = self.artists.heap_bytes() + self.albums.heap_bytes()
             + self.genres.heap_bytes() + self.labels.heap_bytes() + self.keys.heap_bytes();
         let ranks: usize = self.ranks.iter().map(|r| r.capacity() * 4).sum();

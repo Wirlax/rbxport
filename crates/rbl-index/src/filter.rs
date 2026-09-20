@@ -212,6 +212,10 @@ impl Library {
     /// tallies. Sort and filter are ignored: the lists are what the user can
     /// pick from, so they must not shrink with what is picked.
     pub fn filter_values(&self, spec: &ViewSpec) -> FilterValues {
+        self.filter_values_scoped(spec, crate::SearchField::All)
+    }
+
+    pub fn filter_values_scoped(&self, spec: &ViewSpec, field: crate::SearchField) -> FilterValues {
         let unfiltered = ViewSpec {
             source: spec.source.clone(),
             sort: crate::SortColumn::TrackNo,
@@ -219,7 +223,7 @@ impl Library {
             query: spec.query.clone(),
             filter: TrackFilter::default(),
         };
-        let view = self.open_view(&unfiltered);
+        let view = self.open_view_scoped(&unfiltered, field);
         self.values_of(&view.rows)
     }
 

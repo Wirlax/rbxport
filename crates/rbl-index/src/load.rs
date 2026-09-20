@@ -258,11 +258,38 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
 
     let t1 = Instant::now();
     lib.build_ranks();
+    load_search_extra(conn, &mut lib)?;
     lib.build_search();
     stats.index_ms = t1.elapsed().as_millis();
     stats.heap_bytes = lib.heap_bytes();
 
     Ok((lib, stats))
+}
+
+fn load_search_extra(conn: &Connection, lib: &mut Library) -> rusqlite::Result<()> {
+    // Resolve uncommon search metadata once, rather than querying SQLite on each keystroke.
+    let mut extra = conn.prepare("SELECT c.ID, composer.Name, album_artist.Name, remixer.Name, original.Name, c.Subtitle
+        FROM djmdContent c
+        LEFT JOIN djmdAlbum album ON album.ID=c.AlbumID
+        LEFT JOIN djmdArtist album_artist ON album_artist.ID=album.AlbumArtistID
+        LEFT JOIN djmdArtist composer ON composer.ID=c.ComposerID
+        LEFT JOIN djmdArtist remixer ON remixer.ID=c.RemixerID
+        LEFT JOIN djmdArtist original ON original.ID=c.OrgArtistID
+        WHERE c.rb_local_deleted=0")?;
+    let mut by_id = HashMap::new();
+    let mut rows = extra.query([])?;
+    while let Some(row) = rows.next()? {
+        let id = row.get::<_, String>(0)?.parse::<u64>().unwrap_or(0);
+        let mut values = Vec::with_capacity(5);
+        for column in 1..=5 { values.push(row.get::<_, Option<String>>(column)?.unwrap_or_default()); }
+        by_id.insert(id, values);
+    }
+    for id in &lib.ids {
+        for (index, column) in lib.search_extra.iter_mut().enumerate() {
+            column.push(by_id.get(id).and_then(|values| values.get(index)).map_or("", String::as_str));
+        }
+    }
+    Ok(())
 }
 
 /// Reads `djmdCue`, keeping only cues whose track is still live.

@@ -265,7 +265,7 @@ pub async fn open_view(state: State<'_, Arc<AppState>>, spec: ViewSpecDto) -> Ap
     // on the async thread.
     let handle = Arc::clone(&state);
     blocking("open_view", move || {
-        let (view_id, len, generation) = handle.open_view(&parsed)?;
+        let (view_id, len, generation) = handle.open_view_scoped(&parsed, spec.search_field)?;
         Ok(ViewHandleDto { view_id, len, gen: generation })
     })
     .await
@@ -2641,7 +2641,7 @@ pub async fn filter_values(
     let library = state.library()?;
     let parsed = spec_from_wire(&library, &spec);
     blocking("filter_values", move || {
-        let values = library.filter_values(&parsed);
+        let values = library.filter_values_scoped(&parsed, spec.search_field);
         Ok(FilterValuesDto {
             bpms: values
                 .bpms

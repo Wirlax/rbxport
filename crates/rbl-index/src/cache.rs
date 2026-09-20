@@ -48,7 +48,7 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// was built from: formats 1 to 6 keyed on the change counter alone, so a
 /// different `master.db` with the same counter — a test fixture rebuilt
 /// under another folder — was served the old one's file paths.
-pub const FORMAT: u32 = 7;
+pub const FORMAT: u32 = 8;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -203,6 +203,8 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
         &library.title,
         &library.title_folded,
         &library.comment,
+        &library.search_extra[0], &library.search_extra[1], &library.search_extra[2],
+        &library.search_extra[3], &library.search_extra[4],
         &library.folder_path,
         &library.file_name,
         &library.analysis_path,
@@ -392,6 +394,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.title = r.strings()?;
     lib.title_folded = r.strings()?;
     lib.comment = r.strings()?;
+    for column in &mut lib.search_extra { *column = r.strings()?; }
     lib.folder_path = r.strings()?;
     lib.file_name = r.strings()?;
     lib.analysis_path = r.strings()?;

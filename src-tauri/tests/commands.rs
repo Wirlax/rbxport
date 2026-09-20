@@ -167,6 +167,7 @@ fn collection_spec() -> ViewSpecDto {
         sort: "title".into(),
         descending: false,
         query: String::new(),
+        search_field: rbl_index::SearchField::All,
         filter: TrackFilterDto::default(),
     }
 }
@@ -177,6 +178,7 @@ fn playlist_spec(id: &str) -> ViewSpecDto {
         sort: "trackNo".into(),
         descending: false,
         query: String::new(),
+        search_field: rbl_index::SearchField::All,
         filter: TrackFilterDto::default(),
     }
 }

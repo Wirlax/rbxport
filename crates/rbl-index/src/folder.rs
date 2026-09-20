@@ -235,6 +235,10 @@ impl Library {
     /// is not captured].
     #[must_use]
     pub fn open_folder(&self, files: Vec<(String, PathBuf)>, spec: &ViewSpec) -> FolderView {
+        self.open_folder_scoped(files, spec, crate::SearchField::All)
+    }
+
+    pub fn open_folder_scoped(&self, files: Vec<(String, PathBuf)>, spec: &ViewSpec, field: crate::SearchField) -> FolderView {
         let mut view = FolderView { entries: Vec::with_capacity(files.len()), ..FolderView::default() };
         for (name, path) in files {
             if let Some(row) = self.row_for_path(&path) {
@@ -249,9 +253,19 @@ impl Library {
         if !query.is_empty() {
             let files = &view.files;
             view.entries.retain(|entry| match *entry {
-                FolderEntry::Track(row) => self.row_matches(row, &query),
+                FolderEntry::Track(row) => self.row_matches_in(row, &query, field),
                 FolderEntry::File(index) => {
-                    files.get(index).is_some_and(|file| matches_name(&fold(&file.name), &query))
+                    files.get(index).is_some_and(|file| {
+                        use crate::SearchField;
+                        let value = match field {
+                            SearchField::All | SearchField::Title => &file.name,
+                            SearchField::Artist => &file.tags().artist,
+                            SearchField::Album => &file.tags().album,
+                            SearchField::Genre => &file.tags().genre,
+                            _ => "",
+                        };
+                        matches_name(&fold(value), &query)
+                    })
                 }
             });
         }

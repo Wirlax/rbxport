@@ -136,6 +136,8 @@ pub struct ViewSpecDto {
     pub sort: String,
     pub descending: bool,
     pub query: String,
+    #[serde(default)]
+    pub search_field: rbl_index::SearchField,
     /// The track filter bar's picks. Absent on the wire means no filter, so a
     /// caller that predates the bar keeps working.
     #[serde(default)]
