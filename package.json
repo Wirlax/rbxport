@@ -21,6 +21,7 @@
     "e2e:win": "scripts/e2e-win/run.sh",
     "e2e:mac": "scripts/e2e-mac/run.sh",
     "e2e:link": "scripts/e2e-link/run.sh",
+    "e2e:cdj": "scripts/e2e-link/run-cdj.sh",
     "tokens": "tsx scripts/build-tokens.ts",
     "measure": "tsx design/measure/measure.ts",
     "budget": "tsx scripts/check-bundle-size.ts",
