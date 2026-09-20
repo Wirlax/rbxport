@@ -14,7 +14,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_MP3, CODEC_TYPE_NULL};
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
@@ -52,6 +52,9 @@ pub struct Streamer {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn Decoder>,
     track_id: u32,
+    /// MPEG coarse seeks estimate timestamps from byte offsets. Discarding
+    /// samples from that estimate does not make the result frame-exact.
+    seek_mode: SeekMode,
     /// The file's own rate, before resampling.
     source_rate: u32,
     device_rate: u32,
@@ -103,6 +106,11 @@ impl Streamer {
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
             .ok_or_else(|| DeckError::Decode("there is no audio track in that file".to_owned()))?;
         let track_id = track.id;
+        let seek_mode = if track.codec_params.codec == CODEC_TYPE_MP3 {
+            SeekMode::Accurate
+        } else {
+            SeekMode::Coarse
+        };
         let source_rate = track.codec_params.sample_rate.unwrap_or(device_rate).max(1);
         // Length in device-rate frames, which is what the playhead counts. A
         // file that does not say gets zero, and the deck reports what it has
@@ -134,6 +142,7 @@ impl Streamer {
             format,
             decoder,
             track_id,
+            seek_mode,
             source_rate,
             device_rate,
             resampler,
@@ -172,21 +181,18 @@ impl Streamer {
     /// is a cue point in the wrong place.
     pub fn seek(&mut self, frame: u64) -> Result<u64> {
         let seconds = frame as f64 / f64::from(self.device_rate.max(1));
-        // Coarse, and then decoded forward to the exact frame below.
-        //
-        // Symphonia's accurate seek walks the file from a point it knows,
-        // which on a three-hour MP3 is 12 seconds of scanning for an hour in
-        // and 23 for three, and 95-142 ms on an ordinary FLAC. Coarse costs
-        // 0.0-0.1 ms, and across every format in this library it landed on the
-        // same packet as accurate did — the exactness came from the decoding
-        // afterwards, not from the mode. Measured by
-        // `cargo run --release -p rbl-deck --example seekwhere`.
+        // MPEG needs an accurate packet timestamp. Coarse seeking can put
+        // audio a packet ahead while reporting the requested timestamp: the
+        // subsequent discard cannot repair that estimate. Compare PCM with
+        // sequential decoding, not just SeekedTo, when checking accuracy.
+        // Accurate MPEG seeks may scan from the start on backward jumps;
+        // other formats retain the faster coarse path and overshoot fallback.
         //
         // What accurate does guarantee is landing at or before the target, and
         // the discard below only moves forward. So an overshoot is stepped
         // back from, and a format that still overshoots after that pays for
         // the accurate seek rather than being played from the wrong place.
-        let mut landed = self.seek_to(seconds, SeekMode::Coarse)?;
+        let mut landed = self.seek_to(seconds, self.seek_mode)?;
         for back in BACKOFF_SECONDS {
             if self.landed_frame(&landed) <= frame {
                 break;
@@ -540,6 +546,32 @@ mod tests {
             let frames = streamer.fill(&mut window).unwrap();
             assert!(frames > 0, "no audio after seeking back to 0 at {device_rate} Hz");
             assert!(window.iter().any(|s| *s != 0.0), "silence after seeking back to 0 at {device_rate} Hz");
+        }
+    }
+
+    #[test]
+    fn mp3_seeks_keep_the_sequential_audio_timeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seek.mp3");
+        std::fs::write(&path, include_bytes!("../tests/fixtures/seek-noise.mp3")).unwrap();
+        let mut linear = Streamer::open(&path, 44_100).unwrap();
+        let mut reference = vec![0.0; 44_100 * 2 * 2];
+        linear.fill(&mut reference).unwrap();
+        let mut seeked = Streamer::open(&path, 44_100).unwrap();
+        // Include backward seeks and zero: a coarse MP3 seek can label the
+        // second packet as time zero even though continuous decoding doesn't.
+        for at in [0, 22_050, 11_025, 0] {
+            seeked.seek(at as u64).unwrap();
+            let mut samples = vec![0.0; 16_384];
+            assert_eq!(seeked.fill(&mut samples).unwrap(), 8192);
+            // Ignore decoder warmup and compare actual PCM, not the reported
+            // position (which can agree while the audio is a packet ahead).
+            let error = samples[8192..]
+                .iter()
+                .zip(&reference[at * 2 + 8192..at * 2 + samples.len()])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(error < 1e-5, "seek to {at}: PCM shifted, max error {error}");
         }
     }
 
