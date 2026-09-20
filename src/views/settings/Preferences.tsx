@@ -20,6 +20,8 @@ import {
   PrefKeyboardIcon, PrefViewIcon,
   LinkIcon,
 } from "@/components/icons";
+import { getBackend } from "@/ipc/client";
+import { ReportBug } from "@/views/report/ReportBug";
 import type { LibrarySummary, Limiter } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
 import type { PreferencePane } from "@/lib/preferences";
@@ -125,18 +127,27 @@ export function Preferences({
   const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
   const [query, setQuery] = useState("");
   const { reset } = usePreferencesContext();
+  const [reportOpen, setReportOpen] = useState(false);
+  const openReport = () => {
+    void getBackend().then((backend) => backend.openReportWindow()).then((opened) => {
+      if (!opened) setReportOpen(true);
+    });
+  };
 
   useEffect(() => {
     // Focus the window so Escape reaches it and a reader lands inside.
-    window_.current?.focus();
+    if (!reportOpen) window_.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (reportOpen) setReportOpen(false);
+        else onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
+  }, [onClose, reportOpen]);
 
   // The search box narrows the pane to the sections that mention the words
   // typed. The sections' own text is the index: every label in them is what
@@ -229,6 +240,7 @@ export function Preferences({
                 </li>
               ))}
             </ul>
+            <Button className={styles.reportBug} onClick={openReport}>Report bug</Button>
           </nav>
 
           <div className={styles.content}>
@@ -282,10 +294,14 @@ export function Preferences({
       </div>
   );
 
-  if (windowed) return body;
   return (
-    <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
-      {body}
-    </div>
+    <>
+      {windowed ? body : (
+        <div className={styles.backdrop} onMouseDown={onClose} role="presentation">
+          {body}
+        </div>
+      )}
+      {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
+    </>
   );
 }

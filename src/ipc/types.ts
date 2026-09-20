@@ -601,6 +601,7 @@ export interface Backend {
   openSyncWindow(): Promise<boolean>;
   openReportWindow(): Promise<boolean>;
   reportAttachment(): Promise<string>;
+  openReportAttachment(attachment: string): Promise<void>;
   saveBugReport(email: string, description: string, attachment: string): Promise<boolean>;
 
   /**

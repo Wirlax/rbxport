@@ -20,6 +20,7 @@ export interface StatusBarProps {
   /** Library Protection in Preferences is why, rather than rekordbox running. */
   protectedLibrary?: boolean;
   onOpenProtection?: (() => void) | undefined;
+  onReportBug?: (() => void) | undefined;
   /** Present only while analysis is running, so it can be stopped. */
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
@@ -34,6 +35,7 @@ export function StatusBar({
   readOnly = false,
   protectedLibrary = false,
   onOpenProtection,
+  onReportBug,
   onCancelAnalysis,
   analysisFailures = 0,
 }: StatusBarProps) {
@@ -79,6 +81,7 @@ export function StatusBar({
         </span>
       ) : null}
       <span className={styles.selection}>{selection}</span>
+      {onReportBug ? <button type="button" className={styles.reportBug} onClick={onReportBug}>Report bug</button> : null}
     </footer>
   );
 }

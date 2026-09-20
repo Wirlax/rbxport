@@ -1545,6 +1545,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // No windows in a browser: the shell draws the manager over itself.
     openReportWindow: () => wait(false),
     reportAttachment: () => wait("System information\nBrowser preview\n\nApplication log\nNo application log available.\n"),
+    openReportAttachment: () => Promise.reject(new Error("Opening the text editor requires the desktop app.")),
     saveBugReport: () => Promise.reject(new Error("Saving ZIP reports requires the desktop app.")),
     openSyncWindow: () => wait(false),
     // Stick after stick, each announced before and after, as the real run

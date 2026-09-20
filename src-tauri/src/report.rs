@@ -61,6 +61,24 @@ fn log_tail(dir: &std::path::Path) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Open a copy of the exact attachment captured by the report form.
+#[tauri::command]
+pub async fn open_report_attachment(app: tauri::AppHandle, attachment: String) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    if attachment.len() > 2_000_000 {
+        return Err(AppError::internal("The attachment is too large."));
+    }
+    let directory = app.path().app_cache_dir().map_err(|e| AppError::internal(e.to_string()))?;
+    crate::commands::blocking("open_report_attachment", move || {
+        std::fs::create_dir_all(&directory).map_err(|e| AppError::internal(e.to_string()))?;
+        let path = directory.join("report-attachment.txt");
+        crate::grid::write_atomically(&path, attachment.as_bytes())
+            .map_err(|e| AppError::internal(format!("The attachment could not be written: {e}")))?;
+        app.opener().open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| AppError::internal(format!("The text editor could not open: {e}")))
+    }).await
+}
+
 /// The log is last, while system information precedes the user's report.
 fn report_text(email: &str, description: &str, attachment: &str) -> AppResult<String> {
     if email.len() > 320 || description.trim().is_empty() || description.len() > 100_000 || attachment.len() > 2_000_000 {

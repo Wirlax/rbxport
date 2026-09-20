@@ -1774,7 +1774,6 @@ export function App() {
         <span className={styles.appName}>rbxport</span>
       </div>
       <TopBar
-        onReportBug={openReport}
         clock={clock}
         onOpenSettings={() => openPreferences("view")}
         layout={layout}
@@ -2125,6 +2124,7 @@ export function App() {
       </div>
 
       <StatusBar
+        onReportBug={openReport}
         version={version}
         activity={
           analysis.running

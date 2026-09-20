@@ -24,7 +24,6 @@ import styles from "./TopBar.module.css";
 
 export interface TopBarProps {
   clock: string;
-  onReportBug?: () => void;
   onOpenSettings?: () => void;
   /**
    * Master output level, 0 to 1. There is no audio engine behind this yet, so
@@ -56,7 +55,6 @@ function clamp(value: number): number {
 
 export function TopBar({
   clock,
-  onReportBug,
   onOpenSettings,
   level = 1,
   onLevelChange,
@@ -73,7 +71,6 @@ export function TopBar({
       <LayoutMenu layout={layout} onChange={onLayoutChange} />
 
       <span className={styles.spacer} />
-      <button type="button" className={styles.report} onClick={onReportBug}>Report bug</button>
 
       <button
         type="button"

@@ -70,6 +70,8 @@
 
 /* ---- Sidebar ---- */
 .sidebar {
+  display: flex;
+  flex-direction: column;
   flex: none;
   width: var(--s-pref-sidebar-w);
   box-sizing: border-box;
@@ -616,3 +618,15 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .networkInterfaces input { margin: 0; accent-color: var(--c-accent); }
 .networkInterfaces:disabled { opacity: 0.6; }
 .networkInterfaces:disabled label { cursor: default; }
+
+.reportBug {
+  margin-top: auto;
+  margin-bottom: 12px;
+  align-self: flex-start;
+  border-color: var(--c-raised);
+  background: transparent;
+}
+.reportBug:hover:not(:disabled) {
+  border-color: var(--c-raised);
+  background: var(--c-raised);
+}

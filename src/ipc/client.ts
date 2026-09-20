@@ -304,6 +304,7 @@ async function realBackend(): Promise<Backend> {
     },
     openReportWindow: async () => { await invoke("open_report_window"); return true; },
     reportAttachment: () => invoke<string>("report_attachment"),
+    openReportAttachment: (attachment) => invoke<void>("open_report_attachment", { attachment }),
     saveBugReport: async (email, description, attachment) => {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const path = await save({ title: "Save bug report", defaultPath: "rbxport-bug-report.zip", filters: [{ name: "ZIP report", extensions: ["zip"] }] });

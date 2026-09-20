@@ -478,6 +478,7 @@ pub fn run() {
             sync_window::open_sync_window,
             report::open_report_window,
             report::report_attachment,
+            report::open_report_attachment,
             report::save_bug_report,
             commands::sync_devices,
             commands::export_tracks_to_device,

@@ -9,7 +9,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   const [description, setDescription] = useState("");
   const [include, setInclude] = useState(() => loadPreferences().advanced.usageStats);
   const [attachment, setAttachment] = useState<string | null>(null);
-  const [preview, setPreview] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -25,7 +25,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
     <section className={styles.dialog} role="dialog" aria-label="Report bug" aria-modal={windowed ? undefined : true}>
       <header className={styles.title} onMouseDown={windowed ? startWindowDrag : undefined}>
         Report bug
-        <button type="button" aria-label="Close report" onClick={onClose}>×</button>
+        {windowed ? null : <button type="button" aria-label="Close report" onClick={onClose}>×</button>}
       </header>
       <form className={styles.form} onSubmit={event => {
         event.preventDefault();
@@ -35,17 +35,38 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
           .then(result => setSaved(result)).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => setBusy(false));
       }}>
-        <label>Your email<input type="email" autoComplete="email" maxLength={320} value={email} onChange={e => setEmail(e.target.value)} /></label>
-        <label>What happened?<textarea required maxLength={100000} rows={7} value={description} onChange={e => setDescription(e.target.value)} /></label>
-        <label className={styles.toggle}><input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />Attach application log and system information</label>
-        <p>The log can contain library paths and track titles. Your report is saved as a local ZIP file.</p>
-        <button type="button" disabled={!include || attachment === null} onClick={() => setPreview(on => !on)}>
-          {preview ? "Hide attachment" : "Show exactly what will be attached"}
-        </button>
-        {preview && include ? <pre className={styles.preview} aria-label="Report attachment">{attachment ?? "Reading attachment…"}</pre> : null}
-        {error ? <p role="alert">{error}</p> : null}
-        {saved ? <p role="status">Report ZIP saved.</p> : null}
-        <footer><button type="button" onClick={onClose}>Close</button><button type="submit" disabled={busy || !description.trim() || (include && attachment === null)}>{busy ? "Saving…" : "Save report ZIP…"}</button></footer>
+        <div className={styles.fields}>
+          <label className={styles.email}>
+            <span>Your email <span className={styles.optional}>(optional)</span></span>
+            <input type="email" autoComplete="email" placeholder="you@example.com" maxLength={320} value={email} onChange={e => setEmail(e.target.value)} />
+          </label>
+          <label className={styles.description}>What happened?
+            <textarea required maxLength={100000} rows={7} placeholder="What were you doing, what went wrong, and what did you expect?" value={description} onChange={e => setDescription(e.target.value)} />
+          </label>
+          <div className={styles.attachments}>
+            <div className={styles.attachmentControls}>
+              <label className={styles.toggle}><input type="checkbox" checked={include} onChange={e => setInclude(e.target.checked)} />Attach log and system information</label>
+              <button type="button" className={styles.previewToggle} disabled={!include || attachment === null || opening} onClick={() => {
+                if (attachment === null) return;
+                setOpening(true);
+                setError("");
+                void getBackend().then(backend => backend.openReportAttachment(attachment))
+                  .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setOpening(false));
+              }}>
+                {opening ? "Opening…" : "Open attachment"}
+              </button>
+            </div>
+            <p className={styles.hint}>The log may include library paths and track titles.</p>
+          </div>
+          {error ? <p className={styles.error} role="alert">{error}</p> : null}
+          {saved ? <p role="status">Report ZIP saved.</p> : null}
+        </div>
+        <footer>
+          <span className={styles.hint}>Saved locally as a ZIP file.</span>
+          <button type="button" onClick={onClose}>Close</button>
+          <button className={styles.save} type="submit" disabled={busy || !description.trim() || (include && attachment === null)}>{busy ? "Saving…" : "Save report ZIP…"}</button>
+        </footer>
       </form>
     </section>
   );
