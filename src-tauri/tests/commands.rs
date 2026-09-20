@@ -391,20 +391,25 @@ fn every_edit_bumps_the_generation_and_tells_the_interface() {
 }
 
 #[test]
-fn the_library_is_backed_up_once_a_session_not_once_an_edit() {
+fn library_backups_are_manual_only() {
     let s = shell();
     let backups = s._dir.path().join("backups");
     assert!(!backups.exists());
 
     run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 3)).unwrap();
-    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "the first write is preceded by a copy");
+    assert!(!backups.exists(), "the first edit must not back up");
 
-    // Every kind of edit opens its own writer; none of them copies again.
+    // Every kind of edit opens its own writer; none should copy the database.
     run(commands::set_track_comment(s.handle(), s.state(), track_id(0), "x".into())).unwrap();
     run(commands::create_playlist(s.handle(), s.state(), "Later".into(), ROOT.into())).unwrap();
     run(cues::add_cue(s.handle(), s.state(), track_id(0), CueKind::Memory, 1_000)).unwrap();
     run(details::set_track_field(s.handle(), s.state(), track_id(0), "title".into(), "T".into())).unwrap();
-    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1, "once a session");
+    assert!(!backups.exists(), "edits must not back up automatically");
+
+    let path = run(commands::back_up_library(s.state())).unwrap();
+    assert!(Path::new(&path).is_file(), "manual backups remain available");
+    run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 4)).unwrap();
+    assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
 }
 
 #[test]

@@ -261,6 +261,7 @@ pub struct Writer {
     rng: Rng,
     backup_dir: PathBuf,
     backup_taken: bool,
+    automatic_backups: bool,
 }
 
 /// What one action changed. Returned so a caller can report it and a test can
@@ -290,7 +291,13 @@ impl Writer {
             rng: Rng::from_entropy(),
             backup_dir: backup_dir.into(),
             backup_taken: false,
+            automatic_backups: true,
         })
+    }
+
+    /// Disables the automatic first-write copy. Explicit backups remain available.
+    pub fn disable_automatic_backups(&mut self) {
+        self.automatic_backups = false;
     }
 
     /// Tells the writer the session already holds a backup, so this one
@@ -1822,7 +1829,7 @@ impl Writer {
                 "rekordbox is running. Quit it before making changes.".to_owned(),
             ));
         }
-        if !self.backup_taken {
+        if self.automatic_backups && !self.backup_taken {
             self.back_up()?;
             self.backup_taken = true;
         }

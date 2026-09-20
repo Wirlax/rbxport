@@ -289,10 +289,9 @@ function takenAt(name: string): string {
 }
 
 /**
- * Database management: the backups the app takes before its first write of
- * a session, kept five deep, with one to be taken now and any to be put
- * back. Restoring replaces the library file, so it asks first and is
- * refused while rekordbox holds the file.
+ * Database management: manually requested backups, kept five deep,
+ * with one to be taken now and any to be put back. Restoring replaces the
+ * library file, so it asks first and is refused while rekordbox holds the file.
  */
 function BackupSection({ readOnly }: { readOnly: boolean }) {
   const [backups, setBackups] = useState<Backup[] | null>(null);

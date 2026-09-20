@@ -172,35 +172,25 @@ describe("SyncManager", () => {
     // The run is announced stick by stick while it is going.
     act(() => progress?.({ path: "/Volumes/USB A", state: "writing" }));
     expect(status()).toBe("Writing to USB A…");
-    act(() => finish([report("/Volumes/USB A", 30)]));
+    act(() => finish([report("/Volumes/USB A", 30), report("/Volumes/USB B", 30)]));
     await settle();
-    // USB A came back with Automatic synchronization on and USB B without,
-    // so the two go in runs of their own, the automatic one first.
-    expect(syncDevices).toHaveBeenCalledTimes(2);
+    expect(syncDevices).toHaveBeenCalledTimes(1);
     const [playlists, destinations, , automatic] = syncDevices.mock.calls[0] as [string[], string[], unknown, boolean];
-    // In tree order, the folder's two and the one USB A brought back.
     expect(playlists).toEqual(["p1", "p2", "p3"]);
-    expect(destinations).toEqual(["/Volumes/USB A"]);
-    expect(automatic).toBe(true);
-    expect(syncDevices.mock.calls[1]?.[1]).toEqual(["/Volumes/USB B"]);
-    expect(syncDevices.mock.calls[1]?.[3]).toBe(false);
-    expect(box("Automatic synchronization for USB A")?.checked).toBe(true);
-    expect(box("Automatic synchronization for USB B")?.checked).toBe(false);
+    expect(destinations).toEqual(["/Volumes/USB A", "/Volumes/USB B"]);
+    expect(automatic).toBe(false);
+    expect(box("Automatic synchronization for USB A")).toBeNull();
+    expect(box("Automatic synchronization for USB B")).toBeNull();
     expect(status()).toContain("Exported 30 tracks to USB A");
     expect(status()).toContain("Exported 30 tracks to USB B");
     expect(sync?.disabled).toBe(false);
   });
 
   it("a stick that failed says why, beside the ones that were written", async () => {
-    // USB A and USB B differ on Automatic synchronization, so they come as
-    // two runs: the first writes A, the second finds B gone.
-    syncDevices
-      .mockImplementationOnce((_playlists: string[], destinations: string[]) =>
-        Promise.resolve([report(destinations[0] ?? "", 5)]),
-      )
-      .mockImplementationOnce((_playlists: string[], destinations: string[]) =>
-        Promise.resolve([{ path: destinations[0] ?? "", error: "That device is no longer connected." }]),
-      );
+    syncDevices.mockImplementationOnce(() => Promise.resolve([
+      report("/Volumes/USB A", 5),
+      { path: "/Volumes/USB B", error: "That device is no longer connected." },
+    ]));
     click(box("Closing"));
     click(box("USB A"));
     click(box("USB B"));

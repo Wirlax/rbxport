@@ -1560,45 +1560,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices]);
 
-  // A stick plugged in whose sync record asks for it is written again with
-  // the playlists it was last given — rekordbox's "Automatic synchronization",
-  // which its Sync Manager sets per device and this one does too. Only a
-  // stick that the shell's mount watcher reports arriving while the app is
-  // running: the launch's own listing, and a focus refresh, are not
-  // arrivals (2026-09-18: the first listing after launch counted as one and
-  // rewrote a stick nobody had touched). Each volume is synced once per
-  // plugging-in.
-  const devicesNow = useRef<readonly Device[]>([]);
-  devicesNow.current = devices;
-  const autoSyncing = useRef(false);
-  const autoSyncArrivals = useCallback(
-    (arrived: readonly Device[]) => {
-      const candidates = arrived.filter((device) => device.export !== null);
-      if (candidates.length === 0 || autoSyncing.current) return;
-      autoSyncing.current = true;
-      void (async () => {
-        try {
-          const backend = await getBackend();
-          for (const device of candidates) {
-            const state = await backend.deviceSyncState(device.path).catch(() => null);
-            if (!state?.automatic || state.selected.length === 0) continue;
-            report(`Synchronizing ${device.name}…`);
-            const playlists = state.selected.map((playlist) => playlist.libraryId);
-            const [written] = await backend.syncDevices(playlists, [device.path], stickDefaults, true);
-            if (written?.report) report(exportSummary(device.name, written.report));
-            else refuse(`${device.name}: ${written?.error ?? "The sync could not be written."}`);
-          }
-          setDevices(await backend.listDevices());
-        } catch (e) {
-          refuse(e instanceof Error ? e.message : "The sync could not be written.");
-        } finally {
-          autoSyncing.current = false;
-        }
-      })();
-    },
-    [report, refuse, stickDefaults],
-  );
-  // The mount watcher's word: the list before and after says what arrived.
+  // Refresh connected devices without starting an export.
   useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
@@ -1607,11 +1569,9 @@ export function App() {
       if (!live) return;
       stop = backend.onDevicesChanged(() => {
         void (async () => {
-          const before = new Set(devicesNow.current.map((device) => device.volumeId));
           const after = await backend.listDevices().catch(() => null);
           if (after === null || !live) return;
           setDevices(after);
-          autoSyncArrivals(after.filter((device) => !before.has(device.volumeId)));
         })();
       });
     })();
@@ -1619,7 +1579,7 @@ export function App() {
       live = false;
       stop?.();
     };
-  }, [autoSyncArrivals]);
+  }, []);
 
   // Devices join the tree as nodes so the Devices section renders through the
   // same path as every other section, and the Explorer's folders after them.
