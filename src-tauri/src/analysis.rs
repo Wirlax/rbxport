@@ -57,11 +57,17 @@ pub async fn analyse_track<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     track_id: String,
+    mode: Option<String>,
 ) -> AppResult<AnalysisResultDto> {
+    let preset = match mode.as_deref().unwrap_or("rbxport") {
+        "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
+        "rbxport" => rbl_analysis::AnalysisPreset::Rbxport,
+        _ => return Err(AppError::new(ErrorKind::Malformed, "Unknown analysis mode.")),
+    };
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
-    let result = blocking("analyse_track", move || analyse_and_save(&state, &library, &share, &track_id)).await?;
+    let result = blocking("analyse_track", move || analyse_and_save(&state, &library, &share, &track_id, preset)).await?;
     // The track's id, well inside the 1 KB event cap: a deck showing the
     // track redraws its waveform and grid from the new files.
     let _ = tauri::Emitter::emit(&app, "analysis:changed", &result.track_id);
@@ -75,6 +81,7 @@ fn analyse_and_save(
     library: &rbl_index::Library,
     share: &std::path::Path,
     track_id: &str,
+    preset: rbl_analysis::AnalysisPreset,
 ) -> AppResult<AnalysisResultDto> {
     // By the id map rather than a scan: a queue analyses hundreds of
     // tracks, and each scan is 38,681 comparisons.
@@ -100,7 +107,7 @@ fn analyse_and_save(
         AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
             .with_detail(e.to_string())
     })?;
-    let analysis = rbl_analysis::analyse(&audio.samples, audio.sample_rate);
+    let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, preset.options());
 
     // The files: where the row already points, or a fresh place.
     let relative = {
@@ -359,7 +366,7 @@ mod tests {
         state.set_library(library, false, None, 0, location.clone());
         let library = state.library().unwrap();
 
-        let result = analyse_and_save(&state, &library, &share, &track_id(0)).expect("analysed");
+        let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport).expect("analysed");
         assert_eq!(result.track_id, track_id(0));
         assert!(result.analysis_path.starts_with("/PIONEER/USBANLZ/P"), "{}", result.analysis_path);
         assert!(result.analysis_path.ends_with("/ANLZ0000.DAT"));
@@ -395,7 +402,7 @@ mod tests {
         assert_eq!(link, 0x002c_0600, "rekordbox needs the track registration to display its preview");
 
         // A second analysis lands in the same place, files rewritten in place.
-        let again = analyse_and_save(&state, &library, &share, &track_id(0)).expect("analysed again");
+        let again = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport).expect("analysed again");
         assert_eq!(again.analysis_path, result.analysis_path);
         let names: Vec<String> = std::fs::read_dir(dat_path.parent().unwrap())
             .unwrap()

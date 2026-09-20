@@ -10,6 +10,7 @@
  * the same way: a hand-edited value, a value from a build that spelt a choice
  * differently, or nothing at all must each come back as a working set.
  */
+import { ANALYSIS_SLOTS, SLOTS } from "./queue";
 import type { KeyChord } from "./shortcuts";
 import { toCamelot, type TrafficLightReach } from "./camelot";
 import type {
@@ -130,7 +131,11 @@ export interface AudioPreferences {
   metronomeVolume: MetronomeVolume;
 }
 
+export type AnalysisMode = "rekordbox" | "rbxport";
+
 export interface AnalysisPreferences {
+  mode: AnalysisMode;
+  concurrentTracks: number;
   /** Auto Analysis: analyse a track when it is added to the library. */
   auto: boolean;
 }
@@ -244,6 +249,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
     metronomeVolume: "large",
   },
   analysis: {
+    mode: "rbxport",
+    concurrentTracks: SLOTS,
     auto: true,
   },
   djSystem: {
@@ -392,6 +399,8 @@ export function sanitisePreferences(value: unknown): Preferences {
       metronomeVolume: oneOf(audio.metronomeVolume, METRONOME_VOLUMES, d.audio.metronomeVolume),
     },
     analysis: {
+      mode: oneOf(analysis.mode, ["rekordbox", "rbxport"], d.analysis.mode),
+      concurrentTracks: oneOfNumber(analysis.concurrentTracks, ANALYSIS_SLOTS, SLOTS),
       auto: bool(analysis.auto, d.analysis.auto),
     },
     djSystem: {

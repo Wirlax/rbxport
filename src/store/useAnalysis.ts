@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import { usePreferences } from "./usePreferences";
 import type { AnalysisResult } from "@/ipc/types";
 import {
   cancel as cancelQueue,
@@ -37,6 +38,7 @@ export function useAnalysis(
   /** Called once when a run ends, whether it finished, failed or was stopped. */
   onDrained?: () => void,
 ): Analysis {
+  const { mode, concurrentTracks } = usePreferences().analysis;
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The tracks whose request is in flight, so the effect below never sends
   // one twice.
@@ -56,7 +58,7 @@ export function useAnalysis(
   useEffect(() => {
     // Fill the free slots first, if the run has not been cancelled; the
     // effect runs again on the new state and sends the requests.
-    const next = start(state);
+    const next = start(state, concurrentTracks);
     if (next !== state) {
       setState(next);
       return;
@@ -67,7 +69,7 @@ export function useAnalysis(
       void (async () => {
         try {
           const backend = await getBackend();
-          const result = await backend.analyseTrack(track.id);
+          const result = await backend.analyseTrack(track.id, mode);
           setState((s) => succeed(s, track.id));
           onAnalysed?.(track.id, result);
         } catch (e) {
@@ -77,7 +79,7 @@ export function useAnalysis(
         }
       })();
     }
-  }, [state, onAnalysed]);
+  }, [state, onAnalysed, mode, concurrentTracks]);
 
   const add = useCallback((items: readonly QueueItem[]) => setState((s) => enqueue(s, items)), []);
   const cancel = useCallback(() => setState(cancelQueue), []);

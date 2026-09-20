@@ -249,7 +249,7 @@ export interface Backend {
    *
    * Slow — a decode and a DSP pass — so callers run these one at a time.
    */
-  analyseTrack(trackId: string): Promise<AnalysisResult>;
+  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport"): Promise<AnalysisResult>;
 
   /**
    * A track's whole beat grid, as raw bytes: seven per beat, a little-endian

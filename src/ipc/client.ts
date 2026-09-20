@@ -58,7 +58,7 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
-    analyseTrack: (trackId) => invoke<AnalysisResult>("analyse_track", { trackId }),
+    analyseTrack: (trackId, mode = "rbxport") => invoke<AnalysisResult>("analyse_track", { trackId, mode }),
     trackBeats: async (trackId) => {
       // Raw bytes rather than a JSON array of objects: a long mix has tens of
       // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an

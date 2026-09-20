@@ -156,3 +156,12 @@ describe("reset", () => {
     expect(reset(q)).toBe(q);
   });
 });
+
+it("changing the concurrency limit drains existing work before filling again", () => {
+  const q = start(enqueue(emptyQueue, items("a", "b", "c", "d")), 3);
+  expect(start(q, 1)).toBe(q);
+  const draining = succeed(succeed(q, "a"), "b");
+  expect(start(draining, 1)).toBe(draining);
+  expect(running(start(succeed(draining, "c"), 1))).toEqual(["d"]);
+  expect(running(start(q, 4))).toEqual(["a", "b", "c", "d"]);
+});

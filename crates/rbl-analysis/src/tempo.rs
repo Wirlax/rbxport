@@ -31,7 +31,7 @@ use crate::onset::OnsetEnvelope;
 /// Tempo search range. Dance music sits well inside this, and a wider range
 /// mostly adds octave errors.
 pub const MIN_BPM: f64 = 70.0;
-pub const MAX_BPM: f64 = 200.0;
+pub const MAX_BPM: f64 = 180.0;
 
 /// One beat of the grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

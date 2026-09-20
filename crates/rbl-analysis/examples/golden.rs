@@ -274,7 +274,16 @@ impl Score {
 /// The options the gate scores: the defaults, or a placement named by
 /// `RB_LITE_PLACEMENT` (`envelope`, `attack`).
 fn options_under_test() -> rbl_analysis::AnalysisOptions {
-    let mut options = rbl_analysis::AnalysisOptions::default();
+    let mut options = match std::env::var("RB_LITE_PRESET").as_deref() {
+        Ok("baseline") => {
+            let mut options = rbl_analysis::AnalysisOptions::default();
+            options.tempo.max_bpm = 200.0;
+            options
+        },
+        Ok("rekordbox") => rbl_analysis::AnalysisPreset::Rekordbox.options(),
+        Ok("rbxport") | Err(_) => rbl_analysis::AnalysisPreset::Rbxport.options(),
+        Ok(other) => panic!("Unknown analysis preset {other:?}"),
+    };
     if let Some(r) = std::env::var("RB_LITE_ATTACK_REACH").ok().and_then(|v| v.parse::<f64>().ok()) {
         options.attacks.reach_secs = r;
     }

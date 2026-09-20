@@ -17,6 +17,7 @@
  * count; beyond four the workers only fight.
  */
 export const SLOTS = 3;
+export const ANALYSIS_SLOTS = [1, 2, 3, 4] as const;
 
 export interface QueueItem {
   id: string;
@@ -26,7 +27,7 @@ export interface QueueItem {
 export interface QueueState {
   /** Waiting, in order. */
   pending: QueueItem[];
-  /** Being analysed now, up to `SLOTS` of them, in the order they started. */
+  /** Being analysed now, up to the requested limit, in the order they started. */
   running: QueueItem[];
   done: number;
   /** One entry per track that failed, with why. */
@@ -74,11 +75,12 @@ export function enqueue(state: QueueState, items: readonly QueueItem[]): QueueSt
  * Fills the free slots from the waiting tracks, in order, or parks if there
  * is nothing waiting, the slots are full, or the run is cancelling.
  */
-export function start(state: QueueState): QueueState {
+export function start(state: QueueState, slots = SLOTS): QueueState {
   if (state.cancelling) {
     return state.pending.length > 0 ? { ...state, pending: [] } : state;
   }
-  const free = SLOTS - state.running.length;
+  const limit = Number.isInteger(slots) ? Math.max(1, Math.min(4, slots)) : SLOTS;
+  const free = limit - state.running.length;
   if (free <= 0 || state.pending.length === 0) return state;
   return {
     ...state,

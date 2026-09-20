@@ -65,6 +65,23 @@ pub struct AnalysisOptions {
     pub key: key::KeyOptions,
 }
 
+/// Named application presets. Both use the requested 70–180 BPM range.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AnalysisPreset {
+    Rekordbox,
+    #[default]
+    Rbxport,
+}
+
+impl AnalysisPreset {
+    pub fn options(self) -> AnalysisOptions {
+        let mut options = AnalysisOptions::default();
+        options.tempo.min_bpm = 70.0;
+        options.tempo.max_bpm = 180.0;
+        options
+    }
+}
+
 /// Runs the full analysis over mono audio.
 pub fn analyse(samples: &[f32], sample_rate: u32) -> Analysis {
     analyse_with(samples, sample_rate, AnalysisOptions::default())
