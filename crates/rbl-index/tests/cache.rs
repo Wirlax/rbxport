@@ -15,6 +15,7 @@ fn fingerprint() -> Fingerprint {
         wal_modified_ns: 5,
         db_version: 6000,
         content: 42,
+        database: 7,
     }
 }
 
@@ -137,6 +138,7 @@ fn a_snapshot_of_a_different_database_is_refused() {
         Fingerprint { content: 43, ..fingerprint() },
         Fingerprint { db_version: 6001, ..fingerprint() },
         Fingerprint { format: rbl_index::cache::FORMAT + 1, ..fingerprint() },
+        Fingerprint { database: 8, ..fingerprint() },
     ] {
         assert!(decode(&bytes, changed).is_none(), "{changed:?} should have been refused");
     }

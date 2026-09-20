@@ -44,8 +44,11 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// every start that hit the snapshot had no Histories section at all.
 /// 5 added the release year, and each playlist's attribute and rule: format
 /// 4 knew only whether a playlist was a folder, so an intelligent playlist
-/// read from the snapshot opened empty.
-pub const FORMAT: u32 = 6;
+/// read from the snapshot opened empty. 7 added which database the snapshot
+/// was built from: formats 1 to 6 keyed on the change counter alone, so a
+/// different `master.db` with the same counter — a test fixture rebuilt
+/// under another folder — was served the old one's file paths.
+pub const FORMAT: u32 = 7;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -67,6 +70,11 @@ pub struct Fingerprint {
     /// was running for, which is most of them. The counter only moves when a
     /// row actually changes.
     pub content: u64,
+    /// Which database: a hash of the `master.db` path. Two libraries can
+    /// share a change counter — the same fixture built twice under different
+    /// folders does, row for row — and a snapshot of one must not stand in
+    /// for the other.
+    pub database: u64,
 }
 
 impl Fingerprint {
@@ -91,8 +99,21 @@ impl Fingerprint {
             wal_modified_ns,
             db_version,
             content,
+            database: database_id(master_db),
         })
     }
+}
+
+/// A stable hash of a database's path (FNV-1a over its bytes), the same
+/// across runs and builds, which the standard hasher does not promise.
+fn database_id(master_db: &Path) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+    master_db
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .fold(OFFSET, |h, &b| (h ^ u64::from(b)).wrapping_mul(PRIME))
 }
 
 fn stamp(path: &Path) -> Option<(u64, i64)> {
@@ -174,6 +195,7 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     w.i64(fingerprint.wal_modified_ns);
     w.u32(fingerprint.db_version);
     w.u64(fingerprint.content);
+    w.u64(fingerprint.database);
 
     w.u64(library.len() as u64);
     w.u64s(&library.ids);
@@ -350,14 +372,16 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         wal_modified_ns: r.i64()?,
         db_version: r.u32()?,
         content: r.u64()?,
+        database: r.u64()?,
     };
     // The file stamps are recorded but deliberately not compared: rekordbox
     // rewrites the WAL without changing a single row, and refusing the
     // snapshot for that made it useless whenever rekordbox was open. What must
-    // match is the content counter, the schema, and the format.
+    // match is the database, the content counter, the schema, and the format.
     if found.format != want.format
         || found.db_version != want.db_version
         || found.content != want.content
+        || found.database != want.database
     {
         return None;
     }

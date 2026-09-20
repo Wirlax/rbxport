@@ -197,6 +197,7 @@ fn a_snapshot_keeps_the_tag_categories() {
         wal_modified_ns: 4,
         db_version: 6000,
         content: 5,
+        database: 6,
     };
     let restored = decode(&encode(&lib, fp), fp).expect("decodes");
     assert_eq!(restored.my_tags(), lib.my_tags());
