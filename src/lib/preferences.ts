@@ -219,7 +219,7 @@ export type PreferencePane = keyof Preferences;
  */
 export const DEFAULT_PREFERENCES: Preferences = {
   view: {
-    tempoSlider: true,
+    tempoSlider: false,
     tooltips: true,
     browseFontSize: BROWSE_SCALE_DEFAULT,
     browseBold: false,

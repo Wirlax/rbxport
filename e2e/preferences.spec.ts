@@ -324,6 +324,9 @@ test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", asy
 });
 
 test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("rbl.preferences")) localStorage.setItem("rbl.preferences", JSON.stringify({ view: { tempoSlider: true } }));
+  });
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
