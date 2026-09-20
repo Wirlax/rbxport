@@ -368,6 +368,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center top;
   /* Hidden until it has decoded. `color: transparent` hides the alt text but
      not WebKit's broken-file glyph, which is what the first screen was full
      of while the library was still opening. */
