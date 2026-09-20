@@ -341,8 +341,8 @@ fn emit_deck_event<R: Runtime>(app: &AppHandle<R>, event: &DeckEvent) {
 
 /// Starts the ticker if one is not already running.
 ///
-/// It stops as soon as neither deck is playing, which is what keeps an idle
-/// window at no measurable cost. Every play starts it again.
+/// It stops when neither deck is playing nor scrubbing, keeping an idle
+/// window at no measurable cost. Playing or beginning a drag starts it again.
 pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     let player = app.state::<Arc<Player>>();
     if player.ticking().swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -383,12 +383,17 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
             if let Err(e) = handle.emit("deck:tick", tick) {
                 tracing::warn!(error = %e, "a deck tick did not reach the interface");
             }
-            if !snapshot.any_playing() {
+            if !engine.any_sounding() {
                 break;
             }
         }
         let player = handle.state::<Arc<Player>>();
         player.ticking().store(false, std::sync::atomic::Ordering::SeqCst);
+        // A play or scrub can start between the idle check and releasing the
+        // ticker flag. Its start request saw us still running; hand it off now.
+        if player.opened().is_some_and(|engine| engine.any_sounding()) {
+            start_ticker(&handle);
+        }
     });
     if let Err(e) = spawned {
         tracing::error!(error = %e, "the deck ticker could not be started");

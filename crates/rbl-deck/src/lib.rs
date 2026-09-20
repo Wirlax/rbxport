@@ -689,7 +689,7 @@ impl Engine {
     }
 
     /// Whether anything needs the device: playing, or being dragged.
-    fn any_sounding(&self) -> bool {
+    pub fn any_sounding(&self) -> bool {
         self.decks.iter().any(|deck| deck.clock().sounding())
     }
 
