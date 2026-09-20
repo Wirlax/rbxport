@@ -20,7 +20,7 @@ import type { Cue, DeckId, RowDto } from "@/ipc/types";
 import { Artwork } from "@/components/Artwork";
 import { EjectIcon, RecordIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
-import { splitTime } from "@/lib/player";
+import { splitTime, type BeatGrid } from "@/lib/player";
 import { CueMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
 import styles from "./SimplePlayer.module.css";
@@ -45,6 +45,7 @@ export interface SimplePlayerProps {
   /** Seconds in the track, or 0 while nothing is loaded. */
   total: number;
   cues: readonly Cue[];
+  grid: BeatGrid;
   /** Where CUE returns to, in seconds: the amber triangle under the overview. */
   cuePoint: number;
   /** The overview's element and its measured size, for the canvas. */
@@ -62,7 +63,7 @@ export interface SimplePlayerProps {
 
 export const SimplePlayer = memo(function SimplePlayer({
   track, deck, shell, armed, droppable, onDragOver, onDrop,
-  playing, idle, onToggle, position, total, cues, cuePoint,
+  playing, idle, onToggle, position, total, cues, grid, cuePoint,
   overviewRef, overview, overviewHead, scrubFill, onScrubStart, onScrubMove, onScrubEnd,
   onEject, onLoadSelected,
 }: SimplePlayerProps) {
@@ -174,7 +175,7 @@ export const SimplePlayer = memo(function SimplePlayer({
                 half
               />
             ) : null}
-            <CueMarkers cues={cues} totalMs={total * 1000} />
+            <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} />
           </div>
           <div className={styles.scrub} aria-hidden>
             <div ref={scrubFill} className={styles.scrubFill} />

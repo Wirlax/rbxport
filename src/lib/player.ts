@@ -461,6 +461,14 @@ export function tempoAtMs(grid: BeatGrid, ms: number): number {
   return tempos[beat] ?? 0;
 }
 
+/** BPM at a tempo boundary coinciding with a cue, allowing integer-ms rounding. */
+export function cueTempoChange(grid: BeatGrid, ms: number): number | null {
+  const at = lowerBound(grid.times, ms - 2);
+  if (at < 1 || Math.abs((grid.times[at] ?? Infinity) - ms) > 2) return null;
+  const tempo = grid.tempos[at] ?? 0;
+  return tempo > 0 && tempo !== grid.tempos[at - 1] ? tempo : null;
+}
+
 /**
  * The beat nearest `ms`, or `ms` itself when there is no grid.
  *

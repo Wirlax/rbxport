@@ -1193,3 +1193,15 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
 
 .player[data-tempo-slider] { grid-template-columns: var(--s-player-transport-w) minmax(0, 1fr) 76px var(--s-player-right-w); }
 .player[data-shared][data-tempo-slider] { grid-template-columns: minmax(0, 1fr) 76px var(--s-player-right-w); }
+
+.cueTempo {
+  position: absolute;
+  left: 4px;
+  bottom: 1px;
+  padding: 0 2px;
+  color: var(--c-text);
+  background: var(--c-black);
+  font-size: var(--f-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

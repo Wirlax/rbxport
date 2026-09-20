@@ -26,6 +26,7 @@ import {
   isClick,
   ZOOM_STEPS,
   zoomBy,
+  cueTempoChange,
   phraseKind,
   phraseSpans,
   splitTime,
@@ -794,5 +795,14 @@ describe("beatAtMs", () => {
     expect(beatAtMs(grid, 9000)).toBe(3);
     expect(beatAtMs(grid, 10)).toBe(1);
     expect(beatAtMs(NO_BEATS, 500)).toBe(1);
+  });
+});
+
+describe("cueTempoChange", () => {
+  const grid = { times: new Uint32Array([0, 500, 1000, 1400]), numbers: new Uint8Array([1, 2, 3, 4]), tempos: new Uint16Array([12000, 12000, 15000, 15000]) };
+  it("labels only cues at tempo changes, including millisecond rounding", () => {
+    expect(cueTempoChange(grid, 1000)).toBe(15000);
+    expect(cueTempoChange(grid, 1001)).toBe(15000);
+    for (const ms of [0, 500, 1010, 1400, 99999]) expect(cueTempoChange(grid, ms)).toBeNull();
   });
 });

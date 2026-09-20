@@ -56,6 +56,8 @@ import {
   type PadMode,
   beatLoopRange,
   tempoAtMs,
+  cueTempoChange,
+  type BeatGrid as TrackBeatGrid,
 } from "@/lib/player";
 import { type DeckLoop, usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
@@ -272,9 +274,10 @@ export function cueStyle(
  * Exported for the simple player's overview, which is the same strip.
  */
 export const CueMarkers = memo(function CueMarkers({
-  cues, totalMs, band = "overview", window, loop = null,
+  cues, totalMs, band = "overview", window, loop = null, grid = NO_BEATS,
 }: {
   cues: readonly Cue[];
+  grid?: TrackBeatGrid;
   totalMs: number;
   /**
    * Which waveform this is drawn over.
@@ -327,6 +330,7 @@ export const CueMarkers = memo(function CueMarkers({
         // A hot cue is its lettered badge on both waveforms; the stylesheet
         // places it by band. A memory cue's red head is the overview's small
         // one or the detail's 16pt triangle.
+        const changedTempo = cueTempoChange(grid, cue.positionMs);
         const head = !cue.memory ? (
           <b className={styles.hotCueBadge}>{cue.letter}</b>
         ) : band === "detail" ? (
@@ -345,6 +349,7 @@ export const CueMarkers = memo(function CueMarkers({
             aria-hidden
           >
             {head}
+            {changedTempo !== null ? <span className={styles.cueTempo} data-testid="cue-tempo">{formatBpm(changedTempo)}</span> : null}
           </span>
         );
       })}
@@ -1522,6 +1527,7 @@ export const Player = memo(function Player({
         position={playback.position}
         total={total}
         cues={cues}
+        grid={grid}
         cuePoint={cuePoint}
         overviewRef={overviewRef}
         overview={overview}
@@ -1737,7 +1743,7 @@ export const Player = memo(function Player({
                   half={viewPrefs.overviewWaveform === "half"}
                 />
               ) : null}
-              <CueMarkers cues={cues} totalMs={total * 1000} loop={playback.loop} />
+              <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} loop={playback.loop} />
               <span
                 ref={overviewHead}
                 className={styles.playhead}
@@ -1932,7 +1938,7 @@ export const Player = memo(function Player({
               {gridEditor.cutMs !== null && total > 0 ? (
                 <CutMark cutMs={gridEditor.cutMs} totalMs={total * 1000} window={window} />
               ) : null}
-              <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
+              <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
             </div>
             {/* Bars elapsed, printed to the left of the playhead. Its text and
                 its position are both the frame loop's, so React renders it
