@@ -222,9 +222,7 @@ pub async fn edit_phrase<R: tauri::Runtime>(
             AppError::new(ErrorKind::NotFound, "That track's analysis file could not be read.").with_detail(e.to_string())
         })?;
         let Some(bytes) = file.with_phrase_edit(edit) else { return Ok(false) };
-        let staged = ext.with_extension("tmp");
-        // perf-ok: runs inside the command's spawn_blocking closure
-        std::fs::write(&staged, bytes).and_then(|()| std::fs::rename(&staged, &ext)).map_err(|e| {
+        crate::durable::write(&ext, &bytes).map_err(|e| {
             AppError::new(ErrorKind::Internal, "The analysis file could not be written.").with_detail(e.to_string())
         })?;
         Ok(true)
@@ -269,10 +267,7 @@ fn write_analysis_files(dat: &std::path::Path, files: &rbl_anlz::AnalysisFiles) 
         (rbl_anlz::sibling(dat, "EXT"), &files.ext),
         (rbl_anlz::sibling(dat, "2EX"), &files.two_ex),
     ] {
-        let staged = path.with_extension("tmp");
-        // perf-ok: runs inside the command's spawn_blocking closure
-        std::fs::write(&staged, bytes)?;
-        std::fs::rename(&staged, &path)?;
+        crate::durable::write(&path, bytes)?;
     }
     Ok(())
 }

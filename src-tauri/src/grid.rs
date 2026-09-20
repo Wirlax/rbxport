@@ -251,12 +251,7 @@ fn file_error(what: &str, path: &Path, error: &std::io::Error) -> AppError {
 /// Writes a file whole, through a sibling and a rename, so a crash midway
 /// leaves the old file rather than half of the new one.
 pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let temp = path.with_file_name(format!("{name}.rbxport-tmp"));
-    std::fs::write(&temp, bytes)?;
-    std::fs::rename(&temp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temp);
-    })
+    crate::durable::write(path, bytes)
 }
 
 /// A track's analysis files, resolved.

@@ -11,6 +11,7 @@ pub mod commands;
 pub mod cues;
 pub mod details;
 pub mod grid;
+mod durable;
 mod diagnostics;
 mod explorer;
 mod link;
