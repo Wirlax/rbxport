@@ -164,6 +164,7 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     let genres = load_lookup(conn, "djmdGenre", "Name", &mut lib.genres)?;
     let labels = load_lookup(conn, "djmdLabel", "Name", &mut lib.labels)?;
     let keys = load_lookup(conn, "djmdKey", "ScaleName", &mut lib.keys)?;
+    eprintln!("PH lookups {}", t0.elapsed().as_millis());
 
     let mut stmt = conn.prepare(
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,
@@ -243,10 +244,14 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     }
     lib.count = lib.ids.len();
     stats.tracks = lib.count;
+    eprintln!("PH content {}", t0.elapsed().as_millis());
 
     load_cues(conn, &mut lib, &content_row)?;
+    eprintln!("PH cues {}", t0.elapsed().as_millis());
     load_playlists(conn, &mut lib, &content_row, &mut stats)?;
+    eprintln!("PH playlists {}", t0.elapsed().as_millis());
     load_histories(conn, &mut lib, &content_row, &mut stats)?;
+    eprintln!("PH histories {}", t0.elapsed().as_millis());
     lib.set_tag_list(read_tag_list(conn, &content_row)?);
     lib.set_my_tags(read_my_tags(conn)?);
     stats.read_ms = t0.elapsed().as_millis();
@@ -272,6 +277,7 @@ fn load_cues(
     let tracks = lib.len();
     // Gathered per track first, because the table is not in track order and
     // the index wants each track's cues contiguous.
+    let tq = Instant::now();
     let mut per_track: Vec<Vec<Cue>> = vec![Vec::new(); tracks];
 
     let mut stmt = conn.prepare(&format!(
@@ -286,6 +292,7 @@ fn load_cues(
             list.push(read_cue(r, 1)?);
         }
     }
+    eprintln!("PH cues-read {}", tq.elapsed().as_millis());
     lib.set_cues(Cues::from_per_track(per_track));
     Ok(())
 }
