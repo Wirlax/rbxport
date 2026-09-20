@@ -6,6 +6,10 @@ import { ReportWindow } from "./views/report/ReportBug";
 import { SyncWindow } from "./views/sync/SyncWindow";
 import "./styles/base.css";
 
+// Suppress the webview's Reload/Inspect menu in every app window. Leave
+// propagation intact so the app's context-menu handlers still receive it.
+window.addEventListener("contextmenu", (event) => event.preventDefault());
+
 const el = document.getElementById("root");
 if (!el) throw new Error("#root missing from index.html");
 

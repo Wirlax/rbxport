@@ -224,7 +224,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   view: {
     vuMeter: "normal",
     tempoSlider: false,
-    tooltips: true,
+    tooltips: false,
     browseFontSize: BROWSE_SCALE_DEFAULT,
     browseBold: false,
     browseLineSpace: BROWSE_SCALE_DEFAULT,

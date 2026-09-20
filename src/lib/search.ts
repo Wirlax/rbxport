@@ -10,5 +10,5 @@ export const TRACK_SEARCH_OPTIONS = [
 export type TrackSearchField = typeof TRACK_SEARCH_OPTIONS[number]["value"];
 export const TREE_SEARCH_OPTIONS = [
   { value: "all", label: "All" }, { value: "playlist", label: "Playlist" },
-  { value: "smartPlaylist", label: "Intelligent playlist" }, { value: "folder", label: "Folder" },
+  { value: "folder", label: "Folder" },
 ] as const;

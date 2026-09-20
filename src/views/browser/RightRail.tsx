@@ -5,12 +5,8 @@
  * My Tag, Related Tracks and Track Suggestion above these — and those three
  * are left out of this column by request, recorded in TODO.md under
  * "Deliberate divergences". Related Tracks is hidden until finished,
- * and My Tag filtering is the Track Filter's. The two that remain sit where
- * rekordbox puts them, not moved up into the room the missing three would
- * have taken: the 2026-09-09 capture
- * (`docs/screenshots`, `9.09.33 PM`) [OBS] has the Information box 361pt
- * under the browser's top, and that is where it is drawn here. The wording
- * is german.lang's.
+ * and My Tag filtering is the Track Filter's. The two remaining buttons
+ * are vertically centered as a group. The wording is german.lang's.
  */
 import { InfoIcon, SubBrowseIcon } from "@/components/icons";
 import styles from "./RightRail.module.css";

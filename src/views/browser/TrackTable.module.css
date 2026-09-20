@@ -24,23 +24,21 @@
   gap: 12px;
 }
 
-.title { font-size: var(--f-size-ui); color: var(--c-text); }
+.title { margin-right: auto; font-size: var(--f-size-ui); color: var(--c-text); }
 
 /* The Track Filter button: an outlined square that goes blue when the bar is
-   showing, the glyph white either way. Before the search box, which keeps
-   `margin-left: auto`. */
+   showing, the glyph white either way. The controls sit together to the
+   right of the title, immediately before the search box. */
 /* The Traffic Light's MASTER menu: a 79 by 16pt box on the head's grey with
    a blue underline, the chevron beside it, and a menu of the three decks.
    Measured from the 2-player capture; see design/tokens `trafficMaster*`. */
 .trafficBox {
   position: relative;
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
 }
-.trafficBox + .filterToggle { margin-left: 0; }
 .trafficMaster {
   width: var(--s-traffic-master-w);
   height: var(--s-traffic-master-h);
@@ -102,7 +100,6 @@
 .trafficTickGlyph { width: 12px; height: 8px; }
 
 .filterToggle {
-  margin-left: auto;
   margin-right: 8px;
   flex: none;
   width: var(--s-filter-toggle);
@@ -122,7 +119,7 @@
   height: var(--s-filter-toggle-glyph);
   color: var(--c-filter-text);
 }
-.filterToggle + .search { margin-left: auto; flex: 0 1 var(--s-search-w); }
+.search { flex: 0 1 var(--s-search-w); }
 
 .colHead {
   display: grid;
@@ -372,4 +369,3 @@
   outline: 1px solid var(--c-accent);
   outline-offset: -1px;
 }
-

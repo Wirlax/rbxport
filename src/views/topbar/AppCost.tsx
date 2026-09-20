@@ -18,7 +18,7 @@ export function AppCost({ className }: { className?: string | undefined }) {
   return (
     <div className={className} data-testid="app-cost">
       <span title={tip(`Audio callback deadline usage; ${cost.audioXruns} overruns`)}>AUDIO {formatPercent(cost.audioLoad * 100)}</span>
-      <span title={tip("Resident memory")}>MEM {formatMemory(cost.memoryMb)}</span>
+      <span title={tip("Resident memory")}>RAM {formatMemory(cost.memoryMb)}</span>
       <span title={tip("Frames a second, timed in the window")}>FPS {formatCount(cost.fps)}</span>
     </div>
   );

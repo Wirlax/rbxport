@@ -5,7 +5,8 @@
  * rekordbox's lists — so this only decides where the menu goes, what closes
  * it, and how a greyed row differs from a live one.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { enabled, SEPARATOR, type MenuContext, type MenuRow } from "@/lib/contextMenus";
 import styles from "./ContextMenu.module.css";
@@ -28,6 +29,7 @@ export function ContextMenu<A extends string>({
   x, y, rows, context, label, onChoose, onClose,
 }: ContextMenuProps<A>) {
   const box = useRef<HTMLDivElement>(null);
+  const submenu = useRef<HTMLDivElement>(null);
   /** Which entry's submenu is open, by label. One at a time, as menus are. */
   const [open, setOpen] = useState<string | null>(null);
 
@@ -43,19 +45,22 @@ export function ContextMenu<A extends string>({
     window.addEventListener("mousedown", outside, true);
     window.addEventListener("keydown", key);
     window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
+    const scroll = (event: Event) => {
+      if (!box.current?.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener("scroll", scroll, true);
     return () => {
       window.removeEventListener("mousedown", outside, true);
       window.removeEventListener("keydown", key);
       window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", scroll, true);
     };
   }, [onClose]);
 
-  // Placed after the first paint, from its own measured size: a menu that is
+  // Placed before the first paint, from its own measured size: a menu that is
   // one row shorter than the last is a different height, and guessing it puts
   // the bottom of a long menu under the status bar.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = box.current;
     if (!element) return;
     const { width, height } = element.getBoundingClientRect();
@@ -65,7 +70,19 @@ export function ContextMenu<A extends string>({
     element.style.top = `${Math.max(EDGE, top)}px`;
   }, [x, y, rows]);
 
-  return (
+  useLayoutEffect(() => {
+    const element = submenu.current;
+    const anchor = element?.parentElement;
+    if (!element || !anchor) return;
+    const row = anchor.getBoundingClientRect();
+    const { width, height } = element.getBoundingClientRect();
+    const right = row.right - 1;
+    const left = right + width <= window.innerWidth - EDGE ? right : row.left - width + 1;
+    element.style.left = `${Math.max(EDGE, Math.min(left, window.innerWidth - width - EDGE))}px`;
+    element.style.top = `${Math.max(EDGE, Math.min(row.top, window.innerHeight - height - EDGE))}px`;
+  }, [open, x, y, rows]);
+
+  return createPortal(
     <div
       ref={box}
       className={styles.menu}
@@ -112,7 +129,7 @@ export function ContextMenu<A extends string>({
               ) : null}
             </button>
             {row.items && open === row.label ? (
-              <div className={styles.submenu} role="menu" aria-label={row.label}>
+              <div ref={submenu} className={styles.submenu} role="menu" aria-label={row.label}>
                 {row.items.map((child, at) =>
                   child === SEPARATOR ? (
                     <div key={`sub-${at}`} className={styles.separator} role="separator" />
@@ -141,6 +158,7 @@ export function ContextMenu<A extends string>({
           </div>
         ),
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

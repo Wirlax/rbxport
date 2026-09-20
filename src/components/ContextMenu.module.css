@@ -85,15 +85,15 @@
   display: flex;
 }
 
-/* Beside the entry, overlapping the menu's border by a pixel so the two
-   panels read as one surface, and lifted by its own border and padding so
-   its first row is level with the entry that opened it. */
+/* Positioned beside the entry in viewport coordinates, flipping left when
+   the right edge has no room. Tall submenus scroll within the window. */
 .submenu {
-  position: absolute;
-  left: calc(100% - 1px);
-  top: calc(-1px - var(--s-context-menu-pad));
-  z-index: 1;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  box-sizing: border-box;
+  overflow: auto;
 }
+.submenu > .item { flex-shrink: 0; }
 
 .separator {
   height: 1px;

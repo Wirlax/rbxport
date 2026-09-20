@@ -766,9 +766,19 @@ test("the Traffic Light lights the keys that go with the loaded track's", async 
   const menu = page.getByRole("button", { name: "Traffic Light deck", exact: true });
   await expect(menu).toHaveText("MASTER");
   await menu.click();
+  await expect(page.getByRole("menuitemradio", { name: "PLAYER A - Traffic Light" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "PLAYER B - Traffic Light" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  await menu.click();
   await page.getByRole("menuitemradio", { name: "PLAYER B - Traffic Light" }).click();
   await expect(menu).toHaveText("PLAYER B");
   await expect(lit).toHaveCount(0);
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "1 PLAYER", exact: true }).click();
+  await expect(menu).toHaveText("PLAYER A");
+  await expect(keys.first()).toHaveAttribute("data-lit", "true");
   await menu.click();
   await page.getByRole("menuitemradio", { name: "PLAYER A - Traffic Light" }).click();
   await expect(keys.first()).toHaveAttribute("data-lit", "true");
@@ -1122,8 +1132,6 @@ test("the metadata columns are typed over in the list, and Escape abandons", asy
 test("the title cell still loads a track on double-click", async ({
   page,
 }) => {
-  // A cell that both loads and opens an editor can do neither reliably, so
-  // the title is the information panel's to edit.
   await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();

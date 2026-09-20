@@ -1,11 +1,9 @@
-/* The Track Filter bar. Every size and colour is a token measured from the
-   capture (docs/screenshots 9.10.17 PM); see design/tokens/tokens.json. */
+/* Content-sized value columns leave the remaining width for tag filters. */
 
 .bar {
   position: relative;
   background: var(--c-panel);
-  /* Fixed-width content clipped by the pane, as rekordbox does: in the
-     capture the last tag heading is cut to "Empty Catego" under RST. */
+
   overflow: hidden;
   border-bottom: 1px solid var(--c-black);
 }
@@ -62,13 +60,14 @@
 
 .bpmGroup {
   flex: none;
-  width: calc(var(--s-filter-bpm-w) + var(--s-filter-col-gap) + var(--s-filter-pct-w));
+  width: max-content;
   display: flex;
   flex-direction: column;
 }
 
 .strip {
   flex: 1;
+  min-width: calc(var(--s-filter-strip-label-w) + 20px);
   align-self: stretch;
   display: flex;
   align-items: center;
@@ -104,12 +103,13 @@
 }
 
 .bpmLists {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(max-content, 1fr);
   gap: var(--s-filter-col-gap);
   margin-top: var(--s-filter-list-gap);
 }
-.bpmList { width: var(--s-filter-bpm-w); }
-.pctList { width: var(--s-filter-pct-w); }
+.bpmList,
+.pctList { width: auto; }
 .pctList .row { padding-left: 10px; }
 
 /* --- The other fixed columns -------------------------------------------- */
@@ -122,10 +122,15 @@
   display: flex;
   flex-direction: column;
 }
-.keyCol { width: var(--s-filter-key-w); }
-.ratingCol { width: var(--s-filter-rating-w); }
-.colorCol { width: var(--s-filter-color-w); }
-.tagCol { width: var(--s-filter-tag-w); }
+.keyCol,
+.ratingCol,
+.colorCol { width: max-content; }
+.tagCol { flex: 1 1 0; min-width: 0; }
+.tagCol .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tagCol:last-child .head { padding-right: calc(var(--s-filter-rst-w) + 14px); }
+.keyCol > .head,
+.ratingCol > .head,
+.colorCol > .head { padding-right: 8px; }
 .keyCol > .list,
 .ratingCol > .list,
 .colorCol > .list { margin-top: var(--s-filter-list-gap); }
@@ -153,6 +158,7 @@
   height: var(--s-filter-row-h);
   line-height: var(--s-filter-row-h);
   padding-left: 6px;
+  padding-right: 8px;
   /* The picked band stops short of the scrollbar column. */
   margin-right: var(--s-filter-col-gap);
   font-size: var(--f-size-ui);
@@ -192,14 +198,13 @@
 /* --- Tag columns: drawn, inert ------------------------------------------ */
 
 .andOr {
-  position: relative;
+  display: flex;
+  justify-content: space-evenly;
   height: var(--s-filter-and-or-h);
   flex: none;
 }
 .and,
 .or {
-  position: absolute;
-  top: 0;
   height: 26px;
   line-height: 26px;
   padding: 0;
@@ -209,8 +214,6 @@
   color: var(--c-filter-label);
   cursor: default;
 }
-.and { left: var(--s-filter-and-x); }
-.or { left: var(--s-filter-or-x); }
 .and[data-on],
 .or[data-on] { color: var(--c-filter-accent); }
 

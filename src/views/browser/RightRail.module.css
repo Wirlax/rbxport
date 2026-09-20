@@ -1,15 +1,9 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal. */
 
-/* The column runs the full height of the browser row, 24pt wide, with the
-   18pt boxes centred in it (3pt either side). The boxes start a measured way
-   down it — a spacer row that takes the measured height when there is room
-   and less when there is not, so a short window brings the buttons up rather
-   than hiding them. The spacer is the Information box's own offset, 361pt:
-   rekordbox draws three more boxes above it, and with those left out the two
-   that remain stay put rather than climbing into the gap. */
+/* Center the two buttons as a group in the full-height browser rail. */
 .rail {
   display: grid;
-  grid-template-rows: minmax(0, var(--s-right-rail-info-top)) auto 1fr;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
   width: var(--s-right-rail-w);
   padding-left: var(--s-right-rail-inset);
   background: var(--c-panel);

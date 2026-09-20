@@ -275,6 +275,7 @@ test("About shows the version and who it is by, and leaves updates to Advanced",
 });
 
 test("the player's ≡ opens rekordbox's own menu, and its choices are the View preferences", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 750 });
   await open(page);
   await load(page);
   await player(page).getByRole("button", { name: "Player menu" }).click();
@@ -293,6 +294,18 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
   }
   // Analysis writes to the library, which the mock holds read-only here.
   await expect(menu.getByRole("menuitem", { name: "Analyze Track" })).toBeDisabled();
+
+  for (const name of ["Beat Count Display", "Export Track", "Click on the waveform for PLAY and CUE", "Change waveform color"]) {
+    await menu.getByRole("menuitem", { name, exact: true }).hover();
+    const submenu = page.getByRole("menu", { name, exact: true });
+    await expect(submenu).toBeVisible();
+    const bounds = await submenu.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(8);
+    expect(bounds!.y).toBeGreaterThanOrEqual(8);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1092);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(742);
+  }
 
   // The submenu ticks what is in force, and choosing changes the preference.
   await menu.getByRole("menuitem", { name: "Change waveform color" }).hover();

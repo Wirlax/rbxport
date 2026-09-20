@@ -174,14 +174,14 @@
   --s-status-bar-h: 27px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.26 PM: the strip under the browser y 2280..2333, 54px, to the window's bottom edge */
   --s-bottom-bar-h: 72px;
   --s-tree-w: 305px; /* browseSetting.xml TreeView 319 incl. rail */
-  --s-tree-gutter-w: 5px; /* narrowed by request from the 7pt the capture measures — the tree ends at 282pt, its scrollbar runs to 292 and the track list starts at 299 */
+  --s-tree-gutter-w: 1px; /* user adjustment: 1px black divider between the library sidebar and track list */
   --s-rail-w: 36px;
   --s-right-rail-w: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.10.38 PM: the icon column x 3662..3709 between the list's scrollbar column and the window edge, 48px; 9.09.26 PM measured 56 because the sub-browser's 4pt right margin (x 3654..3661) was counted into it. The boxes sit at x 3668..3703 in every capture */
   --s-tree-rail-w: 57px; /* browseSetting.xml TreeShortcut w=57 */
   --s-info-w: 557px; /* browseSetting.xml BrowseLayout ListInfo w=557 */
   --s-sub-browse-w: 878px; /* capture 2026-09-09 9.09.26 PM at 2x: the sub-browser runs x 1898..3653 of a 1798pt window, 1756px, rail to list edge. browseSetting.xml recorded SubBrowse w=1107 for a different window; the capture is what rekordbox drew */
   --s-player-h: 279px; /* measured from a 2x capture of rekordbox 7.2.11 running; player spans y 56..335pt */
-  --s-player-gutter-h: 3px; /* capture: the pad bar ends at 335pt and the browser starts at 338pt */
+  --s-player-gutter-h: 4px; /* user adjustment: increase the black gap below the player by 1px from the measured 3px */
   --s-player-transport-w: 80px; /* measured from a 2x capture of rekordbox 7.2.11 running; transport column x 0..80pt */
   --s-player-right-w: 209px; /* measured from a 2x capture of rekordbox 7.2.11 running; memory/hotcue panel x 1711..1920pt */
   --s-player-margin: 2px; /* black around the deck column, so it reads as a panel rather than as the whole strip */
@@ -561,6 +561,7 @@
   --f-size-sm: 12px; /* status bar 'Analyzing: 8319 Tracks', 128pt wide, bold */
   --f-size-bars: 14px; /* docs/screenshots at 2x: the bar count reads 20px tall over the detail band, which is a 14px face */
   --f-size-xs: 10px; /* top-bar 'EXPORT' label, 42pt wide, bold */
+  --f-size-cue-tempo: 14px; /* User-requested smaller detail waveform BPM labels after reviewing the 20px size */
   --f-size-preview-cue: 6px; /* design/reference/macos/playlist-player@2x.png: the letter in a row's hot cue badge is 8px tall at 2x, a 4pt cap, which against Arial's 0.716 em cap is a 6px face; bold, centred in the 7pt badge */
   --f-size-title: 17px; /* the player's track title, measured from the same capture; bold */
   --f-size-menu: 12.5px; /* the layout menu's 'SIMPLE PLAYER' in the same 2x capture: 194px wide with an 18px cap height, which Arial gives at 12.5px */
