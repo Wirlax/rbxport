@@ -359,8 +359,11 @@ impl LinkSession {
             // here; the capture is verification/link/kuvo-delivery-20260919.txt.
             kind::USER_INFO => Self::blob(message, kind::USER_INFO_REPLY, Some(vec![0; USER_INFO_LEN]), None),
             kind::ARTWORK => {
-                let art = Self::number(message, 1);
-                Self::blob(message, kind::ARTWORK_REPLY, self.catalog.artwork(art), None)
+                let id = Self::number(message, 1);
+                // With the size argument the id is the menu item's own; without
+                // it, the artwork field of a title item (`Catalog::item_artwork`).
+                let art = if message.arguments.len() > 2 { self.catalog.item_artwork(id) } else { self.catalog.artwork(id) };
+                Self::blob(message, kind::ARTWORK_REPLY, art, None)
             }
             kind::WAVEFORM_PREVIEW => {
                 let track = Self::number(message, 2);

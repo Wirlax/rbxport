@@ -132,8 +132,17 @@ pub trait Catalog: Send + Sync {
     /// The whole record, for metadata and track info.
     fn track(&self, id: u32) -> Option<TrackDetails>;
 
-    /// Artwork bytes (JPEG) by `djmdContent.ArtworkID`.
+    /// Artwork bytes (JPEG) for the artwork id a title item carries, the
+    /// way a player without the size argument asks (`[ctx, artwork]`).
     fn artwork(&self, id: u32) -> Option<Vec<u8>>;
+
+    /// Artwork bytes (JPEG) for a menu item's own id: a track's, or an
+    /// album's. A CDJ-3000 asking with the size argument (`[ctx, id, 1]`)
+    /// names the row it drew, not the artwork field in it: every one of the
+    /// 244 requests in a rekordbox 7.2.11 browse capture carried a track
+    /// row's id (180) or an album row's (64), and rekordbox answered 135 of
+    /// the track ones and 3 of the album ones with an image.
+    fn item_artwork(&self, id: u32) -> Option<Vec<u8>>;
 
     /// A track's analysis blob, in the layout the reply carries.
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>>;

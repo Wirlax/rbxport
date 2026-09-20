@@ -81,6 +81,9 @@ impl Catalog for Small {
         })
     }
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
+        (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
+    }
+    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> {
         (id == 0x6272).then(|| vec![0xff, 0xd8, 0xff, 0xe0])
     }
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
@@ -308,6 +311,12 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     assert_eq!(none[0].encode(), hex("11872349ae11000001871040020f04140000000406060603110000200311000000321100000000"));
     let some = s.handle(&numbers(kind::ARTWORK, 0x1a3, &[0x0108_0301, 0x6272, 1]));
     assert_eq!(args(&some[0]), "0x2003, 0x0, 0x4, blob[4]");
+    // Without the size argument the id is the title item's artwork field,
+    // not the track's id.
+    let by_field = s.handle(&numbers(kind::ARTWORK, 0x1a4, &[0x0108_0301, 0x14]));
+    assert_eq!(args(&by_field[0]), "0x2003, 0x0, 0x4, blob[4]");
+    let not_a_field = s.handle(&numbers(kind::ARTWORK, 0x1a5, &[0x0108_0301, 0x6272]));
+    assert_eq!(args(&not_a_field[0]), "0x2003, 0x32, 0x0, blob[0]");
 
     let tag = s.handle(&numbers(kind::ANLZ_TAG, 0x197, &[0x0108_0301, TRACK, 0x3456_5750, 0x54_5845]));
     assert_eq!(tag[0].kind, kind::ANLZ_TAG_REPLY);
@@ -330,6 +339,7 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
         }
         fn track(&self, _: u32) -> Option<TrackDetails> { None }
         fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
     }
     let handler = CatalogHandler::new(Arc::new(Many));
@@ -373,6 +383,7 @@ fn tracks_are_sorted_the_way_the_player_asked() {
         fn track_row(&self, _: u32) -> Option<TrackRow> { None }
         fn track(&self, _: u32) -> Option<TrackDetails> { None }
         fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
         fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
     }
     let spy = Arc::new(Spy(std::sync::Mutex::new(None)));
@@ -399,6 +410,7 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
         fn track_row(&self, _: u32) -> Option<TrackRow> { None }
         fn track(&self, _: u32) -> Option<TrackDetails> { None }
         fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
         fn analysis(&self, _: u32, what: &Analysis) -> Option<Vec<u8>> {
             match what {
                 Analysis::ExtendedCueList => {

@@ -10,7 +10,8 @@
 //! back: tracks go out as `djmdContent.ID`, which fits a `u32` in every
 //! library measured; artists, albums, genres and labels as their interner
 //! index plus one (0 means "none" in an album row); artwork as the track's
-//! row plus two (1 means "no artwork" to a player).
+//! row plus two (1 means "no artwork" to a player). A CDJ-3000 asks for
+//! artwork by the track's or album's id instead, and is answered that way.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -94,6 +95,43 @@ impl IndexCatalog {
 
     fn row_of(library: &Library, id: u32) -> Option<rbl_index::Row> {
         library.row_of_id(u64::from(id))
+    }
+
+    /// The row a menu item's id names: the track with that id, or the first
+    /// track with artwork on the album with that id. The two id spaces
+    /// overlap for small numbers (an album's is its index plus one), and a
+    /// track wins: it is what a player asks about far more often.
+    fn item_row(library: &Library, id: u32) -> Option<rbl_index::Row> {
+        if let Some(row) = Self::row_of(library, id) {
+            return Some(row);
+        }
+        let album = id.checked_sub(1)?;
+        library
+            .album
+            .iter()
+            .enumerate()
+            .find(|&(row, &of)| of == album && !library.artwork_path.get(row).is_empty())
+            .and_then(|(row, _)| rbl_index::Row::try_from(row).ok())
+    }
+
+    /// The artwork file of a row, read whole: the medium file rekordbox
+    /// keeps beside the one the library names, or the named one where
+    /// rekordbox has not made it.
+    fn artwork_at(&self, library: &Library, row: rbl_index::Row) -> Option<Vec<u8>> {
+        let relative = library.artwork_path.get(row as usize);
+        if relative.is_empty() {
+            return None;
+        }
+        let share = self.source.share_root();
+        let path = [medium_artwork(relative), relative.to_owned()]
+            .iter()
+            .filter_map(|candidate| resolve_under(&share, candidate))
+            .find(|candidate| candidate.is_file())?;
+        let meta = std::fs::metadata(&path).ok()?;
+        if meta.len() > MAX_ARTWORK {
+            return None;
+        }
+        std::fs::read(&path).ok()
     }
 
     fn track_id(library: &Library, row: rbl_index::Row) -> Option<u32> {
@@ -432,22 +470,14 @@ impl Catalog for IndexCatalog {
 
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
         let library = self.source.library()?;
-        let row = id.checked_sub(2)? as usize;
-        let relative = library.artwork_path.get(row);
-        if relative.is_empty() {
-            return None;
-        }
-        let share = self.source.share_root();
-        // The medium file, or the named one where rekordbox has not made it.
-        let path = [medium_artwork(relative), relative.to_owned()]
-            .iter()
-            .filter_map(|candidate| resolve_under(&share, candidate))
-            .find(|candidate| candidate.is_file())?;
-        let meta = std::fs::metadata(&path).ok()?;
-        if meta.len() > MAX_ARTWORK {
-            return None;
-        }
-        std::fs::read(&path).ok()
+        let row = id.checked_sub(2)?;
+        self.artwork_at(&library, row)
+    }
+
+    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> {
+        let library = self.source.library()?;
+        let row = Self::item_row(&library, id)?;
+        self.artwork_at(&library, row)
     }
 
     fn analysis(&self, track: u32, what: &Wanted) -> Option<Vec<u8>> {
@@ -681,6 +711,22 @@ mod tests {
         // cues; the extended list (2b04) carries the real ones.
         assert_eq!(c.analysis(10, &Wanted::CueList).unwrap(), vec![0_u8; 1604]);
         assert_eq!(c.analysis(10, &Wanted::ExtendedCueList).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn a_cdj_3000_names_the_track_or_album_whose_artwork_it_wants() {
+        let mut lib = library();
+        for relative in ["", "/PIONEER/Artwork/a/artwork.jpg", "/PIONEER/Artwork/b/artwork.jpg"] {
+            lib.artwork_path.push(relative);
+        }
+        // Tracks by id, then albums: the test interner gives each track its
+        // own album entry, so album ids 1, 2, 3 hold tracks 10, 11, 12.
+        assert_eq!(IndexCatalog::item_row(&lib, 12), Some(2));
+        assert_eq!(IndexCatalog::item_row(&lib, 11), Some(1));
+        assert_eq!(IndexCatalog::item_row(&lib, 3), Some(2), "album 3's track has artwork");
+        assert_eq!(IndexCatalog::item_row(&lib, 2), Some(1));
+        assert_eq!(IndexCatalog::item_row(&lib, 1), None, "album 1's only track has none");
+        assert_eq!(IndexCatalog::item_row(&lib, 99), None);
     }
 
     #[test]
