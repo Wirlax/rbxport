@@ -13,7 +13,7 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { treeMenu } from "@/lib/contextMenus";
 import {
   branchIds, childrenOf, containerOf, emptySources, newlyClosed, nodesForSource, sourceOf,
-  subtreeIds, toggle, visibleNodes, type Source,
+  subtreeIds, toggle, visibleNodes, searchTree, type TreeSearchScope, type Source,
 } from "@/lib/tree";
 import { SourceRail } from "./SourceRail";
 
@@ -292,6 +292,8 @@ export function TreeView({
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
 }: TreeViewProps) {
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<TreeSearchScope>("all");
   /** The tree menu: where it is, and which node it was opened on. */
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   /** The row whose name is being typed over, if any. */
@@ -383,8 +385,8 @@ export function TreeView({
   // selection rather than kept apart from it, so the two cannot disagree.
   const source = useMemo(() => sourceOf(nodes, selectedId), [nodes, selectedId]);
   const visible = useMemo(
-    () => visibleNodes(nodesForSource(nodes, source), collapsed),
-    [nodes, source, collapsed],
+    () => query.trim() ? searchTree(nodes, query, scope) : visibleNodes(nodesForSource(nodes, source), collapsed),
+    [nodes, source, collapsed, query, scope],
   );
   // Set by a rail click, read once the selection has moved: the section's
   // heading is scrolled to the top, or as near it as the list's end allows;
@@ -420,6 +422,15 @@ export function TreeView({
         onOpenShortcut={onOpenShortcut}
         onDeleteShortcut={onDeleteShortcut}
       />
+      <div className={styles.content}>
+      <div className={styles.search} role="search" aria-label="Library tree">
+        <select aria-label="Tree search scope" value={scope} onChange={event => setScope(event.target.value as TreeSearchScope)}>
+          <option value="all">All</option><option value="playlist">Playlist</option><option value="folder">Folder</option>
+        </select>
+        <input type="search" aria-label="Search library tree" placeholder="Search tree" value={query}
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => { if (event.key === "Escape") setQuery(""); event.stopPropagation(); }} />
+      </div>
       <div className={styles.nodes} role="tree" ref={list}>
         {visible.map((node) => (
           <Row
@@ -451,6 +462,8 @@ export function TreeView({
         {visible.length === 0 ? (
           <p className={styles.emptyNote}>Nothing here yet.</p>
         ) : null}
+      </div>
+
       </div>
 
       {menu ? (

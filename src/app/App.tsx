@@ -41,7 +41,7 @@ import { DevicePanel } from "@/views/devices/DevicePanel";
 import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { isLooseId } from "@/lib/explorer";
-import { childrenOf, containerOf, parentFor, withRelated } from "@/lib/tree";
+import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
 import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
@@ -414,7 +414,7 @@ export function App() {
           backend.librarySummary(),
         ]);
         if (cancelled) return true;
-        setTree(withRelated(nodes));
+        setTree(withSources(nodes));
         setSummary(info);
         setLoadError(null);
         // The playlist that was open at exit, when it is still there — it can
@@ -573,7 +573,7 @@ export function App() {
         setPendingEdits(new Map());
         // The tree can change too — a playlist gained tracks, or one was
         // deleted — so it is re-read rather than assumed still right.
-        void backend.playlistTree().then((nodes) => setTree(withRelated(nodes)));
+        void backend.playlistTree().then((nodes) => setTree(withSources(nodes)));
       });
     })();
     return () => {

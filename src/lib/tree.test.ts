@@ -4,7 +4,7 @@ import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import {
   RELATED_NODES, TAG_LIST_NODE, branchIds, childrenOf, containerOf, emptySources, hasChildren,
   newlyClosed, nodesForSource, parentFor, relatedCriterionOf, sourceOf, subtreeIds, toggle,
-  visibleNodes, withRelated,
+  visibleNodes, withSources, searchTree,
 } from "./tree";
 
 /** `"a"` at depth 0, `"  b"` at depth 1, and so on. */
@@ -358,18 +358,17 @@ describe("subtreeIds", () => {
   });
 });
 
-describe("withRelated", () => {
+describe("withSources", () => {
   const backend: TreeNode[] = [
     { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
     { id: "pl", name: "Playlists", kind: "collection", depth: 0 },
     { id: "one", name: "One", kind: "playlist", depth: 1 },
   ];
 
-  it("adds the Related Tracks section and the Tag List after the backend's tree", () => {
-    const ids = withRelated(backend).map((n) => n.id);
+  it("adds Tag List and hides unfinished Related Tracks", () => {
+    const ids = withSources(backend).map((n) => n.id);
     expect(ids).toEqual([
       "all", "pl", "one",
-      "related", "related:bpmKey", "related:genreRecent", "related:artist", "related:suggestion",
       "tagList",
     ]);
   });
@@ -378,18 +377,17 @@ describe("withRelated", () => {
     // The tree is rebuilt on every library change, and the frontend's own
     // rows are already in the array it is handed back: without the filter
     // each refetch would add another Related Tracks section.
-    expect(withRelated(withRelated(backend))).toEqual(withRelated(backend));
+    expect(withSources(withSources(backend))).toEqual(withSources(backend));
   });
 
   it("leaves the backend's own nodes alone, in order", () => {
-    expect(withRelated(backend).slice(0, 3)).toEqual(backend);
-    expect(withRelated([])).toEqual([...RELATED_NODES, TAG_LIST_NODE]);
+    expect(withSources(backend).slice(0, 3)).toEqual(backend);
+    expect(withSources([])).toEqual([TAG_LIST_NODE]);
   });
 
-  it("gives the rail a Related section and a Tag List to show", () => {
-    const nodes = withRelated(backend);
+  it("keeps Related hidden and gives the rail a Tag List", () => {
+    const nodes = withSources(backend);
     expect(nodesForSource(nodes, "related").map((n) => n.id)).toEqual([
-      "related", "related:bpmKey", "related:genreRecent", "related:artist", "related:suggestion",
     ]);
     expect(nodesForSource(nodes, "tagList").map((n) => n.id)).toEqual(["tagList"]);
     // And they stay out of the playlists section, which is the rail's job.
@@ -397,7 +395,7 @@ describe("withRelated", () => {
   });
 
   it("puts the rail on the section a selected row belongs to", () => {
-    const nodes = withRelated(backend);
+    const nodes = [...withSources(backend), ...RELATED_NODES];
     expect(sourceOf(nodes, "related")).toBe("related");
     expect(sourceOf(nodes, "related:artist")).toBe("related");
     expect(sourceOf(nodes, "tagList")).toBe("tagList");
@@ -426,5 +424,22 @@ describe("relatedCriterionOf", () => {
       if (node.kind === "relatedCriterion") expect(criterion).not.toBeNull();
       else expect(criterion).toBeNull();
     }
+  });
+});
+
+describe("searchTree", () => {
+  const nodes: TreeNode[] = [
+    { id: "root", name: "Playlists", kind: "collection", depth: 0 },
+    { id: "folder", name: "House", kind: "folder", depth: 1 },
+    { id: "list", name: "Late House", kind: "playlist", depth: 2 },
+    { id: "other", name: "Jazz", kind: "playlist", depth: 1 },
+  ];
+  it("finds matches inside collapsed branches and keeps their context", () => {
+    expect(searchTree(nodes, " late ", "playlist").map(n => n.id)).toEqual(["root", "folder", "list"]);
+  });
+  it("scopes matches to folders and preserves the unfiltered tree for a blank query", () => {
+    expect(searchTree(nodes, "house", "folder").map(n => n.id)).toEqual(["root", "folder"]);
+    expect(searchTree(nodes, "", "folder")).toEqual(nodes);
+    expect(searchTree(nodes, "missing", "all")).toEqual([]);
   });
 });

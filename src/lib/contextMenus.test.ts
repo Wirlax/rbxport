@@ -92,7 +92,6 @@ describe("treeMenu", () => {
     expect(entriesOf(treeMenu("playlist")).map((e) => e.label)).toEqual([
       "Export Playlist",
       "Create New Playlist",
-      "Create New Intelligent Playlist",
       "Create New Folder",
       "Playlist display setting",
       "Add Artwork",
@@ -150,7 +149,6 @@ describe("treeMenu", () => {
     expect(entriesOf(treeMenu("folder")).map((e) => e.label)).toEqual([
       "Export Folder",
       "Create New Playlist",
-      "Create New Intelligent Playlist",
       "Create New Folder",
       "Playlist display setting",
       "Rename Folder",

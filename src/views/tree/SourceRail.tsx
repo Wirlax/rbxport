@@ -13,7 +13,7 @@ import { useState, type SVGProps } from "react";
 import type { Source } from "@/lib/tree";
 
 import { ContextMenu } from "@/components/ContextMenu";
-import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, ListIcon, SmartListIcon, SyncIcon } from "@/components/icons";
+import { DeviceIcon, ExplorerIcon, FolderIcon, HistoryIcon, ListIcon, SyncIcon } from "@/components/icons";
 import { shortcutMenu } from "@/lib/contextMenus";
 import styles from "./SourceRail.module.css";
 import { useTooltip } from "@/store/usePreferences";
@@ -29,10 +29,8 @@ const SOURCES: ReadonlyArray<{
   // Recordings. The streaming and cloud buttons are not here (no such
   // services behind this app), Hot Cue Bank List and Recordings are not
   // built, and Collection is All Tracks at the top of the tree; the rest
-  // keep rekordbox's order. The Related icon is the intelligent
-  // playlist's [ASSUME], with no capture of rekordbox's own.
+  // keep rekordbox's order. Related Tracks is hidden until finished.
   { id: "playlists", label: "Playlists", Icon: FolderIcon },
-  { id: "related", label: "Related Tracks", Icon: SmartListIcon },
   { id: "explorer", label: "Explorer", Icon: ExplorerIcon },
   { id: "devices", label: "Devices", Icon: DeviceIcon },
   { id: "histories", label: "Histories", Icon: HistoryIcon },

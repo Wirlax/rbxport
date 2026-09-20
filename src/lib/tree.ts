@@ -223,11 +223,10 @@ export function relatedCriterionOf(id: string): RelatedCriterion | null {
  */
 export const TAG_LIST_NODE: TreeNode = { id: "tagList", name: "Tag List", kind: "tagList", depth: 0 };
 
-/** The backend's tree with the Related Tracks section and the Tag List after it. */
-export function withRelated(nodes: readonly TreeNode[]): TreeNode[] {
+/** Visible sources. Related Tracks stays hidden until its criteria are ready. */
+export function withSources(nodes: readonly TreeNode[]): TreeNode[] {
   return [
     ...nodes.filter((n) => n.kind !== "related" && n.kind !== "relatedCriterion" && n.kind !== "tagList"),
-    ...RELATED_NODES,
     TAG_LIST_NODE,
   ];
 }
@@ -307,4 +306,25 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
     default:
       return "playlists";
   }
+}
+
+export type TreeSearchScope = "all" | "playlist" | "folder";
+
+/** Keep matches and their ancestors, so duplicate names retain their context. */
+export function searchTree(nodes: readonly TreeNode[], query: string, scope: TreeSearchScope): TreeNode[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [...nodes];
+  const keep = new Set<string>();
+  const ancestors: TreeNode[] = [];
+  for (const node of nodes) {
+    while (ancestors.length && ancestors[ancestors.length - 1]!.depth >= node.depth) ancestors.pop();
+    const matchesKind = scope === "all" || (scope === "folder" ? node.kind === "folder"
+      : node.kind === "playlist" || node.kind === "smartPlaylist");
+    if (matchesKind && node.name.toLocaleLowerCase().includes(needle)) {
+      keep.add(node.id);
+      for (const parent of ancestors) keep.add(parent.id);
+    }
+    ancestors.push(node);
+  }
+  return nodes.filter(node => keep.has(node.id));
 }
