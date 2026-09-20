@@ -12,6 +12,7 @@ pub mod cues;
 pub mod details;
 pub mod grid;
 mod durable;
+mod file_journal;
 mod diagnostics;
 mod explorer;
 mod link;
@@ -62,6 +63,11 @@ fn spawn_library_load(app: tauri::AppHandle) {
         let started = std::time::Instant::now();
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
+                if let Err(e) = file_journal::recover(app.state::<Arc<state::AppState>>().backup_dir(), db.location()) {
+                    tracing::error!(error = %e, "analysis recovery failed");
+                    let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                    return;
+                }
                 let db_version = db.schema().db_version;
                 let location = db.location().clone();
                 let master_db = db.location().master_db.clone();

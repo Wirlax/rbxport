@@ -129,6 +129,8 @@ struct History {
 /// files have been backed up. Managed by the app beside `AppState`.
 #[derive(Debug)]
 pub struct GridEditor {
+    editing: parking_lot::Mutex<()>,
+    journal_root: PathBuf,
     histories: parking_lot::Mutex<HashMap<String, History>>,
     /// Loaded from `locks_path` on first use; `None` until then.
     locks: parking_lot::Mutex<Option<BTreeSet<String>>>,
@@ -156,6 +158,8 @@ impl GridEditor {
     /// An editor keeping its lock list and backups under `root`.
     pub fn at(root: &Path) -> Self {
         Self {
+            editing: parking_lot::Mutex::new(()),
+            journal_root: root.join("backups"),
             histories: parking_lot::Mutex::new(HashMap::new()),
             locks: parking_lot::Mutex::new(None),
             locks_path: root.join("grid-locks.json"),
@@ -318,6 +322,8 @@ pub fn apply(
     ) {
         return Err(AppError::new(ErrorKind::ReadOnly, reason));
     }
+    let _editing = editor.editing.lock();
+    crate::file_journal::recover(&editor.journal_root, location)?;
     let files = files_of(library, &location.share_root, track)?;
     let (parsed, beats) = read_dat(&files.dat)?;
 
@@ -343,53 +349,50 @@ pub fn apply(
         GridAction::Undo | GridAction::Redo => {
             let mut histories = editor.histories.lock();
             let history = histories.entry(track.to_owned()).or_default();
-            let (from, to) = if action == GridAction::Undo {
-                (&mut history.undo, &mut history.redo)
-            } else {
-                (&mut history.redo, &mut history.undo)
-            };
-            let Some(previous) = from.pop() else {
+            let from = if action == GridAction::Undo { &history.undo } else { &history.redo };
+            let Some(previous) = from.last() else {
                 let what = if action == GridAction::Undo { "undo" } else { "redo" };
                 return Err(AppError::new(ErrorKind::NotFound, format!("Nothing to {what}.")));
             };
-            to.push(beats.clone());
-            previous
+            previous.clone()
         }
     };
 
-    // The files, the original kept aside until the row agrees.
-    let original = std::fs::read(&files.dat).map_err(|e| file_error("read", &files.dat, &e))?;
     editor.back_up(&files.dat, &files.relative, "DAT")?;
     editor.back_up(&files.ext, &files.relative, "EXT")?;
-    write_atomically(&files.dat, &parsed.with_beat_grid(&next)).map_err(|e| file_error("written", &files.dat, &e))?;
-    if let Ok(ext) = rbl_anlz::Anlz::read(&files.ext) {
-        if let Some(cleared) = ext.with_extended_grid_cleared() {
-            write_atomically(&files.ext, &cleared).map_err(|e| file_error("written", &files.ext, &e))?;
-        }
+    let mut changed_files = vec![(files.dat.clone(), parsed.with_beat_grid(&next))];
+    if files.ext.exists() {
+        let ext = rbl_anlz::Anlz::read(&files.ext).map_err(|e| AppError::internal(e.to_string()))?;
+        if let Some(cleared) = ext.with_extended_grid_cleared() { changed_files.push((files.ext.clone(), cleared)); }
     }
-
     let old_bpm = u32::from(tempo_x100(&beats));
     let new_bpm = u32::from(tempo_x100(&next));
     let bpm_changed = new_bpm != old_bpm;
+    let journal = crate::file_journal::FileJournal::prepare(&editor.journal_root, location, track,
+        new_bpm, None, bpm_changed, &changed_files)?;
+    if let Err(e) = journal.publish() {
+        journal.rollback()?;
+        return Err(e);
+    }
     if bpm_changed {
         if let Err(refused) = set_bpm(new_bpm) {
-            // The grid goes back with the row it still matches. A restore
-            // that fails leaves the original error in place: it is the one
-            // that explains what happened, and the backup holds the file.
-            if let Err(e) = write_atomically(&files.dat, &original) {
-                tracing::error!(path = %files.dat.display(), error = %e, "the grid could not be put back");
-            }
+            journal.rollback()?;
             return Err(refused);
         }
     }
+    journal.commit()?;
 
-    if let GridAction::Edit { .. } = action {
+    {
         let mut histories = editor.histories.lock();
         let history = histories.entry(track.to_owned()).or_default();
-        history.redo.clear();
-        history.undo.push(beats);
-        if history.undo.len() > HISTORY_CAP {
-            history.undo.remove(0);
+        match action {
+            GridAction::Edit { .. } => {
+                history.redo.clear();
+                history.undo.push(beats);
+                if history.undo.len() > HISTORY_CAP { history.undo.remove(0); }
+            }
+            GridAction::Undo => { history.undo.pop(); history.redo.push(beats); }
+            GridAction::Redo => { history.redo.pop(); history.undo.push(beats); }
         }
     }
 
@@ -427,6 +430,7 @@ async fn run<R: tauri::Runtime>(
         let state = Arc::clone(&state);
         let track = track.clone();
         blocking(name, move || {
+            let _files_guard = state.analysis_write.lock();
             let mut set_bpm = |bpm_x100: u32| {
                 let track = track.clone();
                 state.write(|writer| writer.set_bpm_x100(&track, bpm_x100).map(|_| ())).map_err(write_error)
@@ -696,6 +700,22 @@ mod tests {
         let mut f = open();
         f.run(GridAction::Edit { edit: GridEdit::Nudge { ms: 100 }, from_ms: Some(2500) }).unwrap();
         assert_eq!(f.times(), vec![500, 1000, 1500, 2000, 2600, 3100, 3600, 4100]);
+    }
+
+    #[test]
+    fn a_refused_undo_keeps_the_history_and_both_file_images() {
+        let mut f = open();
+        f.edit(GridEdit::Double);
+        let before_dat = f.dat().beat_grid().unwrap();
+        let before_ext = std::fs::read(rbl_anlz::resolve(&f.location.share_root, RELATIVE).with_extension("EXT")).unwrap();
+        let mut refuse = |_bpm: u32| Err(AppError::new(ErrorKind::ReadOnly, "no"));
+        assert!(apply(&f.editor, &f.library, &f.location, &Fixture::track(), GridAction::Undo, &mut refuse).is_err());
+        assert_eq!(f.dat().beat_grid().unwrap(), before_dat);
+        assert_eq!(std::fs::read(rbl_anlz::resolve(&f.location.share_root, RELATIVE).with_extension("EXT")).unwrap(), before_ext);
+        assert!(f.editor.state_for(&Fixture::track(), &before_dat).can_undo);
+        assert!(!f.editor.state_for(&Fixture::track(), &before_dat).can_redo);
+        f.run(GridAction::Undo).unwrap();
+        assert_eq!(f.dat().beat_grid().unwrap(), grid());
     }
 
     #[test]

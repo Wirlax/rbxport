@@ -11,6 +11,21 @@ pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn create_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut missing = Vec::new();
+    let mut at = path;
+    while !at.exists() {
+        missing.push(at.to_path_buf());
+        let Some(parent) = at.parent().filter(|p| !p.as_os_str().is_empty()) else { break };
+        at = parent;
+    }
+    std::fs::create_dir_all(path)?;
+    for dir in missing.iter().rev() {
+        sync_dir(dir.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")))?;
+    }
+    Ok(())
+}
+
 pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let temp = parent.join(format!(".rbxport-{}.tmp", uuid::Uuid::new_v4()));

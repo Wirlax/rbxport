@@ -109,6 +109,10 @@ fn analyse_and_save(
     })?;
     let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, preset.options());
 
+    let _files_guard = state.analysis_write.lock();
+    let location = state.location()?;
+    crate::file_journal::recover(state.backup_dir(), &location)?;
+    state.write(|writer| writer.import_artwork(track_id)).map_err(write_error)?;
     // The files: where the row already points, or a fresh place.
     let relative = {
         let current = library.analysis_path.get(row);
@@ -142,11 +146,6 @@ fn analyse_and_save(
         &columns,
         rbl_anlz::Existing { dat: existing[0].as_ref(), ext: existing[1].as_ref(), two_ex: existing[2].as_ref() },
     );
-    write_analysis_files(&dat, &files).map_err(|e| {
-        AppError::new(ErrorKind::Internal, "The analysis files could not be written.")
-            .with_detail(e.to_string())
-    })?;
-
     // Clamp before narrowing so the conversion cannot truncate.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped into 0..=u32::MAX on the line above")]
     let to_u32 = |v: f64| v.round().clamp(0.0, f64::from(u32::MAX)) as u32;
@@ -157,9 +156,17 @@ fn analyse_and_save(
     // decode's length would be the cap, not the track's.
     let length_sec = (audio.duration_secs() < DECODE_CAP_SECS - 1.0).then_some(duration_sec);
 
-    state
+    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, track_id,
+        bpm_x100, Some(relative.clone()), true, &[
+            (dat.clone(), files.dat), (rbl_anlz::sibling(&dat, "EXT"), files.ext),
+            (rbl_anlz::sibling(&dat, "2EX"), files.two_ex),
+        ])?;
+    if let Err(e) = journal.publish() {
+        journal.rollback()?;
+        return Err(e);
+    }
+    let written = state
         .write(|writer| {
-            writer.import_artwork(track_id)?;
             writer.set_analysis(
                 track_id,
                 &rbl_db::write::AnalysisWrite {
@@ -170,7 +177,12 @@ fn analyse_and_save(
                 },
             )
         })
-        .map_err(write_error)?;
+        .map_err(write_error);
+    if let Err(e) = written {
+        journal.rollback()?;
+        return Err(e);
+    }
+    journal.commit()?;
 
     Ok(AnalysisResultDto {
         track_id: track_id.to_owned(),
@@ -257,6 +269,7 @@ fn new_analysis_path(content_id: u64) -> String {
 /// reader never sees a half-written one.
 ///
 /// Only ever called from inside `analyse_track`'s `blocking` closure.
+#[cfg(test)]
 fn write_analysis_files(dat: &std::path::Path, files: &rbl_anlz::AnalysisFiles) -> std::io::Result<()> {
     if let Some(dir) = dat.parent() {
         // perf-ok: runs inside the command's spawn_blocking closure

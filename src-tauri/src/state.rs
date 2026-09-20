@@ -21,13 +21,10 @@ use crate::error::{AppError, AppResult, ErrorKind};
 const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
+    pub(crate) analysis_write: parking_lot::Mutex<()>,
     inner: RwLock<Inner>,
-    /// Where backups go before the first write of a session.
+    /// Where manually requested backups and analysis recovery files go.
     backup_dir: std::path::PathBuf,
-    /// Whether this session has backed the library up. Kept here because a
-    /// writer lives for one edit; the writer is told, so the second edit does
-    /// not copy the library again.
-    backed_up: std::sync::atomic::AtomicBool,
     /// A read-only handle to the database for point reads, opened on first
     /// use. Opening costs 50 ms on the reference library — the `SQLCipher`
     /// key derivation — and a point read under 1 ms, so the handle is kept
@@ -75,13 +72,13 @@ impl AppState {
         Self::with_backups(default_backup_dir())
     }
 
-    /// State that backs the library up under `backup_dir`. The location is
+    /// State that stores manual backups under `backup_dir`. The location is
     /// not chosen here: it arrives with the library, in [`Self::set_library`].
     pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
         Self {
+            analysis_write: parking_lot::Mutex::new(()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
             backup_dir: backup_dir.into(),
-            backed_up: std::sync::atomic::AtomicBool::new(false),
             reader: parking_lot::Mutex::new(None),
         }
     }
@@ -121,29 +118,20 @@ impl AppState {
     ///
     /// Opened per edit rather than held: holding it would keep the database
     /// open read-write for the life of the app, and rekordbox launching
-    /// behind us must be able to take the file back. The session's backup is
-    /// taken before the first write and not again: the writer is told when
-    /// one exists, and remembered here when it takes one.
+    /// behind us must be able to take the file back. Database backups are
+    /// made only by an explicit request, never automatically on edits.
     ///
     /// Blocking — call from `spawn_blocking`, never from a command body.
     pub fn write<T>(
         &self,
         edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
     ) -> Result<T, rbl_db::DbError> {
-        use std::sync::atomic::Ordering;
         let location = self
             .location()
             .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
         let mut writer = rbl_db::write::Writer::open(location, self.backup_dir.clone())?;
-        if self.backed_up.load(Ordering::SeqCst) {
-            writer.mark_backed_up();
-        }
-        let outcome = edit(&mut writer);
-        // Whatever the edit did, a backup taken is a backup that stands.
-        if writer.backed_up() {
-            self.backed_up.store(true, Ordering::SeqCst);
-        }
-        outcome
+        writer.disable_automatic_backups();
+        edit(&mut writer)
     }
 
     /// Runs one read against the database, opening the handle if needed.
@@ -185,10 +173,6 @@ impl AppState {
         // would be a deadlock waiting for a reload during a point read.
         *self.reader.lock() = None;
         let mut inner = self.inner.write();
-        // A different file is a different session's worth of backing up.
-        if inner.location.as_ref().map(|l| &l.master_db) != Some(&location.master_db) {
-            self.backed_up.store(false, std::sync::atomic::Ordering::SeqCst);
-        }
         inner.library = Some(Arc::new(library));
         inner.location = Some(location);
         inner.read_only = read_only;
@@ -340,8 +324,7 @@ impl AppState {
     }
 }
 
-/// Where backups of the installed library go before the first write of a
-/// session.
+/// Where manual backups of the installed library go.
 fn default_backup_dir() -> std::path::PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
