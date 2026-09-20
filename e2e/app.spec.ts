@@ -1274,6 +1274,12 @@ test("settings has the LINK switch, and says why a browser cannot turn it on", a
 
   const section = page.getByRole("region", { name: "Link" });
   await expect(page.getByTestId("link-on")).toHaveCount(0);
+  await expect(section.getByRole("columnheader")).toHaveText(["Interface", "Connection", "Adapter", "IP address"]);
+  const wired = section.getByRole("row").filter({ hasText: "en11" });
+  await expect(wired).toContainText("Wired");
+  await expect(wired).toContainText("USB Ethernet");
+  await section.getByRole("radio", { name: "en11", exact: true }).check();
+  await expect(section.getByRole("radio", { name: "en11", exact: true })).toBeChecked();
 
   await section.getByRole("button", { name: "Connect to PRO DJ LINK" }).click();
   await expect(section).toContainText("browser has no access to the network");

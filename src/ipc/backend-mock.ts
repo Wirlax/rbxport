@@ -1234,7 +1234,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     problem: null,
     interface: null,
     players: [],
-    interfaces: [],
+    interfaces: [
+      { name: "en0", address: "192.168.1.14", adapter: "Wi-Fi", connection: "wireless" },
+      { name: "en11", address: "192.168.2.14", adapter: "USB Ethernet", connection: "wired" },
+    ],
     master: false,
     masterBpm: mockMaster.bpm,
     state: "off",

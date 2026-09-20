@@ -27,11 +27,14 @@ const REPORT_EVERY: Duration = Duration::from_millis(500);
 pub struct InterfaceDto {
     pub name: String,
     pub address: String,
+    pub adapter: Option<String>,
+    pub connection: Option<String>,
 }
 
 impl From<&Interface> for InterfaceDto {
     fn from(interface: &Interface) -> Self {
-        Self { name: interface.name.clone(), address: interface.address.to_string() }
+        let label = crate::network_labels::for_interface(&interface.name);
+        Self { name: interface.name.clone(), address: interface.address.to_string(), adapter: label.adapter, connection: label.connection }
     }
 }
 

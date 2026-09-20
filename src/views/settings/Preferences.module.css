@@ -594,3 +594,25 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 }
 .meterFill[data-reduction] { background: var(--c-meter-red); }
 .meterDb { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; color: var(--c-text-dim); font-size: var(--f-size-xs); }
+
+/* Keep adapter details in aligned columns without encoding spacing in text. */
+.networkInterfaces {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+.networkInterfaces legend { margin-bottom: 8px; }
+.networkInterfaces table { width: 100%; border-collapse: collapse; text-align: left; }
+.networkInterfaces th, .networkInterfaces td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--c-raised);
+  overflow-wrap: anywhere;
+}
+.networkInterfaces th { color: var(--c-text-dim); font-size: var(--f-size-sm); }
+.networkInterfaces td { font-size: var(--f-size-sm); }
+.networkInterfaces td:last-child { font-variant-numeric: tabular-nums; }
+.networkInterfaces label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.networkInterfaces input { margin: 0; accent-color: var(--c-accent); }
+.networkInterfaces:disabled { opacity: 0.6; }
+.networkInterfaces:disabled label { cursor: default; }

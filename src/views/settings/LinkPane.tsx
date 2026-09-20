@@ -10,9 +10,9 @@ import { getBackend } from "@/ipc/client";
 import type { LinkStatus } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Note, Section, Select } from "./controls";
+import { Button, Note, Section } from "./controls";
 
-/** The dropdown's value for "no interface chosen". */
+/** The radio value for "no interface chosen". */
 const AUTOMATIC = "";
 
 /**
@@ -56,13 +56,7 @@ export function LinkPane() {
   const interfaces = link?.interfaces ?? [];
   // A chosen interface that is not there right now (unplugged, renamed) is
   // kept in the store and shown as such, not silently swapped for another.
-  const choices = [
-    { value: AUTOMATIC, label: "Automatic" },
-    ...interfaces.map((i) => ({ value: i.name, label: `${i.name} — ${i.address}` })),
-  ];
-  if (linkInterface !== null && !interfaces.some((i) => i.name === linkInterface)) {
-    choices.push({ value: linkInterface, label: `${linkInterface} — not present` });
-  }
+  const missingInterface = linkInterface !== null && !interfaces.some((i) => i.name === linkInterface);
 
   const toggle = () => {
     setBusy(true);
@@ -86,15 +80,29 @@ export function LinkPane() {
           </Button>
         </div>
       )}
-      <Select
-        label="Network interface"
-        caption="Network interface"
-        plain
-        value={linkInterface ?? AUTOMATIC}
-        disabled={link === null || link.on}
-        choices={choices}
-        onChange={(value) => onChoose(value === AUTOMATIC ? null : value)}
-      />
+      <fieldset className={styles.networkInterfaces} disabled={link === null || link.on}>
+        <legend>Network interface</legend>
+        <table>
+          <thead><tr><th>Interface</th><th>Connection</th><th>Adapter</th><th>IP address</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><label><input type="radio" name="link-interface" value={AUTOMATIC} checked={linkInterface === null} onChange={() => onChoose(null)} />Automatic</label></td>
+              <td colSpan={3}>Choose the interface that reaches the players</td>
+            </tr>
+            {interfaces.map((iface) => (
+              <tr key={`${iface.name}-${iface.address}`}>
+                <td><label><input type="radio" name="link-interface" value={iface.name} checked={linkInterface === iface.name} onChange={() => onChoose(iface.name)} />{iface.name}</label></td>
+                <td>{iface.connection === "wireless" ? "Wi-Fi" : iface.connection === "wired" ? "Wired" : "Unknown"}</td>
+                <td>{iface.adapter ?? "Unknown"}</td>
+                <td>{iface.address}</td>
+              </tr>
+            ))}
+            {missingInterface ? (
+              <tr><td><label><input type="radio" name="link-interface" checked readOnly />{linkInterface}</label></td><td colSpan={3}>Not present</td></tr>
+            ) : null}
+          </tbody>
+        </table>
+      </fieldset>
       {link === null ? null : link.on ? (
         <>
           <Note>

@@ -16,6 +16,7 @@ mod file_journal;
 mod diagnostics;
 mod explorer;
 mod link;
+mod network_labels;
 pub mod logging;
 pub mod menu;
 pub mod player;

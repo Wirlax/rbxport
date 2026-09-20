@@ -987,6 +987,8 @@ export interface LinkInterface {
   /** The OS name: `en0`, `Ethernet 2`. */
   name: string;
   address: string;
+  adapter?: string | null;
+  connection?: "wired" | "wireless" | null;
 }
 
 /** A player on the link, and what it has loaded from us. */
