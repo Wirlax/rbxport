@@ -1508,13 +1508,14 @@ fn an_analysis_is_registered_on_the_track_with_the_usual_bookkeeping() {
         )
         .unwrap();
     assert_eq!((bpm, key.as_str(), path.as_str(), length, analysed), (12_850, "12", "/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT", 312, ANALYSED_BY_THIS_APP));
-    assert!(updated.ends_with("+00:00"), "{updated}");
+    assert_eq!(updated, "1", "AnalysisUpdated is a revision counter, not a timestamp");
+    assert_eq!(f.one::<i64>("SELECT ContentLink FROM djmdContent WHERE ID = ?1", &[&track_id(0)]), 2_885_120);
     let counter: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
     assert_eq!(counter, changed.usn);
 
     // rekordbox's own value on an analysed track is kept, and an unknown key
     // name leaves the key as it was rather than inventing a djmdKey row.
-    f.conn().execute("UPDATE djmdContent SET KeyID = '12' WHERE ID = ?1", [track_id(1)]).unwrap();
+    f.conn().execute("UPDATE djmdContent SET KeyID = '12', ContentLink = 3999246, AnalysisUpdated = '7' WHERE ID = ?1", [track_id(1)]).unwrap();
     f.writer
         .set_analysis(&track_id(1), &AnalysisWrite { bpm_x100: 12_000, key: Some("H#m"), analysis_path: "/PIONEER/USBANLZ/P001/00000002/ANLZ0000.DAT", length_sec: None })
         .unwrap();
@@ -1523,7 +1524,58 @@ fn an_analysis_is_registered_on_the_track_with_the_usual_bookkeeping() {
         .query_row("SELECT Analysed, KeyID, Length FROM djmdContent WHERE ID = ?1", [track_id(1)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .unwrap();
     assert_eq!((analysed, key.as_str(), length), (105, "12", 300));
+    assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID = ?1", &[&track_id(1)]), "8");
+    assert_eq!(f.one::<i64>("SELECT ContentLink FROM djmdContent WHERE ID = ?1", &[&track_id(1)]), 3_999_246);
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdKey"), 1);
+}
+
+#[test]
+fn clearing_the_analysis_puts_the_row_back_to_unanalysed_and_lets_it_be_registered_again() {
+    use rbl_db::write::{AnalysisWrite, ANALYSED_BY_THIS_APP};
+    let mut f = fixture();
+    let stamp = rbl_core::time::now();
+    f.conn()
+        .execute(
+            "INSERT INTO djmdKey (ID, ScaleName, Seq, created_at, updated_at) VALUES ('12', 'Fm', 7, ?1, ?1)",
+            [&stamp],
+        )
+        .unwrap();
+    // The fixture's track is analysed by rekordbox: Analysed 105, a key, a path.
+    f.conn()
+        .execute("UPDATE djmdContent SET Analysed = 105, KeyID = '12', BPM = 12850 WHERE ID = ?1", [track_id(0)])
+        .unwrap();
+    let before: i64 = f.one("SELECT rb_local_usn FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+
+    let changed = f.writer.clear_analysis(&track_id(0)).unwrap();
+    assert_eq!(changed.rows, 1);
+    assert!(changed.usn > before);
+    let (bpm, key, path, analysed, updated, length): (i64, Option<String>, String, i64, Option<String>, i64) = f
+        .conn()
+        .query_row(
+            "SELECT BPM, KeyID, AnalysisDataPath, Analysed, AnalysisUpdated, Length FROM djmdContent WHERE ID = ?1",
+            [track_id(0)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap();
+    assert_eq!((bpm, key, path.as_str(), analysed, updated), (0, None, "", 0, None));
+    // The file's length is not the analysis's, and stays.
+    assert_eq!(length, 300);
+    let counter: i64 = f.count("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'");
+    assert_eq!(counter, changed.usn);
+
+    // And the point of clearing it: `set_analysis` now writes its own
+    // `Analysed`, where on the 105 above it would have kept rekordbox's.
+    f.writer
+        .set_analysis(
+            &track_id(0),
+            &AnalysisWrite { bpm_x100: 14_000, key: Some("Fm"), analysis_path: "/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT", length_sec: None },
+        )
+        .unwrap();
+    let (bpm, analysed): (i64, i64) = f
+        .conn()
+        .query_row("SELECT BPM, Analysed FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((bpm, analysed), (14_000, ANALYSED_BY_THIS_APP));
 }
 
 #[test]
@@ -1838,4 +1890,37 @@ fn reload_tag_reads_the_file_again_over_the_row() {
     assert_eq!((read.title.as_str(), read.artist.as_str(), read.genre.as_str()), ("Retitled", "Someone", "House"));
     assert_eq!((read.comment.as_str(), read.track_number), ("a note", 7));
     assert!(matches!(f.writer.reload_tags("no-such-track"), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
+fn embedded_cover_is_registered_with_thumbnails_and_never_replaces_custom_art() {
+    use lofty::config::WriteOptions;
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::prelude::TagExt;
+    use lofty::tag::{Tag, TagType};
+
+    let mut f = fixture();
+    let path = f._dir.path().join("cover.wav");
+    write_wav(&path, 1);
+    let id = f.writer.import_file(&path).unwrap();
+    assert!(!f.writer.import_artwork(&id).unwrap(), "untagged audio has no cover");
+    let png = f._dir.path().join("front.png");
+    image::RgbImage::from_pixel(12, 8, image::Rgb([10, 100, 200])).save(&png).unwrap();
+    let bytes = std::fs::read(&png).unwrap();
+    let mut tag = Tag::new(TagType::Id3v2);
+    tag.push_picture(Picture::new_unchecked(PictureType::CoverFront, Some(MimeType::Png), None, bytes.clone()));
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    assert!(f.writer.import_artwork(&id).unwrap());
+    let relative: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]);
+    let filed = rbl_anlz::resolve(&f.writer.library().location().share_root, &relative);
+    assert_eq!(std::fs::read(&filed).unwrap(), bytes);
+    for (name, size) in [("artwork_s.jpg", 80), ("artwork_m.jpg", 240)] {
+        let thumb = image::open(filed.with_file_name(name)).unwrap();
+        assert_eq!((thumb.width(), thumb.height()), (size, size));
+    }
+    assert!(!f.writer.import_artwork(&id).unwrap(), "repeat analysis keeps the existing cover");
+    f.writer.set_artwork(&id, Some(&png)).unwrap();
+    let custom: String = f.one("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]);
+    assert!(!f.writer.import_artwork(&id).unwrap());
+    assert_eq!(f.one::<String>("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]), custom);
 }

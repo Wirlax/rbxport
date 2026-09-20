@@ -73,6 +73,23 @@ pub fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.as_str()))
 }
 
+/// Reads embedded artwork separately from the fast Explorer tag probe.
+/// Prefer a front cover across all tags, then the first available picture.
+pub fn read_artwork(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
+    let tagged = Probe::open(path)
+        .map(|probe| probe.options(ParseOptions::new().read_properties(false)))
+        .and_then(Probe::read)
+        .map_err(|e| ImportError::Unreadable {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        })?;
+    let pictures = || tagged.tags().iter().flat_map(|tag| tag.pictures());
+    Ok(pictures()
+        .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+        .or_else(|| pictures().next())
+        .map(|p| p.data().to_vec()))
+}
+
 /// Reads a file's tags.
 ///
 /// A missing title falls back to the file's own name rather than being left

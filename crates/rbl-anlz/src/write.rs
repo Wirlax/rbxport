@@ -142,7 +142,10 @@ impl AnlzBuilder {
         let mut header = Vec::with_capacity(12);
         header.extend_from_slice(&be32(stride));
         header.extend_from_slice(&be32(u32::try_from(entries).unwrap_or(0)));
-        header.extend_from_slice(&be32(trailer));
+        // PWV6 has a 20-byte header, not the 24-byte scroll header.
+        if tag != b"PWV6" {
+            header.extend_from_slice(&be32(trailer));
+        }
         self.sections.push(Section::new(tag, header, data.to_vec()));
         self
     }

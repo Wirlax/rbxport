@@ -99,6 +99,12 @@ const USN_TABLES: &[&str] = &["djmdContent", "djmdPlaylist", "djmdSongPlaylist"]
 /// waveforms but no phrases [ASSUME — see the module doc].
 pub const ANALYSED_BY_THIS_APP: i64 = 1;
 
+/// Local-file registration written by rekordbox when it first opens an
+/// RBX-imported track (0x2c0600). A NULL ContentLink suppresses its browser
+/// preview even when all analysis files exist. Preserve existing values:
+/// the other bits also describe states unrelated to our analysis.
+const CONTENT_LINK_LOCAL: i64 = 0x002c_0600;
+
 /// What [`Writer::set_analysis`] registers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnalysisWrite<'a> {
@@ -1393,6 +1399,40 @@ impl Writer {
         self.touch_content(content, "ImagePath", &Value::Text(relative))
     }
 
+    /// Import a file's embedded cover only when the track has no artwork.
+    /// Read the current database row so a stale index cannot replace custom art.
+    pub fn import_artwork(&mut self, content: &str) -> Result<bool> {
+        self.prepare()?;
+        let (path, image): (String, Option<String>) = self.library.connection().query_row(
+            "SELECT FolderPath, ImagePath FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+            [content], |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if image.is_some_and(|p| !p.is_empty()) {
+            return Ok(false);
+        }
+        let Some(bytes) = crate::import::read_artwork(Path::new(&path))
+            .map_err(|e| DbError::WriteRefused(e.to_string()))? else {
+            return Ok(false);
+        };
+        let format = image::guess_format(&bytes)
+            .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
+        let extension = match format {
+            image::ImageFormat::Jpeg => "jpg",
+            image::ImageFormat::Png => "png",
+            _ => return Ok(false),
+        };
+        // Validate before publishing an ImagePath that rekordbox cannot draw.
+        image::load_from_memory(&bytes)
+            .map_err(|e| DbError::WriteRefused(format!("invalid embedded artwork: {e}")))?;
+        let uuid = self.rng.uuid4();
+        let bucket = uuid.get(..3).unwrap_or("000");
+        let relative = format!("/PIONEER/Artwork/{bucket}/{uuid}/artwork.{extension}");
+        let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
+        write_artwork_sizes(&target, &bytes)?;
+        self.touch_content(content, "ImagePath", &Value::Text(relative))?;
+        Ok(true)
+    }
+
     /// Gives a playlist artwork, or takes it away with `None`. The image
     /// goes where a track's does [ASSUME: the reference library has no
     /// playlist with artwork to copy the path from].
@@ -1676,13 +1716,52 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// Takes the analysis off a track: the row goes back to how an
+    /// unanalysed one reads.
+    ///
+    /// `BPM` to 0, `KeyID` and `AnalysisUpdated` to null, `AnalysisDataPath`
+    /// to empty and `Analysed` to 0 — the value [`set_analysis`] looks for
+    /// before it writes its own, so a track cleared here is re-registered
+    /// rather than left with whatever analysed it first. `Length` stays: it
+    /// is the file's, not the analysis's. The files themselves are the
+    /// caller's to delete, in that order — a row naming files that are gone
+    /// is worse than files nothing names.
+    ///
+    /// [`set_analysis`]: Self::set_analysis
+    pub fn clear_analysis(&mut self, content: &str) -> Result<Changed> {
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self
+            .library
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let usn = next_usn(&tx);
+        let rows = tx.execute(
+            "UPDATE djmdContent SET
+                BPM = 0,
+                KeyID = NULL,
+                AnalysisDataPath = '',
+                Analysed = 0,
+                AnalysisUpdated = NULL,
+                rb_local_usn = ?1,
+                updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, content],
+        )?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
     /// Registers an analysis this app made for a track.
     ///
     /// One transaction: `BPM`, `KeyID` when the key is one the library
     /// names (an unknown name leaves the key as it was rather than creating
     /// a `djmdKey` row, whose `Seq` is unexplained), `AnalysisDataPath`,
-    /// `Length`, `Analysed` and `AnalysisUpdated`, with the usual
-    /// bookkeeping. The files themselves are the caller's to have written
+    /// `Length`, `Analysed` and the integer `AnalysisUpdated` revision, with
+    /// the usual bookkeeping. Initializes missing local-file `ContentLink`
+    /// registration so rekordbox can display the preview. Existing flags
+    /// are preserved. The files themselves are the caller's to have written
     /// first: a row that names files that are not there is worse than files
     /// nothing names.
     pub fn set_analysis(&mut self, content: &str, analysis: &AnalysisWrite<'_>) -> Result<Changed> {
@@ -1708,7 +1787,8 @@ impl Writer {
                 AnalysisDataPath = ?3,
                 Length = COALESCE(?4, Length),
                 Analysed = CASE WHEN COALESCE(Analysed, 0) = 0 THEN ?5 ELSE Analysed END,
-                AnalysisUpdated = ?6,
+                ContentLink = COALESCE(ContentLink, ?9),
+                AnalysisUpdated = CAST(COALESCE(AnalysisUpdated, '0') AS INTEGER) + 1,
                 rb_local_usn = ?7,
                 updated_at = ?6
              WHERE ID = ?8 AND rb_local_deleted = 0",
@@ -1720,7 +1800,8 @@ impl Writer {
                 ANALYSED_BY_THIS_APP,
                 stamp,
                 usn,
-                content
+                content,
+                CONTENT_LINK_LOCAL
             ],
         )?;
         set_counter(&tx, usn)?;

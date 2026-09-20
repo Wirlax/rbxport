@@ -152,6 +152,7 @@ fn analyse_and_save(
 
     state
         .write(|writer| {
+            writer.import_artwork(track_id)?;
             writer.set_analysis(
                 track_id,
                 &rbl_db::write::AnalysisWrite {
@@ -347,7 +348,7 @@ mod tests {
         {
             let db = Db::open(location.clone(), OpenMode::ReadWrite).unwrap();
             db.connection()
-                .execute("UPDATE djmdContent SET Analysed = 0, AnalysisDataPath = '' WHERE ID = ?1", [track_id(0)])
+                .execute("UPDATE djmdContent SET Analysed = 0, AnalysisDataPath = '', ImagePath = '', ContentLink = NULL WHERE ID = ?1", [track_id(0)])
                 .unwrap();
         }
 
@@ -389,7 +390,9 @@ mod tests {
         assert_eq!(path, result.analysis_path);
         assert_eq!(analysed, rbl_db::write::ANALYSED_BY_THIS_APP);
         assert_eq!(length, 20);
-        assert!(!updated.is_empty());
+        assert_eq!(updated, "1");
+        let link: i64 = db.connection().query_row("SELECT ContentLink FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
+        assert_eq!(link, 0x002c_0600, "rekordbox needs the track registration to display its preview");
 
         // A second analysis lands in the same place, files rewritten in place.
         let again = analyse_and_save(&state, &library, &share, &track_id(0)).expect("analysed again");
