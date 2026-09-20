@@ -28,7 +28,7 @@ export function PreferencesWindow() {
   // The limiter is the engine's, so this window reads and sets it the same
   // way the shell does, and its meter ticks arrive here as they do there.
   const limiter = useLimiter();
-  const master = useMaster();
+  const master = useMaster(store.preferences.view.vuMeter);
 
   // Turned to another pane by the shell while open: it sets the hash.
   useEffect(() => {
@@ -69,6 +69,7 @@ export function PreferencesWindow() {
         limiter={limiter.limiter}
         onLimiterChange={limiter.set}
         reduction={master.reduction}
+        vu={master.vu}
         peakLeft={master.peakLeft}
         peakRight={master.peakRight}
         initialPane={pane}

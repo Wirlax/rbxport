@@ -815,6 +815,9 @@ export interface Tick {
 
 /** The master's meters and level, on their own faster beat. */
 export interface Meters {
+  /** Unweighted 400 ms RMS amplitudes from the audio callback. */
+  rmsLeft?: number;
+  rmsRight?: number;
   peakLeft: number;
   peakRight: number;
   master: number;

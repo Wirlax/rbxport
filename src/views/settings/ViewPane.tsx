@@ -80,8 +80,6 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
     return (
       <>
         <Section title="Layout">
-          <Sub>Media Player</Sub>
-          <Checkbox label="Display Tempo slider" checked={view.tempoSlider} onChange={(tempoSlider) => set({ tempoSlider })} />
           <Sub>Media Browser</Sub>
           {/* Of rekordbox's twelve sources only the Explorer exists here; the
               others are streaming services, iTunes and its own formats. */}
@@ -173,6 +171,11 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           steps={BROWSE_SCALE_STEPS}
           onChange={(browseLineSpace) => set({ browseLineSpace })}
         />
+      </Section>
+      <Section title="VU Meter">
+        <Radios label="VU Meter" value={view.vuMeter}
+          choices={[{ value: "normal", label: "Normal" }, { value: "fabulous", label: "Fabulous" }]}
+          onChange={(vuMeter) => set({ vuMeter })} />
       </Section>
       <Section title="Key display format">
         <Radios

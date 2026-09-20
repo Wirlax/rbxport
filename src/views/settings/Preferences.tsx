@@ -1,3 +1,4 @@
+import type { VuDisplay } from "@/lib/vuMeter";
 /**
  * The Preferences window.
  *
@@ -67,6 +68,7 @@ export interface PreferencesProps {
   onLimiterChange: (change: Partial<Limiter>) => void;
   reduction: number;
   /** The loudest sample the device was given, per channel, for the Audio pane's meters. */
+  vu?: VuDisplay | undefined;
   peakLeft?: number;
   peakRight?: number;
   onResetColumns: () => void;
@@ -103,7 +105,7 @@ const FIRST_TABS: Tabs = {
 };
 
 export function Preferences({
-  summary, limiter, onLimiterChange, reduction, peakLeft = 0, peakRight = 0, onResetColumns, onResetLayout,
+  summary, limiter, onLimiterChange, reduction, vu, peakLeft = 0, peakRight = 0, onResetColumns, onResetLayout,
   onClose, initialPane = "view", windowed = false,
 }: PreferencesProps) {
   const window_ = useRef<HTMLDivElement>(null);
@@ -245,6 +247,7 @@ export function Preferences({
                     limiter={limiter}
                     onLimiterChange={onLimiterChange}
                     reduction={reduction}
+                    vu={vu}
                     peakLeft={peakLeft}
                     peakRight={peakRight}
                   />

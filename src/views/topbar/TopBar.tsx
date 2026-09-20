@@ -1,3 +1,5 @@
+import { VuMeterFill } from "@/components/VuMeterFill";
+import type { VuDisplay } from "@/lib/vuMeter";
 /**
  * Top strip: settings, level, meters, clock.
  *
@@ -33,6 +35,7 @@ export interface TopBarProps {
   /** Master level, 0 to 1, and where a turn of the knob goes. */
   onLevelChange?: (level: number) => void;
   /** The loudest sample the device was given, per channel, 0 to 1. */
+  vu?: VuDisplay | undefined;
   peakLeft?: number;
   peakRight?: number;
   /**
@@ -57,6 +60,7 @@ export function TopBar({
   onOpenSettings,
   level = 1,
   onLevelChange,
+  vu,
   peakLeft = 0,
   peakRight = 0,
   audioLoad,
@@ -93,9 +97,10 @@ export function TopBar({
             aria-label={`Master output ${channel}`}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={Math.round(clamp(peak) * 100)}
+            aria-valuenow={Math.round((vu?.[channel === "L" ? "left" : "right"].peak ?? clamp(peak)) * 100)}
+            data-mode={vu?.mode ?? "normal"}
           >
-            <span className={styles.meterFill} style={{ width: `${clamp(peak) * 100}%` }} />
+            <VuMeterFill mode={vu?.mode ?? "normal"} channel={vu?.[channel === "L" ? "left" : "right"] ?? { peak: clamp(peak), rms: 0, marker: 0 }} />
           </div>
         ))}
       </div>

@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import type { VuMeterMode } from "@/lib/preferences";
+import { emptyVu, VuMeter, type VuDisplay } from "@/lib/vuMeter";
 
 /**
  * How fast a meter falls, in decibels a second.
@@ -68,11 +70,8 @@ export function nextReduction(shown: number, reading: number, seconds: number): 
 /**
  * How long a meter waits for the next reading before it falls on its own.
  *
- * The engine's ticker stops the moment neither deck is playing, which is what
- * keeps an idle window at no measurable cost. The last reading it emits is the
- * one taken just before the stop, and that reading is not silence — so without
- * this the bars would sit where the music left them until something played
- * again. Past this, the meter drives its own fall.
+ * The engine's ticker stops after publishing the RMS tail. Display holds can
+ * outlast those readings, so the meter finishes its own fall once IPC stops.
  *
  * Three tick periods at 30 Hz: long enough that a reading arriving late is not
  * mistaken for the end of the music.
@@ -80,6 +79,7 @@ export function nextReduction(shown: number, reading: number, seconds: number): 
 const SILENT_AFTER_MS = 100;
 
 export interface Master {
+  vu: VuDisplay;
   /** 0 to 1. */
   level: number;
   peakLeft: number;
@@ -89,11 +89,19 @@ export interface Master {
   setLevel: (level: number) => void;
 }
 
-export function useMaster(): Master {
-  const [state, setState] = useState({ level: 1, peakLeft: 0, peakRight: 0, reduction: 0 });
+export function useMaster(mode: VuMeterMode = "normal"): Master {
+  const [state, setState] = useState({ level: 1, peakLeft: 0, peakRight: 0, reduction: 0, vu: emptyVu(mode) });
 
   useEffect(() => {
     let live = true;
+    const meterLeft = new VuMeter(mode);
+    const meterRight = new VuMeter(mode);
+    let vu = emptyVu(mode);
+    const advance = (peakLeft: number, peakRight: number, rmsLeft: number, rmsRight: number, ms: number) => {
+      const left = meterLeft.step(peakLeft, rmsLeft, ms);
+      const right = meterRight.step(peakRight, rmsRight, ms);
+      if (left !== vu.left || right !== vu.right) vu = { mode, left, right };
+    };
     let stop: (() => void) | undefined;
     // The shown peaks, which are what the fall works on. They are held here
     // rather than read back out of the state so that the fall can ask whether
@@ -113,9 +121,9 @@ export function useMaster(): Master {
         return current.level === next &&
           current.peakLeft === left &&
           current.peakRight === right &&
-          current.reduction === reduction
+          current.reduction === reduction && current.vu === vu
           ? current
-          : { level: next, peakLeft: left, peakRight: right, reduction };
+          : { level: next, peakLeft: left, peakRight: right, reduction, vu };
       });
     };
 
@@ -125,13 +133,14 @@ export function useMaster(): Master {
       if (!live) return;
       const elapsed = (now - last) / 1000;
       last = now;
+      advance(0, 0, 0, 0, elapsed * 1000);
       left = nextPeak(left, 0, elapsed);
       right = nextPeak(right, 0, elapsed);
       reduction = nextReduction(reduction, 0, elapsed);
       show();
       // Nothing left to fall, so nothing left to draw: the frames stop here
       // rather than running on against an idle window.
-      if (left > 0 || right > 0 || reduction > 0) falling = requestAnimationFrame(fall);
+      if (left > 0 || right > 0 || reduction > 0 || meterLeft.active || meterRight.active) falling = requestAnimationFrame(fall);
     };
 
     /** Hands the meters over to the fall if the next reading does not come. */
@@ -139,7 +148,7 @@ export function useMaster(): Master {
       if (quiet !== undefined) clearTimeout(quiet);
       quiet = setTimeout(() => {
         quiet = undefined;
-        if (!live || falling !== undefined || (left === 0 && right === 0 && reduction === 0)) {
+        if (!live || falling !== undefined || (left === 0 && right === 0 && reduction === 0 && !meterLeft.active && !meterRight.active)) {
           return;
         }
         last = performance.now();
@@ -163,6 +172,7 @@ export function useMaster(): Master {
         last = now;
         // A peak falls back rather than dropping: a meter that snaps to the
         // next reading flickers, and the loud moment is the one to see.
+        advance(meters.peakLeft, meters.peakRight, meters.rmsLeft ?? 0, meters.rmsRight ?? 0, elapsed * 1000);
         left = nextPeak(left, meters.peakLeft, elapsed);
         right = nextPeak(right, meters.peakRight, elapsed);
         reduction = nextReduction(reduction, meters.reduction, elapsed);
@@ -180,6 +190,7 @@ export function useMaster(): Master {
       left = Math.min(Math.max(now.peakLeft, 0), 1);
       right = Math.min(Math.max(now.peakRight, 0), 1);
       reduction = nextReduction(0, now.reduction, 0);
+      advance(left, right, 0, 0, 0);
       last = performance.now();
       show(now.master);
       // Opening onto a stopped engine is the same case as the music ending:
@@ -193,7 +204,7 @@ export function useMaster(): Master {
       if (quiet !== undefined) clearTimeout(quiet);
       if (falling !== undefined) cancelAnimationFrame(falling);
     };
-  }, []);
+  }, [mode]);
 
   const setLevel = useCallback((level: number) => {
     // Locally first: a knob that waits a tenth of a second to move is a knob

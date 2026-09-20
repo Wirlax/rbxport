@@ -1,3 +1,5 @@
+import { VuMeterFill } from "@/components/VuMeterFill";
+import type { VuDisplay } from "@/lib/vuMeter";
 /**
  * Audio › Configuration. Capture docs/screenshots 9.47.23 PM: the output
  * device, Sample Rate, Buffer size and the Metronome, and then a section of
@@ -29,6 +31,7 @@ export interface AudioPaneProps {
   /** How far the limiter is turning the sum down right now, in dB. */
   reduction: number;
   /** The loudest sample the device was given, per channel, 0 to 1. */
+  vu?: VuDisplay | undefined;
   peakLeft?: number;
   peakRight?: number;
 }
@@ -54,7 +57,7 @@ function fillOf(peak: number): number {
 /** The reduction meters' scale: twelve decibels of gain reduction is full. */
 const REDUCTION_FULL_DB = 12;
 
-export function AudioPane({ limiter, onLimiterChange, reduction, peakLeft = 0, peakRight = 0 }: AudioPaneProps) {
+export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 0, peakRight = 0 }: AudioPaneProps) {
   const [audio, setAudio] = useState<AudioDevices | null>(null);
   const { preferences, update } = usePreferencesContext();
   const prefs = preferences.audio;
@@ -182,9 +185,10 @@ export function AudioPane({ limiter, onLimiterChange, reduction, peakLeft = 0, p
               aria-label={`Output ${channel}`}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(fillOf(peak) * 100)}
+              aria-valuenow={Math.round((vu?.[channel === "L" ? "left" : "right"].peak ?? fillOf(peak)) * 100)}
+              data-mode={vu?.mode ?? "normal"}
             >
-              <span className={styles.meterFill} data-vu style={{ width: `${fillOf(peak) * 100}%` }} />
+              <VuMeterFill mode={vu?.mode ?? "normal"} channel={vu?.[channel === "L" ? "left" : "right"] ?? { peak: fillOf(peak), rms: 0, marker: 0 }} />
             </div>
             <span className={styles.meterDb}>{decibels(peak)}</span>
           </div>

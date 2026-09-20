@@ -21,6 +21,22 @@ async function prefs(page: Page) {
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
 
+test("View VU Meter switches modes and persists the selection", async ({ page }) => {
+  await open(page);
+  const dialog = await prefs(page);
+  const choices = dialog.getByRole("radiogroup", { name: "VU Meter", exact: true });
+  await expect(choices.getByRole("radio", { name: "Normal", exact: true })).toBeChecked();
+  await choices.getByRole("radio", { name: "Fabulous", exact: true }).click();
+  await expect(page.getByRole("banner").locator('[role="meter"][data-mode="fabulous"]')).toHaveCount(2);
+  await expect(page.getByRole("banner").getByTestId("vu-rms")).toHaveCount(2);
+  await page.reload();
+  const again = await prefs(page);
+  await expect(again.getByRole("radio", { name: "Fabulous", exact: true })).toBeChecked();
+  await again.getByRole("radio", { name: "Normal", exact: true }).click();
+  await expect(page.getByRole("banner").locator('[role="meter"][data-mode="normal"]')).toHaveCount(2);
+  await expect(page.getByRole("banner").getByTestId("vu-rms")).toHaveCount(0);
+});
+
 /** Loads the fourth row — analysed, with the mock's four hot cues and a memory cue. */
 async function load(page: Page) {
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();

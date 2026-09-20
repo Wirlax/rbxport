@@ -325,7 +325,7 @@ export function App() {
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
   const trafficDeck: DeckId = trafficLight === "master" ? syncMaster : trafficLight;
   const trafficKey = (trafficDeck === "b" ? playerTrackB : playerTrack)?.key ?? null;
-  const master = useMaster();
+  const master = useMaster(prefs.preferences.view.vuMeter);
   // Read at start so the remembered setting reaches the engine before the
   // first thing plays, not when Settings is next opened.
   const limiter = useLimiter();
@@ -1784,6 +1784,7 @@ export function App() {
         onLayoutChange={setLayout}
         level={master.level}
         onLevelChange={master.setLevel}
+        vu={master.vu}
         peakLeft={master.peakLeft}
         peakRight={master.peakRight}
       />
@@ -2081,6 +2082,7 @@ export function App() {
           limiter={limiter.limiter}
           onLimiterChange={limiter.set}
           reduction={master.reduction}
+          vu={master.vu}
           peakLeft={master.peakLeft}
           peakRight={master.peakRight}
           initialPane={settingsOpen}

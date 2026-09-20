@@ -34,6 +34,7 @@ mod decode;
 mod fade;
 mod limiter;
 mod metronome;
+mod meter;
 mod mixer;
 #[cfg(feature = "rubberband")]
 mod rubberband;
@@ -150,6 +151,8 @@ pub struct Master {
     gain: AtomicU32,
     peak_left: AtomicU32,
     peak_right: AtomicU32,
+    rms_left: AtomicU32,
+    rms_right: AtomicU32,
     /// The lowest gain the limiter applied since the meter was last read, as
     /// a linear factor: 1.0 is a limiter that did nothing.
     reduction: AtomicU32,
@@ -168,6 +171,8 @@ impl Default for Master {
             gain: AtomicU32::new(DEFAULT_MASTER_GAIN.to_bits()),
             peak_left: AtomicU32::new(0),
             peak_right: AtomicU32::new(0),
+            rms_left: AtomicU32::new(0),
+            rms_right: AtomicU32::new(0),
             reduction: AtomicU32::new(1.0_f32.to_bits()),
             rate: AtomicU32::new(0),
         }
@@ -248,6 +253,12 @@ impl Master {
             f32::from_bits(self.peak_left.swap(0, Ordering::Relaxed)),
             f32::from_bits(self.peak_right.swap(0, Ordering::Relaxed)),
         )
+    }
+
+    /// Latest 400 ms unweighted RMS amplitudes, measured after output clipping.
+    pub fn rms(&self) -> (f32, f32) {
+        (f32::from_bits(self.rms_left.load(Ordering::Relaxed)),
+         f32::from_bits(self.rms_right.load(Ordering::Relaxed)))
     }
 
     /// How far the limiter turned the sum down since the last read, in
@@ -348,8 +359,10 @@ impl Engine {
         // callback, because the device's rate is not known until the sink is
         // open and the sink is opened with this closure.
         let mut level: Option<Smoothed> = None;
+        let mut rms = meter::WindowRms::new();
         let render: Render = Box::new(move |out: &mut [f32]| {
             let rate = mixing.rate();
+            rms.set_rate(rate);
             let channels =
                 channels.get_or_insert_with(|| [Channel::new(rate), Channel::new(rate)]);
             let curve = strip.curve();
@@ -418,6 +431,12 @@ impl Engine {
                     }
                 }
             }
+            for frame in out.chunks_exact(2) {
+                if let [left, right] = frame { rms.push(*left, *right); }
+            }
+            let [rms_left, rms_right] = rms.levels();
+            mixing.rms_left.store(rms_left.to_bits(), Ordering::Relaxed);
+            mixing.rms_right.store(rms_right.to_bits(), Ordering::Relaxed);
             mixing.report(left, right);
         });
 

@@ -70,7 +70,10 @@ export function browseScale(step: number): number {
   return BROWSE_SCALES[step] ?? 1;
 }
 
+export type VuMeterMode = "normal" | "fabulous";
+
 export interface ViewPreferences {
+  vuMeter: VuMeterMode;
   /** Media Player › Display Tempo slider. */
   tempoSlider: boolean;
   /** Show Tooltips. */
@@ -219,6 +222,7 @@ export type PreferencePane = keyof Preferences;
  */
 export const DEFAULT_PREFERENCES: Preferences = {
   view: {
+    vuMeter: "normal",
     tempoSlider: false,
     tooltips: true,
     browseFontSize: BROWSE_SCALE_DEFAULT,
@@ -371,6 +375,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     view: {
+      vuMeter: oneOf(view.vuMeter, ["normal", "fabulous"] as const, d.view.vuMeter),
       tempoSlider: bool(view.tempoSlider, d.view.tempoSlider),
       tooltips: bool(view.tooltips, d.view.tooltips),
       browseFontSize: step(view.browseFontSize, d.view.browseFontSize),

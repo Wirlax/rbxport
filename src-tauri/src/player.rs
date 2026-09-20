@@ -116,6 +116,8 @@ impl TickDto {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeterDto {
+    pub rms_left: f32,
+    pub rms_right: f32,
     pub peak_left: f32,
     pub peak_right: f32,
     pub master: f32,
@@ -341,8 +343,8 @@ fn emit_deck_event<R: Runtime>(app: &AppHandle<R>, event: &DeckEvent) {
 
 /// Starts the ticker if one is not already running.
 ///
-/// It stops when neither deck is playing nor scrubbing, keeping an idle
-/// window at no measurable cost. Playing or beginning a drag starts it again.
+/// It stops after a short RMS tail when neither deck is playing nor scrubbing.
+/// Playing or beginning a drag starts it again.
 pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     let player = app.state::<Arc<Player>>();
     if player.ticking().swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -354,6 +356,7 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
     // with a command that is reading the database.
     let spawned = std::thread::Builder::new().name("rbl-deck-tick".to_owned()).spawn(move || {
         let mut since_deck_tick = 0_u32;
+        let mut silent_ticks = 0_u32;
         loop {
             std::thread::sleep(METER_TICK);
             let player = handle.state::<Arc<Player>>();
@@ -361,9 +364,10 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
             let master = engine.master();
             let (peak_left, peak_right) = master.peaks();
             let reduction = master.reduction_db();
+            let (rms_left, rms_right) = master.rms();
             if let Err(e) = handle.emit(
                 "deck:meters",
-                MeterDto { peak_left, peak_right, master: master.gain(), reduction },
+                MeterDto { peak_left, peak_right, rms_left, rms_right, master: master.gain(), reduction },
             ) {
                 tracing::warn!(error = %e, "a meter tick did not reach the interface");
             }
@@ -383,8 +387,12 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
             if let Err(e) = handle.emit("deck:tick", tick) {
                 tracing::warn!(error = %e, "a deck tick did not reach the interface");
             }
-            if !engine.any_sounding() {
-                break;
+            if engine.any_sounding() {
+                silent_ticks = 0;
+            } else {
+                // Publish the 400 ms RMS tail after playback stops.
+                silent_ticks += 1;
+                if silent_ticks >= 5 { break; }
             }
         }
         let player = handle.state::<Arc<Player>>();
