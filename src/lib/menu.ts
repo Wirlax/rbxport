@@ -20,6 +20,7 @@ export type MenuAction =
   | "layout-two"
   | "layout-simple"
   | "layout-browser"
+  | "tempo-slider"
   | "updates";
 
 export interface MenuCommand {
@@ -42,6 +43,7 @@ const COMMANDS: Record<string, MenuCommand> = {
   "layout-two": { action: "layout-two", writes: false },
   "layout-simple": { action: "layout-simple", writes: false },
   "layout-browser": { action: "layout-browser", writes: false },
+  "tempo-slider": { action: "tempo-slider", writes: false },
   updates: { action: "updates", writes: false },
 };
 

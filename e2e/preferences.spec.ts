@@ -309,16 +309,42 @@ test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", asy
   expect(Number(await bpm.innerText())).toBeGreaterThan(shown);
 
   // A semitone either way, shown beside the fader.
-  const shift = fader.getByTestId("key-shift");
-  await expect(shift).toHaveText("KEY");
-  await fader.getByRole("button", { name: "Key up a semitone" }).click();
-  await expect(shift).toHaveText("+1 st");
-  await fader.getByRole("button", { name: "Key down a semitone" }).click();
-  await fader.getByRole("button", { name: "Key down a semitone" }).click();
-  await expect(shift).toHaveText("−1 st");
+  const shift = deck.getByTestId("key-shift");
+  await expect(shift).toHaveText("+/-0");
+  await deck.getByRole("button", { name: "Key up a semitone" }).click();
+  await expect(shift).toHaveText("+1");
+  await deck.getByRole("button", { name: "Key down a semitone" }).click();
+  await deck.getByRole("button", { name: "Key down a semitone" }).click();
+  await expect(shift).toHaveText("-1");
   // The BPM is untouched by the key.
   expect(Number(await bpm.innerText())).toBeCloseTo(Number(await bpm.innerText()), 2);
 
   await page.keyboard.press("Escape");
   await expect(fader).toBeHidden();
+});
+
+test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  const deck = page.getByRole("region", { name: "Preview player", exact: true });
+  const panel = deck.getByRole("complementary", { name: "Tempo slider" });
+  const range = panel.getByRole("button", { name: "Tempo range", exact: true });
+  for (const value of ["±6", "±10", "±16", "WIDE", "±6"]) {
+    await expect(range).toHaveText(value);
+    await range.click();
+  }
+  const slider = panel.getByRole("slider", { name: "Tempo", exact: true });
+  await slider.focus();
+  await slider.press("ArrowDown");
+  await expect(slider).toHaveAttribute("aria-valuenow", "0.1");
+  await panel.getByRole("button", { name: "Reset tempo" }).click();
+  await expect(slider).toHaveAttribute("aria-valuenow", "0");
+  await page.evaluate(() => {
+    const value = JSON.parse(localStorage.getItem("rbl.preferences") ?? "{}");
+    value.view = { ...value.view, tempoSlider: false };
+    localStorage.setItem("rbl.preferences", JSON.stringify(value));
+  });
+  await page.reload();
+  await expect(panel).toHaveCount(0);
 });

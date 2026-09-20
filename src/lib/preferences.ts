@@ -70,6 +70,8 @@ export function browseScale(step: number): number {
 }
 
 export interface ViewPreferences {
+  /** Media Player › Display Tempo slider. */
+  tempoSlider: boolean;
   /** Show Tooltips. */
   tooltips: boolean;
   /** Browse › FontSize, as a slider stop 0 to 4. */
@@ -212,6 +214,7 @@ export type PreferencePane = keyof Preferences;
  */
 export const DEFAULT_PREFERENCES: Preferences = {
   view: {
+    tempoSlider: true,
     tooltips: true,
     browseFontSize: BROWSE_SCALE_DEFAULT,
     browseBold: false,
@@ -361,6 +364,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   const d = DEFAULT_PREFERENCES;
   return {
     view: {
+      tempoSlider: bool(view.tempoSlider, d.view.tempoSlider),
       tooltips: bool(view.tooltips, d.view.tooltips),
       browseFontSize: step(view.browseFontSize, d.view.browseFontSize),
       browseBold: bool(view.browseBold, d.view.browseBold),

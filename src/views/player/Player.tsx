@@ -61,6 +61,8 @@ import { type DeckLoop, usePlayback } from "@/store/usePlayback";
 import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePreferences";
 import { ContextMenu } from "@/components/ContextMenu";
 import { deckMenu, type DeckAction } from "@/lib/contextMenus";
+import { KeyShift } from "./KeyShift";
+import { TempoSlider } from "./TempoSlider";
 import { TempoField } from "./TempoField";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
@@ -1765,6 +1767,7 @@ export const Player = memo(function Player({
       data-flipped={flipped || undefined}
       // The two-deck body, whose rows are DualDeck's.
       data-dual={dual || undefined}
+      data-tempo-slider={viewPrefs.tempoSlider || undefined}
       data-droppable={takesDrop || undefined}
       onDragOver={dragOver}
       onDrop={drop}
@@ -1778,6 +1781,9 @@ export const Player = memo(function Player({
             remaining={remaining}
             elapsed={elapsed}
             sleeve={sleeve}
+            keyControl={<KeyShift musicalKey={track ? formatKey(track.key, viewPrefs.keyDisplay) : ""}
+              shift={playback.keyShift} disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />}
+            bpmX100={Math.round(bpmX100 * playback.tempo)}
             onBeatSync={beatSync}
             synced={synced}
             isMaster={isMaster}
@@ -1799,8 +1805,9 @@ export const Player = memo(function Player({
                 {elapsed.main}
                 <i className={styles.tenths}>.{elapsed.tenths}</i>
               </span>
-              <span className={styles.readout}>{formatKey(track.key, viewPrefs.keyDisplay)}</span>
-              <span className={styles.readout}>{formatBpm(bpmX100)}</span>
+              <KeyShift musicalKey={formatKey(track.key, viewPrefs.keyDisplay)} shift={playback.keyShift}
+                disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />
+              <span className={styles.readout}>{formatBpm(Math.round(bpmX100 * playback.tempo))}</span>
             </>
           ) : null}
           {/* Sync belongs to the two-deck layouts and to nothing else: one
@@ -1861,15 +1868,13 @@ export const Player = memo(function Player({
             left. */}
         {dual ? (
           <DualControls
+            showTempoButtons={!viewPrefs.tempoSlider}
             idle={playback.idle}
             readOnly={readOnly}
             memory={memory}
             trackBpmX100={bpmX100}
             tempo={playback.tempo}
             onTempo={playback.setTempo}
-            keyShift={playback.keyShift}
-            shiftsKey={playback.shiftsKey}
-            onKeyShift={playback.setKeyShift}
             onNudgeTempo={playback.nudgeTempo}
             synced={synced}
             masterTempo={playback.masterTempo}
@@ -2212,9 +2217,6 @@ export const Player = memo(function Player({
               trackBpmX100={bpmX100}
               tempo={playback.tempo}
               onTempo={playback.setTempo}
-              keyShift={playback.keyShift}
-              shiftsKey={playback.shiftsKey}
-              onKeyShift={playback.setKeyShift}
               disabled={playback.idle || synced}
               disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
               fieldClassName={styles.bpmField}
@@ -2229,6 +2231,7 @@ export const Player = memo(function Player({
             >
               +
             </button>
+            {!viewPrefs.tempoSlider ? <>
             <button
               type="button"
               className={styles.chip}
@@ -2251,6 +2254,7 @@ export const Player = memo(function Player({
             >
               RST
             </button>
+            </> : null}
           </div>
 
           <button
@@ -2299,6 +2303,9 @@ export const Player = memo(function Player({
 
       </div>
 
+      {viewPrefs.tempoSlider ? <TempoSlider tempo={playback.tempo} onTempo={playback.setTempo}
+        idle={playback.idle} synced={synced} masterTempo={playback.masterTempo}
+        onMasterTempo={playback.setMasterTempo} onReset={resetTempo} /> : null}
       <aside className={styles.side} aria-label="Cue list">
         {panel === "info" ? (
           <DeckInfo track={track} details={details} />

@@ -1190,3 +1190,6 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
 /* The BPM field while TAP is being pressed: the taps' tempo, lit the way a
    pressed pad is, until they stop and the grid takes it. */
 .bpmField[data-tapping] { color: var(--c-pad-set); }
+
+.player[data-tempo-slider] { grid-template-columns: var(--s-player-transport-w) minmax(0, 1fr) 76px var(--s-player-right-w); }
+.player[data-shared][data-tempo-slider] { grid-template-columns: minmax(0, 1fr) 76px var(--s-player-right-w); }

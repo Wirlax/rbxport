@@ -20,8 +20,7 @@ import { formatBpm } from "@/lib/format";
 import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "@/components/icons";
 import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
-import { usePreferences, useTooltip } from "@/store/usePreferences";
-import { formatKey } from "@/lib/preferences";
+import { useTooltip } from "@/store/usePreferences";
 import { TempoField } from "./TempoField";
 
 /** A time split the way `splitTime` returns it. */
@@ -36,6 +35,8 @@ export interface DualHeadProps {
   elapsed: Split;
   /** The sleeve button, which `Player` builds because it owns load and eject. */
   sleeve: ReactNode;
+  keyControl: ReactNode;
+  bpmX100: number;
   /** BEAT SYNC: pull this deck to the master. Disabled while this deck is it. */
   onBeatSync: () => void;
   /** BEAT SYNC is lit: the deck is following the master's tempo. */
@@ -53,10 +54,9 @@ export interface DualHeadProps {
  * it there, and the row itself is the same either way up.
  */
 export const DualHead = memo(function DualHead({
-  track, remaining, elapsed, sleeve, onBeatSync, synced, isMaster, onMaster,
+  track, remaining, elapsed, sleeve, keyControl, bpmX100, onBeatSync, synced, isMaster, onMaster,
 }: DualHeadProps) {
   const tip = useTooltip();
-  const { keyDisplay } = usePreferences().view;
   return (
     <div className={styles.head} data-testid="player-head-row">
       {sleeve}
@@ -85,8 +85,7 @@ export const DualHead = memo(function DualHead({
                   <i className={styles.tenths}>.{elapsed.tenths}</i>
                 </span>
               </span>
-              <span className={styles.cell}>{formatKey(track.key, keyDisplay)}</span>
-              <span className={styles.cell}>{formatBpm(track.bpmX100)}</span>
+              <span className={styles.cell}>{formatBpm(bpmX100)}</span>
             </>
           ) : null}
         </div>
@@ -123,15 +122,7 @@ export const DualHead = memo(function DualHead({
         >
           BEAT SYNC
         </button>
-        {/* The key shift: ‹ key ±0 ›, semitones up or down from the track's
-            own key. [ASSUME] the ±0 is the shift; it goes with KEY SYNC and
-            is inert for the same reason. */}
-        <div className={styles.keyShift} aria-label="Key shift">
-          <button type="button" className={styles.shiftStep} aria-label="Shift the key down" disabled>‹</button>
-          <span className={styles.shiftKey}>{track ? formatKey(track.key, keyDisplay) : ""}</span>
-          <span className={styles.shiftAmount}>±0</span>
-          <button type="button" className={styles.shiftStep} aria-label="Shift the key up" disabled>›</button>
-        </div>
+        {keyControl}
         <button
           type="button"
           className={styles.masterButton}
@@ -148,6 +139,7 @@ export const DualHead = memo(function DualHead({
 });
 
 export interface DualControlsProps {
+  showTempoButtons: boolean;
   /** Nothing loaded: the transport-shaped buttons are inert. */
   idle: boolean;
   readOnly: boolean;
@@ -161,9 +153,6 @@ export interface DualControlsProps {
   trackBpmX100: number;
   tempo: number;
   onTempo: (tempo: number) => void;
-  keyShift: number;
-  shiftsKey: boolean;
-  onKeyShift: (semitones: number) => void;
   onNudgeTempo: (direction: number) => void;
   /** Following the master: the tempo is not this deck's to step. */
   synced: boolean;
@@ -186,7 +175,7 @@ export interface DualControlsProps {
  * loops are not built — with the reason on each.
  */
 export const DualControls = memo(function DualControls({
-  idle, readOnly, memory, trackBpmX100, tempo, onTempo, keyShift, shiftsKey, onKeyShift,
+  showTempoButtons, idle, readOnly, memory, trackBpmX100, tempo, onTempo,
   onNudgeTempo, synced, masterTempo, onMasterTempo,
   atUnity, onResetTempo, quantize, onQuantize,
 }: DualControlsProps) {
@@ -248,9 +237,6 @@ export const DualControls = memo(function DualControls({
           trackBpmX100={trackBpmX100}
           tempo={tempo}
           onTempo={onTempo}
-          keyShift={keyShift}
-          shiftsKey={shiftsKey}
-          onKeyShift={onKeyShift}
           disabled={idle || synced}
           disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
           fieldClassName={styles.bpmField}
@@ -279,7 +265,7 @@ export const DualControls = memo(function DualControls({
 
       <span className={styles.spacer} />
 
-      <div className={styles.group}>
+      {showTempoButtons ? <div className={styles.group}>
         <button
           type="button"
           className={styles.tempoButton}
@@ -300,7 +286,7 @@ export const DualControls = memo(function DualControls({
         >
           RST
         </button>
-      </div>
+      </div> : null}
 
       <button
         type="button"

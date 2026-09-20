@@ -80,6 +80,8 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
     return (
       <>
         <Section title="Layout">
+          <Sub>Media Player</Sub>
+          <Checkbox label="Display Tempo slider" checked={view.tempoSlider} onChange={(tempoSlider) => set({ tempoSlider })} />
           <Sub>Media Browser</Sub>
           {/* Of rekordbox's twelve sources only the Explorer exists here; the
               others are streaming services, iTunes and its own formats. */}

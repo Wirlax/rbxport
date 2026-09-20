@@ -81,7 +81,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;
 
+    let media_player = SubmenuBuilder::new(app, "Media Player")
+        .item(&MenuItemBuilder::with_id("tempo-slider", "Display Tempo slider").build(app)?)
+        .build()?;
+    let layout = SubmenuBuilder::new(app, "Layout").item(&media_player).build()?;
     let view = SubmenuBuilder::new(app, label("View"))
+        .item(&layout)
         .item(
             &MenuItemBuilder::with_id("info", label("Information Window"))
                 .accelerator("CmdOrCtrl+I")

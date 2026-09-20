@@ -5,9 +5,7 @@
  * becomes whatever makes the track play at that BPM. A drag on the number
  * opens the tempo fader a CDJ has — ±6, ±10, ±16 or WIDE, the range chosen
  * above it — and the same drag drives the fader: down is faster, as a CDJ's
- * is. Beside the fader, the key shift: a semitone up or down at a press,
- * which only the Rubber Band backend can do accurately, so the buttons are
- * greyed in a build without it.
+ * is. The key controls live in the deck header.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -27,11 +25,6 @@ export interface TempoFieldProps {
   /** A multiple of the track's own speed. */
   tempo: number;
   onTempo: (tempo: number) => void;
-  /** Semitones from the track's own key. */
-  keyShift: number;
-  /** Whether the build can shift a key at all. */
-  shiftsKey: boolean;
-  onKeyShift: (semitones: number) => void;
   /** Nothing loaded, or the tempo is the master's: the field is read-only. */
   disabled: boolean;
   /** Why it is read-only, for the tooltip. */
@@ -41,7 +34,7 @@ export interface TempoFieldProps {
 }
 
 export function TempoField({
-  trackBpmX100, tempo, onTempo, keyShift, shiftsKey, onKeyShift, disabled, disabledBecause,
+  trackBpmX100, tempo, onTempo, disabled, disabledBecause,
   fieldClassName,
 }: TempoFieldProps) {
   const tip = useTooltip();
@@ -220,31 +213,7 @@ export function TempoField({
             <span className={styles.end} data-end="top" aria-hidden>{`−${ends.down}`}</span>
             <span className={styles.end} data-end="bottom" aria-hidden>{`+${ends.up}`}</span>
           </div>
-          <div className={styles.keys} role="group" aria-label="Key shift">
-            <button
-              type="button"
-              className={styles.key}
-              aria-label="Key down a semitone"
-              disabled={!shiftsKey || keyShift <= -12}
-              title={tip(shiftsKey ? undefined : "This build cannot shift a key without moving the tempo")}
-              onClick={() => onKeyShift(keyShift - 1)}
-            >
-              −
-            </button>
-            <span className={styles.keyShift} data-testid="key-shift">
-              {keyShift === 0 ? "KEY" : `${keyShift > 0 ? "+" : "−"}${Math.abs(keyShift)} st`}
-            </span>
-            <button
-              type="button"
-              className={styles.key}
-              aria-label="Key up a semitone"
-              disabled={!shiftsKey || keyShift >= 12}
-              title={tip(shiftsKey ? undefined : "This build cannot shift a key without moving the tempo")}
-              onClick={() => onKeyShift(keyShift + 1)}
-            >
-              +
-            </button>
-          </div>
+
         </div>
       ) : null}
     </div>

@@ -1371,6 +1371,10 @@ export function App() {
       setSubOpen((open) => !open);
       return;
     }
+    if (outcome.action === "tempo-slider") {
+      prefs.update("view", { tempoSlider: !viewPrefs.tempoSlider });
+      return;
+    }
     if (outcome.action === "updates") {
       checkForUpdates(true);
       return;
@@ -1383,7 +1387,7 @@ export function App() {
     openPreferences(outcome.action === "missing" ? "advanced" : "view");
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
-    openPreferences, checkForUpdates,
+    openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider,
   ]);
 
   // Native menu clicks.
