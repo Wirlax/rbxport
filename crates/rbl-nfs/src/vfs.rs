@@ -1,14 +1,30 @@
 //! The read-only tree a player sees, and the file handles that address it.
 //!
-//! The tree is built once from the export plan; a player can only reach a node
-//! by walking from the mount point, one name at a time. Names are never joined
-//! onto a path and re-opened, so `..`, an absolute name, or a symlink in a name
-//! cannot escape the export — there is nothing to escape *to*, because the only
-//! real paths in existence are the ones we registered.
+//! A player can only reach a node by walking from the mount point, one name
+//! at a time, and there are two ways a name resolves:
+//!
+//! - a node registered up front ([`Vfs::add_file`], [`Vfs::add_dir`]): the
+//!   tree the tests and the fake player build, every file named;
+//! - a folder allowed as a whole ([`Vfs::allow_folder`]): the library's
+//!   folders, `/Volumes/SD/RB` and the like. Nothing under it exists in the
+//!   tree until a player asks for it by name; then the host is asked whether
+//!   that name is a file or a directory there, and a node is made for it.
+//!   The folders above an allowed one resolve only along the way to it.
+//!
+//! Names are never joined onto a path and re-opened from the root: `.` and
+//! `..` are answered from the tree, a name with a separator in it is not a
+//! name, and a symlink is not followed, so a player cannot reach outside
+//! what was registered or allowed. rekordbox's own file server goes
+//! further and exports `/`, resolving every name against the host.
+//!
+//! Nodes grow while the server runs, so the table is behind a lock; a node's
+//! index, and so its handle, never changes once issued.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
+
+use unicode_normalization::UnicodeNormalization as _;
 
 /// A file handle is a fixed 32 opaque bytes in `NFSv2`.
 pub const HANDLE_LEN: usize = 32;
@@ -32,14 +48,52 @@ struct Node {
     name: String,
     kind: NodeKind,
     parent: usize,
+    /// In the order they were made, which is the order a listing shows.
     children: Vec<usize>,
-    /// Where a file's bytes actually live. Directories have none.
+    /// The children by name, decomposed (NFD): a name a player read off a
+    /// listing comes back decomposed, the way rekordbox's `UTF8-MAC`
+    /// conversion sent it, and the host may hold it either way.
+    by_name: HashMap<String, usize>,
+    /// Where a file's bytes actually live; for a directory under an allowed
+    /// folder, the host directory its names are asked of. A directory of the
+    /// registered tree, or one on the way to an allowed folder, has none.
     source: Option<PathBuf>,
-    /// What the host says about the file. Given at insertion, or — for a
-    /// tree built from a 38,681-track index, where a `stat` per file at
-    /// start would cost seconds — read from the file the first time a player
-    /// asks.
+    /// Whether every child is in the tree: always for a registered
+    /// directory; for one on the host, once a listing has read it.
+    listed: bool,
+    /// What the host says about the file. Given at insertion, or read from
+    /// the file the first time a player asks.
     stat: OnceLock<Stat>,
+}
+
+impl Node {
+    fn new(name: &str, kind: NodeKind, parent: usize, source: Option<PathBuf>, stat: Option<Stat>, listed: bool) -> Self {
+        Self {
+            name: name.to_owned(),
+            kind,
+            parent,
+            children: Vec::new(),
+            by_name: HashMap::new(),
+            source,
+            listed,
+            stat: stat.map_or_else(OnceLock::new, OnceLock::from),
+        }
+    }
+}
+
+/// A name as the tree keys it: decomposed, so either form a player sends
+/// finds the same child.
+fn key(name: &str) -> String {
+    name.nfd().collect()
+}
+
+/// A folder a player may reach everything under.
+#[derive(Debug, Clone)]
+struct Root {
+    /// Its path inside the export, one component per entry.
+    parts: Vec<String>,
+    /// Where it is on the host.
+    host: PathBuf,
 }
 
 /// What `stat` says about a file, as the `fattr` reports it: rekordbox's
@@ -135,7 +189,11 @@ fn stat_file(path: &Path) -> Stat {
     }
     #[cfg(not(unix))]
     {
-        let mut stat = Stat::plain(meta.len(), seconds(meta.modified()));
+        let mut stat = if meta.is_dir() {
+            Stat::directory(seconds(meta.modified()))
+        } else {
+            Stat::plain(meta.len(), seconds(meta.modified()))
+        };
         stat.accessed = seconds(meta.accessed());
         stat.changed = seconds(meta.created());
         stat
@@ -143,15 +201,28 @@ fn stat_file(path: &Path) -> Stat {
 }
 
 /// An exported filesystem and everything reachable inside it.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Vfs {
     /// The export name a player mounts, e.g. `/` on macOS or `/C/` on Windows.
     export: String,
-    nodes: Vec<Node>,
+    nodes: RwLock<Vec<Node>>,
+    /// The folders allowed as a whole.
+    roots: Vec<Root>,
     /// Where this export's file ids start: libFilSiNE numbers every node
     /// of every export from one table, so a handle names its export by its
     /// ids alone. Set when the export joins an [`Exports`].
     id_base: u32,
+}
+
+impl Clone for Vfs {
+    fn clone(&self) -> Self {
+        Self {
+            export: self.export.clone(),
+            nodes: RwLock::new(self.read().clone()),
+            roots: self.roots.clone(),
+            id_base: self.id_base,
+        }
+    }
 }
 
 /// Addresses one node, laid out as rekordbox's libFilSiNE lays its handles
@@ -186,6 +257,31 @@ pub struct Attributes {
     pub stat: Stat,
 }
 
+/// What the host says a name under an allowed folder is.
+enum HostEntry {
+    Directory,
+    File,
+}
+
+/// Whether a name is one component and nothing else: no separator, no NUL,
+/// and not the two names the tree answers itself.
+fn is_plain_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
+}
+
+/// Asks the host what `name` is inside `dir`, without following a symlink
+/// out of the export.
+fn host_entry(dir: &Path, name: &str) -> Option<HostEntry> {
+    let meta = std::fs::symlink_metadata(dir.join(name)).ok()?;
+    if meta.is_dir() {
+        Some(HostEntry::Directory)
+    } else if meta.is_file() {
+        Some(HostEntry::File)
+    } else {
+        None
+    }
+}
+
 impl Vfs {
     /// Creates an empty export. `export` is the name a player mounts.
     pub fn new(export: impl Into<String>) -> Self {
@@ -193,15 +289,19 @@ impl Vfs {
         Self {
             id_base: 0,
             export,
-            nodes: vec![Node {
-                name: String::new(),
-                kind: NodeKind::Directory,
-                parent: 0,
-                children: Vec::new(),
-                source: None,
-                stat: OnceLock::from(Stat::directory(0)),
-            }],
+            nodes: RwLock::new(vec![Node::new("", NodeKind::Directory, 0, None, Some(Stat::directory(0)), false)]),
+            roots: Vec::new(),
         }
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Vec<Node>> {
+        // A poisoned lock means a panic mid-insert on another thread; the
+        // table is append-only, so what is there is still whole.
+        self.nodes.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Vec<Node>> {
+        self.nodes.write().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn export_name(&self) -> &str {
@@ -213,12 +313,27 @@ impl Vfs {
     }
 
     pub fn len(&self) -> usize {
-        self.nodes.len()
+        self.read().len()
     }
 
     pub fn is_empty(&self) -> bool {
         // The root always exists, so a fresh tree has exactly one node.
-        self.nodes.len() <= 1
+        self.read().len() <= 1 && self.roots.is_empty()
+    }
+
+    /// Allows everything under a folder: `path` is its slash-separated place
+    /// inside the export, `host` where it is on the host. A player reaching
+    /// it by name gets whatever the host has there, one name at a time; the
+    /// folders above it resolve only on the way to it.
+    ///
+    /// The same folder allowed twice is allowed once.
+    pub fn allow_folder(&mut self, path: &str, host: impl Into<PathBuf>) {
+        let parts: Vec<String> =
+            path.split('/').filter(|part| !part.is_empty() && *part != "." && *part != "..").map(str::to_owned).collect();
+        if parts.is_empty() || self.roots.iter().any(|root| root.parts == parts) {
+            return;
+        }
+        self.roots.push(Root { parts, host: host.into() });
     }
 
     /// Adds a file at a slash-separated path inside the export, creating the
@@ -228,97 +343,208 @@ impl Vfs {
     /// building a tree has no business asking for them, and silently resolving
     /// them is how an export grows a hole.
     pub fn add_file(&mut self, path: &str, source: impl Into<PathBuf>, size: u64, modified: u32) -> usize {
-        let mut at = self.root();
-        let parts: Vec<&str> = path
-            .split('/')
-            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
-            .collect();
-        let Some((last, directories)) = parts.split_last() else {
-            return at;
-        };
-        for part in directories {
-            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some(Stat::directory(modified)));
-        }
-        self.child_or_insert(at, last, NodeKind::File, Some(source.into()), Some(Stat::plain(size, modified)))
+        self.add(path, Some((source.into(), Some(Stat::plain(size, modified)))), Stat::directory(modified))
     }
 
     /// Adds a file whose size and modification time are read from `source`
     /// the first time a player asks for its attributes, not now.
     pub fn add_file_unsized(&mut self, path: &str, source: impl Into<PathBuf>) -> usize {
-        let mut at = self.root();
-        let parts: Vec<&str> = path
-            .split('/')
-            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
-            .collect();
-        let Some((last, directories)) = parts.split_last() else {
-            return at;
-        };
-        for part in directories {
-            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some(Stat::directory(0)));
-        }
-        self.child_or_insert(at, last, NodeKind::File, Some(source.into()), None)
+        self.add(path, Some((source.into(), None)), Stat::directory(0))
     }
 
     /// Adds an empty directory, for a tree that must show a folder with no files.
     pub fn add_dir(&mut self, path: &str) -> usize {
-        let mut at = self.root();
-        for part in path.split('/').filter(|p| !p.is_empty() && *p != "." && *p != "..") {
-            at = self.child_or_insert(at, part, NodeKind::Directory, None, Some(Stat::directory(0)));
-        }
-        at
+        self.add(path, None, Stat::directory(0))
     }
 
-    fn child_or_insert(
-        &mut self,
+    fn add(&mut self, path: &str, file: Option<(PathBuf, Option<Stat>)>, dir_stat: Stat) -> usize {
+        let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty() && *part != "." && *part != "..").collect();
+        let nodes = self.nodes.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut at = 0;
+        let (last, directories) = match file {
+            Some(_) => match parts.split_last() {
+                Some(split) => split,
+                None => return at,
+            },
+            None => (&"", parts.as_slice()),
+        };
+        for part in directories {
+            at = Self::insert(nodes, at, part, NodeKind::Directory, None, Some(dir_stat), true);
+        }
+        match file {
+            Some((source, stat)) => Self::insert(nodes, at, last, NodeKind::File, Some(source), stat, true),
+            None => at,
+        }
+    }
+
+    /// The child of `parent` called `name`, made if it is not there.
+    fn insert(
+        nodes: &mut Vec<Node>,
         parent: usize,
         name: &str,
         kind: NodeKind,
         source: Option<PathBuf>,
         stat: Option<Stat>,
+        listed: bool,
     ) -> usize {
-        if let Some(existing) = self.child(parent, name) {
-            return existing;
+        let k = key(name);
+        if let Some(existing) = nodes.get(parent).and_then(|node| node.by_name.get(&k)) {
+            return *existing;
         }
-        let index = self.nodes.len();
-        self.nodes.push(Node {
-            name: name.to_owned(),
-            kind,
-            parent,
-            children: Vec::new(),
-            source,
-            stat: stat.map_or_else(OnceLock::new, OnceLock::from),
-        });
-        if let Some(node) = self.nodes.get_mut(parent) {
+        let index = nodes.len();
+        nodes.push(Node::new(name, kind, parent, source, stat, listed));
+        if let Some(node) = nodes.get_mut(parent) {
             node.children.push(index);
+            node.by_name.insert(k, index);
         }
         index
     }
 
     /// Looks up one name in one directory. This is the only way in.
     pub fn child(&self, parent: usize, name: &str) -> Option<usize> {
-        let node = self.nodes.get(parent)?;
-        if node.kind != NodeKind::Directory {
+        {
+            let nodes = self.read();
+            let node = nodes.get(parent)?;
+            if node.kind != NodeKind::Directory {
+                return None;
+            }
+            // `.` and `..` are answered here rather than by name matching, so
+            // they stay inside the export: `..` at the root is the root.
+            match name {
+                "." => return Some(parent),
+                ".." => return Some(node.parent),
+                _ => {}
+            }
+            if let Some(index) = node.by_name.get(&key(name)) {
+                return Some(*index);
+            }
+            if node.listed {
+                return None;
+            }
+        }
+        if !is_plain_name(name) {
             return None;
         }
-        // `.` and `..` are answered here rather than by name matching, so they
-        // stay inside the export: `..` at the root is the root.
-        match name {
-            "." => return Some(parent),
-            ".." => return Some(node.parent),
-            _ => {}
+        // Not in the tree yet: what the allowed folders say, then the host.
+        let mut nodes = self.write();
+        let node = nodes.get(parent)?;
+        if let Some(index) = node.by_name.get(&key(name)) {
+            return Some(*index);
         }
-        // A name a player read off a listing comes back decomposed (NFD),
-        // the way rekordbox's `UTF8-MAC` conversion sent it; the tree holds
-        // it as the library wrote it. Either form finds the child.
-        let exact = node.children.iter().copied().find(|index| self.nodes.get(*index).is_some_and(|c| c.name == name));
-        exact.or_else(|| {
-            use unicode_normalization::UnicodeNormalization as _;
-            let wanted: String = name.nfd().collect();
-            node.children
-                .iter()
-                .copied()
-                .find(|index| self.nodes.get(*index).is_some_and(|c| c.name.nfd().eq(wanted.chars())))
-        })
+        if let Some(dir) = node.source.clone() {
+            // Under an allowed folder: the host decides. A name the player
+            // decomposed may be composed on a volume that keeps names as
+            // written.
+            let composed: String = name.nfc().collect();
+            let (found, as_named) = match host_entry(&dir, name) {
+                Some(entry) => (entry, name),
+                None if composed != name => (host_entry(&dir, &composed)?, composed.as_str()),
+                None => return None,
+            };
+            let host = dir.join(as_named);
+            return Some(match found {
+                HostEntry::Directory => {
+                    Self::insert(&mut nodes, parent, as_named, NodeKind::Directory, Some(host), None, false)
+                }
+                HostEntry::File => Self::insert(&mut nodes, parent, as_named, NodeKind::File, Some(host), None, true),
+            });
+        }
+        // On the way to an allowed folder, or at it.
+        let mut path = Self::path_of(&nodes, parent);
+        path.push(key(name));
+        let depth = path.len();
+        let root = self.roots.iter().find(|root| {
+            root.parts.len() >= depth && root.parts.iter().map(|p| key(p)).zip(&path).all(|(a, b)| a == *b)
+        })?;
+        let as_named = root.parts.get(depth - 1)?.clone();
+        let host = (root.parts.len() == depth).then(|| root.host.clone());
+        // A folder on the way has no host behind it and reports as a
+        // directory of the tree; the allowed folder itself is the host's,
+        // read when first asked.
+        let stat = host.is_none().then(|| Stat::directory(0));
+        Some(Self::insert(&mut nodes, parent, &as_named, NodeKind::Directory, host, stat, false))
+    }
+
+    /// The names from the root down to `index`, decomposed.
+    fn path_of(nodes: &[Node], mut index: usize) -> Vec<String> {
+        let mut parts = Vec::new();
+        while index != 0 {
+            let Some(node) = nodes.get(index) else { break };
+            parts.push(key(&node.name));
+            index = node.parent;
+        }
+        parts.reverse();
+        parts
+    }
+
+    /// The children of a directory, complete: a directory on the host is
+    /// read the first time, so a listing shows what is there and later
+    /// lookups find the same nodes.
+    pub fn children(&self, index: usize) -> Vec<usize> {
+        {
+            let nodes = self.read();
+            let Some(node) = nodes.get(index) else { return Vec::new() };
+            if node.listed || node.kind != NodeKind::Directory {
+                return node.children.clone();
+            }
+        }
+        let mut nodes = self.write();
+        let Some(node) = nodes.get(index) else { return Vec::new() };
+        if node.listed {
+            return node.children.clone();
+        }
+        if let Some(dir) = node.source.clone() {
+            let mut names: Vec<(String, HostEntry)> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_str()?.to_owned();
+                    if !is_plain_name(&name) {
+                        return None;
+                    }
+                    let kind = host_entry(&dir, &name)?;
+                    Some((name, kind))
+                })
+                .collect();
+            names.sort_by(|a, b| a.0.cmp(&b.0));
+            for (name, kind) in names {
+                let host = dir.join(&name);
+                match kind {
+                    HostEntry::Directory => {
+                        Self::insert(&mut nodes, index, &name, NodeKind::Directory, Some(host), None, false);
+                    }
+                    HostEntry::File => {
+                        Self::insert(&mut nodes, index, &name, NodeKind::File, Some(host), None, true);
+                    }
+                }
+            }
+        } else {
+            // On the way to the allowed folders: the next name of each that
+            // passes through here.
+            let path = Self::path_of(&nodes, index);
+            let depth = path.len();
+            let mut next: Vec<(String, Option<PathBuf>)> = Vec::new();
+            let mut seen = HashSet::new();
+            for root in &self.roots {
+                if root.parts.len() <= depth || !root.parts.iter().map(|p| key(p)).zip(&path).all(|(a, b)| a == *b) {
+                    continue;
+                }
+                let Some(name) = root.parts.get(depth) else { continue };
+                if seen.insert(key(name)) {
+                    next.push((name.clone(), (root.parts.len() == depth + 1).then(|| root.host.clone())));
+                }
+            }
+            for (name, host) in next {
+                Self::insert(&mut nodes, index, &name, NodeKind::Directory, host, Some(Stat::directory(0)), false);
+            }
+        }
+        if let Some(node) = nodes.get_mut(index) {
+            node.listed = true;
+            node.children.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     /// The name of a node as it goes on the wire: decomposed (NFD) on Apple
@@ -327,10 +553,9 @@ impl Vfs {
     pub fn wire_name(&self, index: usize) -> Option<String> {
         let name = self.name(index)?;
         if cfg!(target_vendor = "apple") {
-            use unicode_normalization::UnicodeNormalization as _;
             Some(name.nfd().collect())
         } else {
-            Some(name.to_owned())
+            Some(name)
         }
     }
 
@@ -344,26 +569,25 @@ impl Vfs {
     }
 
     pub fn kind(&self, index: usize) -> Option<NodeKind> {
-        self.nodes.get(index).map(|node| node.kind)
+        self.read().get(index).map(|node| node.kind)
     }
 
-    pub fn name(&self, index: usize) -> Option<&str> {
-        self.nodes.get(index).map(|node| node.name.as_str())
+    pub fn name(&self, index: usize) -> Option<String> {
+        self.read().get(index).map(|node| node.name.clone())
     }
 
-    pub fn source(&self, index: usize) -> Option<&Path> {
-        self.nodes.get(index)?.source.as_deref()
-    }
-
-    pub fn children(&self, index: usize) -> &[usize] {
-        self.nodes.get(index).map_or(&[], |node| node.children.as_slice())
+    /// The host path behind a node: a file's bytes, or the directory a
+    /// host-backed folder reads its names from.
+    pub fn source(&self, index: usize) -> Option<PathBuf> {
+        self.read().get(index)?.source.clone()
     }
 
     pub fn attributes(&self, index: usize) -> Option<Attributes> {
-        let node = self.nodes.get(index)?;
+        let nodes = self.read();
+        let node = nodes.get(index)?;
         let stat = *node
             .stat
-            .get_or_init(|| node.source.as_deref().map_or_else(|| Stat::plain(0, 0), stat_file));
+            .get_or_init(|| node.source.as_deref().map_or_else(|| Stat::directory(0), stat_file));
         Some(Attributes {
             kind: node.kind,
             size: stat.size,
@@ -382,7 +606,8 @@ impl Vfs {
 
     /// Builds the handle for a node.
     pub fn handle(&self, index: usize) -> Option<Handle> {
-        let node = self.nodes.get(index)?;
+        let nodes = self.read();
+        let node = nodes.get(index)?;
         let mut out = [0_u8; HANDLE_LEN];
         out.get_mut(0..4)?.copy_from_slice(&self.fileid(index).to_be_bytes());
         out.get_mut(4..8)?.copy_from_slice(&self.fileid(node.parent).to_be_bytes());
@@ -396,7 +621,8 @@ impl Vfs {
         let word = |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
         let (own, parent, root) = (word(0)?, word(4)?, word(8)?);
         let index = usize::try_from(own.checked_sub(self.id_base)?.checked_sub(1)?).ok()?;
-        let node = self.nodes.get(index)?;
+        let nodes = self.read();
+        let node = nodes.get(index)?;
         if parent != self.fileid(node.parent) || root != self.fileid(self.root()) {
             return None;
         }
@@ -415,15 +641,20 @@ pub struct Exports {
     by_name: HashMap<String, Vfs>,
 }
 
+/// File ids per export: every export's nodes are numbered from one table,
+/// and an export grows as players look names up, so each gets a range of
+/// its own rather than the count of the ones before it.
+const IDS_PER_EXPORT: u32 = 1 << 24;
+
 impl Exports {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Adds an export, numbering its nodes after every export already in.
+    /// Adds an export, numbering its nodes in a range after every export
+    /// already in.
     pub fn insert(&mut self, mut vfs: Vfs) {
-        let taken: usize = self.by_name.values().map(Vfs::len).sum();
-        vfs.id_base = u32::try_from(taken).unwrap_or(u32::MAX);
+        vfs.id_base = u32::try_from(self.by_name.len()).unwrap_or(u32::MAX).saturating_mul(IDS_PER_EXPORT);
         self.by_name.insert(vfs.export_name().to_owned(), vfs);
     }
 

@@ -849,3 +849,86 @@ fn portmap_dumps_its_three_mappings() {
     assert!(seen.contains(&(PROGRAM_NFS, u32::from(NFS_PORT))));
     assert!(seen.contains(&(PROGRAM_MOUNT, u32::from(MOUNT_PORT))));
 }
+
+// ---------------------------------------------------------------- allowed folders
+
+/// A server over a temp dir with one folder allowed as a whole: what the
+/// library's folders look like to a player. The folder holds a track, a
+/// subfolder with another, a file the library does not know, and a symlink
+/// out; beside it sits a file that must stay out of reach.
+fn folder_fixture() -> (tempfile::TempDir, Server, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let music = dir.path().join("Music");
+    fs::create_dir_all(music.join("Artist/Album")).unwrap();
+    fs::write(music.join("Artist/Album/one.mp3"), vec![1_u8; 3_000]).unwrap();
+    fs::write(music.join("Artist/loose.mp3"), b"loose").unwrap();
+    fs::write(music.join("Caf\u{e9}.wav"), b"composed on disk").unwrap();
+    fs::write(dir.path().join("beside.mp3"), b"beside the folder").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(dir.path().join("beside.mp3"), music.join("link.mp3")).unwrap();
+
+    let (export, folder) = split_export(music.to_str().unwrap()).unwrap();
+    let mut vfs = Vfs::new(export);
+    vfs.allow_folder(&folder, &music);
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    (dir, Server::new(exports, NFS_PORT, MOUNT_PORT), folder)
+}
+
+#[test]
+fn a_track_under_an_allowed_folder_is_found_and_read_without_being_registered() {
+    let (_dir, server, folder) = folder_fixture();
+    let root = mount_root(&server);
+    let one = lookup_path(&server, &root, &format!("{folder}/Artist/Album/one.mp3")).unwrap();
+    assert_eq!(read_whole(&server, &one), vec![1_u8; 3_000]);
+    let loose = lookup_path(&server, &root, &format!("{folder}/Artist/loose.mp3")).unwrap();
+    assert_eq!(read_whole(&server, &loose), b"loose");
+    // Asked twice, it is the same node and the same handle.
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/Artist/Album/one.mp3")).unwrap(), one);
+}
+
+#[test]
+fn nothing_beside_or_above_an_allowed_folder_resolves() {
+    let (dir, server, folder) = folder_fixture();
+    let root = mount_root(&server);
+    let (_, beside) = split_export(dir.path().join("beside.mp3").to_str().unwrap()).unwrap();
+    assert_eq!(lookup_path(&server, &root, &beside), Err(nfs_status::NOENT));
+    // The folders on the way exist, but only the way is in them: the temp
+    // dir's parent is not listed, and a real name in it is not found.
+    let (parent, _) = folder.rsplit_once('/').unwrap();
+    let way = lookup_path(&server, &root, parent).unwrap();
+    assert_eq!(list(&server, &way, 8192), vec![folder.rsplit_once('/').unwrap().1]);
+    assert_eq!(lookup(&server, &way, "beside.mp3"), Err(nfs_status::NOENT));
+    // `..` from the allowed folder is the folder on the way, not the host's parent.
+    let allowed = lookup_path(&server, &root, &folder).unwrap();
+    assert_eq!(lookup(&server, &allowed, ".."), Ok(way));
+    assert!(lookup(&server, &way, "..").is_ok());
+    // A name that is a path is not a name.
+    assert_eq!(lookup(&server, &allowed, "Artist/Album"), Err(nfs_status::NOENT));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_in_an_allowed_folder_is_not_followed() {
+    let (_dir, server, folder) = folder_fixture();
+    let root = mount_root(&server);
+    assert_eq!(lookup_path(&server, &root, &format!("{folder}/link.mp3")), Err(nfs_status::NOENT));
+    let allowed = lookup_path(&server, &root, &folder).unwrap();
+    let names = list(&server, &allowed, 8192);
+    assert!(!names.iter().any(|n| n == "link.mp3"), "{names:?}");
+}
+
+#[test]
+fn an_allowed_folder_lists_what_the_host_has_and_a_decomposed_name_finds_a_composed_file() {
+    let (_dir, server, folder) = folder_fixture();
+    let root = mount_root(&server);
+    let allowed = lookup_path(&server, &root, &folder).unwrap();
+    let names = list(&server, &allowed, 8192);
+    assert!(names.iter().any(|n| n == "Artist"), "{names:?}");
+    // The listing sends the name decomposed on Apple hosts, as rekordbox
+    // does; a player asks for it that way and gets the file.
+    let decomposed = "Cafe\u{301}.wav";
+    let cafe = lookup(&server, &allowed, decomposed).unwrap();
+    assert_eq!(read_whole(&server, &cafe), b"composed on disk");
+    assert_eq!(lookup(&server, &allowed, "Caf\u{e9}.wav"), Ok(cafe));
+}

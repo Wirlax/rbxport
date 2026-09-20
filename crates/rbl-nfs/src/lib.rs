@@ -617,7 +617,7 @@ impl Server {
             .child(parent, &name)
             .and_then(|index| Some((vfs.handle(index)?, vfs.attributes(index)?)));
         let Some((child_handle, attributes)) = found else {
-            tracing::debug!(xid = call.xid, parent = %vfs.name(parent).unwrap_or(""), %name, "lookup found nothing");
+            tracing::debug!(xid = call.xid, parent = %vfs.name(parent).unwrap_or_default(), %name, "lookup found nothing");
             return Self::status_only(call.xid, nfs_status::NOENT);
         };
         tracing::debug!(xid = call.xid, %name, size = attributes.size, "lookup found a node");
@@ -654,7 +654,7 @@ impl Server {
         }
         // A file that vanished between the export and the read is the normal
         // case here, not an I/O fault worth distinguishing.
-        let data = match self.read_at(source, u64::from(offset), wanted) {
+        let data = match self.read_at(&source, u64::from(offset), wanted) {
             Ok(data) => data,
             Err(error) => {
                 tracing::warn!(xid = call.xid, file = %source.display(), offset, wanted, %error, "read failed");
@@ -725,7 +725,7 @@ impl Server {
         let eof = at >= children.len();
         tracing::debug!(
             xid = call.xid,
-            directory = %vfs.name(index).unwrap_or(""),
+            directory = %vfs.name(index).unwrap_or_default(),
             cookie,
             sent = at - start,
             of = children.len(),
@@ -751,7 +751,6 @@ impl Server {
         // directory of the tree has no file behind it.
         let host = vfs
             .source(index)
-            .map(std::path::Path::to_path_buf)
             .or_else(|| Some(PathBuf::from(vfs.export_name())))
             .and_then(|path| host_statfs(&path));
         let (tsize, bsize, blocks, bfree, bavail) = host.unwrap_or((u32::try_from(MAX_READ).unwrap_or(8192), 4096, 0, 0, 0));
