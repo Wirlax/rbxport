@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::commands::{blocking, edit, write_error, Touched};
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -254,6 +254,18 @@ pub async fn set_track_field<R: tauri::Runtime>(
     let Some(which) = rbl_db::write::TrackField::parse(&field) else {
         return Err(AppError::new(ErrorKind::ReadOnly, format!("{field} cannot be edited here.")));
     };
+    if field == "bpm" {
+        let state = Arc::clone(&state);
+        let writing = Arc::clone(&state);
+        let reported = track.clone();
+        if let Some(editor) = app.try_state::<Arc<crate::grid::GridEditor>>() {
+            if editor.is_locked(&track) { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked. Unlock it to edit.")); }
+        }
+        blocking("set_track_bpm", move || crate::grid::set_tempo(&writing, &track, &value)).await?;
+        if let Some(editor) = app.try_state::<Arc<crate::grid::GridEditor>>() { editor.forget_history(&reported); }
+        let _ = tauri::Emitter::emit(&app, "grid:changed", reported);
+        return crate::commands::reload(app, state).await;
+    }
     edit(app, state, "set_track_field", Touched::Tracks, move |w| {
         w.set_field(&track, which, &value).map(|_| ())
     })

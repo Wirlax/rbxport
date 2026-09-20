@@ -168,6 +168,8 @@ impl GridEditor {
         }
     }
 
+    pub(crate) fn forget_history(&self, track: &str) { self.histories.lock().remove(track); }
+
     /// Whether the track's grid is locked against editing.
     pub fn is_locked(&self, track: &str) -> bool {
         self.with_locks(|locks| locks.contains(track))
@@ -404,6 +406,46 @@ pub fn apply(
     })
 }
 
+/// The Info panel's BPM field shares the durable file/row transaction.
+pub(crate) fn set_tempo(state: &AppState, track: &str, value: &str) -> AppResult<()> {
+    let bpm: f64 = value.trim().parse().map_err(|_| AppError::new(ErrorKind::Malformed, "Enter a BPM from 20 to 400."))?;
+    if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) {
+        return Err(AppError::new(ErrorKind::Malformed, "Enter a BPM from 20 to 400."));
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "validated 20..=400 above")]
+    let bpm_x100 = (bpm * 100.0).round() as u16;
+    let _files = state.analysis_write.lock();
+    let location = state.location()?;
+    if let Some(reason) = rbl_db::write_refusal_reason(location.is_real_install,
+        std::env::var_os("RB_LITE_TEST").is_some(), rbl_db::is_rekordbox_running()) {
+        return Err(AppError::new(ErrorKind::ReadOnly, reason));
+    }
+    crate::file_journal::recover(state.backup_dir(), &location)?;
+    let library = state.library()?;
+    let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track is no longer in the library."))?;
+    let relative = library.analysis_path.get(row as usize);
+    if relative.is_empty() {
+        return state.write(|w| w.set_bpm_x100(track, u32::from(bpm_x100)).map(|_| ())).map_err(write_error);
+    }
+    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    let (parsed, beats) = read_dat(&dat)?;
+    let next = apply_from(&beats, None, Edit::Tempo { bpm_x100, anchor_ms: beats.first().map_or(0, |b| b.time_ms) });
+    let mut files = vec![(dat.clone(), parsed.with_beat_grid(&next))];
+    let ext = rbl_anlz::sibling(&dat, "EXT");
+    if ext.exists() {
+        let parsed = rbl_anlz::Anlz::read(&ext).map_err(|e| AppError::internal(e.to_string()))?;
+        if let Some(bytes) = parsed.with_extended_grid_cleared() { files.push((ext, bytes)); }
+    }
+    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, track,
+        u32::from(bpm_x100), None, true, &files)?;
+    if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
+    if let Err(e) = state.write(|w| w.set_bpm_x100(track, u32::from(bpm_x100)).map(|_| ())) {
+        journal.rollback()?;
+        return Err(write_error(e));
+    }
+    journal.commit()
+}
+
 fn wire_beats(beats: &[Beat]) -> Vec<(u32, u8)> {
     beats.iter().map(|beat| (beat.time_ms, u8::try_from(beat.beat_number).unwrap_or(0))).collect()
 }
@@ -613,6 +655,52 @@ mod tests {
         fn times(&self) -> Vec<u32> {
             self.dat().beat_grid().unwrap().iter().map(|b| b.time_ms).collect()
         }
+    }
+
+    fn app_state(f: &Fixture) -> AppState {
+        let db = Db::open(f.location.clone(), OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(f.dir.path().join("app/backups"));
+        state.set_library(library, false, db.schema().db_version, 0, f.location.clone());
+        state
+    }
+
+    #[test]
+    fn typed_bpm_keeps_the_row_and_both_analysis_files_consistent() {
+        let f = open();
+        let state = app_state(&f);
+        set_tempo(&state, &Fixture::track(), "150").unwrap();
+        let beats = f.dat().beat_grid().unwrap();
+        assert_eq!(beats[0].time_ms, 500, "the first beat stays put");
+        assert_eq!(beats[1].time_ms, 900);
+        assert!(beats.iter().all(|b| b.tempo_x100 == 15_000));
+        assert!(f.ext().section(b"PQT2").unwrap().payload.is_empty());
+        let bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT BPM FROM djmdContent WHERE ID=?1", [Fixture::track()], |r| r.get(0))?)).unwrap();
+        assert_eq!(bpm, 15_000);
+        set_tempo(&state, &track_id(2), "128.5").unwrap();
+        let bpm: u32 = state.read_db(|db| Ok(db.connection().query_row(
+            "SELECT BPM FROM djmdContent WHERE ID=?1", [track_id(2)], |r| r.get(0))?)).unwrap();
+        assert_eq!(bpm, 12_850, "a track without analysis still gets its BPM");
+    }
+
+    #[test]
+    fn a_refused_typed_bpm_restores_dat_and_ext() {
+        let f = open();
+        let state = app_state(&f);
+        let dat = rbl_anlz::resolve(&f.location.share_root, RELATIVE);
+        let before_dat = std::fs::read(&dat).unwrap();
+        let before_ext = std::fs::read(dat.with_extension("EXT")).unwrap();
+        let db = Db::open(f.location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection().execute_batch("CREATE TRIGGER refuse_bpm BEFORE UPDATE OF BPM ON djmdContent BEGIN SELECT RAISE(ABORT, 'refused'); END;").unwrap();
+        drop(db);
+        assert!(set_tempo(&state, &Fixture::track(), "150").is_err());
+        assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
+        assert_eq!(std::fs::read(dat.with_extension("EXT")).unwrap(), before_ext);
+        for invalid in ["NaN", "inf", "0", "401", "not a tempo"] {
+            assert!(set_tempo(&state, &Fixture::track(), invalid).is_err());
+        }
+        assert_eq!(std::fs::read(&dat).unwrap(), before_dat);
     }
 
     #[test]
