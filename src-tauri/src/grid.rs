@@ -761,6 +761,42 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_past_the_history_cap_drops_the_oldest_grid_so_the_first_one_cannot_be_undone_to() {
+        let mut f = open();
+        // One edit more than the cap fits: each pushes the grid it replaced,
+        // and the push past the cap takes the front of the stack off.
+        let edits = HISTORY_CAP + 1;
+        for _ in 0..edits {
+            f.edit(GridEdit::Nudge { ms: 1 });
+        }
+        let cap = u32::try_from(HISTORY_CAP).unwrap();
+        assert_eq!(f.times()[0], 500 + cap + 1);
+        assert_eq!(f.editor.histories.lock()[&Fixture::track()].undo.len(), HISTORY_CAP, "the stack stops at the cap");
+
+        // Undoing as far as the stack goes lands on the grid after the first
+        // edit, not on the grid the track started with: the entry holding it
+        // was the one dropped, and nothing else keeps it. The backup on disk
+        // is what the original grid survives in.
+        for _ in 0..HISTORY_CAP {
+            f.run(GridAction::Undo).unwrap();
+        }
+        assert_eq!(f.times()[0], 501, "one edit in, not back at 500");
+        let err = f.run(GridAction::Undo).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::NotFound);
+        assert!(!f.editor.state_for(&Fixture::track(), &grid()).can_undo);
+
+        // Everything undone is still redoable: the cap is on the undo stack
+        // after a push, and a redo puts grids back without being capped.
+        assert_eq!(f.editor.histories.lock()[&Fixture::track()].redo.len(), HISTORY_CAP);
+        for _ in 0..HISTORY_CAP {
+            f.run(GridAction::Redo).unwrap();
+        }
+        assert_eq!(f.times()[0], 500 + cap + 1);
+        assert_eq!(f.editor.histories.lock()[&Fixture::track()].undo.len(), HISTORY_CAP);
+        assert!(f.bpms.is_empty(), "a nudge never changes the tempo, however many there are");
+    }
+
+    #[test]
     fn a_track_without_analysis_has_no_grid_to_edit() {
         let mut f = open();
         let mut none = |_bpm: u32| Ok(());

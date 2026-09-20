@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { Cue } from "@/ipc/types";
 import {
-  MEMORY_TOLERANCE_MS, hotCue, hotLetters, memoryCueAt, nextMemoryCue, previousMemoryCue,
+  MEMORY_TOLERANCE_MS, hotCue, hotLetters, memoryCueAt, memoryCueNumber, nextMemoryCue,
+  previousMemoryCue, rowCuesOf,
 } from "./cues";
 
 const memory = (id: string, positionMs: number): Cue => ({
   id, positionMs, outMs: 0, letter: "", memory: true, colour: null,
 });
-const hot = (id: string, letter: string, positionMs: number): Cue => ({
-  id, positionMs, outMs: 0, letter, memory: false, colour: null,
+const hot = (id: string, letter: string, positionMs: number, colour: string | null = null): Cue => ({
+  id, positionMs, outMs: 0, letter, memory: false, colour,
 });
 
 // Out of order on purpose: the list the backend hands over is sorted, but
@@ -110,5 +111,60 @@ describe("hotLetters", () => {
     expect(hotLetters([])).toBe("");
     expect(hotLetters([memory("m", 1)])).toBe("");
     expect(hotLetters([hot("x", "A", 1), hot("y", "A", 2)])).toBe("A");
+  });
+});
+
+describe("memoryCueNumber", () => {
+  it("counts memory cues from the start of the track, one-based", () => {
+    expect(memoryCueNumber(cues, 1)?.id).toBe("m1");
+    expect(memoryCueNumber(cues, 2)?.id).toBe("m2");
+    expect(memoryCueNumber(cues, 3)?.id).toBe("m3");
+  });
+
+  it("counts by position, not by the order the list arrived in", () => {
+    // `cues` is deliberately unsorted, and the hot cues at 5 s and 60 s sit
+    // between the memory cues: neither may shift the numbering.
+    const shuffled = [memory("c", 3_000), memory("a", 1_000), memory("b", 2_000)];
+    expect([1, 2, 3].map((n) => memoryCueNumber(shuffled, n)?.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("is null off either end, which is what a pad past the last cue presses", () => {
+    expect(memoryCueNumber(cues, 4)).toBeNull();
+    expect(memoryCueNumber(cues, 0)).toBeNull();
+    expect(memoryCueNumber(cues, -1)).toBeNull();
+    expect(memoryCueNumber([], 1)).toBeNull();
+    expect(memoryCueNumber([hot("a", "A", 1_000)], 1)).toBeNull();
+  });
+});
+
+describe("rowCuesOf", () => {
+  it("is one entry per slot in letter order, carrying the colour", () => {
+    const coloured = [
+      hot("b", "B", 60_000, "#00f"),
+      memory("m", 30_000),
+      hot("a", "A", 5_000, "#f00"),
+    ];
+    expect(rowCuesOf(coloured)).toEqual([
+      ["A", 5_000, "#f00"],
+      ["B", 60_000, "#00f"],
+    ]);
+  });
+
+  it("leaves out memory cues and any row with no slot", () => {
+    expect(rowCuesOf([memory("m", 1_000)])).toEqual([]);
+    expect(rowCuesOf([hot("blank", "", 1_000)])).toEqual([]);
+    expect(rowCuesOf([])).toEqual([]);
+  });
+
+  it("agrees with hotLetters, which is built from it", () => {
+    expect(rowCuesOf(cues).map(([letter]) => letter).join("")).toBe(hotLetters(cues));
+  });
+
+  it("names a doubled slot once, taking the row the backend would list first", () => {
+    // The backend hands the list back in position order, so the first row
+    // for a slot is also the earliest — the same one `hotCue` gives the pad.
+    const sorted = [hot("early", "A", 2_000, "#f00"), hot("late", "A", 9_000, "#0f0")];
+    expect(rowCuesOf(sorted)).toEqual([["A", 2_000, "#f00"]]);
+    expect(rowCuesOf(sorted)[0]?.[1]).toBe(hotCue(sorted, "A")?.positionMs);
   });
 });

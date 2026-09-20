@@ -435,6 +435,81 @@ fn a_write_the_library_refuses_is_read_only_to_the_interface_and_changes_nothing
     assert_eq!(err.kind, ErrorKind::ReadOnly);
 }
 
+// ----------------------------------------------------------- the Tag List
+
+/// The Tag List in its own order: `trackNo` is the view's order rather than
+/// a column, which for this source is the order the tracks were put on.
+fn tag_list_spec() -> ViewSpecDto {
+    ViewSpecDto { source: TrackSourceDto::TagList, sort: "trackNo".into(), ..collection_spec() }
+}
+
+#[test]
+fn the_tag_list_takes_tracks_in_order_ignores_a_repeat_and_empties_on_clear() {
+    let s = shell();
+    let (view, len) = s.open(tag_list_spec());
+    assert_eq!(len, 0);
+    assert!(s.rows(view).is_empty());
+
+    let (t1, t2, t3) = (track_id(1), track_id(2), track_id(3));
+    let first = run(commands::add_to_tag_list(s.handle(), s.state(), vec![t3.clone(), t1.clone()])).unwrap();
+    let (view, _) = s.open(tag_list_spec());
+    assert_eq!(ids(&s.rows(view)), [t3.as_str(), t1.as_str()], "on the end, in the order given");
+
+    // A track already on the list is not put on twice. The edit still went
+    // through the writer, so the generation moves and the interface refetches.
+    let second = run(commands::add_to_tag_list(s.handle(), s.state(), vec![t3.clone(), t2.clone()])).unwrap();
+    assert!(second > first);
+    let (view, _) = s.open(tag_list_spec());
+    assert_eq!(ids(&s.rows(view)), [t3.as_str(), t1.as_str(), t2.as_str()]);
+
+    // One off the front, and the rest close the gap it left.
+    let third = run(commands::remove_from_tag_list(s.handle(), s.state(), vec![t3.clone()])).unwrap();
+    let (view, _) = s.open(tag_list_spec());
+    assert_eq!(ids(&s.rows(view)), [t1.as_str(), t2.as_str()]);
+
+    // Taking off a track that is not on the list is not a refusal.
+    let fourth = run(commands::remove_from_tag_list(s.handle(), s.state(), vec![t3])).unwrap();
+    assert!(fourth > third);
+    let (view, _) = s.open(tag_list_spec());
+    assert_eq!(ids(&s.rows(view)), [t1.as_str(), t2.as_str()]);
+
+    let fifth = run(commands::clear_tag_list(s.handle(), s.state())).unwrap();
+    let (view, len) = s.open(tag_list_spec());
+    assert_eq!(len, 0);
+    assert!(s.rows(view).is_empty());
+
+    // `Touched::TagList` re-reads the list alone, but what it announces is
+    // the same `library:changed` carrying the generation that a playlist or
+    // a track edit sends — the Tag List has no event of its own.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while s.changes.lock().unwrap().len() < 5 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*s.changes.lock().unwrap(), vec![first, second, third, fourth, fifth]);
+}
+
+#[test]
+fn a_tag_list_add_naming_a_track_that_is_not_there_is_read_only_and_adds_none_of_them() {
+    let s = shell();
+    let track = track_id(4);
+    let generation = run(commands::add_to_tag_list(s.handle(), s.state(), vec![track.clone()])).unwrap();
+
+    let err = run(commands::add_to_tag_list(s.handle(), s.state(), vec![track_id(5), "no-such-track".into()]))
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::ReadOnly, "the writer's refusal, as the status bar shows it");
+
+    // The refusal came inside the writer's transaction, so the good track in
+    // the same call did not go on either, and nothing was re-read.
+    let (view, _) = s.open(tag_list_spec());
+    assert_eq!(ids(&s.rows(view)), [track.as_str()]);
+    assert_eq!(s.state().summary().3, generation);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while s.changes.lock().unwrap().is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*s.changes.lock().unwrap(), vec![generation], "only the add that went through announced");
+}
+
 // ----------------------------------------------------------- track editing
 
 #[test]
@@ -551,6 +626,105 @@ fn a_cue_added_through_the_command_is_read_back_and_announced() {
     }
     let announced = announced.lock().unwrap();
     assert_eq!(announced.len(), 5);
+    assert!(announced.iter().all(|t| *t == track));
+}
+
+/// Collects every `cues:changed` the command emits, and waits for them: the
+/// emit is the last thing each edit does and the listener runs off-thread.
+fn cue_announcements(s: &Shell) -> impl Fn(usize) -> Vec<String> {
+    let announced: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&announced);
+    s.app.listen("cues:changed", move |event| {
+        seen.lock().unwrap().push(event.payload().trim_matches('"').to_owned());
+    });
+    move |count: usize| {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while announced.lock().unwrap().len() < count && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        announced.lock().unwrap().clone()
+    }
+}
+
+#[test]
+fn memory_cues_are_converted_into_the_free_hot_slots_in_position_order_and_each_one_is_announced() {
+    let s = shell();
+    let track = track_id(5);
+    let announced = cue_announcements(&s);
+
+    // B is taken before the conversion, so the three memory cues take the
+    // letters left: A, C and D, in order of position rather than of adding.
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot('B'), 1_000)).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 30_000)).unwrap();
+    run(cues::add_loop(s.handle(), s.state(), track.clone(), CueKind::Memory, 10_000, 14_000, Some(8))).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 50_000)).unwrap();
+    assert_eq!(announced(4).len(), 4, "the four cues that set the track up");
+
+    let made = run(cues::convert_memory_cues_to_hot(s.handle(), s.state(), track.clone())).unwrap();
+    assert_eq!(made, 3);
+
+    let cues = run(commands::track_cues(s.state(), track.clone())).unwrap();
+    assert_eq!(cues.len(), 7, "the memory cues are kept beside the hot cues they became");
+    let mut hot: Vec<(String, u32, u32)> = cues
+        .iter()
+        .filter(|c| !c.memory)
+        .map(|c| (c.letter.clone(), c.position_ms, c.out_ms))
+        .collect();
+    hot.sort();
+    assert_eq!(
+        hot,
+        vec![
+            ("A".to_owned(), 10_000, 14_000),
+            ("B".to_owned(), 1_000, 0),
+            ("C".to_owned(), 30_000, 0),
+            ("D".to_owned(), 50_000, 0),
+        ],
+        "the loop stayed a loop when it became a hot cue"
+    );
+
+    // One `cues:changed` per cue written, so a deck showing the track
+    // refetches after each of them rather than only at the end.
+    let announced = announced(7);
+    assert_eq!(announced.len(), 7);
+    assert!(announced.iter().all(|t| *t == track));
+}
+
+#[test]
+fn a_conversion_stops_at_the_last_free_hot_slot_and_a_track_with_no_memory_cues_is_a_no_op() {
+    let s = shell();
+    let track = track_id(6);
+    let announced = cue_announcements(&s);
+
+    // Fifteen of the sixteen slots taken, and two memory cues for the one
+    // that is left.
+    for letter in 'A'..='O' {
+        run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Hot(letter), 1_000)).unwrap();
+    }
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 20_000)).unwrap();
+    run(cues::add_cue(s.handle(), s.state(), track.clone(), CueKind::Memory, 40_000)).unwrap();
+
+    assert_eq!(run(cues::convert_memory_cues_to_hot(s.handle(), s.state(), track.clone())).unwrap(), 1);
+    let cues = run(commands::track_cues(s.state(), track.clone())).unwrap();
+    assert_eq!(cues.len(), 18, "one cue written, and the memory cue with nowhere to go is untouched");
+    assert_eq!(
+        cues.iter().find(|c| c.letter == "P").unwrap().position_ms,
+        20_000,
+        "the earlier memory cue took the last slot"
+    );
+
+    // Every slot is taken now, so a second conversion writes nothing at all.
+    assert_eq!(run(cues::convert_memory_cues_to_hot(s.handle(), s.state(), track.clone())).unwrap(), 0);
+    assert_eq!(run(commands::track_cues(s.state(), track.clone())).unwrap().len(), 18);
+
+    // A track with no memory cues is the same no-op.
+    let other = track_id(7);
+    assert_eq!(run(cues::convert_memory_cues_to_hot(s.handle(), s.state(), other.clone())).unwrap(), 0);
+    assert!(run(commands::track_cues(s.state(), other)).unwrap().is_empty());
+
+    // Seventeen for the setup and one for the conversion: neither no-op
+    // announced anything, because neither wrote anything.
+    let announced = announced(18);
+    assert_eq!(announced.len(), 18);
     assert!(announced.iter().all(|t| *t == track));
 }
 

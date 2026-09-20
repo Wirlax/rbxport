@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { TREE_ROOT, type TreeNode } from "@/ipc/types";
 import {
-  branchIds, childrenOf, containerOf, emptySources, hasChildren, newlyClosed, nodesForSource,
-  parentFor, sourceOf, subtreeIds, toggle, visibleNodes,
+  RELATED_NODES, TAG_LIST_NODE, branchIds, childrenOf, containerOf, emptySources, hasChildren,
+  newlyClosed, nodesForSource, parentFor, relatedCriterionOf, sourceOf, subtreeIds, toggle,
+  visibleNodes, withRelated,
 } from "./tree";
 
 /** `"a"` at depth 0, `"  b"` at depth 1, and so on. */
@@ -354,5 +355,76 @@ describe("subtreeIds", () => {
 
   it("is just the node itself for a leaf", () => {
     expect([...subtreeIds(nested, nested[2]!)]).toEqual(["one"]);
+  });
+});
+
+describe("withRelated", () => {
+  const backend: TreeNode[] = [
+    { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
+    { id: "pl", name: "Playlists", kind: "collection", depth: 0 },
+    { id: "one", name: "One", kind: "playlist", depth: 1 },
+  ];
+
+  it("adds the Related Tracks section and the Tag List after the backend's tree", () => {
+    const ids = withRelated(backend).map((n) => n.id);
+    expect(ids).toEqual([
+      "all", "pl", "one",
+      "related", "related:bpmKey", "related:genreRecent", "related:artist", "related:suggestion",
+      "tagList",
+    ]);
+  });
+
+  it("does not stack the rows when the tree is refetched", () => {
+    // The tree is rebuilt on every library change, and the frontend's own
+    // rows are already in the array it is handed back: without the filter
+    // each refetch would add another Related Tracks section.
+    expect(withRelated(withRelated(backend))).toEqual(withRelated(backend));
+  });
+
+  it("leaves the backend's own nodes alone, in order", () => {
+    expect(withRelated(backend).slice(0, 3)).toEqual(backend);
+    expect(withRelated([])).toEqual([...RELATED_NODES, TAG_LIST_NODE]);
+  });
+
+  it("gives the rail a Related section and a Tag List to show", () => {
+    const nodes = withRelated(backend);
+    expect(nodesForSource(nodes, "related").map((n) => n.id)).toEqual([
+      "related", "related:bpmKey", "related:genreRecent", "related:artist", "related:suggestion",
+    ]);
+    expect(nodesForSource(nodes, "tagList").map((n) => n.id)).toEqual(["tagList"]);
+    // And they stay out of the playlists section, which is the rail's job.
+    expect(nodesForSource(nodes, "playlists").map((n) => n.id)).toEqual(["all", "pl", "one"]);
+  });
+
+  it("puts the rail on the section a selected row belongs to", () => {
+    const nodes = withRelated(backend);
+    expect(sourceOf(nodes, "related")).toBe("related");
+    expect(sourceOf(nodes, "related:artist")).toBe("related");
+    expect(sourceOf(nodes, "tagList")).toBe("tagList");
+  });
+});
+
+describe("relatedCriterionOf", () => {
+  it("names the criterion each row stands for", () => {
+    expect(relatedCriterionOf("related:bpmKey")).toBe("bpmKey");
+    expect(relatedCriterionOf("related:genreRecent")).toBe("genreRecent");
+    expect(relatedCriterionOf("related:artist")).toBe("artist");
+    expect(relatedCriterionOf("related:suggestion")).toBe("suggestion");
+  });
+
+  it("is null for the heading and for anything else", () => {
+    // The heading opens no view of its own; nor does a playlist that happens
+    // to be selected when the Related section is showing.
+    expect(relatedCriterionOf("related")).toBeNull();
+    expect(relatedCriterionOf("tagList")).toBeNull();
+    expect(relatedCriterionOf("")).toBeNull();
+  });
+
+  it("answers for every criterion row, so none can be drawn without a view", () => {
+    for (const node of RELATED_NODES) {
+      const criterion = relatedCriterionOf(node.id);
+      if (node.kind === "relatedCriterion") expect(criterion).not.toBeNull();
+      else expect(criterion).toBeNull();
+    }
   });
 });
