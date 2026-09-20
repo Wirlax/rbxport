@@ -3,6 +3,7 @@
    11.5px bold Arial the capture's stems and cap height fit, ending 34.5pt
    short of the window's edge. */
 .statusBar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -40,9 +41,45 @@
   white-space: nowrap;
 }
 /* Failures, in the one place the eye already goes for what the app is doing. */
-.error { color: var(--c-error); }
+.error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 24px);
+  padding: 2px 8px;
+  background: var(--c-black);
+  color: var(--c-error);
+  font-size: var(--f-size-bars);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: warningFlash 300ms ease-in-out 2;
+}
+
+@keyframes warningFlash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .error { animation: none; }
+}
 
 .selection { margin-left: auto; }
+
+.warningAction {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--c-raised);
+  border-radius: 3px;
+  background: var(--c-button);
+  color: var(--c-text);
+  font: inherit;
+  cursor: pointer;
+}
+.warningAction:hover { border-color: var(--c-accent); }
 
 /* Shown only while analysis runs. The track already being analysed finishes:
    it is most of a second's work already spent. */

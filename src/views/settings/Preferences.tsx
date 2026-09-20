@@ -41,6 +41,8 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  */
 export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "about";
 
+export type PreferencesTarget = Pane | "libraryProtection";
+
 const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: "view", label: "View", Icon: PrefViewIcon },
   { id: "audio", label: "Audio", Icon: PrefAudioIcon },
@@ -75,7 +77,7 @@ export interface PreferencesProps {
   onResetLayout: () => void;
   onClose: () => void;
   /** Where to open: the missing-file manager lands on Advanced › Database. */
-  initialPane?: Pane;
+  initialPane?: PreferencesTarget;
   /**
    * Drawn as the whole of a window of its own — no backdrop, no title bar of
    * ours, the shell's chrome around it — rather than over the main window.
@@ -110,11 +112,15 @@ export function Preferences({
 }: PreferencesProps) {
   const window_ = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const [pane, setPane] = useState<Pane>(initialPane);
+  const [pane, setPane] = useState<Pane>(initialPane === "libraryProtection" ? "advanced" : initialPane);
   // The window is turned to another pane from outside — the File menu's
   // Missing File Manager while it is already open.
   useEffect(() => {
-    setPane(initialPane);
+    setPane(initialPane === "libraryProtection" ? "advanced" : initialPane);
+    if (initialPane === "libraryProtection") {
+      setTabs((current) => ({ ...current, advanced: "browse" }));
+      setQuery("");
+    }
   }, [initialPane]);
   const [tabs, setTabs] = useState<Tabs>(FIRST_TABS);
   const [query, setQuery] = useState("");

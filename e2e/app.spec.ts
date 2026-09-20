@@ -735,6 +735,14 @@ test("Library Protection refuses edits the way a running rekordbox does", async 
   const target = page.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first();
   await row.dragTo(target);
   await expect(page.getByRole("contentinfo")).toContainText("Library Protection");
+  await page.getByRole("contentinfo").getByRole("button", { name: "Open Preferences" }).click();
+  await expect(dialog.getByRole("tab", { name: "Advanced", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab", { name: "Browse", exact: true })).toHaveAttribute("aria-selected", "true");
+  const protection = dialog.getByRole("switch", { name: "Protect library edit." });
+  await expect(protection).toBeChecked();
+  await protection.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("contentinfo").getByRole("alert")).toHaveCount(0);
 });
 
 test("the Traffic Light lights the keys that go with the loaded track's", async ({ page }) => {
@@ -1111,7 +1119,7 @@ test("the metadata columns are typed over in the list, and Escape abandons", asy
   await expect(page.getByRole("contentinfo")).not.toContainText("Label saved.");
 });
 
-test("the title cell stays the gesture that loads a track, not one that edits it", async ({
+test("the title cell still loads a track on double-click", async ({
   page,
 }) => {
   // A cell that both loads and opens an editor can do neither reliably, so
@@ -1122,6 +1130,32 @@ test("the title cell stays the gesture that loads a track, not one that edits it
   await expect(page.locator('[role="gridcell"][data-col="title"] input')).toHaveCount(0);
   // And it loaded, which is what the double click was for.
   await expect(page.getByTestId("player-title")).not.toHaveText("");
+});
+
+test("a second single click edits a playlist title", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await cell.click();
+  await expect(cell.locator("input")).toHaveCount(0);
+  await cell.click();
+  const field = cell.locator("input");
+  expect(await field.count()).toBe(0);
+  await expect(field).toBeFocused();
+  await field.fill("Edited Playlist Title");
+  await field.press("Enter");
+  await expect(cell).toHaveText("Edited Playlist Title");
+  await expect(page.getByRole("contentinfo")).toContainText("Title saved.");
+  await expect(page.getByTestId("player-title")).toHaveText("");
+
+  await cell.click();
+  await cell.locator("input").fill("Discard this title");
+  await cell.locator("input").press("Escape");
+  await expect(cell).toHaveText("Edited Playlist Title");
+
+  await cell.dblclick();
+  await expect(cell.locator("input")).toHaveCount(0);
+  await expect(page.getByTestId("player-title")).toHaveText("Edited Playlist Title");
 });
 
 test("the key column is not typed over: it is checked against the library's own", async ({
@@ -1135,11 +1169,48 @@ test("the key column is not typed over: it is checked against the library's own"
   await expect(page.locator('[role="gridcell"][data-col="key"] input')).toHaveCount(0);
 });
 
+test("editing follows rekordbox opening and closing without reloading", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await cell.click();
+  await cell.click();
+  const warning = page.getByRole("contentinfo").getByRole("alert");
+  await expect(warning).toContainText("rekordbox is running");
+
+  // Change the mock process state without remounting the app.
+  await page.evaluate(() => history.replaceState(null, "", "/?writable=1"));
+  await expect(page.getByRole("contentinfo")).not.toContainText("Read-only");
+  await expect(warning).toHaveCount(0);
+  await cell.click();
+  await expect(cell.locator("input")).toBeFocused();
+  const originalTitle = await cell.locator("input").inputValue();
+  await cell.locator("input").fill("Must not save after locking");
+
+  await page.evaluate(() => history.replaceState(null, "", "/"));
+  await expect(page.getByRole("contentinfo")).toContainText("Read-only");
+  await expect(cell.locator("input")).toHaveAttribute("readonly", "");
+  await cell.locator("input").press("Enter");
+  await expect(cell).toHaveText(originalTitle);
+  await cell.click();
+  await expect(cell.locator("input")).toHaveCount(0);
+  await expect(warning).toContainText("rekordbox is running");
+});
+
 test("with the library held by rekordbox the cells are not editable at all", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="artist"]').nth(3).dblclick();
   await expect(page.locator('[role="gridcell"][data-col="artist"] input')).toHaveCount(0);
+  const warning = page.getByRole("contentinfo").getByRole("alert");
+  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.");
+  await expect(warning).toHaveCount(0, { timeout: 12000 });
+
+  const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await title.click();
+  await title.click();
+  await expect(title.locator("input")).toHaveCount(0);
+  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.");
 });
 
 test("settings can check for missing files", async ({ page }) => {

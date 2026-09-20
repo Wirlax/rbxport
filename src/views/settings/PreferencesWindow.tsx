@@ -14,25 +14,31 @@ import type { LibrarySummary } from "@/ipc/types";
 import { useLimiter } from "@/store/useLimiter";
 import { useMaster } from "@/store/useMaster";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
-import { asPane, Preferences, type Pane } from "./Preferences";
+import { asPane, Preferences, type PreferencesTarget } from "./Preferences";
 
 /** The pane the hash names: `#preferences/advanced` is Advanced. */
-export function paneFromHash(hash: string): Pane {
-  return asPane(hash.replace(/^#preferences\/?/, "").split(/[/?]/)[0]);
+export function paneFromHash(hash: string): PreferencesTarget {
+  const target = hash.replace(/^#preferences\/?/, "").split(/[/?]/)[0];
+  return target === "libraryProtection" ? target : asPane(target);
 }
 
 export function PreferencesWindow() {
   const store = usePreferencesStore();
-  const [pane, setPane] = useState<Pane>(() => paneFromHash(window.location.hash));
+  const [pane, setPane] = useState<PreferencesTarget>(() => paneFromHash(window.location.hash));
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
   // The limiter is the engine's, so this window reads and sets it the same
   // way the shell does, and its meter ticks arrive here as they do there.
   const limiter = useLimiter();
   const master = useMaster(store.preferences.view.vuMeter);
 
+  const [navigation, setNavigation] = useState(0);
+
   // Turned to another pane by the shell while open: it sets the hash.
   useEffect(() => {
-    const onHash = () => setPane(paneFromHash(window.location.hash));
+    const onHash = () => {
+      setPane(paneFromHash(window.location.hash));
+      setNavigation((value) => value + 1);
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -72,6 +78,7 @@ export function PreferencesWindow() {
         vu={master.vu}
         peakLeft={master.peakLeft}
         peakRight={master.peakRight}
+        key={navigation}
         initialPane={pane}
         onResetColumns={() => ask("columns")}
         onResetLayout={() => ask("layout")}

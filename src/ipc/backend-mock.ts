@@ -325,7 +325,6 @@ export interface MockOptions {
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
-  const writable = options.writable ?? readFlagFromUrl("writable");
   const all = makeRows(trackCount);
   const colors = makeColors(trackCount);
   const rowPositions = new Map(all.map((row, index) => [row.id, index]));
@@ -1292,7 +1291,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         ? wait<LibrarySummary>({
             trackCount,
             playlistCount: tree.filter((n) => n.kind === "playlist").length,
-            readOnly: !writable,
+            readOnly: !(options.writable ?? readFlagFromUrl("writable")),
             dbVersion: null,
           })
         : notReady(),

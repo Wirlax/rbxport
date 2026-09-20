@@ -34,7 +34,7 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
     let pane: String = pane.chars().filter(char::is_ascii_alphanumeric).collect();
     if let Some(window) = app.get_webview_window(WINDOW) {
         // The window reads its pane from the hash, and listens for it to change.
-        let _ = window.eval(format!("location.hash = '#preferences/{pane}'"));
+        let _ = window.eval(format!("location.hash = '#preferences/{pane}?open=' + Date.now()"));
         let _ = window.unminimize();
         let _ = window.set_focus();
         return Ok(());

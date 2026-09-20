@@ -214,6 +214,7 @@ fn the_summary_and_the_tree_describe_the_loaded_library() {
     assert_eq!(summary.track_count, 40);
     assert_eq!(summary.playlist_count, 3);
     assert_eq!(summary.db_version, Some(6000));
+    assert!(!summary.read_only, "fixture editing is independent of the installed rekordbox process");
 
     let tree = s.tree();
     assert_eq!(tree[0].kind, "allTracks");

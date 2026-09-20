@@ -14,7 +14,7 @@ describe("menu", () => {
 
   it("refuses a write while rekordbox holds the library", () => {
     expect(resolveMenu("import", true)).toEqual({
-      refused: "rekordbox is running, so the library is open read-only.",
+      refused: "Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.",
     });
     expect(resolveMenu("import", false)).toEqual({ action: "import" });
   });

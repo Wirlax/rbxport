@@ -111,9 +111,8 @@ function cellText(row: RowDto, key: Column["key"]): string {
  * Plain text that the writer takes as given, and only columns whose cells are
  * not the gesture for something else.
  *
- * `title` is left out although the writer takes it: the title cell is what
- * people double-click to load a track, and a cell that both loads and opens
- * an editor cannot do either reliably. The information panel edits it.
+ * The title edits on a second single click; its double click still loads
+ * the track into the deck.
  *
  * `key` is left out too — it is checked against the keys the library already
  * holds, so a free-typed one would be refused after the fact, and the
@@ -123,6 +122,7 @@ function cellText(row: RowDto, key: Column["key"]): string {
  * to, so the CDJ and the column agree.
  */
 const EDITABLE_FIELDS: Partial<Record<ColumnKey, TrackField>> = {
+  title: "title",
   artist: "artist",
   album: "album",
   genre: "genre",
@@ -173,7 +173,7 @@ const Stars = memo(function Stars({
 });
 
 /**
- * A cell that turns into a text box on a double click.
+ * A cell that turns into a text box on the configured editing gesture.
  *
  * Committing on blur as well as Enter matters: clicking away is how people
  * leave a field, and losing the edit then is the behaviour everyone hates.
@@ -181,19 +181,22 @@ const Stars = memo(function Stars({
  * safe.
  */
 const EditableCell = memo(function EditableCell({
-  value, label, col, onCommit, onClick, tip,
+  value, label, col, onCommit, onClick, tip, doubleClickLoads = false, onEditBlocked,
 }: {
   value: string;
   label: string;
   /** The column this cell belongs to, which its width and alignment key off. */
   col: string;
   onCommit: (next: string) => void;
+  onEditBlocked?: (() => void) | undefined;
   /**
    * Edit Library › Double-click to edit is off: a click on this cell of a
    * row that is already selected opens it, as in rekordbox. On, and only a
    * double click does.
    */
   onClick: boolean;
+  /** Titles retain the row's double-click gesture for loading a track. */
+  doubleClickLoads?: boolean;
   tip: string | undefined;
 }) {
   const [editing, setEditing] = useState(false);
@@ -203,11 +206,34 @@ const EditableCell = memo(function EditableCell({
   // then `onClick` says "selected" for a row the same gesture selected —
   // and a click that selects must not also open the editor.
   const pressedOnSelected = useRef(false);
+  const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingEdit = useCallback(() => {
+    if (editTimer.current !== null) clearTimeout(editTimer.current);
+    editTimer.current = null;
+    document.removeEventListener("pointerdown", cancelPendingEdit, true);
+    document.removeEventListener("keydown", cancelPendingEdit, true);
+    document.removeEventListener("dragstart", cancelPendingEdit, true);
+    window.removeEventListener("blur", cancelPendingEdit);
+  }, []);
+  // A pending edit must not follow a changed selection, lock, or recycled row.
+  useEffect(() => cancelPendingEdit, [cancelPendingEdit, onClick, onEditBlocked, value]);
 
   if (!editing) {
     const begin = () => {
-      setDraft(value);
-      setEditing(true);
+      cancelPendingEdit();
+      if (onEditBlocked) {
+        onEditBlocked();
+        return;
+      }
+      document.addEventListener("pointerdown", cancelPendingEdit, true);
+      document.addEventListener("keydown", cancelPendingEdit, true);
+      document.addEventListener("dragstart", cancelPendingEdit, true);
+      window.addEventListener("blur", cancelPendingEdit);
+      editTimer.current = setTimeout(() => {
+        cancelPendingEdit();
+        setDraft(value);
+        setEditing(true);
+      }, 300);
     };
     return (
       <div
@@ -215,17 +241,19 @@ const EditableCell = memo(function EditableCell({
         data-col={col}
         role="gridcell"
         onMouseDown={(e) => {
-          pressedOnSelected.current = onClick && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+          pressedOnSelected.current = onClick && e.button === 0 && !e.shiftKey && !e.metaKey && !e.ctrlKey;
         }}
-        onClick={onClick ? () => {
+        onClick={onClick ? (e) => {
+          if (doubleClickLoads && e.detail > 1) return;
           if (pressedOnSelected.current) begin();
         } : undefined}
         onDoubleClick={(e) => {
+          cancelPendingEdit();
           // Swallowed only when the double click is the gesture that opens
           // the editor. Otherwise it belongs to the row, where it loads the
           // track into the deck — taking it unconditionally stopped a
           // double-click on a cell loading anything at all.
-          if (onClick) return;
+          if (doubleClickLoads || onClick) return;
           e.stopPropagation();
           begin();
         }}
@@ -242,18 +270,28 @@ const EditableCell = memo(function EditableCell({
       role="gridcell"
       // A second click on a cell that has just opened is not a request to
       // play the track either.
-      onDoubleClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        if (doubleClickLoads) {
+          setEditing(false);
+        } else {
+          e.stopPropagation();
+        }
+      }}
     >
       <input
         className={styles.editor}
         value={draft}
+        readOnly={onEditBlocked !== undefined}
         aria-label={label}
         autoFocus
         onMouseDown={(e) => e.stopPropagation()}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           setEditing(false);
-          if (draft !== value) onCommit(draft);
+          if (draft !== value) {
+            if (onEditBlocked) onEditBlocked();
+            else onCommit(draft);
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -272,7 +310,7 @@ const EditableCell = memo(function EditableCell({
 
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
-  onComment, onEditField, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
+  onComment, onEditField, onEditBlocked, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
   reorderable, dropEdge, onReorderOver, onReorderDrop,
 }: {
   row: RowDto | undefined;
@@ -300,6 +338,7 @@ const TrackRow = memo(function TrackRow({
   onComment: ((id: string, comment: string) => void) | undefined;
   /** Write a metadata field typed over in the row. */
   onEditField: ((id: string, field: TrackField, value: string) => void) | undefined;
+  onEditBlocked?: (() => void) | undefined;
   onMenu: (index: number, row: RowDto, at: { x: number; y: number }) => void;
   onDragEnd: () => void;
   /** The list can be reordered by hand, so a drop here means something. */
@@ -431,6 +470,7 @@ const TrackRow = memo(function TrackRow({
             <EditableCell
               key={col.key}
               value={row.comment}
+              onEditBlocked={onEditBlocked}
               label="Comment"
               col={col.key}
               onCommit={(next) => onComment(row.id, next)}
@@ -454,13 +494,15 @@ const TrackRow = memo(function TrackRow({
               <EditableCell
                 key={col.key}
                 value={cellText(row, col.key)}
+                onEditBlocked={onEditBlocked}
                 label={col.label}
                 col={col.key}
                 onCommit={(next) => onEditField(row.id, field, next)}
-                onClick={clickToEdit && selected}
+                onClick={(clickToEdit || col.key === "title") && selected}
+                doubleClickLoads={col.key === "title"}
                 tip={
                   tooltips
-                    ? `${col.label} — ${clickToEdit ? "click" : "double-click"} to edit`
+                    ? `${col.label} — ${clickToEdit || col.key === "title" ? "click" : "double-click"} to edit`
                     : undefined
                 }
               />
@@ -485,7 +527,7 @@ const TrackRow = memo(function TrackRow({
         if (col.key === "rating") {
           return (
             <div key={col.key} className={styles.cell} data-col={col.key} role="gridcell">
-              <Stars rating={row.rating} onRate={(stars) => onRate?.(row.id, stars)} />
+              <Stars rating={row.rating} onRate={(stars) => onEditBlocked ? onEditBlocked() : onRate?.(row.id, stars)} />
             </div>
           );
         }
@@ -584,6 +626,7 @@ export interface TrackTableProps {
    * cells as plain text rather than offering an edit that would be refused.
    */
   onEditField?: ((id: string, field: TrackField, value: string) => void) | undefined;
+  onEditBlocked?: (() => void) | undefined;
   /** Bumped when the library changes, so cached pages are dropped. */
   libraryGeneration?: number;
   /** Edits shown before the backend has caught up. */
@@ -664,7 +707,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
 export function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
@@ -1186,7 +1229,7 @@ export function TrackTable({
             </button>
             {trafficMenu ? (
               <div className={styles.trafficMenu} role="menu" aria-label="Traffic Light deck">
-                {TRAFFIC_SOURCES.map((source) => (
+                {TRAFFIC_SOURCES.filter((source) => source.id === "master" || (source.id === "a" ? players >= 1 : players >= 2)).map((source) => (
                   <button
                     key={source.id}
                     type="button"
@@ -1254,6 +1297,7 @@ export function TrackTable({
                 onRate={onRate}
                 onComment={onComment}
                 onEditField={onEditField}
+                onEditBlocked={onEditBlocked}
                 keyDisplay={keyDisplay}
                 previewCues={previewCueMarkers}
                 clickToEdit={clickToEdit}

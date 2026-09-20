@@ -77,6 +77,6 @@ export function resolveMenu(
 /** Why a write was refused, in the words the status bar shows. */
 export function refusal(protectedLibrary: boolean): string {
   return protectedLibrary
-    ? "Library Protection is on in Preferences, so the library is read-only."
-    : "rekordbox is running, so the library is open read-only.";
+    ? "Editing is locked by Library Protection. Turn it off in Preferences to edit."
+    : "Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.";
 }

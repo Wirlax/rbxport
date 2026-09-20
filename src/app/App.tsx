@@ -51,7 +51,7 @@ import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
-import { Preferences, type Pane } from "@/views/settings/Preferences";
+import { Preferences, type PreferencesTarget } from "@/views/settings/Preferences";
 import { SyncManager } from "@/views/sync/SyncManager";
 import { SmartPlaylistEditor } from "@/views/tree/SmartPlaylistEditor";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
@@ -271,8 +271,8 @@ export function App() {
   // manager lives under Advanced, so the File menu opens it there. In the
   // shell it is a window of its own; in a browser, which has no windows to
   // open, it is drawn over this one.
-  const [settingsOpen, setSettingsOpen] = useState<Pane | null>(null);
-  const openPreferences = useCallback((pane: Pane) => {
+  const [settingsOpen, setSettingsOpen] = useState<PreferencesTarget | null>(null);
+  const openPreferences = useCallback((pane: PreferencesTarget) => {
     void getBackend().then(async (backend) => {
       const opened = await backend.openPreferences(pane).catch(() => false);
       if (!opened) setSettingsOpen(pane);
@@ -296,6 +296,31 @@ export function App() {
   // Every write path reads this one flag: rekordbox holding the database,
   // or Library Protection in Preferences, refuse the same way.
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const backend = await getBackend();
+        if (!live) return;
+        const info = await backend.librarySummary();
+        if (live) {
+          setSummary((current) => current && current.readOnly !== info.readOnly
+            ? { ...current, readOnly: info.readOnly }
+            : current);
+        }
+      } catch {
+        // Keep the last known lock state if the library is temporarily unavailable.
+      } finally {
+        if (live) timer = setTimeout(() => void refresh(), 2000);
+      }
+    };
+    timer = setTimeout(() => void refresh(), 2000);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, []);
   // Checks on its own a while after launch when Preferences says so; the
   // menu and Preferences ask by hand.
   const updater = useUpdater(advancedPrefs.checkUpdates, advancedPrefs.updateFrequency);
@@ -393,6 +418,17 @@ export function App() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
+  useEffect(() => {
+    setNote((current) => {
+      if (!current?.failed) return current;
+      if (summary?.readOnly === false && current.text === refusal(false)) return null;
+      if (!advancedPrefs.protectLibrary && current.text === refusal(true)) return null;
+      return current;
+    });
+  }, [summary?.readOnly, advancedPrefs.protectLibrary]);
+  const explainEditLock = useCallback(() => {
+    refuse(refusal(advancedPrefs.protectLibrary));
+  }, [refuse, advancedPrefs.protectLibrary]);
   // Bumped whenever the library changes underneath us, which drops cached
   // pages. Without it an edit's effect never reached the table.
   const [libraryGeneration, setLibraryGeneration] = useState(0);
@@ -1252,7 +1288,7 @@ export function App() {
   // Clear the note after a moment: it reports an action, not a state.
   useEffect(() => {
     if (note === null) return;
-    const timer = setTimeout(() => setNote(null), 4000);
+    const timer = setTimeout(() => setNote(null), note.failed ? 10000 : 4000);
     return () => {
       clearTimeout(timer);
     };
@@ -1945,7 +1981,8 @@ export function App() {
           // The sub-browser's list is left out on purpose: it has a source and
           // a sort of its own, which this gate does not describe.
           onReorder={canReorder ? reorderPlaylistTracks : undefined}
-          onEditField={readOnly ? undefined : editTrackField}
+          onEditField={editTrackField}
+          onEditBlocked={readOnly ? explainEditLock : undefined}
           libraryGeneration={libraryGeneration}
           pendingEdits={pendingEdits}
           title={selectedNode?.name ?? "Collection"}
@@ -2101,6 +2138,8 @@ export function App() {
         // refusals, a library that would not open, and a write the library
         // turned down.
         error={playerError ?? loadError ?? (note?.failed === true ? note.text : null)}
+        onOpenProtection={!playerError && !loadError && note?.failed && note.text === refusal(true) && advancedPrefs.protectLibrary
+          ? () => openPreferences("libraryProtection") : undefined}
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}
         analysisFailures={analysis.state.failed.length}
         selection={selectionText}
