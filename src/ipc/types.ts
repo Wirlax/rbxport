@@ -843,6 +843,8 @@ export interface DeckEvent {
  * no colour of its own and is always `null`.
  */
 export interface Cue {
+  /** Saved cue note; older backends may omit it. */
+  comment?: string;
   /**
    * `djmdCue.ID`, which `moveCue` and `deleteCue` take. Empty for a cue the
    * backend cannot edit — one whose id is not a number under 2^32, of which

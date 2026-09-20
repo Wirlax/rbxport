@@ -196,12 +196,30 @@ export function drawBands(
     let mid = 0;
     let high = 0;
     const first = Math.floor(x * step);
-    const last = Math.max(first + 1, Math.floor((x + 1) * step));
-    for (let i = first; i < last && i < columns; i++) {
-      const at = i * 3;
-      low = Math.max(low, data[at] ?? 0);
-      mid = Math.max(mid, data[at + 1] ?? 0);
-      high = Math.max(high, data[at + 2] ?? 0);
+    if (step < 1 && band === "detail") {
+      // Interpolate small variations in either direction, keeping every stored
+      // peak. Only large attacks stay vertical at the next sample: ramping
+      // those early turns a kick into a diamond. This is our rendering heuristic,
+      // not a reconstruction of rekordbox's audio-derived zoom waveform.
+      const next = Math.min(first + 1, columns - 1);
+      const fraction = x * step - first;
+      const interpolate = (channel: number) => {
+        const a = data[first * 3 + channel] ?? 0;
+        const b = data[next * 3 + channel] ?? a;
+        const sharpAttack = b - a >= 16 && b >= a * 2;
+        return sharpAttack ? a : a + (b - a) * fraction;
+      };
+      low = interpolate(0);
+      mid = interpolate(1);
+      high = interpolate(2);
+    } else {
+      const last = Math.max(first + 1, Math.floor((x + 1) * step));
+      for (let i = first; i < last && i < columns; i++) {
+        const at = i * 3;
+        low = Math.max(low, data[at] ?? 0);
+        mid = Math.max(mid, data[at + 1] ?? 0);
+        high = Math.max(high, data[at + 2] ?? 0);
+      }
     }
     const bands = [
       [low, stops[0], STACK_SCALE[0]],

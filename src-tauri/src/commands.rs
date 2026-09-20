@@ -1788,12 +1788,17 @@ pub async fn track_cues(
     track: String,
 ) -> AppResult<Vec<CueDto>> {
     let library = state.library()?;
+    let cue_state = Arc::clone(&state);
     blocking("track_cues", move || {
         let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
+        let comments = cue_state
+            .read_db(|db| rbl_db::details::cue_comments(db.connection(), &track))
+            .map_err(write_error)?;
         Ok(library
             .cues_of(row)
             .iter()
             .map(|cue| CueDto {
+                comment: comments.get(&cue.id.to_string()).cloned().unwrap_or_default(),
                 id: if cue.id == 0 { String::new() } else { cue.id.to_string() },
                 position_ms: cue.position_ms,
                 out_ms: cue.out_ms,

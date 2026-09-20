@@ -1099,7 +1099,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     if (row && row.analysed !== 0) {
       const total = row.durationSec * 1000;
       made.push(
-        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true, colour: null },
+        { id: `cue-${nextCueId++}`, positionMs: Math.round(total * 0.02), outMs: 0, letter: "", memory: true, colour: null, comment: "136 BPM" },
         ...row.hotCues.map(([letter, positionMs, colour]) => (
           { id: `cue-${nextCueId++}`, positionMs, outMs: 0, letter, memory: false, colour }
         )),

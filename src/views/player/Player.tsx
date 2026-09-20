@@ -56,7 +56,7 @@ import {
   type PadMode,
   beatLoopRange,
   tempoAtMs,
-  cueTempoChange,
+  tempoChangeAtMs,
   type BeatGrid as TrackBeatGrid,
 } from "@/lib/player";
 import { type DeckLoop, usePlayback } from "@/store/usePlayback";
@@ -64,8 +64,8 @@ import { usePreferences, usePreferencesContext, useTooltip } from "@/store/usePr
 import { ContextMenu } from "@/components/ContextMenu";
 import { deckMenu, type DeckAction } from "@/lib/contextMenus";
 import { KeyShift } from "./KeyShift";
+import { TempoToggle } from "./TempoToggle";
 import { TempoSlider } from "./TempoSlider";
-import { TempoField } from "./TempoField";
 import type { HotCueColor } from "@/lib/preferences";
 import { formatKey, quantizeFraction } from "@/lib/preferences";
 import {
@@ -262,8 +262,8 @@ export function cueStyle(
  * The detail draws the same two things larger, measured off the user's crop of
  * a hot cue there: a 16pt red triangle pointing down from 8.25pt under the
  * band's top for the memory cue, and the 11pt badge centred on the cue 15pt
- * down for the hot cue, over the triangle's point, with a 1pt white line under
- * it through the waveform.
+ * down for the hot cue. The white line belongs to the beat grid; an off-grid
+ * hot cue has a badge at its saved position without an extra vertical line.
  *
  * A badge takes the colour rekordbox paints for the cue's `ColorTableIndex`,
  * which arrives with the cue from the nine indices measured off the captures.
@@ -274,18 +274,16 @@ export function cueStyle(
  * Exported for the simple player's overview, which is the same strip.
  */
 export const CueMarkers = memo(function CueMarkers({
-  cues, totalMs, band = "overview", window, loop = null, grid = NO_BEATS,
+  cues, totalMs, band = "overview", window, loop = null,
 }: {
   cues: readonly Cue[];
-  grid?: TrackBeatGrid;
   totalMs: number;
   /**
    * Which waveform this is drawn over.
    *
    * The overview hangs its badges from the top of the strip, left edge on the
-   * cue. The detail centres them on the cue under the memory cue's triangle,
-   * and keeps a line down through the waveform — the thing that makes a cue
-   * placeable while the grid is being edited.
+   * cue. The detail centres each badge on its saved cue position. Memory cues
+   * and grid beats retain their own timestamps, even when close to a hot cue.
    */
   band?: "overview" | "detail";
   /** The slice of the track being shown, for the zoomed detail waveform. */
@@ -330,7 +328,6 @@ export const CueMarkers = memo(function CueMarkers({
         // A hot cue is its lettered badge on both waveforms; the stylesheet
         // places it by band. A memory cue's red head is the overview's small
         // one or the detail's 16pt triangle.
-        const changedTempo = cueTempoChange(grid, cue.positionMs);
         const head = !cue.memory ? (
           <b className={styles.hotCueBadge}>{cue.letter}</b>
         ) : band === "detail" ? (
@@ -349,7 +346,6 @@ export const CueMarkers = memo(function CueMarkers({
             aria-hidden
           >
             {head}
-            {changedTempo !== null ? <span className={styles.cueTempo} data-testid="cue-tempo">{formatBpm(changedTempo)}</span> : null}
           </span>
         );
       })}
@@ -357,16 +353,36 @@ export const CueMarkers = memo(function CueMarkers({
   );
 });
 
-/**
- * The beat grid over the detail waveform.
- *
- * Downbeats are drawn heavier than the beats between them, which is what makes
- * a grid readable at a glance rather than a picket fence.
- */
+/** Overview labels use the grid's tempo boundaries, independent of cues. */
+export const OverviewTempoMarkers = memo(function OverviewTempoMarkers({ grid, totalMs }: {
+  grid: TrackBeatGrid;
+  totalMs: number;
+}) {
+  if (totalMs <= 0) return null;
+  const labels = [];
+  for (let i = 0; i < grid.times.length; i++) {
+    const tempo = grid.tempos[i] ?? 0;
+    const time = grid.times[i] ?? 0;
+    if (tempo <= 0 || (i > 0 && tempo === grid.tempos[i - 1]) || time > totalMs) continue;
+    labels.push(
+      <span
+        key={time}
+        className={`${styles.cueTempo} ${styles.overviewTempo}`}
+        style={{ left: `${time / totalMs * 100}%` }}
+        data-testid="overview-tempo"
+        aria-hidden
+      >{formatBpm(tempo)}</span>,
+    );
+  }
+  return <>{labels}</>;
+});
+
+/** The detail beat grid, with heavier downbeats and labels at tempo changes. */
 const BeatGrid = memo(function BeatGrid({
-  beats, totalMs, window, everyBeat = true,
+  beats, grid, totalMs, window, everyBeat = true,
 }: {
   beats: readonly { timeMs: number; downbeat: boolean }[];
+  grid: TrackBeatGrid;
   totalMs: number;
   window: { from: number; to: number };
   /** False at the widest zoom, where only the bar lines are drawn. */
@@ -377,7 +393,8 @@ const BeatGrid = memo(function BeatGrid({
   return (
     <>
       {beats.map((beat) => {
-        if (!everyBeat && !beat.downbeat) return null;
+        const changedTempo = tempoChangeAtMs(grid, beat.timeMs);
+        if (!everyBeat && !beat.downbeat && changedTempo === null) return null;
         const at = beat.timeMs / totalMs;
         if (at < window.from || at > window.to) return null;
         return (
@@ -386,7 +403,11 @@ const BeatGrid = memo(function BeatGrid({
             className={beat.downbeat ? styles.downbeat : styles.beat}
             style={{ left: `${((at - window.from) / span) * 100}%` }}
             aria-hidden
-          />
+          >
+            {changedTempo !== null ? (
+              <span className={styles.cueTempo} data-testid="cue-tempo">{formatBpm(changedTempo)} BPM</span>
+            ) : null}
+          </span>
         );
       })}
     </>
@@ -919,14 +940,14 @@ export const Player = memo(function Player({
       if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
       if (barsLabel.current) {
         barsLabel.current.style.transform = `translateX(${x}px)`;
-        barsLabel.current.textContent = beatCountText(seconds, bpm, beatCount, memorySeconds);
+        barsLabel.current.textContent = beatCountText(seconds, bpm, beatCount, memorySeconds, grid);
       }
     };
     // At once as well as on every frame: a paused player schedules no frames,
     // and the head would otherwise sit where the last track left it.
     apply(positionRef.current);
     return subscribe(apply);
-  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe, beatCount, memorySeconds]);
+  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe, beatCount, memorySeconds, grid]);
 
   /*
    * The layer's new anchor, taken only once it is on screen.
@@ -1294,8 +1315,11 @@ export const Player = memo(function Player({
     if (Math.abs(tempo - playback.tempo) > 1e-4) playback.setTempo(tempo);
   }, [synced, leaderBpmX100, fileBpmX100, advancedPrefs.syncDoubleHalf, playback]);
 
+  const [tempoResetLocked, setTempoResetLocked] = useState(true);
+
   /** RST: the file's own speed, and no longer following anything. */
   const resetTempo = useCallback(() => {
+    setTempoResetLocked(true);
     if (synced) onSyncToggle?.();
     playback.setTempo(1);
   }, [synced, onSyncToggle, playback]);
@@ -1743,7 +1767,8 @@ export const Player = memo(function Player({
                   half={viewPrefs.overviewWaveform === "half"}
                 />
               ) : null}
-              <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} loop={playback.loop} />
+              <CueMarkers cues={cues} totalMs={total * 1000} loop={playback.loop} />
+              <OverviewTempoMarkers grid={grid} totalMs={total * 1000} />
               <span
                 ref={overviewHead}
                 className={styles.playhead}
@@ -1811,9 +1836,11 @@ export const Player = memo(function Player({
                 {elapsed.main}
                 <i className={styles.tenths}>.{elapsed.tenths}</i>
               </span>
-              <KeyShift musicalKey={formatKey(track.key, viewPrefs.keyDisplay)} shift={playback.keyShift}
-                disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />
-              <span className={styles.readout}>{formatBpm(Math.round(bpmX100 * playback.tempo))}</span>
+              <div className={styles.keyControl}>
+                <KeyShift musicalKey={formatKey(track.key, viewPrefs.keyDisplay)} shift={playback.keyShift}
+                  disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />
+              </div>
+              <TempoToggle className={styles.readout} bpmX100={Math.round(bpmX100 * playback.tempo)} />
             </>
           ) : null}
           {/* Sync belongs to the two-deck layouts and to nothing else: one
@@ -1874,19 +1901,8 @@ export const Player = memo(function Player({
             left. */}
         {dual ? (
           <DualControls
-            showTempoButtons={!viewPrefs.tempoSlider}
-            idle={playback.idle}
             readOnly={readOnly}
             memory={memory}
-            trackBpmX100={bpmX100}
-            tempo={playback.tempo}
-            onTempo={playback.setTempo}
-            onNudgeTempo={playback.nudgeTempo}
-            synced={synced}
-            masterTempo={playback.masterTempo}
-            onMasterTempo={playback.setMasterTempo}
-            atUnity={playback.tempo === 1 && !synced}
-            onResetTempo={resetTempo}
             quantize={quantize}
             onQuantize={() => setQuantize((on) => !on)}
           />
@@ -1929,6 +1945,7 @@ export const Player = memo(function Player({
                 />
               ) : null}
               <BeatGrid
+                grid={grid}
                 beats={beats}
                 totalMs={total * 1000}
                 window={window}
@@ -1938,7 +1955,7 @@ export const Player = memo(function Player({
               {gridEditor.cutMs !== null && total > 0 ? (
                 <CutMark cutMs={gridEditor.cutMs} totalMs={total * 1000} window={window} />
               ) : null}
-              <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
+              <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
             </div>
             {/* Bars elapsed, printed to the left of the playhead. Its text and
                 its position are both the frame loop's, so React renders it
@@ -2205,64 +2222,6 @@ export const Player = memo(function Player({
           </div>
           )}
 
-          {/* The tempo cluster, as the capture has it: the BPM the deck is
-              playing at with a step either side, the key lock, and a reset.
-              rekordbox puts them between the pads and Q. */}
-          <div className={styles.tempo} role="group" aria-label="Tempo">
-            <button
-              type="button"
-              className={styles.step}
-              aria-label="Slower"
-              disabled={playback.idle || synced}
-              title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
-              onClick={() => playback.nudgeTempo(-1)}
-            >
-              −
-            </button>
-            <TempoField
-              trackBpmX100={bpmX100}
-              tempo={playback.tempo}
-              onTempo={playback.setTempo}
-              disabled={playback.idle || synced}
-              disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
-              fieldClassName={styles.bpmField}
-            />
-            <button
-              type="button"
-              className={styles.step}
-              aria-label="Faster"
-              disabled={playback.idle || synced}
-              title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
-              onClick={() => playback.nudgeTempo(1)}
-            >
-              +
-            </button>
-            {!viewPrefs.tempoSlider ? <>
-            <button
-              type="button"
-              className={styles.chip}
-              // Master Tempo, which rekordbox labels MT: the key stays put
-              // while the speed changes.
-              aria-label="Master tempo"
-              aria-pressed={playback.masterTempo}
-              data-on={playback.masterTempo ? "" : undefined}
-              disabled={playback.idle}
-              onClick={() => playback.setMasterTempo(!playback.masterTempo)}
-            >
-              MT
-            </button>
-            <button
-              type="button"
-              className={styles.chip}
-              aria-label="Reset tempo"
-              disabled={playback.idle || (playback.tempo === 1 && !synced)}
-              onClick={resetTempo}
-            >
-              RST
-            </button>
-            </> : null}
-          </div>
-
           <button
             type="button"
             className={styles.chip}
@@ -2307,11 +2266,15 @@ export const Player = memo(function Player({
           />
         ) : null}
 
+        {viewPrefs.tempoSlider ? (
+          <div className={styles.tempoOverlay}>
+            <TempoSlider tempo={playback.tempo} onTempo={playback.setTempo}
+              idle={playback.idle} synced={synced} masterTempo={playback.masterTempo}
+              onMasterTempo={playback.setMasterTempo} onReset={resetTempo}
+              resetLocked={tempoResetLocked} onUnlock={() => setTempoResetLocked(false)} />
+          </div>
+        ) : null}
       </div>
-
-      {viewPrefs.tempoSlider ? <TempoSlider tempo={playback.tempo} onTempo={playback.setTempo}
-        idle={playback.idle} synced={synced} masterTempo={playback.masterTempo}
-        onMasterTempo={playback.setMasterTempo} onReset={resetTempo} /> : null}
       <aside className={styles.side} aria-label="Cue list">
         {panel === "info" ? (
           <DeckInfo track={track} details={details} />
@@ -2350,7 +2313,7 @@ export const Player = memo(function Player({
                   {cue ? (
                     <>
                       <span className={styles.cueTime}>{splitTime(cue.positionMs / 1000).main}</span>
-                      <span className={styles.cueName}>CUE(Auto)</span>
+                      <span className={styles.cueName}>{cue.comment || "CUE(Auto)"}</span>
                       <button
                         type="button"
                         className={styles.cueDelete}
@@ -2394,11 +2357,7 @@ export const Player = memo(function Player({
                 }}
               >
                 <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
-                {/* A loop is listed the same way as a cue. [UNKNOWN] How
-                    rekordbox labels a loop row — no capture holds one, and
-                    german.lang has only "CUE(Auto)" — so nothing is invented;
-                    `data-loop` marks the row for when one is measured. */}
-                <span className={styles.cueName}>CUE(Auto)</span>
+                <span className={styles.cueName}>{cue.comment || "CUE(Auto)"}</span>
                 <button
                   type="button"
                   className={styles.cueDelete}

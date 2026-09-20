@@ -197,6 +197,7 @@ pub struct DuplicatesDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CueDto {
+    pub comment: String,
     /// `djmdCue.ID`, which `move_cue` and `delete_cue` take. Empty for a cue
     /// whose id is not a number under 2^32 — none in the reference library —
     /// which the interface shows but cannot edit.

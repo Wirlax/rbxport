@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type BeatGrid,
   beatAtMs,
   beatLoopRange,
   BEATS_PER_BAR,
@@ -26,7 +27,7 @@ import {
   isClick,
   ZOOM_STEPS,
   zoomBy,
-  cueTempoChange,
+  tempoChangeAtMs,
   phraseKind,
   phraseSpans,
   splitTime,
@@ -603,6 +604,25 @@ describe("showsEveryBeat", () => {
 describe("waveSlice", () => {
   const BYTES = 4000 * 3;
 
+  it("keeps a transient on its timestamp when the crop falls between analysis columns", () => {
+    // One second at 150 columns/second, magnified enough to expose a column
+    // being stretched into the wrong place relative to an exact beat line.
+    const columns = 150;
+    for (const progress of [0.5001, 0.503, 0.509, 0.0123, 0.9887]) {
+      const span = 0.1;
+      const width = 1200;
+      const slice = waveSlice(progress, span, columns * 3, width);
+      const first = slice.first / 3;
+      const last = slice.last / 3;
+      for (let column = first; column <= last; column++) {
+        const drawn = slice.x0 + (column - first) / (last - first) * slice.width;
+        const timestamp = (column / columns - (progress - span / 2)) / span * width;
+        // Only the final device-pixel placement may round, not the time range.
+        expect(Math.abs(drawn - timestamp)).toBeLessThanOrEqual(0.500001);
+      }
+    }
+  });
+
   it("puts a window in the middle of the track across the whole canvas", () => {
     const slice = waveSlice(0.5, 0.05, BYTES, 1200);
     expect(slice.x0).toBe(0);
@@ -674,23 +694,63 @@ describe("subdivideGrid", () => {
 });
 
 describe("beatCountText", () => {
+  const shiftedGrid: BeatGrid = {
+    times: Uint32Array.from({ length: 40 }, (_, i) => 18 + Math.round(i * 60_000 / 136)),
+    numbers: Uint8Array.from({ length: 40 }, (_, i) => i % 4 + 1),
+    tempos: new Uint16Array(40).fill(13_600),
+  };
+
+  it("changes from 8.4 to 9.1 only when the stored downbeat crosses the head", () => {
+    const downbeat = shiftedGrid.times[32]! / 1000;
+    expect(beatCountText(downbeat - 0.001, 136, "position", [], shiftedGrid)).toBe("8.4 Bars");
+    expect(beatCountText(downbeat, 136, "position", [], shiftedGrid)).toBe("9.1 Bars");
+    expect(beatCountText(downbeat + 0.001, 136, "position", [], shiftedGrid)).toBe("9.1 Bars");
+    // A backwards scrub must cross the same boundary in reverse.
+    expect(beatCountText(downbeat - 0.001, 136, "position", [], shiftedGrid)).toBe("8.4 Bars");
+  });
+
+  it("follows an edited grid and tempo changes instead of the displayed BPM", () => {
+    const grid = {
+      times: Uint32Array.from([18, 518, 1018, 1518, 2018, 2418, 2818, 3218, 3618]),
+      numbers: Uint8Array.from([1, 2, 3, 4, 1, 2, 3, 4, 1]),
+      tempos: Uint16Array.from([12000, 12000, 12000, 12000, 15000, 15000, 15000, 15000, 15000]),
+    };
+    expect(beatCountText(3.617, 150, "position", [], grid)).toBe("2.4 Bars");
+    expect(beatCountText(3.618, 120, "position", [], grid)).toBe("3.1 Bars");
+    expect(beatCountText(3.618, 0, "position", [], grid)).toBe("3.1 Bars");
+    const shifted = { ...grid, times: grid.times.map((ms) => ms + 50) };
+    expect(beatCountText(3.618, 120, "position", [], shifted)).toBe("2.4 Bars");
+  });
+
+  it("keeps the run-in before the first downbeat and respects a partial first bar", () => {
+    expect(beatCountText(0, 136, "position", [], shiftedGrid)).toBe("-1.4 Bars");
+    expect(beatCountText(0.018, 136, "position", [], shiftedGrid)).toBe("1.1 Bars");
+    const grid = {
+      times: Uint32Array.from([18, 518, 1018]),
+      numbers: Uint8Array.from([3, 4, 1]),
+      tempos: new Uint16Array(3).fill(12000),
+    };
+    expect(beatCountText(0.018, 120, "position", [], grid)).toBe("1.3 Bars");
+    expect(beatCountText(1.018, 120, "position", [], grid)).toBe("2.1 Bars");
+  });
+
   // 120 BPM: two beats a second, a bar every two seconds.
   it("counts bars and beats from the start by default, the beat only ever 1 to 4", () => {
     // Ten seconds at 120 is twenty beats: the first beat of the sixth bar.
-    expect(beatCountText(10, 120, "position", [30])).toBe("6.1Bars");
-    expect(beatCountText(0, 120, "position", [])).toBe("1.1Bars");
-    expect(beatCountText(1.5, 120, "position", [])).toBe("1.4Bars");
-    expect(beatCountText(2, 120, "position", [])).toBe("2.1Bars");
+    expect(beatCountText(10, 120, "position", [30])).toBe("6.1 Bars");
+    expect(beatCountText(0, 120, "position", [])).toBe("1.1 Bars");
+    expect(beatCountText(1.5, 120, "position", [])).toBe("1.4 Bars");
+    expect(beatCountText(2, 120, "position", [])).toBe("2.1 Bars");
   });
 
   it("counts down to the next memory cue in bars and beats, or beats", () => {
-    expect(beatCountText(10, 120, "toMemoryBars", [30, 14, 5])).toBe("-2.0Bars");
+    expect(beatCountText(10, 120, "toMemoryBars", [30, 14, 5])).toBe("-2.0 Bars");
     expect(beatCountText(10, 120, "toMemoryBeats", [30, 14, 5])).toBe("-8Beats");
-    expect(beatCountText(10.5, 120, "toMemoryBars", [14])).toBe("-1.3Bars");
+    expect(beatCountText(10.5, 120, "toMemoryBars", [14])).toBe("-1.3 Bars");
     // Part way through a beat rounds up: seven and a bit beats left is eight.
     expect(beatCountText(10.1, 120, "toMemoryBeats", [14])).toBe("-8Beats");
     // At the cue itself the count is zero, not the cue before it.
-    expect(beatCountText(14, 120, "toMemoryBars", [14, 5])).toBe("-0.0Bars");
+    expect(beatCountText(14, 120, "toMemoryBars", [14, 5])).toBe("-0.0 Bars");
   });
 
   it("shows nothing with no cue ahead, or no grid", () => {
@@ -798,11 +858,23 @@ describe("beatAtMs", () => {
   });
 });
 
-describe("cueTempoChange", () => {
+describe("tempoChangeAtMs", () => {
+  it("finds Cannonball's 48.4 change even when its memory cue is four milliseconds later", () => {
+    const grid = {
+      times: new Uint32Array([85563, 86032, 86446]),
+      numbers: new Uint8Array([3, 4, 1]),
+      tempos: new Uint16Array([12800, 14500, 14500]),
+    };
+    expect(tempoChangeAtMs(grid, 86032)).toBe(14500);
+    expect(tempoChangeAtMs(grid, 86036)).toBeNull();
+    expect(tempoChangeAtMs(grid, 86446)).toBeNull();
+  });
   const grid = { times: new Uint32Array([0, 500, 1000, 1400]), numbers: new Uint8Array([1, 2, 3, 4]), tempos: new Uint16Array([12000, 12000, 15000, 15000]) };
-  it("labels only cues at tempo changes, including millisecond rounding", () => {
-    expect(cueTempoChange(grid, 1000)).toBe(15000);
-    expect(cueTempoChange(grid, 1001)).toBe(15000);
-    for (const ms of [0, 500, 1010, 1400, 99999]) expect(cueTempoChange(grid, ms)).toBeNull();
+  it("labels exact tempo-change beats independently of nearby cues", () => {
+    expect(tempoChangeAtMs(grid, 0)).toBe(12000);
+    expect(tempoChangeAtMs(NO_BEATS, 0)).toBeNull();
+    expect(tempoChangeAtMs(grid, 1000)).toBe(15000);
+    expect(tempoChangeAtMs(grid, 1001)).toBeNull();
+    for (const ms of [500, 1010, 1400, 99999]) expect(tempoChangeAtMs(grid, ms)).toBeNull();
   });
 });

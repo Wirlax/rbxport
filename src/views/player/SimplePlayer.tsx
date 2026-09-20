@@ -21,7 +21,7 @@ import { Artwork } from "@/components/Artwork";
 import { EjectIcon, RecordIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
 import { splitTime, type BeatGrid } from "@/lib/player";
-import { CueMarkers } from "./Player";
+import { CueMarkers, OverviewTempoMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
 import styles from "./SimplePlayer.module.css";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
@@ -175,7 +175,8 @@ export const SimplePlayer = memo(function SimplePlayer({
                 half
               />
             ) : null}
-            <CueMarkers grid={grid} cues={cues} totalMs={total * 1000} />
+            <CueMarkers cues={cues} totalMs={total * 1000} />
+            <OverviewTempoMarkers grid={grid} totalMs={total * 1000} />
           </div>
           <div className={styles.scrub} aria-hidden>
             <div ref={scrubFill} className={styles.scrubFill} />

@@ -238,6 +238,53 @@ describe("the three-band waveform", () => {
     drawBands(ctx, data, 1, 100, "overview");
     expect(fills[0]!.h).toBeCloseTo(100, 5);
   });
+
+  it("keeps magnified attacks sharp and on time while smoothing their decay", () => {
+    const { ctx, fills } = recorder();
+    drawBands(ctx, new Uint8Array([0, 0, 0, 127, 0, 0, 0, 0, 0]), 12, 100, "detail");
+    const heightAt = (x: number) => fills.find((fill) => fill.x === x)?.h ?? 0;
+    expect(heightAt(0)).toBe(0);
+    expect(heightAt(2)).toBe(0);
+    expect(heightAt(3)).toBe(0);
+    expect(heightAt(4)).toBeCloseTo(100);
+    expect(heightAt(6)).toBeCloseTo(50);
+    expect(heightAt(8)).toBe(0);
+    expect(heightAt(11)).toBe(0);
+    expect(fills.every((fill) => fill.h <= 100)).toBe(true);
+  });
+
+  it("preserves attacks above a nonzero floor in each frequency band", () => {
+    for (const channel of [0, 1, 2]) {
+      const { ctx, fills } = recorder();
+      const data = new Uint8Array(9);
+      data[channel] = 32;
+      data[3 + channel] = 96;
+      data[6 + channel] = 32;
+      drawBands(ctx, data, 12, 127, "detail");
+      const heightAt = (x: number) => fills.find((fill) => fill.x === x)?.h ?? 0;
+      expect(heightAt(3)).toBeCloseTo(32);
+      expect(heightAt(4)).toBeCloseTo(96);
+      expect(heightAt(6)).toBeCloseTo(64);
+      expect(heightAt(8)).toBeCloseTo(32);
+    }
+  });
+
+  it("smooths small rises in every band without flattening their peaks and dips", () => {
+    for (const channel of [0, 1, 2]) {
+      const { ctx, fills } = recorder();
+      const data = new Uint8Array(12);
+      [77, 92, 90, 99].forEach((value, i) => { data[i * 3 + channel] = value; });
+      drawBands(ctx, data, 16, 127, "detail");
+      const heightAt = (x: number) => fills.find((fill) => fill.x === x)?.h ?? 0;
+      expect(heightAt(0)).toBeCloseTo(77);
+      expect(heightAt(2)).toBeCloseTo(84.5);
+      expect(heightAt(4)).toBeCloseTo(92);
+      expect(heightAt(8)).toBeCloseTo(90);
+      expect(heightAt(10)).toBeCloseTo(94.5);
+      expect(heightAt(12)).toBeCloseTo(99);
+      expect(heightAt(15)).toBeCloseTo(99);
+    }
+  });
 });
 
 describe("the hot cue badges on a row preview", () => {

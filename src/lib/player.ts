@@ -461,12 +461,12 @@ export function tempoAtMs(grid: BeatGrid, ms: number): number {
   return tempos[beat] ?? 0;
 }
 
-/** BPM at a tempo boundary coinciding with a cue, allowing integer-ms rounding. */
-export function cueTempoChange(grid: BeatGrid, ms: number): number | null {
-  const at = lowerBound(grid.times, ms - 2);
-  if (at < 1 || Math.abs((grid.times[at] ?? Infinity) - ms) > 2) return null;
+/** BPM x100 at the first grid beat or an exact tempo boundary, independent of cues. */
+export function tempoChangeAtMs(grid: BeatGrid, ms: number): number | null {
+  const at = lowerBound(grid.times, ms);
+  if (grid.times[at] !== ms) return null;
   const tempo = grid.tempos[at] ?? 0;
-  return tempo > 0 && tempo !== grid.tempos[at - 1] ? tempo : null;
+  return tempo > 0 && (at === 0 || tempo !== grid.tempos[at - 1]) ? tempo : null;
 }
 
 /**
@@ -593,10 +593,10 @@ export interface WaveSlice {
  * wide, and translating the canvas by a fraction splits every one of them
  * across two columns at partial alpha — measured, an offset of 285.6 left not
  * one pure pixel in the strip, which over black reads as the waveform going
- * pale. Only a window hanging off the start or end of the track has a non-zero
- * offset at all, and across a sweep of those positions nine in ten were
- * fractional, so this was most of the strip most of the time near the ends.
- * Half a pixel of position is invisible; the blending is not.
+ * pale. Position the slice by the timestamps of the columns actually read,
+ * including the partial columns outside the requested window. Stretching a
+ * rounded slice to the unrounded window moves transients relative to the grid
+ * by up to a column as the window changes. Only the final pixel edges round.
  */
 export function waveSlice(
   progress: number,
@@ -611,13 +611,18 @@ export function waveSlice(
   const to = progress + reach;
   const width_ = Math.max(to - from, 1e-9);
   const columns = Math.floor(bytes / stride);
+  if (columns === 0) return { first: 0, last: 0, x0: 0, width: 0 };
   const shownFrom = Math.min(Math.max(from, 0), 1);
   const shownTo = Math.min(Math.max(to, 0), 1);
+  const first = Math.floor(shownFrom * columns);
+  const last = Math.ceil(shownTo * columns);
+  const x0 = Math.round(((first / columns - from) / width_) * canvasWidth);
+  const x1 = Math.round(((last / columns - from) / width_) * canvasWidth);
   return {
-    first: Math.floor(shownFrom * columns) * stride,
-    last: Math.min(bytes, Math.ceil(shownTo * columns) * stride),
-    x0: Math.round(((shownFrom - from) / width_) * canvasWidth),
-    width: Math.round(((shownTo - shownFrom) / width_) * canvasWidth),
+    first: first * stride,
+    last: last * stride,
+    x0,
+    width: x1 - x0,
   };
 }
 
@@ -626,6 +631,8 @@ export function waveSlice(
  *
  * `position` is bars and beats from the start, `12.3` being the third beat
  * of the twelfth bar, so the figure after the point only ever reads 1 to 4.
+ * With analysis, its boundaries come from the same grid as the beat lines;
+ * elapsed time times BPM is only a fallback while no grid is available.
  * The other two count down to the next memory cue at or after the
  * playhead, in bars and beats or in whole beats, the way a CDJ's count-down
  * does; with no cue ahead there is nothing to count, and nothing is shown.
@@ -637,12 +644,28 @@ export function beatCountText(
   mode: "position" | "toMemoryBars" | "toMemoryBeats",
   /** Memory cue positions in seconds, in any order. */
   memorySeconds: readonly number[],
+  /** The same timestamped grid used to draw the beat lines. */
+  grid: BeatGrid = NO_BEATS,
 ): string {
-  if (!(bpm > 0) || !Number.isFinite(seconds)) return "";
+  if (!Number.isFinite(seconds)) return "";
+  if (mode === "position" && grid.times.length > 0) {
+    const ms = seconds * 1000;
+    const next = lowerBound(grid.times, ms);
+    // A beat becomes current at its timestamp, never when it is merely the
+    // nearest beat. The grid may start after zero or change tempo mid-track.
+    const index = grid.times[next] === ms ? next : next - 1;
+    const firstNumber = grid.numbers[0] || 1;
+    const ordinal = index + firstNumber - 1;
+    const bar = Math.floor(ordinal / 4);
+    const number = index >= 0 ? (grid.numbers[index] || 1) : ((ordinal % 4 + 4) % 4) + 1;
+    // The beat just before 1.1 is -1.4; there is no bar zero.
+    return `${bar < 0 ? bar : bar + 1}.${number} Bars`;
+  }
+  if (!(bpm > 0)) return "";
   const beatsPerSecond = bpm / 60;
   if (mode === "position") {
     const elapsed = Math.max(0, Math.floor(seconds * beatsPerSecond + 1e-9));
-    return `${Math.floor(elapsed / 4) + 1}.${(elapsed % 4) + 1}Bars`;
+    return `${Math.floor(elapsed / 4) + 1}.${(elapsed % 4) + 1} Bars`;
   }
   let next = Number.POSITIVE_INFINITY;
   for (const at of memorySeconds) {
@@ -652,7 +675,7 @@ export function beatCountText(
   const beats = (next - seconds) * beatsPerSecond;
   // Whole beats left, rounded up, then split into bars and beats.
   const whole = Math.ceil(beats - 1e-9);
-  return mode === "toMemoryBars" ? `-${Math.floor(whole / 4)}.${whole % 4}Bars` : `-${whole}Beats`;
+  return mode === "toMemoryBars" ? `-${Math.floor(whole / 4)}.${whole % 4} Bars` : `-${whole}Beats`;
 }
 
 /**

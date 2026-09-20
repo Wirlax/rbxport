@@ -301,8 +301,7 @@
    prints along the bottom. The beat lines keep a head at each end, so only
    their extents swap. */
 .player[data-flipped] .beat,
-.player[data-flipped] .downbeat,
-.player[data-flipped] .hotCue[data-band="detail"]::before {
+.player[data-flipped] .downbeat {
   top: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 1px);
   bottom: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 1px);
 }
@@ -315,9 +314,10 @@
   top: auto;
   bottom: var(--s-cue-badge-top);
 }
-.player[data-flipped] .bars { top: auto; bottom: 0; }
+.player[data-flipped] .bars { top: auto; bottom: 4px; }
 
 .main {
+  position: relative;
   display: grid;
   grid-template-rows:
     var(--s-player-title-h)
@@ -327,10 +327,9 @@
     var(--s-player-pad-h);
   min-width: 0;
   min-height: 0;
-  /* A few pixels of black all round, so the deck reads as a panel sitting on
-     the player rather than as the whole strip. The player behind it is black,
-     which is what the margin shows. */
-  margin: var(--s-player-margin);
+  /* Keep the top and side insets; the shared player gutter supplies the
+     bottom gap so this panel ends level with the transport and cue list. */
+  margin: var(--s-player-margin) var(--s-player-margin) 0;
   background: var(--c-black);
   /* Where every strip that starts past the sleeve begins: the overview, the
      phrase bar, the detail waveform — and the title, which lines up with the
@@ -367,7 +366,8 @@
 .artist {
   margin-left: auto;
   color: var(--c-text-dim);
-  font-size: var(--f-size-ui);
+  font-size: var(--f-size-sm);
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,7 +386,12 @@
 }
 
 .remaining { color: var(--c-text); font-weight: 700; }
-.elapsed { color: var(--c-text-dim); }
+.elapsed { border-left: 0; color: var(--c-text-dim); }
+.keyControl {
+  border-left: 1px solid var(--c-raised);
+  padding-left: 12px;
+  flex: none;
+}
 .readout { padding-right: 12px; color: var(--c-text); min-width: 54px; text-align: right; }
 
 /* The tenths are a size down, which is how rekordbox prints them. */
@@ -719,20 +724,10 @@
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-/* The line under a hot cue's badge keeps the cue placeable while the grid is
-   being edited. It spans the rows a beat line does and is the downbeat's white:
-   the crop's cue sits on a downbeat, and what shows there is one 1pt white
-   line. [ASSUME] a cue off the grid draws the same; the crop cannot say. */
-.hotCue[data-band="detail"]::before {
-  content: "";
-  position: absolute;
-  top: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 1px);
-  bottom: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 1px);
-  left: 0;
-  translate: -50% 0;
-  width: var(--s-cue-line-w);
-  background: var(--c-cue-line);
-}
+/* A hot cue contributes its badge, not another vertical line. In the
+   Cannonball reference E is at 11 ms and the first beat at 18 ms: rekordbox
+   draws the line at the beat, with E beside it. Adding a line at the hot cue
+   turned those distinct saved positions into an apparent grid misalignment. */
 
 /* The badge: 11pt square, the letter inside. Its colour is the cue's own where
    one was measured for its ColorTableIndex — set on the marker as --cue-colour
@@ -817,12 +812,13 @@
    clear at the top of the band. */
 .bars {
   position: absolute;
-  top: 0;
+  top: 4px;
   left: 0;
   /* Its own offset, so the frame loop owns `transform` alone. */
   translate: -100% 0;
   will-change: transform;
-  padding-right: 6px;
+  padding: 3px 8px;
+  background: var(--c-black);
   /* Its own size, measured: it was borrowing the track title's 17px, which is
      three points bigger than the capture's. */
   font-size: var(--f-size-bars);
@@ -1191,17 +1187,33 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
    pressed pad is, until they stop and the grid takes it. */
 .bpmField[data-tapping] { color: var(--c-pad-set); }
 
-.player[data-tempo-slider] { grid-template-columns: var(--s-player-transport-w) minmax(0, 1fr) 76px var(--s-player-right-w); }
-.player[data-shared][data-tempo-slider] { grid-template-columns: minmax(0, 1fr) 76px var(--s-player-right-w); }
+.tempoOverlay {
+  position: absolute;
+  z-index: 10;
+  top: var(--s-player-title-h);
+  bottom: var(--s-player-pad-h);
+  right: 0;
+  width: 76px;
+  display: grid;
+  box-shadow: -4px 0 12px rgb(0 0 0 / 40%);
+}
+.player[data-dual] .tempoOverlay { top: var(--s-player-dual-title-h); bottom: 0; }
+.player[data-dual][data-flipped] .tempoOverlay { top: 0; bottom: var(--s-player-dual-title-hb); }
 
 .cueTempo {
   position: absolute;
+  z-index: 1;
   left: 4px;
   bottom: 1px;
-  padding: 0 2px;
+  padding: 1px 4px;
   color: var(--c-text);
-  background: var(--c-black);
-  font-size: var(--f-size-xs);
+  background: var(--c-panel);
+  font-size: var(--f-size-cue-tempo);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.overviewTempo {
+  font-size: var(--f-size-xs);
+  pointer-events: none;
 }

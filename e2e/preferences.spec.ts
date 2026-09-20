@@ -43,6 +43,32 @@ async function load(page: Page) {
   await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeEnabled();
 }
 
+test("memory cues display their saved notes", async ({ page }) => {
+  await open(page);
+  await load(page);
+  const cues = player(page).getByRole("complementary", { name: "Cue list" });
+  await expect(cues).toContainText("136 BPM");
+  await expect(cues).not.toContainText("CUE(Auto)");
+});
+
+test("clicking the tempo readout toggles the tempo slider", async ({ page }) => {
+  await open(page);
+  await load(page);
+  const toggle = page.getByRole("button", { name: "Toggle tempo slider" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(page.getByRole("slider", { name: "Tempo", exact: true })).toBeVisible();
+  await toggle.click();
+  await expect(page.getByRole("slider", { name: "Tempo", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Layout" }).click();
+  await page.getByRole("menuitemradio", { name: "2 PLAYER" }).click();
+  await toggle.first().click();
+  await expect(page.getByRole("slider", { name: "Tempo", exact: true })).toHaveCount(2);
+  await toggle.first().click();
+  await expect(page.getByRole("slider", { name: "Tempo", exact: true })).toHaveCount(0);
+});
+
 test("View › Color offers the three palettes and the two hot cue colours, and keeps them", async ({ page }) => {
   await open(page);
   const dialog = await prefs(page);
@@ -326,7 +352,7 @@ test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", asy
 
   // A semitone either way, shown beside the fader.
   const shift = deck.getByTestId("key-shift");
-  await expect(shift).toHaveText("+/-0");
+  await expect(shift).toHaveCount(0);
   await deck.getByRole("button", { name: "Key up a semitone" }).click();
   await expect(shift).toHaveText("+1");
   await deck.getByRole("button", { name: "Key down a semitone" }).click();
@@ -354,6 +380,35 @@ test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ 
     await range.click();
   }
   const slider = panel.getByRole("slider", { name: "Tempo", exact: true });
+  const reset = panel.getByRole("button", { name: "Reset tempo" });
+  await expect(reset).toHaveAttribute("aria-pressed", "true");
+  await expect(reset).toHaveCSS("background-color", "rgb(102, 221, 66)");
+  await expect(slider).toHaveAttribute("aria-disabled", "true");
+  await slider.click({ force: true, position: { x: 5, y: 5 } });
+  await expect(slider).toHaveAttribute("aria-valuenow", "0");
+  await reset.click();
+  await expect(slider).toHaveAttribute("aria-disabled", "false");
+  const master = panel.getByRole("button", { name: "Master tempo", exact: true });
+  if (await master.getAttribute("aria-pressed") !== "true") await master.click();
+  await expect(master).toHaveCSS("color", "rgb(227, 49, 34)");
+  const rangeBox = (await range.boundingBox())!;
+  const masterBox = (await master.boundingBox())!;
+  const sliderBox = (await slider.boundingBox())!;
+  const resetBox = (await reset.boundingBox())!;
+  expect(rangeBox.y + rangeBox.height).toBeLessThanOrEqual(masterBox.y);
+  expect(masterBox.y + masterBox.height).toBeLessThanOrEqual(sliderBox.y);
+  expect(resetBox.x + resetBox.width).toBeLessThan(sliderBox.x);
+  expect(Math.abs(resetBox.y + resetBox.height / 2 - sliderBox.y - sliderBox.height / 2)).toBeLessThan(1);
+  await page.mouse.move(sliderBox.x + sliderBox.width / 2, sliderBox.y + sliderBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sliderBox.x + sliderBox.width / 2, sliderBox.y + sliderBox.height * 0.75);
+  const readout = page.locator("output").filter({ hasText: /[+-]\d+\.\d+%/ });
+  await expect(readout).toBeVisible();
+  await page.mouse.up();
+  await expect(readout).toHaveCount(0);
+  await reset.click();
+  await expect(slider).toHaveAttribute("aria-valuenow", "0");
+  await reset.click();
   await slider.focus();
   await slider.press("ArrowDown");
   await expect(slider).toHaveAttribute("aria-valuenow", "0.1");

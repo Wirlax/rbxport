@@ -323,7 +323,8 @@ export function App() {
    * loaded track's, so it follows the master when the master moves.
    */
   const [trafficLight, setTrafficLight] = useState<TrafficLightSource>(restored.trafficLight);
-  const trafficDeck: DeckId = trafficLight === "master" ? syncMaster : trafficLight;
+  const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
+  const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? syncMaster : activeTrafficLight;
   const trafficKey = (trafficDeck === "b" ? playerTrackB : playerTrack)?.key ?? null;
   const master = useMaster(prefs.preferences.view.vuMeter);
   // Read at start so the remembered setting reaches the engine before the
@@ -1931,7 +1932,7 @@ export function App() {
           playlists={menuPlaylists}
           devices={menuDevices}
           readOnly={readOnly}
-          trafficLight={trafficLight}
+          trafficLight={activeTrafficLight}
           onTrafficLight={setTrafficLight}
           trafficKey={trafficKey}
           onFocusedRow={setPlayerTrack}

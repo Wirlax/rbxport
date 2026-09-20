@@ -36,6 +36,19 @@ export function fromCamelot(code: string): string {
   return (m[2].toUpperCase() === "A" ? MINOR : MAJOR)[n - 1] ?? "";
 }
 
+/** Transpose a displayed key by semitones, preserving minor and Camelot notation. */
+export function transposeKey(key: string, semitones: number): string {
+  if (!Number.isInteger(semitones) || semitones % 12 === 0) return key;
+  const classical = fromCamelot(key);
+  const match = /^([A-G])([#b]?)(m?)$/.exec((classical || key).trim().replace("♯", "#").replace("♭", "b"));
+  if (!match) return key;
+  const naturals: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const pitch = naturals[match[1]!]! + (match[2] === "#" ? 1 : match[2] === "b" ? -1 : 0);
+  const shifted = notes[((pitch + semitones) % 12 + 12) % 12]! + match[3];
+  return classical ? toCamelot(shifted) : normalizeKey(shifted);
+}
+
 /** Keys that mix harmonically: same code, +/-1 on the wheel, and the relative major/minor. */
 export function compatibleKeys(key: string): string[] {
   const code = toCamelot(key);
@@ -84,4 +97,3 @@ export function trafficLightLit(key: string, reference: string, reach: TrafficLi
   const code = toCamelot(key);
   return code !== "" && trafficLightCodes(reference, reach).includes(code);
 }
-

@@ -16,12 +16,11 @@
 import { memo, type ReactNode } from "react";
 
 import type { RowDto } from "@/ipc/types";
-import { formatBpm } from "@/lib/format";
 import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "@/components/icons";
 import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
+import { TempoToggle } from "./TempoToggle";
 import { useTooltip } from "@/store/usePreferences";
-import { TempoField } from "./TempoField";
 
 /** A time split the way `splitTime` returns it. */
 interface Split {
@@ -85,7 +84,7 @@ export const DualHead = memo(function DualHead({
                   <i className={styles.tenths}>.{elapsed.tenths}</i>
                 </span>
               </span>
-              <span className={styles.cell}>{formatBpm(bpmX100)}</span>
+              <TempoToggle className={styles.cell} bpmX100={bpmX100} />
             </>
           ) : null}
         </div>
@@ -139,28 +138,12 @@ export const DualHead = memo(function DualHead({
 });
 
 export interface DualControlsProps {
-  showTempoButtons: boolean;
-  /** Nothing loaded: the transport-shaped buttons are inert. */
-  idle: boolean;
   readOnly: boolean;
   /** MEMORY, the one memory-cue control the row draws; the rest stay on keys. */
   memory: {
     canEdit: boolean;
     store: () => void;
   };
-  /** The BPM the deck is playing at, already formatted. */
-  /** The BPM field: the track's own BPM, the tempo, and the key shift. */
-  trackBpmX100: number;
-  tempo: number;
-  onTempo: (tempo: number) => void;
-  onNudgeTempo: (direction: number) => void;
-  /** Following the master: the tempo is not this deck's to step. */
-  synced: boolean;
-  masterTempo: boolean;
-  onMasterTempo: (on: boolean) => void;
-  /** RST is inert once the tempo is back at 1. */
-  atUnity: boolean;
-  onResetTempo: () => void;
   quantize: boolean;
   onQuantize: () => void;
 }
@@ -169,15 +152,13 @@ export interface DualControlsProps {
  * The control row, which stands in for the pad row of the one-deck layout.
  *
  * Left to right, as the capture has it: the three grid-shift buttons, MEMORY,
- * AU | MA, the loop length with a step either side, the tempo with its own,
- * the two loop buttons; then at the right, MT, RST and Q. The grid buttons
+ * AU | MA, the loop length with a step either side,
+ * the two loop buttons; then at the right, Q. The grid buttons
  * and the loops are drawn and inert — grid editing needs the PQT2 tag and
  * loops are not built — with the reason on each.
  */
 export const DualControls = memo(function DualControls({
-  showTempoButtons, idle, readOnly, memory, trackBpmX100, tempo, onTempo,
-  onNudgeTempo, synced, masterTempo, onMasterTempo,
-  atUnity, onResetTempo, quantize, onQuantize,
+  readOnly, memory, quantize, onQuantize,
 }: DualControlsProps) {
   const gridReason = "Grid editing needs the PQT2 tag, which is not yet understood";
   const tip = useTooltip();
@@ -222,37 +203,6 @@ export const DualControls = memo(function DualControls({
         <button type="button" className={styles.step} aria-label="Longer loop" disabled>›</button>
       </div>
 
-      <div className={styles.group} role="group" aria-label="Tempo">
-        <button
-          type="button"
-          className={styles.tempoStep}
-          aria-label="Slower"
-          disabled={idle || synced}
-          title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
-          onClick={() => onNudgeTempo(-1)}
-        >
-          −
-        </button>
-        <TempoField
-          trackBpmX100={trackBpmX100}
-          tempo={tempo}
-          onTempo={onTempo}
-          disabled={idle || synced}
-          disabledBecause={synced ? "The tempo is the master's while BEAT SYNC is on." : undefined}
-          fieldClassName={styles.bpmField}
-        />
-        <button
-          type="button"
-          className={styles.tempoStep}
-          aria-label="Faster"
-          disabled={idle || synced}
-          title={tip(synced ? "The tempo is the master's while BEAT SYNC is on." : undefined)}
-          onClick={() => onNudgeTempo(1)}
-        >
-          +
-        </button>
-      </div>
-
       {/* Loop In and Loop Out — german.lang's names. Not built. */}
       <div className={styles.loops} role="group" aria-label="Loop">
         <button type="button" className={styles.icon} aria-label="Loop in" disabled title={tip("Loops are not built yet.")}>
@@ -264,29 +214,6 @@ export const DualControls = memo(function DualControls({
       </div>
 
       <span className={styles.spacer} />
-
-      {showTempoButtons ? <div className={styles.group}>
-        <button
-          type="button"
-          className={styles.tempoButton}
-          aria-label="Master tempo"
-          aria-pressed={masterTempo}
-          data-on={masterTempo ? "" : undefined}
-          disabled={idle}
-          onClick={() => onMasterTempo(!masterTempo)}
-        >
-          MT
-        </button>
-        <button
-          type="button"
-          className={styles.tempoButton}
-          aria-label="Reset tempo"
-          disabled={idle || atUnity}
-          onClick={onResetTempo}
-        >
-          RST
-        </button>
-      </div> : null}
 
       <button
         type="button"

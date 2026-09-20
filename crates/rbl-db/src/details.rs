@@ -93,6 +93,15 @@ pub struct TrackDetails {
     pub publish: bool,
 }
 
+/// Saved notes for the live memory and hot cues of one track.
+pub fn cue_comments(conn: &Connection, id: &str) -> Result<std::collections::HashMap<String, String>> {
+    let mut statement = conn.prepare(
+        "SELECT ID, COALESCE(Comment, '') FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0",
+    )?;
+    let rows = statement.query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Reads one live track, or `None` when there is no such track.
 pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     let Some(mut details) = track_row(conn, id)? else { return Ok(None) };
@@ -231,6 +240,20 @@ mod tests {
         let location = fixture::build(dir.path(), Shape::default()).expect("fixture");
         let library = Library::open(location, OpenMode::ReadWrite).expect("open");
         (dir, library)
+    }
+
+    #[test]
+    fn cue_notes_keep_saved_text_and_exclude_deleted_and_other_tracks() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE djmdCue (ID TEXT, ContentID TEXT, Comment TEXT, rb_local_deleted INTEGER);
+            INSERT INTO djmdCue VALUES ('1', 'track', '136 BPM', 0),
+            ('2', 'track', '136-128 BPM', 0), ('3', 'track', NULL, 0),
+            ('4', 'track', 'deleted', 1), ('5', 'other', 'other track', 0);").unwrap();
+        let notes = cue_comments(&conn, "track").unwrap();
+        assert_eq!(notes.len(), 3);
+        assert_eq!(notes["1"], "136 BPM");
+        assert_eq!(notes["2"], "136-128 BPM");
+        assert_eq!(notes["3"], "");
     }
 
     #[test]
