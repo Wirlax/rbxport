@@ -36,6 +36,8 @@ export interface AppCost extends Diagnostics {
 }
 
 const NOTHING: AppCost = {
+  audioLoad: 0,
+  audioXruns: 0,
   cpu: 0,
   memoryMb: 0,
   threads: null,

@@ -22,6 +22,7 @@ import styles from "./TopBar.module.css";
 
 export interface TopBarProps {
   clock: string;
+  onReportBug?: () => void;
   onOpenSettings?: () => void;
   /**
    * Master output level, 0 to 1. There is no audio engine behind this yet, so
@@ -35,11 +36,11 @@ export interface TopBarProps {
   peakLeft?: number;
   peakRight?: number;
   /**
-   * Processor, as a fraction of one core. Left out, the meter reads the
+   * Audio callback time, as a fraction of its deadline. Left out, the meter reads the
    * app's own cost store — the shell passes nothing, so a reading re-renders
    * this meter and not the window around it.
    */
-  cpu?: number;
+  audioLoad?: number;
   /** How much of the window the deck takes. rekordbox puts this at the left. */
   layout?: PlayerLayout;
   onLayoutChange?: (layout: PlayerLayout) => void;
@@ -52,12 +53,13 @@ function clamp(value: number): number {
 
 export function TopBar({
   clock,
+  onReportBug,
   onOpenSettings,
   level = 1,
   onLevelChange,
   peakLeft = 0,
   peakRight = 0,
-  cpu,
+  audioLoad,
   layout = "one",
   onLayoutChange,
 }: TopBarProps) {
@@ -67,6 +69,7 @@ export function TopBar({
       <LayoutMenu layout={layout} onChange={onLayoutChange} />
 
       <span className={styles.spacer} />
+      <button type="button" className={styles.report} onClick={onReportBug}>Report bug</button>
 
       <button
         type="button"
@@ -97,22 +100,23 @@ export function TopBar({
         ))}
       </div>
 
-      <ProcessorMeter cpu={cpu} />
+      <AudioDropoutMeter audioLoad={audioLoad} />
 
       <span className={styles.clock} data-testid="clock">{clock}</span>
     </header>
   );
 }
 
-/** The processor meter: the given fraction, or the app's own reading. */
-function ProcessorMeter({ cpu }: { cpu: number | undefined }) {
+/** Audio deadline usage. Process CPU remains available in diagnostics reports. */
+function AudioDropoutMeter({ audioLoad }: { audioLoad: number | undefined }) {
   const cost = useAppCost();
-  const fraction = cpu ?? cost.cpu / 100;
+  const fraction = audioLoad ?? cost.audioLoad;
   return (
     <div
       className={`${styles.meter} ${styles.cpu}`}
       role="meter"
-      aria-label="Processor"
+      aria-label="Audio Dropout Meter"
+      title={`Audio callback deadline usage. Overruns: ${cost.audioXruns}`}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(clamp(fraction) * 100)}

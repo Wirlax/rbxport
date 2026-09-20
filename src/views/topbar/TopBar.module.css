@@ -112,3 +112,6 @@
 .icon[data-on] { color: var(--c-accent); }
 .icon:focus-visible { outline: 1px solid var(--c-accent); outline-offset: -1px; }
 .glyph { width: var(--s-top-gear-size); height: var(--s-top-gear-size); }
+
+.report { border: 1px solid var(--c-raised); border-radius: 3px; padding: 3px 8px; background: var(--c-button); color: var(--c-text); font: inherit; font-size: var(--f-size-xs); cursor: default; }
+.report:hover { background: var(--c-raised); }

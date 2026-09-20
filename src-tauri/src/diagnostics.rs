@@ -14,6 +14,8 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 pub struct Diagnostics {
     /// Percent of one core, as the OS accounts it. Over 100 on several cores.
     pub cpu: f32,
+    pub audio_load: f32,
+    pub audio_xruns: u64,
     /// Resident memory in mebibytes.
     pub memory_mb: f64,
     /// Threads in the process, or `None` where the platform will not say.
@@ -47,7 +49,7 @@ pub fn sample_shared() -> Diagnostics {
     let Ok(mut held) = SAMPLER.lock() else {
         // A poisoned lock means a previous sample panicked. The readout is not
         // worth propagating that into the window.
-        return Diagnostics { cpu: 0.0, memory_mb: 0.0, threads: None, open_files: None, gpu: None };
+        return Diagnostics { audio_load: 0.0, audio_xruns: 0, cpu: 0.0, memory_mb: 0.0, threads: None, open_files: None, gpu: None };
     };
     sample(held.get_or_insert_with(System::new_all))
 }
@@ -62,6 +64,8 @@ pub fn sample(system: &mut System) -> Diagnostics {
     );
     let process = system.process(pid);
     Diagnostics {
+        audio_load: 0.0,
+        audio_xruns: 0,
         cpu: process.map_or(0.0, sysinfo::Process::cpu_usage),
         // A process big enough to lose precision here would be sixteen
         // petabytes of resident memory.

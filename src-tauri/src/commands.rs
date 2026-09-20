@@ -1706,10 +1706,16 @@ pub async fn app_version<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResu
 }
 
 #[tauri::command]
-pub async fn app_diagnostics() -> AppResult<crate::diagnostics::Diagnostics> {
+pub async fn app_diagnostics(player: State<'_, std::sync::Arc<crate::player::Player>>) -> AppResult<crate::diagnostics::Diagnostics> {
     // The sampler is kept between calls: CPU is a difference between two
     // readings, and a fresh `System` every second would always report zero.
-    blocking("app_diagnostics", || Ok(crate::diagnostics::sample_shared())).await
+    let health = player.opened().map(|engine| engine.audio_health()).unwrap_or_default();
+    blocking("app_diagnostics", move || {
+        let mut sample = crate::diagnostics::sample_shared();
+        sample.audio_load = health.load;
+        sample.audio_xruns = health.xruns;
+        Ok(sample)
+    }).await
 }
 
 /// Starts a drag on a deck.

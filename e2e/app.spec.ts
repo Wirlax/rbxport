@@ -254,7 +254,7 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
   await expect(bar.getByRole("slider", { name: "Master level" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Master output L" })).toBeVisible();
   await expect(bar.getByRole("meter", { name: "Master output R" })).toBeVisible();
-  await expect(bar.getByRole("meter", { name: "Processor" })).toBeVisible();
+  await expect(bar.getByRole("meter", { name: "Audio Dropout Meter" })).toBeVisible();
 
   // Deliberate divergences: no EXPORT dropdown, no layout or record buttons,
   // and neither the info button nor the "Professional" badge before the gear.
@@ -268,7 +268,7 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
     bar.getByRole("button", { name: "Settings", exact: true }),
     bar.getByRole("slider", { name: "Master level" }),
     bar.getByRole("meter", { name: "Master output L" }),
-    bar.getByRole("meter", { name: "Processor" }),
+    bar.getByRole("meter", { name: "Audio Dropout Meter" }),
     page.getByTestId("clock"),
   ]) {
     xs.push((await item.boundingBox())?.x ?? 0);
@@ -308,7 +308,7 @@ test("the level knob turns, and both meters are the measured size", async ({ pag
 
   // The meters are the capture's: 80pt over two channels, and 35pt alone.
   const vu = await bar.getByRole("meter", { name: "Master output L" }).boundingBox();
-  const cpu = await bar.getByRole("meter", { name: "Processor" }).boundingBox();
+  const cpu = await bar.getByRole("meter", { name: "Audio Dropout Meter" }).boundingBox();
   const width = async (name: string) =>
     page.evaluate(
       (n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)),
@@ -1936,7 +1936,7 @@ test("the title bar reads out what the app is costing", async ({ page }) => {
   // zero — a zero would claim the app is resident in no memory at all.
   await page.goto("/");
   const cost = page.getByTestId("app-cost");
-  for (const label of ["CPU", "MEM", "FPS"]) {
+  for (const label of ["AUDIO", "MEM", "FPS"]) {
     await expect(cost).toContainText(label);
   }
   // GPU was always a dash: macOS accounts it per process only to root.

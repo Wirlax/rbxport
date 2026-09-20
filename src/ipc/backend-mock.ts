@@ -1525,6 +1525,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
 
     // No windows in a browser: the shell draws the manager over itself.
+    openReportWindow: () => wait(false),
+    reportAttachment: () => wait("System information\nBrowser preview\n\nApplication log\nNo application log available.\n"),
+    saveBugReport: () => Promise.reject(new Error("Saving ZIP reports requires the desktop app.")),
     openSyncWindow: () => wait(false),
     // Stick after stick, each announced before and after, as the real run
     // is. A destination that is not a mock device is a stick that was
@@ -1814,7 +1817,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // costs nothing, so every figure the platform will not give is null.
     appVersion: () => wait("0.4.0"),
     appDiagnostics: () =>
-      wait({ cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
+      wait({ audioLoad: 0, audioXruns: 0, cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
     // A browser has no Finder to open. Refusing is the truth; succeeding
     // silently made the menu item look as if it had done something.
     revealTrack: () =>

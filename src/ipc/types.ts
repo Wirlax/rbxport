@@ -127,6 +127,8 @@ export interface LibrarySummary {
 
 /** What the app is costing, for the title bar's readout. */
 export interface Diagnostics {
+  audioLoad: number;
+  audioXruns: number;
   /** Percent of one core, as the OS accounts it. Over 100 on several cores. */
   cpu: number;
   memoryMb: number;
@@ -596,6 +598,9 @@ export interface Backend {
    * manager over itself instead.
    */
   openSyncWindow(): Promise<boolean>;
+  openReportWindow(): Promise<boolean>;
+  reportAttachment(): Promise<string>;
+  saveBugReport(email: string, description: string, attachment: string): Promise<boolean>;
 
   /**
    * Writes the same playlists to every destination, one after another, and

@@ -21,6 +21,7 @@ mod preferences;
 mod protocol;
 mod relocate;
 mod sync_window;
+mod report;
 mod device_settings;
 pub mod dto;
 mod error;
@@ -467,6 +468,9 @@ pub fn run() {
             relocate::auto_relocate,
             preferences::open_preferences,
             sync_window::open_sync_window,
+            report::open_report_window,
+            report::report_attachment,
+            report::save_bug_report,
             commands::sync_devices,
             commands::export_tracks_to_device,
             commands::device_sync_state,

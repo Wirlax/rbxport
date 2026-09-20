@@ -21,6 +21,7 @@ import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes, devicePath, renamedDevice } from "@/lib/devices";
+import { ReportBug } from "@/views/report/ReportBug";
 import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
@@ -282,6 +283,10 @@ export function App() {
       const opened = await backend.openSyncWindow().catch(() => false);
       if (!opened) setSyncOpen(true);
     });
+  }, []);
+  const [reportOpen, setReportOpen] = useState(false);
+  const openReport = useCallback(() => {
+    void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); });
   }, []);
   const prefs = usePreferencesStore();
   const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
@@ -1371,6 +1376,7 @@ export function App() {
       setSubOpen((open) => !open);
       return;
     }
+    if (outcome.action === "report-bug") { openReport(); return; }
     if (outcome.action === "tempo-slider") {
       prefs.update("view", { tempoSlider: !viewPrefs.tempoSlider });
       return;
@@ -1387,7 +1393,7 @@ export function App() {
     openPreferences(outcome.action === "missing" ? "advanced" : "view");
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
-    openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider,
+    openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
   ]);
 
   // Native menu clicks.
@@ -1768,6 +1774,7 @@ export function App() {
         <span className={styles.appName}>rbxport</span>
       </div>
       <TopBar
+        onReportBug={openReport}
         clock={clock}
         onOpenSettings={() => openPreferences("view")}
         layout={layout}
@@ -2084,6 +2091,7 @@ export function App() {
       {syncOpen ? (
         <SyncManager onClose={() => setSyncOpen(false)} onSynced={refreshDevices} />
       ) : null}
+      {reportOpen ? <ReportBug onClose={() => setReportOpen(false)} /> : null}
       {smartEditor ? (
         <SmartPlaylistEditor
           title={smartEditor.mode === "create" ? "Create New Intelligent Playlist" : "Edit the Intelligent Playlist"}

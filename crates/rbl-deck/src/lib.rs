@@ -38,6 +38,8 @@ mod mixer;
 #[cfg(feature = "rubberband")]
 mod rubberband;
 mod scrub;
+mod health;
+pub use health::AudioHealth;
 mod sink;
 mod smooth;
 mod stretch;
@@ -441,6 +443,9 @@ impl Engine {
             .map_err(|_| DeckError::Device("could not start both decks".to_owned()))?;
         Ok(Self { decks, sink, sample_rate, master, mixer, limiter, metronome, metronomes })
     }
+
+    /// Device callback deadlines, without opening or polling the device.
+    pub fn audio_health(&self) -> AudioHealth { self.sink.health() }
 
     /// The metronome's click and volume, shared by both decks.
     pub fn metronome(&self) -> &Arc<MetronomeSettings> {

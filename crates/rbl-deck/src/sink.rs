@@ -6,7 +6,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use crate::health::{AudioHealth, HealthMeter};
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -18,6 +19,7 @@ use crate::{DeckError, Result};
 pub type Render = Box<dyn FnMut(&mut [f32]) + Send>;
 
 pub trait Sink: Send + Sync {
+    fn health(&self) -> AudioHealth { AudioHealth::default() }
     /// The rate everything downstream of the resampler runs at.
     fn sample_rate(&self) -> u32;
     /// Starts pulling. Called when a deck starts playing.
@@ -53,6 +55,7 @@ enum Ask {
 /// every platform — Core Audio's is not — and the engine has to be `Send` and
 /// `Sync` to sit in Tauri's state. The thread owns it and takes instructions.
 pub struct CpalSink {
+    health: Arc<HealthMeter>,
     ask: Sender<Ask>,
     sample_rate: u32,
     running: AtomicBool,
@@ -85,9 +88,11 @@ impl CpalSink {
         let (ask_tx, ask_rx) = std::sync::mpsc::channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
 
+        let health = Arc::new(HealthMeter::default());
+        let callback_health = Arc::clone(&health);
         std::thread::Builder::new()
             .name("rbl-deck-device".to_owned())
-            .spawn(move || device_thread(render, wanted.as_deref(), wish, &ask_rx, &ready_tx))
+            .spawn(move || device_thread(render, wanted.as_deref(), wish, &ask_rx, &ready_tx, callback_health))
             .map_err(DeckError::Io)?;
 
         // The rate decides what the decoders resample to, so opening is not
@@ -96,11 +101,12 @@ impl CpalSink {
             .recv()
             .map_err(|_| DeckError::Device("the audio thread stopped while starting".to_owned()))??;
 
-        Ok(Self { ask: ask_tx, sample_rate, running: AtomicBool::new(false) })
+        Ok(Self { health, ask: ask_tx, sample_rate, running: AtomicBool::new(false) })
     }
 }
 
 impl Sink for CpalSink {
+    fn health(&self) -> AudioHealth { self.health.snapshot(self.running.load(Ordering::Relaxed)) }
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
@@ -137,8 +143,9 @@ fn device_thread(
     wish: StreamWish,
     ask: &Receiver<Ask>,
     ready: &Sender<Result<u32>>,
+    health: Arc<HealthMeter>,
 ) {
-    let stream = match build_stream(render, wanted, wish) {
+    let stream = match build_stream(render, wanted, wish, health) {
         Ok((stream, rate)) => {
             if ready.send(Ok(rate)).is_err() {
                 return;
@@ -277,7 +284,7 @@ fn configure(device: &cpal::Device, wish: StreamWish) -> Result<(cpal::StreamCon
     Ok((config, format))
 }
 
-fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish) -> Result<(cpal::Stream, u32)> {
+fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish, health: Arc<HealthMeter>) -> Result<(cpal::Stream, u32)> {
     let host = cpal::default_host();
     // The named one if it is there, and the default if it is not: a device
     // that has been unplugged since it was chosen should not stop the app
@@ -302,10 +309,10 @@ fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish) -> Resul
 
     let error = |e: cpal::Error| tracing::error!(error = %e, "audio device error");
     let stream = match format {
-        cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error),
-        cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error),
-        cpal::SampleFormat::U16 => build::<u16>(&device, config, channels, render, error),
-        cpal::SampleFormat::I32 => build::<i32>(&device, config, channels, render, error),
+        cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error, health),
+        cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error, health),
+        cpal::SampleFormat::U16 => build::<u16>(&device, config, channels, render, error, health),
+        cpal::SampleFormat::I32 => build::<i32>(&device, config, channels, render, error, health),
         other => Err(DeckError::Device(format!("this device wants {other} samples, which we do not write"))),
     }?;
     Ok((stream, rate))
@@ -321,6 +328,7 @@ fn build<T>(
     channels: u16,
     mut render: Render,
     error: fn(cpal::Error),
+    health: Arc<HealthMeter>,
 ) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
@@ -329,11 +337,13 @@ where
     // callback: the callback itself never allocates.
     let mut scratch = vec![0.0_f32; SCRATCH_FRAMES * 2];
     let lanes = channels.max(1) as usize;
+    let rate = config.sample_rate;
 
     device
         .build_output_stream(
             config,
             move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
+                let started = Instant::now();
                 for chunk in out.chunks_mut(SCRATCH_FRAMES * lanes) {
                     let frames = chunk.len() / lanes;
                     // The chunk is bounded by the scratch, so this cannot be
@@ -355,6 +365,7 @@ where
                         }
                     }
                 }
+                health.record(started.elapsed(), out.len() / lanes, rate);
             },
             error,
             None,

@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "preferences",
-    "sync"
+    "sync",
+    "report"
   ],
   "permissions": [
     "core:default",

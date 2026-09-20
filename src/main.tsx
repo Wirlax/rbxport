@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { PreferencesWindow } from "./views/settings/PreferencesWindow";
+import { ReportWindow } from "./views/report/ReportBug";
 import { SyncWindow } from "./views/sync/SyncWindow";
 import "./styles/base.css";
 
@@ -16,6 +17,6 @@ const sync = window.location.hash.startsWith("#sync");
 
 createRoot(el).render(
   <StrictMode>
-    {preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
+    {window.location.hash.startsWith("#report") ? <ReportWindow /> : preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
   </StrictMode>,
 );

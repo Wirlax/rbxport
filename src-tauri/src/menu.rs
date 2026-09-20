@@ -141,7 +141,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&PredefinedMenuItem::select_all(app, None)?)
         .build()?;
 
-    Menu::with_items(app, &[&application, &file, &edit, &view])
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(&MenuItemBuilder::with_id("report-bug", "Report bug…").build(app)?)
+        .build()?;
+    Menu::with_items(app, &[&application, &file, &edit, &view, &help])
 }
 
 /// Handles a menu click.
