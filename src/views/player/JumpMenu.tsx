@@ -61,7 +61,9 @@ export function JumpMenu({ x, y, current, anchor, onPick, onClose }: JumpMenuPro
       ref={ref}
       className={styles.menu}
       style={{
-        left: Math.min(x, Math.max(8, window.innerWidth - MENU_WIDTH - 8)),
+        left: Math.max(8, x + MENU_WIDTH <= window.innerWidth - 8
+          ? x
+          : (anchor?.getBoundingClientRect().left ?? x) - MENU_WIDTH - 6),
         top: Math.min(y, Math.max(8, window.innerHeight - MENU_HEIGHT - 8)),
       }}
       role="menu"

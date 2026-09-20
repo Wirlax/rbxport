@@ -1582,7 +1582,7 @@ test("CUE/LOOP and GRID swap which controls the pad row shows", async ({ page })
   // GRID is a different set of buttons entirely, not the same row relabelled.
   await expect(player.getByRole("button", { name: "Double the tempo" })).toBeVisible();
   await expect(player.getByRole("button", { name: "Mark the downbeat here" })).toBeVisible();
-  await expect(player.getByRole("button", { name: "Cut the phrase here" })).toBeVisible();
+  await expect(player.getByRole("button", { name: "Cut the phrase here" })).toHaveCount(0);
   await expect(player.getByRole("button", { name: "Hot cue A", exact: true })).toBeHidden();
 
   await player.getByRole("tab", { name: "CUE/LOOP" }).click();

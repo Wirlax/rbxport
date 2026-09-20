@@ -727,7 +727,7 @@ describe("the tempo fader", () => {
     expect(tempoToFader(1, 6)).toBe(0);
     expect(tempoToFader(1.06, 6)).toBeCloseTo(1, 6);
     expect(tempoToFader(0.9, 10)).toBeCloseTo(-1, 6);
-    expect(tempoToFader(1.1, 20)).toBeCloseTo(0.5, 6);
+    expect(tempoToFader(1.08, 16)).toBeCloseTo(0.5, 6);
     // Past the end is the end.
     expect(tempoToFader(1.3, 6)).toBe(1);
   });
@@ -741,7 +741,7 @@ describe("the tempo fader", () => {
   });
 
   it("goes back and forth without drift", () => {
-    for (const range of [6, 10, 20, "wide"] as const) {
+    for (const range of [6, 10, 16, "wide"] as const) {
       for (const at of [-1, -0.3, 0, 0.42, 1]) {
         expect(tempoToFader(faderToTempo(at, range), range)).toBeCloseTo(at, 6);
       }

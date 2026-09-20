@@ -387,7 +387,7 @@
 
 .remaining { color: var(--c-text); font-weight: 700; }
 .elapsed { color: var(--c-text-dim); }
-.readout { color: var(--c-text); min-width: 54px; text-align: right; }
+.readout { padding-right: 12px; color: var(--c-text); min-width: 54px; text-align: right; }
 
 /* The tenths are a size down, which is how rekordbox prints them. */
 .tenths { font-size: var(--f-size-sm); font-style: normal; }
@@ -943,28 +943,6 @@
   color: var(--c-text);
   font-size: var(--f-size-sm);
   font-variant-numeric: tabular-nums;
-}
-
-.wideButton {
-  height: var(--s-pad-edit-h);
-  min-width: 62px;
-  border: 0;
-  border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-text);
-  font-size: var(--f-size-xs);
-  font-weight: 700;
-  cursor: default;
-  padding: 0 10px;
-}
-.wideButton:disabled { color: var(--c-pad-label); }
-
-.phraseField {
-  width: 96px;
-  height: var(--s-pad-edit-h);
-  background: var(--c-panel);
-  border: 1px solid var(--c-raised);
-  border-radius: 2px;
 }
 
 /* A pad is a dark well; a cue is a small bright square inside it, not a

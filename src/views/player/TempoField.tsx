@@ -3,7 +3,7 @@
  *
  * A double-click turns the number into a box to type a BPM into; the tempo
  * becomes whatever makes the track play at that BPM. A drag on the number
- * opens the tempo fader a CDJ has — ±6, ±10, ±20 or WIDE, the range chosen
+ * opens the tempo fader a CDJ has — ±6, ±10, ±16 or WIDE, the range chosen
  * above it — and the same drag drives the fader: down is faster, as a CDJ's
  * is. Beside the fader, the key shift: a semitone up or down at a press,
  * which only the Rubber Band backend can do accurately, so the buttons are

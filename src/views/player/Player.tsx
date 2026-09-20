@@ -54,7 +54,6 @@ import {
   windowAround,
   type CuePanel,
   type PadMode,
-  beatAtMs,
   beatLoopRange,
   tempoAtMs,
 } from "@/lib/player";
@@ -494,14 +493,12 @@ const HOT_CUE_KEYS: Partial<Record<(typeof PADS)[number], string>> = { A: "1", B
 /**
  * What GRID puts in the pad row, read off `docs/screenshots`.
  *
- * Two labelled sections, GRID EDIT and PHRASE EDIT, with the buttons grouped
- * in pairs. Every button but TAP carries one of our icons, drawn to the
+ * GRID EDIT buttons grouped in pairs. Every button but TAP carries one of our icons, drawn to the
  * grid-edit row capture; each carries an `aria-label` saying what it does.
  *
  * The grid buttons are live: what each does is `useGridEditor`'s, and the
  * edit is written to the track's analysis file by the backend, which
- * empties the `.EXT`'s `PQT2` rather than inventing one. The phrase
- * buttons are not: `PSSI` is rekordbox's to author.
+ * updates the beat grid without changing the phrase display.
  */
 const GRID_EDITS: readonly (readonly { id: string; label: string }[])[] = [
   [{ id: "mark", label: "Mark the downbeat here" }],
@@ -655,12 +652,6 @@ function gridButton(
       return { disabled: true, pressed: undefined, title: "", handlers: {} };
   }
 }
-
-/** The phrase-editing controls, to the right of the grid ones. */
-const PHRASE_EDITS = [
-  { id: "phrase-cut", label: "Cut the phrase here", text: "CUT" },
-  { id: "phrase-clear", label: "Clear the phrase", text: "CLEAR" },
-] as const;
 
 /**
  * How many rows the MEMORY list draws whatever it holds.
@@ -862,18 +853,6 @@ export const Player = memo(function Player({
       stop?.();
     };
   }, [track]);
-
-  /** PHRASE EDIT: CUT or CLEAR at the beat under the head. */
-  const editPhrase = useCallback(
-    (action: "cut" | "clear") => {
-      if (!track || playback.idle || grid.times.length === 0) return;
-      const beat = beatAtMs(grid, playback.positionNow() * 1000);
-      void getBackend()
-        .then((backend) => backend.editPhrase(track.id, beat, action))
-        .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The phrase could not be edited."));
-    },
-    [track, playback, grid, onError],
-  );
 
   // Falls back to the track's own length before the file's metadata has
   // loaded, so nothing jumps when it arrives.
@@ -2033,34 +2012,6 @@ export const Player = memo(function Player({
                 </div>
               </section>
 
-              <span className={styles.padSpacer} />
-
-              <section className={styles.editGroup} aria-label="Phrase">
-                <span className={styles.sectionLabel}>PHRASE EDIT</span>
-                <div className={styles.editButtons}>
-                  <div className={styles.editPair}>
-                    <button
-                      type="button"
-                      className={styles.wideButton}
-                      aria-label={PHRASE_EDITS[0].label}
-                      disabled={readOnly || phrases.length === 0}
-                      onClick={() => editPhrase("cut")}
-                    >
-                      {PHRASE_EDITS[0].text}
-                    </button>
-                    <span className={styles.phraseField} aria-hidden />
-                    <button
-                      type="button"
-                      className={styles.wideButton}
-                      aria-label={PHRASE_EDITS[1].label}
-                      disabled={readOnly || phrases.length === 0}
-                      onClick={() => editPhrase("clear")}
-                    >
-                      {PHRASE_EDITS[1].text}
-                    </button>
-                  </div>
-                </div>
-              </section>
             </div>
           ) : (
           <div className={styles.padCluster}>

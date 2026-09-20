@@ -681,8 +681,8 @@ export function isClick(dx: number, dy: number): boolean {
  * two halves are not alike: the fader's lower half spans −50 % and its upper
  * +100 %, with the file's own speed still at the middle.
  */
-export type TempoRange = 6 | 10 | 20 | "wide";
-export const TEMPO_RANGES: readonly TempoRange[] = [6, 10, 20, "wide"];
+export type TempoRange = 6 | 10 | 16 | "wide";
+export const TEMPO_RANGES: readonly TempoRange[] = [6, 10, 16, "wide"];
 
 /** What a range's ends are, as a percentage either side of the file's speed. */
 export function tempoRangeEnds(range: TempoRange): { down: number; up: number } {
