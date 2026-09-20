@@ -308,7 +308,7 @@ export function sourceOf(nodes: readonly TreeNode[], selectedId: string | null):
   }
 }
 
-export type TreeSearchScope = "all" | "playlist" | "folder";
+export type TreeSearchScope = "all" | "playlist" | "smartPlaylist" | "folder";
 
 /** Keep matches and their ancestors, so duplicate names retain their context. */
 export function searchTree(nodes: readonly TreeNode[], query: string, scope: TreeSearchScope): TreeNode[] {
@@ -318,8 +318,7 @@ export function searchTree(nodes: readonly TreeNode[], query: string, scope: Tre
   const ancestors: TreeNode[] = [];
   for (const node of nodes) {
     while (ancestors.length && ancestors[ancestors.length - 1]!.depth >= node.depth) ancestors.pop();
-    const matchesKind = scope === "all" || (scope === "folder" ? node.kind === "folder"
-      : node.kind === "playlist" || node.kind === "smartPlaylist");
+    const matchesKind = scope === "all" || node.kind === scope;
     if (matchesKind && node.name.toLocaleLowerCase().includes(needle)) {
       keep.add(node.id);
       for (const parent of ancestors) keep.add(parent.id);

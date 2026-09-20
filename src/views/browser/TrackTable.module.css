@@ -122,59 +122,7 @@
   height: var(--s-filter-toggle-glyph);
   color: var(--c-filter-text);
 }
-.filterToggle + .search { margin-left: 0; }
-
-/* The field as the capture draws it: black, no border of its own, 24pt tall
-   in the 26pt row, the magnifier 9pt in and the text 37pt in — the gap is
-   where rekordbox puts its search-mode triangle, which this app does not
-   have. The width is the full-width capture's; rekordbox narrows it when the
-   Information panel takes room, and so does `flex-shrink` here. */
-.search {
-  margin-left: auto;
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 0 1 var(--s-search-w);
-  min-width: 0;
-  height: var(--s-search-h);
-  padding-left: var(--s-search-text-left);
-  background: var(--c-field);
-  color: var(--c-field-placeholder);
-  font-size: var(--f-size-search);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-/* The magnifier: a ring with a handle at the lower right, on a 13pt box. */
-.searchIcon {
-  position: absolute;
-  left: var(--s-search-glyph-left);
-  top: var(--s-search-glyph-top);
-  width: var(--s-search-glyph-size);
-  height: var(--s-search-glyph-size);
-  color: var(--c-search-glyph);
-}
-.searchIcon::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 70%;
-  height: 70%;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
-}
-.searchIcon::after {
-  content: "";
-  position: absolute;
-  left: 62%;
-  top: 74%;
-  width: 42%;
-  height: 2px;
-  background: currentColor;
-  transform: rotate(45deg);
-  transform-origin: 0 50%;
-}
+.filterToggle + .search { margin-left: auto; flex: 0 1 var(--s-search-w); }
 
 .colHead {
   display: grid;
@@ -425,21 +373,3 @@
   outline-offset: -1px;
 }
 
-/* The search field reads as part of the chrome, not as a form control: no
-   border of its own, and the surrounding .search block draws the well. */
-.searchInput {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  outline: none;
-  font: inherit;
-  color: var(--c-text);
-}
-/* The measured grey, the same as the magnifier's ring in the capture. */
-.searchInput::placeholder { color: var(--c-field-placeholder); }
-/* WebKit draws its own clear button and magnifier inside a search input. */
-.searchInput::-webkit-search-decoration,
-.searchInput::-webkit-search-cancel-button { appearance: none; }

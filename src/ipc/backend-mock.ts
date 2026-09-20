@@ -9,6 +9,8 @@
  * Its sort and search semantics are checked against the Rust view tests by a
  * parity test once `rbl-index` lands.
  */
+import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
+
 import type {
   AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
@@ -326,9 +328,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const writable = options.writable ?? readFlagFromUrl("writable");
   const all = makeRows(trackCount);
   const colors = makeColors(trackCount);
+  const rowPositions = new Map(all.map((row, index) => [row.id, index]));
   // What the row DTO does not carry, made up per track and edited in place.
   const details = new Map<string, TrackDetails>();
-  const folded = all.map((r) => fold(`${r.title} ${r.artist} ${r.album} ${r.comment}`));
+
 
   /** The rows a source and query leave, before sorting and before the filter. */
   // The mock owns the tree and the playlists' contents the same way Rust
@@ -426,7 +429,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       candidates = Array.from({ length: trackCount }, (_, i) => i);
     }
     const q = fold(spec.query.trim());
-    if (q) candidates = candidates.filter((i) => (folded[i] ?? "").includes(q));
+    if (q) candidates = candidates.filter((i) => all[i] && matchesSearch(all[i], q, spec.searchField ?? "all"));
     return candidates;
   };
   const tree = makeTree();
@@ -1038,7 +1041,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       message: "",
       // The colour the filter bar matches this row by, so the deck's INFO
       // tab and the bar agree.
-      color: String(colors[all.indexOf(row)] ?? 0),
+      color: String(colors[rowPositions.get(row.id) ?? -1] ?? 0),
       rating: row.rating,
       bpmX100: row.bpmX100,
       durationSec: row.durationSec,
@@ -1061,6 +1064,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     };
     details.set(row.id, d);
     return d;
+  };
+
+  const matchesSearch = (row: RowDto, query: string, field: TrackSearchField): boolean => {
+    const detail = detailsOf(row);
+    const value = (key: Exclude<TrackSearchField, "all">): string => {
+      if (key === "bpm") return row.bpmX100 ? (row.bpmX100 / 100).toFixed(2) : "";
+      if (key === "year") return detail.year ? String(detail.year) : "";
+      const raw = key in row ? (row as unknown as Record<string, unknown>)[key] : detail[key];
+      return typeof raw === "string" ? raw : "";
+    };
+    const hay = fold(field === "all" ? TRACK_SEARCH_OPTIONS.filter(option => option.value !== "all")
+      .map(option => value(option.value)).join(" ") : value(field));
+    return query.split(/\s+/).every(token => hay.includes(token));
   };
 
   /*
@@ -1297,7 +1313,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
               ? { ...(all[entry] ?? looseRow(folder, "", at + 1)), trackNo: at + 1 }
               : looseRow(folder, entry, at + 1),
           )
-          .filter((row) => q === "" || fold(`${row.title} ${row.artist} ${row.fileName ?? ""}`).includes(q));
+          .filter((row) => q === "" || matchesSearch(row, q, spec.searchField ?? "all"));
         if (spec.sort !== "trackNo") {
           rows.sort((x, y) => {
             const c = compare(x, y, spec.sort);

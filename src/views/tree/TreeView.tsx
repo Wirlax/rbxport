@@ -5,6 +5,9 @@
  * Flattened to a single array of visible nodes so it virtualizes the same way
  * the track table does; thousands of playlists cost the same as ten.
  */
+import { SearchField } from "@/components/SearchField";
+import { TREE_SEARCH_OPTIONS } from "@/lib/search";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
@@ -423,14 +426,8 @@ export function TreeView({
         onDeleteShortcut={onDeleteShortcut}
       />
       <div className={styles.content}>
-      <div className={styles.search} role="search" aria-label="Library tree">
-        <select aria-label="Tree search scope" value={scope} onChange={event => setScope(event.target.value as TreeSearchScope)}>
-          <option value="all">All</option><option value="playlist">Playlist</option><option value="folder">Folder</option>
-        </select>
-        <input type="search" aria-label="Search library tree" placeholder="Search tree" value={query}
-          onChange={event => setQuery(event.target.value)}
-          onKeyDown={event => { if (event.key === "Escape") setQuery(""); event.stopPropagation(); }} />
-      </div>
+      <SearchField className={styles.search} value={query} onChange={setQuery} scope={scope} onScopeChange={setScope}
+        options={TREE_SEARCH_OPTIONS} menuWidth={154} label="Search library tree" scopeLabel="Tree search scope" />
       <div className={styles.nodes} role="tree" ref={list}>
         {visible.map((node) => (
           <Row

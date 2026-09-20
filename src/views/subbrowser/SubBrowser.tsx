@@ -25,6 +25,8 @@
  * `ViewSpec`, so `useTrackView` opens its own `view_id`), never a copy of
  * the main list's rows; the two share nothing but the library.
  */
+import type { TrackSearchField } from "@/lib/search";
+
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
@@ -154,6 +156,7 @@ export function SubBrowser({
   );
   const onSelect = useCallback((node: TreeNode) => setSelectedId(node.id), []);
   const [query, setQuery] = useState("");
+  const [searchField, setSearchField] = useState<TrackSearchField>("all");
   const [sort, setSort] = useState<SortState | null>(null);
   // Its own columns too: a sub-browser is usually kept narrow, and forcing it
   // to share the main table's widths would make it useless.
@@ -161,8 +164,8 @@ export function SubBrowser({
 
   const keyDisplay = usePreferences().view.keyDisplay;
   const spec: ViewSpec = useMemo(
-    () => specForNode(selected, query, sort, keyDisplay),
-    [selected, query, sort, keyDisplay],
+    () => ({ ...specForNode(selected, query, sort, keyDisplay), searchField }),
+    [selected, query, sort, keyDisplay, searchField],
   );
 
   const onSortChange = useCallback((column: SortColumn) => {
@@ -219,6 +222,8 @@ export function SubBrowser({
         onSortChange={onSortChange}
         title={selected?.name ?? "Collection"}
         query={query}
+        searchField={searchField}
+        onSearchFieldChange={setSearchField}
         onQueryChange={setQuery}
         columns={cols.columns}
         onColumnMove={cols.move}

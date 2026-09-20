@@ -437,6 +437,11 @@ describe("searchTree", () => {
   it("finds matches inside collapsed branches and keeps their context", () => {
     expect(searchTree(nodes, " late ", "playlist").map(n => n.id)).toEqual(["root", "folder", "list"]);
   });
+  it("keeps ordinary and intelligent playlist scopes separate", () => {
+    const extended: TreeNode[] = [...nodes, { id: "smart", name: "Late Auto", kind: "smartPlaylist", depth: 1 }];
+    expect(searchTree(extended, "late", "playlist").map(n => n.id)).toEqual(["root", "folder", "list"]);
+    expect(searchTree(extended, "late", "smartPlaylist").map(n => n.id)).toEqual(["root", "smart"]);
+  });
   it("scopes matches to folders and preserves the unfiltered tree for a blank query", () => {
     expect(searchTree(nodes, "house", "folder").map(n => n.id)).toEqual(["root", "folder"]);
     expect(searchTree(nodes, "", "folder")).toEqual(nodes);

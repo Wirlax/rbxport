@@ -5,6 +5,8 @@
  * bar. The preview player region is reserved but not yet implemented (it lands
  * with `rbl-audio` in Milestone 1).
  */
+import type { TrackSearchField } from "@/lib/search";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type {
@@ -246,6 +248,7 @@ export function App() {
       }
     : {};
   const [query, setQuery] = useState("");
+  const [searchField, setSearchField] = useState<TrackSearchField>("all");
   // The tree's width, dragged by the splitter. Held here because the grid that
   // sizes both panes lives here.
   const [treeWidth, setTreeWidth] = useState(restored.treeWidth);
@@ -534,12 +537,12 @@ export function App() {
   // Related Tracks relate to the track on Player 1, as rekordbox's do.
   const relatedTo = playerTrack?.id ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, relatedTo);
+    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, relatedTo), searchField };
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, query, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, relatedTo]);
+  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, relatedTo]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
@@ -550,7 +553,7 @@ export function App() {
     void (async () => {
       const backend = await getBackend();
       try {
-        const values = await backend.filterValues(specForNode(selectedNode, query, null, "classic", relatedTo));
+        const values = await backend.filterValues({ ...specForNode(selectedNode, query, null, "classic", relatedTo), searchField });
         if (live) setFilterValues(values);
       } catch {
         // The library is not up yet; the ready event re-runs this through
@@ -560,7 +563,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [filterOpen, selectedNode, query, libraryGeneration, relatedTo]);
+  }, [filterOpen, selectedNode, query, searchField, libraryGeneration, relatedTo]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortState((s) => nextSort(s, column));
@@ -1985,6 +1988,8 @@ export function App() {
           pendingEdits={pendingEdits}
           title={selectedNode?.name ?? "Collection"}
           query={query}
+          searchField={searchField}
+          onSearchFieldChange={setSearchField}
           onQueryChange={setQuery}
           searchRef={searchRef}
           columns={cols.columns}

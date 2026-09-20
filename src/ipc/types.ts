@@ -75,6 +75,7 @@ export interface ViewSpec {
   descending: boolean;
   /** Free-text search, matched the way the Rust index folds it. */
   query: string;
+  searchField?: import("@/lib/search").TrackSearchField;
   /**
    * The track filter bar's picks, applied by Rust after the search. Absent
    * means no filter; the sub-browser never sends one.

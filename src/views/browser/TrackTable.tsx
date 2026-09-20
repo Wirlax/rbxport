@@ -6,6 +6,9 @@
  * tokens. Rows are virtualized and keyed by row id so a re-sort moves DOM nodes
  * instead of rewriting every cell.
  */
+import { SearchField } from "@/components/SearchField";
+import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/types";
@@ -541,6 +544,8 @@ export interface TrackTableProps {
   title: string;
   /** The live search text. Rust does the filtering; this is only the box. */
   query: string;
+  searchField?: TrackSearchField;
+  onSearchFieldChange?: (field: TrackSearchField) => void;
   onQueryChange: (query: string) => void;
   /** Visible columns, in order, at their current widths. */
   columns: readonly ColumnSpec[];
@@ -657,7 +662,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
 ];
 
 export function TrackTable({
-  spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef,
+  spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
@@ -1217,22 +1222,9 @@ export function TrackTable({
             <FilterIcon className={styles.filterGlyph} />
           </button>
         ) : null}
-        <div className={styles.search} role="search">
-          <span className={styles.searchIcon} aria-hidden />
-          <input
-            ref={searchRef}
-            className={styles.searchInput}
-            type="search"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search within this track list"
-            aria-label="Search within this track list"
-            // The browser's own clear button and history dropdown do not
-            // belong in an application window.
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
+        <SearchField className={styles.search} value={query} onChange={onQueryChange}
+          scope={searchField} onScopeChange={onSearchFieldChange ?? (() => undefined)} options={TRACK_SEARCH_OPTIONS}
+          label="Search within this track list" scopeLabel="Track search scope" inputRef={searchRef} />
       </div>
 
       {filterOpen ? filterBar : null}

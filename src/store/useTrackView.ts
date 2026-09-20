@@ -75,9 +75,9 @@ export function useTrackView(
   const specKey = useMemo(
     () =>
       JSON.stringify([
-        spec.source, spec.sort, spec.descending, spec.query, spec.filter ?? null, libraryGeneration,
+        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration,
       ]),
-    [spec.source, spec.sort, spec.descending, spec.query, spec.filter, libraryGeneration],
+    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration],
   );
 
   // View identity for the cache: a new view id, or a library change, invalidates pages.
