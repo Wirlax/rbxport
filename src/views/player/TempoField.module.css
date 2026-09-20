@@ -116,9 +116,12 @@
   gap: 5px;
   padding: 6px;
   min-height: 0;
-  border-left: 1px solid var(--c-raised);
+  background: var(--c-panel);
   font-size: var(--f-size-xs);
 }
-.sideSlider > button { width: 100%; font-size: 9px; }
+.sideSlider > button { width: 100%; font-size: 9px; color: var(--c-icon-on); }
+.sideSlider > button:disabled { color: var(--c-icon-off); }
+.sideSlider > button:hover:not(:disabled) { background: var(--c-raised); }
+.sideSlider > button[data-on] { background: var(--c-pad-active); }
 .sideSlider > .track { flex: 1; min-height: 24px; width: 34px; margin: 4px 0; }
 .sideSlider > .track[aria-disabled="true"] { opacity: 0.4; }
