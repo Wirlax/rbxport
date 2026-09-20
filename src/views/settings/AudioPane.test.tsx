@@ -80,23 +80,23 @@ describe("AudioPane's limiter controls", () => {
   it("shows the ceiling and release as the window writes them", async () => {
     mount(DEFAULT_LIMITER);
     await settle();
-    expect(host.textContent).toContain("Ceiling -0.3 dB");
-    expect(host.textContent).toContain("Release 100 ms");
-    expect(toggle()?.checked).toBe(true);
-    expect(slider("Limiter ceiling")?.disabled).toBe(false);
-    expect(slider("Limiter release")?.disabled).toBe(false);
+    expect(host.textContent).toContain("Ceiling 0.0 dB");
+    expect(host.textContent).toContain("Release 250 ms");
+    expect(toggle()?.checked).toBe(false);
+    expect(slider("Limiter ceiling")?.disabled).toBe(true);
+    expect(slider("Limiter release")?.disabled).toBe(true);
   });
 
   it("the switch sends the new enabled state alone", async () => {
     mount(DEFAULT_LIMITER);
     await settle();
     act(() => toggle()?.click());
-    expect(onLimiterChange).toHaveBeenCalledWith({ enabled: false });
+    expect(onLimiterChange).toHaveBeenCalledWith({ enabled: true });
     expect(onLimiterChange).toHaveBeenCalledTimes(1);
   });
 
   it("the sliders send their number alone, in the engine's units", async () => {
-    mount(DEFAULT_LIMITER);
+    mount({ ...DEFAULT_LIMITER, enabled: true });
     await settle();
     const ceiling = slider("Limiter ceiling");
     const release = slider("Limiter release");
@@ -105,8 +105,8 @@ describe("AudioPane's limiter controls", () => {
     expect([release.min, release.max, release.step]).toEqual(["10", "1000", "10"]);
     drag(ceiling, -3);
     expect(onLimiterChange).toHaveBeenLastCalledWith({ ceilingDb: -3 });
-    drag(release, 250);
-    expect(onLimiterChange).toHaveBeenLastCalledWith({ releaseMs: 250 });
+    drag(release, 300);
+    expect(onLimiterChange).toHaveBeenLastCalledWith({ releaseMs: 300 });
   });
 
   it("greys the sliders out while the limiter is off, but still shows the numbers", async () => {

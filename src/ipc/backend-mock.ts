@@ -1152,7 +1152,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let master = 0.891_250_9;
 
   /** The master limiter, likewise. */
-  let limiter: Limiter = { enabled: true, ceilingDb: -0.3, releaseMs: 100 };
+  let limiter: Limiter = { enabled: false, ceilingDb: 0, releaseMs: 250 };
 
   const preferencesRequestListeners = new Set<(what: PreferencesRequest) => void>();
 

@@ -189,7 +189,7 @@ impl Player {
             wish: Mutex::new(StreamWish::default()),
             metronome: Mutex::new((rbl_deck::ClickSound::Two, rbl_deck::ClickVolume::Large)),
             limiter: Mutex::new(LimiterDto {
-                enabled: true,
+                enabled: false,
                 ceiling_db: rbl_deck::DEFAULT_CEILING_DB,
                 release_ms: rbl_deck::DEFAULT_RELEASE_MS,
             }),
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn a_new_player_carries_the_engine_s_limiter_defaults() {
         let limiter = Player::default().limiter();
-        assert!(limiter.enabled);
+        assert!(!limiter.enabled);
         assert_eq!(limiter.ceiling_db, rbl_deck::DEFAULT_CEILING_DB);
         assert_eq!(limiter.release_ms, rbl_deck::DEFAULT_RELEASE_MS);
     }

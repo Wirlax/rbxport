@@ -46,10 +46,8 @@ const LOOKAHEAD_SECONDS: f32 = 0.0015;
 /// The ceiling's range, in dBFS. Nothing above 0: that is the clamp's job.
 pub const MIN_CEILING_DB: f32 = -12.0;
 pub const MAX_CEILING_DB: f32 = 0.0;
-/// Where a new limiter sits: a hair under full scale, so a peak that lands
-/// exactly on the ceiling is still not a clipped sample on a converter that
-/// overshoots reconstructing it.
-pub const DEFAULT_CEILING_DB: f32 = -0.3;
+/// Where a new limiter sits.
+pub const DEFAULT_CEILING_DB: f32 = 0.0;
 
 /// The release's range, in milliseconds.
 ///
@@ -57,9 +55,7 @@ pub const DEFAULT_CEILING_DB: f32 = -0.3;
 /// bass; over a second is one that ducks a whole bar for one kick.
 pub const MIN_RELEASE_MS: f32 = 10.0;
 pub const MAX_RELEASE_MS: f32 = 1_000.0;
-/// Fast enough that a kick's dip is back before the snare, slow enough not to
-/// pump on a sustained bass note.
-pub const DEFAULT_RELEASE_MS: f32 = 100.0;
+pub const DEFAULT_RELEASE_MS: f32 = 250.0;
 
 /// What the interface can set. One atomic each, read once a callback.
 #[derive(Debug)]
@@ -72,7 +68,7 @@ pub struct LimiterSettings {
 impl Default for LimiterSettings {
     fn default() -> Self {
         Self {
-            enabled: AtomicBool::new(true),
+            enabled: AtomicBool::new(false),
             ceiling_db: AtomicU32::new(DEFAULT_CEILING_DB.to_bits()),
             release_ms: AtomicU32::new(DEFAULT_RELEASE_MS.to_bits()),
         }
@@ -296,6 +292,7 @@ mod tests {
     fn quiet_audio_passes_untouched_but_late() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         let input = tone(0.5, 1_000);
         let output = run(&mut limiter, &settings, &input);
         let delay = limiter.latency_frames();
@@ -310,6 +307,7 @@ mod tests {
     fn nothing_over_the_ceiling_leaves() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         let ceiling = db_to_gain(DEFAULT_CEILING_DB);
         // Two full-scale decks summed: the case that clipped.
         let input = tone(2.0, 4_800);
@@ -324,6 +322,7 @@ mod tests {
     fn a_single_peak_is_ramped_into_rather_than_stepped() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         let delay = limiter.latency_frames();
         // Silence, one full-scale-times-two sample, silence.
         let mut input = vec![(0.3, 0.3); 2_000];
@@ -350,6 +349,7 @@ mod tests {
     fn the_gain_comes_back_along_the_release() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         settings.set_release_ms(50.0);
         let mut input = tone(2.0, 480);
         input.extend(tone(0.3, 48_000));
@@ -381,6 +381,7 @@ mod tests {
     fn both_channels_move_together() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         // Loud on the left only: the right must be turned down the same.
         let input: Vec<(f32, f32)> = tone(2.0, 4_800).into_iter().map(|(l, _)| (l, l * 0.25)).collect();
         let output = run(&mut limiter, &settings, &input);
@@ -428,6 +429,7 @@ mod tests {
     fn a_ceiling_lowered_mid_stream_holds_from_a_lookahead_on() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         let delay = limiter.latency_frames();
         // Settled under the default ceiling, then the ceiling drops by six.
         run(&mut limiter, &settings, &tone(2.0, 4_800));
@@ -471,6 +473,8 @@ mod tests {
     fn the_floor_is_reset_by_reading_it() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
+        settings.set_release_ms(100.0);
         run(&mut limiter, &settings, &tone(2.0, 4_800));
         let loud = limiter.take_floor();
         assert!(loud < 0.6, "the loud buffer was not measured: {loud}");
@@ -494,6 +498,7 @@ mod tests {
     fn a_silent_channel_is_turned_down_with_its_loud_partner() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         // Loud on the left, nothing on the right: linked on the louder, so
         // the left is held to the ceiling, and the right stays at nothing.
         let input: Vec<(f32, f32)> = tone(2.0, 4_800).into_iter().map(|(l, _)| (l, 0.0)).collect();
@@ -512,6 +517,7 @@ mod tests {
         // audio should still be unity to the last bit.
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_enabled(true);
         let mut buffer = vec![0.1_f32; 512];
         for _ in 0..(RATE as usize * 60 / 256) {
             buffer.fill(0.1);
