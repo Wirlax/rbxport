@@ -23,6 +23,8 @@ const MAX_VIEWS: usize = 16;
 pub struct AppState {
     pub(crate) edit_gate: parking_lot::ReentrantMutex<()>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
+    pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
+    pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
     inner: RwLock<Inner>,
     /// Where manually requested backups and analysis recovery files go.
     backup_dir: std::path::PathBuf,
@@ -76,11 +78,14 @@ impl AppState {
     /// State that stores manual backups under `backup_dir`. The location is
     /// not chosen here: it arrives with the library, in [`Self::set_library`].
     pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
+        let backup_dir = backup_dir.into();
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
             analysis_write: parking_lot::Mutex::new(()),
+            backup_progress: parking_lot::Mutex::new(Default::default()),
+            backup_sizes: parking_lot::Mutex::new(Default::default()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
-            backup_dir: backup_dir.into(),
+            backup_dir,
             reader: parking_lot::Mutex::new(None),
         }
     }
@@ -94,6 +99,13 @@ impl AppState {
     /// about to be replaced. The next read opens a fresh one.
     pub fn drop_reader(&self) {
         *self.reader.lock() = None;
+    }
+
+    /// Prevent point reads from reopening the file while a restore swaps it.
+    pub fn with_closed_reader<T>(&self, work: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+        let mut reader = self.reader.lock();
+        *reader = None;
+        work()
     }
 
     /// Where the loaded library is.
@@ -143,6 +155,9 @@ impl AppState {
             .location()
             .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
         let _gate = self.edit_gate.lock();
+        if crate::backups::pending(self.backup_dir()) {
+            return Err(rbl_db::DbError::WriteRefused("A library restore is unfinished. Restart the app to recover it before editing.".into()));
+        }
         let gate_ms = started.elapsed().as_millis();
         let mut writer = rbl_db::write::Writer::open(location.clone(), self.backup_dir.clone())?;
         writer.disable_automatic_backups();
@@ -635,6 +650,7 @@ mod edit_refresh_tests {
         let (library, _) = rbl_index::load(&db).unwrap();
         let state = AppState::with_backups(dir.path().join("backups"));
         state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        crate::backups::create(&state).unwrap();
         let track = rbl_db::fixture::track_id(1);
         let original = state.library().unwrap();
         let row = original.row_of(&track).unwrap() as usize;

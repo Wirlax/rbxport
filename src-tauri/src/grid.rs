@@ -148,6 +148,8 @@ impl Default for GridEditor {
 }
 
 impl GridEditor {
+    pub fn clear_history(&self) { self.histories.lock().clear(); }
+
     /// The editor for the installed library: locks and backups under the
     /// app's own data directory, beside the database backups.
     pub fn new() -> Self {
@@ -408,6 +410,11 @@ pub fn apply(
 
 /// The Info panel's BPM field shares the durable file/row transaction.
 pub(crate) fn set_tempo(state: &AppState, track: &str, value: &str) -> AppResult<()> {
+    let _edit_guard = state.edit_gate.lock();
+    set_tempo_inner(state, track, value)
+}
+
+fn set_tempo_inner(state: &AppState, track: &str, value: &str) -> AppResult<()> {
     let bpm: f64 = value.trim().parse().map_err(|_| AppError::new(ErrorKind::Malformed, "Enter a BPM from 20 to 400."))?;
     if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) {
         return Err(AppError::new(ErrorKind::Malformed, "Enter a BPM from 20 to 400."));
@@ -472,6 +479,7 @@ async fn run<R: tauri::Runtime>(
         let state = Arc::clone(&state);
         let track = track.clone();
         blocking(name, move || {
+            let _edit_guard = state.edit_gate.lock();
             let _files_guard = state.analysis_write.lock();
             let mut set_bpm = |bpm_x100: u32| {
                 let track = track.clone();
@@ -566,7 +574,9 @@ pub async fn grid_lock(
     let library = state.library()?;
     let share = state.share_root();
     let editor = Arc::clone(&editor);
+    let state = Arc::clone(&state);
     blocking("grid_lock", move || {
+        let _gate = state.edit_gate.lock();
         editor.set_locked(&track, on)?;
         state_of(&editor, &library, &share, &track)
     })
@@ -662,6 +672,7 @@ mod tests {
         let (library, _) = rbl_index::load(&db).unwrap();
         let state = AppState::with_backups(f.dir.path().join("app/backups"));
         state.set_library(library, false, db.schema().db_version, 0, f.location.clone());
+        crate::backups::create(&state).unwrap();
         state
     }
 

@@ -1243,14 +1243,14 @@ test("with the library held by rekordbox the cells are not editable at all", asy
   await page.locator('[role="gridcell"][data-col="artist"]').nth(3).dblclick();
   await expect(page.locator('[role="gridcell"][data-col="artist"] input')).toHaveCount(0);
   const warning = page.getByRole("contentinfo").getByRole("alert");
-  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.");
+  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox to enable editing.");
   await expect(warning).toHaveCount(0, { timeout: 12000 });
 
   const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
   await title.click();
   await title.click();
   await expect(title.locator("input")).toHaveCount(0);
-  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.");
+  await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox to enable editing.");
 });
 
 test("settings can check for missing files", async ({ page }) => {

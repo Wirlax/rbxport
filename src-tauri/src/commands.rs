@@ -1280,6 +1280,7 @@ pub async fn deck_load<R: tauri::Runtime>(
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.
     engine.load(which, &path);
+    player.loaded_tracks.lock().insert(which, track.clone());
     // And the grid, for the metronome. Read off the async thread: it is a
     // file, and the deck is loading on its own thread anyway.
     let share = state.share_root();
@@ -1364,6 +1365,7 @@ pub async fn deck_unload(
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
 ) -> AppResult<()> {
+    player.loaded_tracks.lock().remove(&crate::player::deck_of(&deck));
     if let Some(engine) = player.opened() {
         engine.unload(crate::player::deck_of(&deck));
     }
@@ -2472,54 +2474,93 @@ pub async fn export_xml(state: State<'_, Arc<AppState>>, path: String) -> AppRes
     .await
 }
 
-/// The backups this app has taken, newest first.
 #[tauri::command]
-pub async fn list_backups(state: State<'_, Arc<AppState>>) -> AppResult<Vec<BackupDto>> {
-    let dir = state.backup_dir().to_path_buf();
-    blocking("list_backups", move || {
-        let mut backups: Vec<BackupDto> = rbl_db::write::backups_in(&dir)
-            .into_iter()
-            .map(|path| BackupDto {
-                name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                bytes: std::fs::metadata(&path).map_or(0, |m| m.len()),
-                path: path.to_string_lossy().into_owned(),
-            })
-            .collect();
-        backups.reverse();
-        Ok(backups)
-    })
-    .await
+pub async fn backup_sizes(state: State<'_, Arc<AppState>>, refresh: Option<bool>) -> AppResult<crate::backup_sizes::BackupSizes> {
+    let state = Arc::clone(&state);
+    blocking("backup_sizes", move || crate::backup_sizes::cached(&state, refresh.unwrap_or(false))).await
 }
 
-/// Copies the library aside now, and says where.
+/// Open the configured folder, creating it if no backup has been taken yet.
+#[tauri::command]
+pub async fn open_backup_directory<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<()> {
+    let path = state.backup_dir().to_path_buf();
+    blocking("open_backup_directory", move || {
+        crate::durable::create_dir_all(&path).map_err(|e| {
+            AppError::internal("The backup folder could not be created.").with_detail(e.to_string())
+        })?;
+        app.opener().open_path(path.to_string_lossy().into_owned(), None::<&str>).map_err(|e| {
+            AppError::internal("The backup folder could not be opened.").with_detail(e.to_string())
+        })
+    }).await
+}
+
+/// The configured destination, whether or not any backups exist yet.
+#[tauri::command]
+pub fn backup_directory(state: State<'_, Arc<AppState>>) -> String {
+    state.backup_dir().to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+pub fn backup_progress(state: State<'_, Arc<AppState>>) -> crate::backups::BackupProgress {
+    state.backup_progress.lock().clone()
+}
+
+#[tauri::command]
+pub fn cancel_backup(state: State<'_, Arc<AppState>>) {
+    crate::backups::cancel(&state);
+}
+
+#[tauri::command]
+pub fn start_backup(state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    crate::backups::start(Arc::clone(&state))
+}
+
+/// Explicit backups, newest first.
+#[tauri::command]
+pub async fn list_backups(state: State<'_, Arc<AppState>>) -> AppResult<Vec<BackupDto>> {
+    let state = Arc::clone(&state);
+    blocking("list_backups", move || crate::backups::list(&state)).await
+}
+
 #[tauri::command]
 pub async fn back_up_library(state: State<'_, Arc<AppState>>) -> AppResult<String> {
     let state = Arc::clone(&state);
-    blocking("back_up_library", move || {
-        let path = state.write(rbl_db::write::Writer::back_up_now).map_err(write_error)?;
-        Ok(path.to_string_lossy().into_owned())
-    })
-    .await
+    blocking("back_up_library", move || crate::backups::create(&state)).await
 }
 
-/// Puts a backup back as the library and re-reads it.
+#[tauri::command]
+pub async fn delete_backup(state: State<'_, Arc<AppState>>, path: String) -> AppResult<()> {
+    let state = Arc::clone(&state);
+    blocking("delete_backup", move || crate::backups::delete(&state, std::path::Path::new(&path))).await
+}
+
 #[tauri::command]
 pub async fn restore_backup<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
+    editor: State<'_, Arc<crate::grid::GridEditor>>,
+    player: State<'_, Arc<crate::player::Player>>,
     path: String,
 ) -> AppResult<u32> {
     let state = Arc::clone(&state);
     let restoring = Arc::clone(&state);
-    blocking("restore_backup", move || {
-        let location = restoring.location()?;
-        // Every handle on the old file goes first; the reload below opens
-        // the restored one.
-        restoring.drop_reader();
-        rbl_db::write::restore_backup(&location, std::path::Path::new(&path)).map_err(write_error)
-    })
-    .await?;
-    reload(app, state).await
+    let generation = blocking("restore_backup", move || {
+        let _gate = restoring.edit_gate.lock();
+        crate::backups::restore(&restoring, std::path::Path::new(&path))?;
+        let db = restoring.open_read_only().map_err(write_error)?;
+        refresh_after_edit(&restoring, &db, Touched::Tracks).map_err(write_error)
+    }).await?;
+    editor.clear_history();
+    if let Some(engine) = player.opened() {
+        engine.unload(crate::player::deck_of("A"));
+        engine.unload(crate::player::deck_of("B"));
+    }
+    player.loaded_tracks.lock().clear();
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(generation)
 }
 
 /// A play: the track goes on today's history session and its play count

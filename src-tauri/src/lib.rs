@@ -12,6 +12,9 @@ pub mod cues;
 pub mod details;
 pub mod grid;
 mod durable;
+mod backups;
+mod backup_copy;
+mod backup_sizes;
 mod file_journal;
 mod diagnostics;
 mod explorer;
@@ -62,6 +65,12 @@ fn schema_key(db_version: Option<i64>) -> u32 {
 fn spawn_library_load(app: tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
+        if let Ok(location) = rbl_db::detect() {
+            if let Err(e) = backups::recover(app.state::<Arc<state::AppState>>().backup_dir(), &location) {
+                let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                return;
+            }
+        }
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
                 if let Err(e) = file_journal::recover(app.state::<Arc<state::AppState>>().backup_dir(), db.location()) {
@@ -504,8 +513,15 @@ pub fn run() {
             commands::import_itunes,
             commands::export_xml,
             commands::list_backups,
+            commands::backup_directory,
+            commands::open_backup_directory,
+            commands::backup_sizes,
+            commands::backup_progress,
+            commands::start_backup,
+            commands::cancel_backup,
             commands::back_up_library,
             commands::restore_backup,
+            commands::delete_backup,
             commands::open_url,
             commands::reset_play_count,
             commands::record_play,

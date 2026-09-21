@@ -32,6 +32,8 @@ import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
 import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
 import { KeyboardPane } from "./KeyboardPane";
+import { BackupsPane } from "./BackupsPane";
+import { ArchiveRestore } from "lucide-react";
 import { LinkPane } from "./LinkPane";
 import styles from "./Preferences.module.css";
 import { Button } from "./controls";
@@ -41,7 +43,7 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  * The sidebar, in the capture's order and wording, less PLAN and CLOUD, and
  * with About at the end — ours, for the version and the update check.
  */
-export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "about";
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "about";
 
 export type PreferencesTarget = Pane | "libraryProtection";
 
@@ -53,6 +55,7 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
   { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+  { id: "backups", label: "Backups", Icon: ArchiveRestore },
   { id: "about", label: "About", Icon: PrefAboutIcon },
 ];
 
@@ -277,6 +280,8 @@ export function Preferences({
                   <LinkPane />
                 ) : pane === "keyboard" ? (
                   <KeyboardPane />
+                ) : pane === "backups" ? (
+                  <BackupsPane readOnly={summary?.readOnly ?? false} />
                 ) : pane === "about" ? (
                   <AboutPane />
                 ) : (

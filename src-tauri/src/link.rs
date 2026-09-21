@@ -475,6 +475,7 @@ mod grid_offset_tests {
         let (library, _) = rbl_index::load(&db).unwrap();
         let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
         state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
         let original = state.library().unwrap();
         let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received = notifications.clone();
@@ -531,6 +532,7 @@ mod grid_offset_tests {
         let (library, _) = rbl_index::load(&db).unwrap();
         let state = AppState::with_backups(dir.path().join("backups"));
         state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
         let track = rbl_db::fixture::track_id(1);
         for offset in [234, -467, 0] {
             save_grid_offset(&state, &track, offset).unwrap();

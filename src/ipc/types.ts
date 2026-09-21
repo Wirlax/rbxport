@@ -357,10 +357,20 @@ export interface Backend {
   openUrl(url: string): Promise<void>;
   /** The backups this app has taken, newest first. */
   listBackups(): Promise<Backup[]>;
+  /** The configured directory, including before the first backup exists. */
+  backupDirectory(): Promise<string>;
+  /** Opens the configured backup folder in the system file manager. */
+  openBackupDirectory(): Promise<void>;
+  /** Logical sizes of the current library contents included in a backup. */
+  backupSizes(refresh?: boolean): Promise<BackupSizes>;
+  startBackup(): Promise<void>;
+  cancelBackup(): Promise<void>;
+  backupProgress(): Promise<BackupProgress>;
   /** Copies the library aside now; resolves to where the copy went. */
   backUpLibrary(): Promise<string>;
   /** Puts a backup back as the library and re-reads it. Refused while rekordbox runs. */
   restoreBackup(path: string): Promise<number>;
+  deleteBackup(path: string): Promise<void>;
   /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
   /** A yes-or-no question in the platform's own dialog; false when dismissed. */
@@ -1038,7 +1048,28 @@ export interface LinkStatus {
 }
 
 /** One backup of the library. */
+export interface BackupSizes {
+  updatedAt: number;
+  database: number;
+  waveforms: number;
+  cues: number;
+  beatGrids: number;
+  phrases: number;
+  other: number;
+}
+
+export interface BackupProgress {
+  running: boolean;
+  phase: "" | "preparing" | "copying" | "validating" | "complete" | "failed" | "stopping" | "cancelled";
+  copiedBytes: number;
+  totalBytes: number;
+  error: string | null;
+  path: string | null;
+}
+
 export interface Backup {
+  createdAt: number;
+  includesAnalysis: boolean;
   path: string;
   /** The file's name, which carries when it was taken. */
   name: string;

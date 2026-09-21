@@ -7,6 +7,7 @@
  * refused while rekordbox holds it, exactly as the other write paths are.
  */
 
+
 export type MenuAction =
   | "settings"
   | "import"
@@ -78,5 +79,5 @@ export function resolveMenu(
 export function refusal(protectedLibrary: boolean): string {
   return protectedLibrary
     ? "Editing is locked by Library Protection. Turn it off in Preferences to edit."
-    : "Editing is locked while rekordbox is running. Quit rekordbox; editing will unlock automatically.";
+    : "Editing is locked while rekordbox is running. Quit rekordbox to enable editing.";
 }

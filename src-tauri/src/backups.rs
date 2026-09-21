@@ -1,0 +1,758 @@
+//! Explicit library snapshots. No work is done here on ordinary edits.
+use crate::{
+    dto::BackupDto,
+    error::{AppError, AppResult},
+    state::AppState,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupProgress {
+    pub running: bool,
+    pub phase: String,
+    pub copied_bytes: u64,
+    pub total_bytes: u64,
+    pub error: Option<String>,
+    pub path: Option<String>,
+}
+
+/// Reserve the job before spawning, so requests from two windows cannot queue duplicates.
+pub fn start(state: std::sync::Arc<AppState>) -> AppResult<()> {
+    {
+        let mut progress = state.backup_progress.lock();
+        if progress.running {
+            return Err(error("A backup is already running."));
+        }
+        *progress = BackupProgress { running: true, phase: "preparing".into(), ..Default::default() };
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            create_with_progress(&state, &mut |phase, copied_bytes, total_bytes| {
+                let mut progress = state.backup_progress.lock();
+                if progress.phase == "stopping" {
+                    return Err(AppError::new(crate::error::ErrorKind::Cancelled, "Backup stopped."));
+                }
+                progress.phase = phase.into();
+                progress.copied_bytes = copied_bytes;
+                progress.total_bytes = total_bytes;
+                Ok(())
+            })
+        })).unwrap_or_else(|_| Err(error("Backup worker stopped unexpectedly.")));
+        let mut progress = state.backup_progress.lock();
+        progress.running = false;
+        match result {
+            Ok(path) => { progress.phase = "complete".into(); progress.path = Some(path); }
+            Err(e) if e.kind == crate::error::ErrorKind::Cancelled => { progress.phase = "cancelled".into(); }
+            Err(e) => { progress.phase = "failed".into(); progress.error = Some(e.message); }
+        }
+    });
+    Ok(())
+}
+
+pub fn cancel(state: &AppState) {
+    let mut progress = state.backup_progress.lock();
+    if progress.running { progress.phase = "stopping".into(); }
+}
+
+fn tree_size(path: &Path, check: &mut dyn FnMut() -> AppResult<()>) -> AppResult<u64> {
+    check()?;
+    let meta = fs::symlink_metadata(path).map_err(error)?;
+    if meta.file_type().is_symlink() { return Err(error("Symbolic links are not supported in backups.")); }
+    if meta.is_file() { return Ok(meta.len()); }
+    if !meta.is_dir() { return Err(error("Unsupported file in backup.")); }
+    let mut bytes = 0;
+    for entry in fs::read_dir(path).map_err(error)? {
+        bytes += tree_size(&entry.map_err(error)?.path(), check)?;
+    }
+    Ok(bytes)
+}
+
+fn error(e: impl std::fmt::Display) -> AppError {
+    AppError::internal(format!("Backup: {e}"))
+}
+fn millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    name.into()
+}
+fn analysis(location: &rbl_db::LibraryLocation) -> PathBuf {
+    location.share_root.join("PIONEER/USBANLZ")
+}
+
+#[derive(Serialize, Deserialize)]
+struct Manifest {
+    version: u32,
+    library: PathBuf,
+    created_at: u64,
+    bytes: u64,
+}
+
+// Refuse symlinks, including within a tree, so a backup never follows files
+// outside its library and deletion cannot traverse outside the backup folder.
+fn copy(source: &Path, target: &Path) -> AppResult<u64> {
+    copy_progress(source, target, &mut |_| Ok(()))
+}
+fn copy_progress(source: &Path, target: &Path, progress: &mut dyn FnMut(u64) -> AppResult<()>) -> AppResult<u64> {
+    progress(0)?;
+    let meta = fs::symlink_metadata(source).map_err(error)?;
+    if meta.file_type().is_symlink() {
+        return Err(error("Symbolic links are not supported in backups."));
+    }
+    if meta.is_dir() {
+        fs::create_dir_all(target).map_err(error)?;
+        let mut bytes = 0;
+        for entry in fs::read_dir(source).map_err(error)? {
+            let entry = entry.map_err(error)?;
+            bytes += copy_progress(&entry.path(), &target.join(entry.file_name()), progress)?;
+        }
+        crate::durable::sync_dir(target).map_err(error)?;
+        Ok(bytes)
+    } else if meta.is_file() {
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(error)?;
+        }
+        let mut refused = None;
+        let result = crate::backup_copy::copy_file(source, target, &mut |bytes| {
+            progress(bytes).map_err(|e| {
+                refused = Some(e);
+                std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+            })
+        });
+        if let Some(error) = refused { return Err(error); }
+        result.map_err(error)
+    } else {
+        Err(error("Unsupported file in backup."))
+    }
+}
+fn remove(path: &Path) -> AppResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+            fs::remove_dir_all(path).map_err(error)
+        }
+        Ok(_) => fs::remove_file(path).map_err(error),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(error(e)),
+    }
+}
+fn writable(location: &rbl_db::LibraryLocation) -> AppResult<()> {
+    if let Some(reason) = rbl_db::write_refusal_reason(
+        location.is_real_install,
+        std::env::var_os("RB_LITE_TEST").is_some(),
+        rbl_db::is_rekordbox_running(),
+    ) {
+        return Err(error(reason));
+    }
+    Ok(())
+}
+fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
+    let root = root.canonicalize().map_err(error)?;
+    let meta = fs::symlink_metadata(path).map_err(error)?;
+    if meta.file_type().is_symlink() {
+        return Err(error("Not a managed backup."));
+    }
+    let path = path.canonicalize().map_err(error)?;
+    if path.parent() != Some(root.as_path()) {
+        return Err(error("Not a managed backup."));
+    }
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if !(name.starts_with("library-") && meta.is_dir()
+        || name.starts_with("master-")
+            && path.extension().is_some_and(|e| e == "db")
+            && meta.is_file())
+    {
+        return Err(error("Not a managed backup."));
+    }
+    Ok(path)
+}
+fn manifest(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<Manifest> {
+    let saved: Manifest =
+        serde_json::from_slice(&fs::read(path.join("manifest.json")).map_err(error)?)
+            .map_err(error)?;
+    if saved.version != 1 || saved.library != location.master_db {
+        return Err(error(
+            "This backup belongs to another library or an unsupported version.",
+        ));
+    }
+    Ok(saved)
+}
+
+pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
+    let _gate = state.edit_gate.lock();
+    let location = state.location()?;
+    let mut result = Vec::new();
+    let entries = match fs::read_dir(state.backup_dir()) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(result),
+        Err(e) => return Err(error(e)),
+    };
+    for entry in entries {
+        let path = entry.map_err(error)?.path();
+        let Ok(path) = checked(state.backup_dir(), &path) else {
+            continue;
+        };
+        let (created_at, bytes, includes_analysis) = if path.is_dir() {
+            let Ok(saved) = manifest(&path, &location) else {
+                continue;
+            };
+            (saved.created_at, saved.bytes, true)
+        } else {
+            let meta = fs::metadata(&path).map_err(error)?;
+            let created = meta
+                .modified()
+                .map_err(error)?
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .try_into()
+                .unwrap_or(0);
+            let bytes = meta.len()
+                + ["-wal", "-shm"]
+                    .iter()
+                    .filter_map(|suffix| fs::metadata(sidecar(&path, suffix)).ok())
+                    .map(|m| m.len())
+                    .sum::<u64>();
+            (created, bytes, false)
+        };
+        result.push(BackupDto {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            path: path.to_string_lossy().into_owned(),
+            bytes,
+            created_at,
+            includes_analysis,
+        });
+    }
+    result.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.name.cmp(&a.name))
+    });
+    Ok(result)
+}
+
+pub fn create(state: &AppState) -> AppResult<String> {
+    create_with_progress(state, &mut |_, _, _| Ok(()))
+}
+fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u64) -> AppResult<()>) -> AppResult<String> {
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let location = state.location()?;
+    writable(&location)?;
+    if pending(state.backup_dir()) {
+        state.with_closed_reader(|| recover(state.backup_dir(), &location))?;
+    }
+    crate::file_journal::recover(state.backup_dir(), &location)?;
+    let tree = analysis(&location);
+    let wal = sidecar(&location.master_db, "-wal");
+    let mut check = || progress("preparing", 0, 0);
+    let total = tree_size(&location.master_db, &mut check)?
+        + if wal.exists() { tree_size(&wal, &mut check)? } else { 0 }
+        + if tree.exists() { tree_size(&tree, &mut check)? } else { 0 };
+    progress("copying", 0, total)?;
+    let mut copied = 0;
+    let root = state.backup_dir();
+    crate::durable::create_dir_all(root).map_err(error)?;
+    let created_at = millis();
+    let id = uuid::Uuid::new_v4();
+    let partial = root.join(format!(".partial-{id}"));
+    let target = root.join(format!("library-{created_at}-{id}"));
+    let result = (|| {
+        fs::create_dir(&partial).map_err(error)?;
+        let mut copied_file = |bytes| { copied += bytes; progress("copying", copied, total) };
+        let mut bytes = copy_progress(&location.master_db, &partial.join("master.db"), &mut copied_file)?;
+        let wal = sidecar(&location.master_db, "-wal");
+        if wal.exists() {
+            bytes += copy_progress(&wal, &partial.join("master.db-wal"), &mut copied_file)?;
+        }
+        let tree = analysis(&location);
+        if tree.exists() {
+            bytes += copy_progress(&tree, &partial.join("analysis"), &mut copied_file)?;
+        } else {
+            fs::create_dir(partial.join("analysis")).map_err(error)?;
+        }
+        progress("validating", bytes, total)?;
+        validate_database(&partial.join("master.db"), &location)?;
+        remove(&partial.join("master.db-shm"))?;
+        let saved = Manifest {
+            version: 1,
+            library: location.master_db.clone(),
+            created_at,
+            bytes,
+        };
+        crate::durable::write(
+            &partial.join("manifest.json"),
+            &serde_json::to_vec(&saved).map_err(error)?,
+        )
+        .map_err(error)?;
+        progress("validating", bytes, total)?;
+        fs::rename(&partial, &target).map_err(error)?;
+        crate::durable::sync_dir(root).map_err(error)?;
+        Ok(target.to_string_lossy().into_owned())
+    })();
+    if result.is_err() {
+        let _ = remove(&partial);
+    }
+    result
+}
+fn validate_database(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<()> {
+    let mut copy = location.clone();
+    copy.master_db = path.to_path_buf();
+    copy.is_real_install = false;
+    let db = rbl_db::Library::open(copy, rbl_db::OpenMode::ReadOnly).map_err(error)?;
+    let check: String = db
+        .connection()
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(error)?;
+    if check != "ok" {
+        return Err(error("The backup database is damaged."));
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct Swap {
+    target: PathBuf,
+    staged: PathBuf,
+    previous: PathBuf,
+    existed: bool,
+}
+#[derive(Serialize, Deserialize)]
+struct Restore {
+    library: PathBuf,
+    committed: bool,
+    swaps: Vec<Swap>,
+}
+fn journal(root: &Path) -> PathBuf {
+    root.join("backup-restore.json")
+}
+
+pub fn pending(root: &Path) -> bool {
+    journal(root).exists()
+}
+fn save_restore(root: &Path, restore: &Restore) -> AppResult<()> {
+    crate::durable::write(&journal(root), &serde_json::to_vec(restore).map_err(error)?)
+        .map_err(error)
+}
+/// A pending restore rolls back on restart; a committed one only needs cleanup.
+pub fn recover(root: &Path, location: &rbl_db::LibraryLocation) -> AppResult<()> {
+    let bytes = match fs::read(journal(root)) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(error(e)),
+    };
+    let restore: Restore = serde_json::from_slice(&bytes).map_err(error)?;
+    if restore.library != location.master_db {
+        return Err(error("An interrupted restore belongs to another library."));
+    }
+    writable(location)?;
+    let allowed = [
+        &location.master_db,
+        &sidecar(&location.master_db, "-wal"),
+        &sidecar(&location.master_db, "-shm"),
+        &analysis(location),
+    ];
+    for swap in &restore.swaps {
+        if !allowed.contains(&&swap.target)
+            || swap.staged.parent() != swap.target.parent()
+            || swap.previous.parent() != swap.target.parent()
+            || !swap
+                .staged
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(".rbxport-restore-"))
+            || !swap
+                .previous
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(".rbxport-restore-"))
+        {
+            return Err(error("Invalid restore recovery paths."));
+        }
+    }
+    for swap in restore.swaps.iter().rev() {
+        if !restore.committed {
+            if swap.previous.exists() {
+                remove(&swap.target)?;
+                fs::rename(&swap.previous, &swap.target).map_err(error)?;
+            } else if !swap.existed && !swap.staged.exists() {
+                remove(&swap.target)?;
+            }
+        }
+        remove(&swap.staged)?;
+        remove(&swap.previous)?;
+        crate::durable::sync_dir(
+            swap.target
+                .parent()
+                .ok_or_else(|| error("Invalid restore path"))?,
+        )
+        .map_err(error)?;
+    }
+    remove(&journal(root))?;
+    crate::durable::sync_dir(root).map_err(error)
+}
+
+fn validate_staged_database(
+    restore: &Restore,
+    location: &rbl_db::LibraryLocation,
+) -> AppResult<()> {
+    let staged_db = &restore.swaps[0].staged;
+    let staged_wal = &restore.swaps[1].staged;
+    let check_wal = sidecar(staged_db, "-wal");
+    let valid = (|| {
+        if staged_wal.exists() {
+            copy(staged_wal, &check_wal)?;
+        }
+        validate_database(staged_db, location)
+    })();
+    remove(&check_wal)?;
+    remove(&sidecar(staged_db, "-shm"))?;
+    valid
+}
+
+pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let location = state.location()?;
+    writable(&location)?;
+    if state.link_running() {
+        return Err(error("Turn off PRO DJ LINK before restoring the library."));
+    }
+    let path = checked(state.backup_dir(), path)?;
+    if path.is_dir() {
+        manifest(&path, &location)?;
+        if !path.join("analysis").is_dir() {
+            return Err(error("The backup analysis folder is missing."));
+        }
+    }
+    state.with_closed_reader(|| {
+        recover(state.backup_dir(), &location)?;
+        crate::file_journal::recover(state.backup_dir(), &location)?;
+        let database = if path.is_dir() {
+            path.join("master.db")
+        } else {
+            path.clone()
+        };
+        let mut sources = vec![
+            (location.master_db.clone(), Some(database.clone())),
+            (
+                sidecar(&location.master_db, "-wal"),
+                Some(sidecar(&database, "-wal")),
+            ),
+            (sidecar(&location.master_db, "-shm"), None),
+        ];
+        if path.is_dir() {
+            sources.push((analysis(&location), Some(path.join("analysis"))));
+        }
+        let mut restore = Restore {
+            library: location.master_db.clone(),
+            committed: false,
+            swaps: Vec::new(),
+        };
+        let result = (|| {
+            for (target, source) in sources {
+                let parent = target
+                    .parent()
+                    .ok_or_else(|| error("Invalid restore path"))?;
+                crate::durable::create_dir_all(parent).map_err(error)?;
+                let id = uuid::Uuid::new_v4();
+                let staged = parent.join(format!(".rbxport-restore-{id}-new"));
+                let previous = parent.join(format!(".rbxport-restore-{id}-old"));
+                restore.swaps.push(Swap {
+                    existed: target.exists(),
+                    target,
+                    staged,
+                    previous,
+                });
+                let swap = restore
+                    .swaps
+                    .last()
+                    .ok_or_else(|| error("Missing restore stage"))?;
+                if let Some(source) = source.filter(|p| p.exists()) {
+                    copy(&source, &swap.staged)?;
+                }
+            }
+            validate_staged_database(&restore, &location)?;
+            save_restore(state.backup_dir(), &restore)?;
+            for swap in &restore.swaps {
+                if swap.existed {
+                    fs::rename(&swap.target, &swap.previous).map_err(error)?;
+                }
+                if swap.staged.exists() {
+                    fs::rename(&swap.staged, &swap.target).map_err(error)?;
+                }
+                crate::durable::sync_dir(
+                    swap.target
+                        .parent()
+                        .ok_or_else(|| error("Invalid restore path"))?,
+                )
+                .map_err(error)?;
+            }
+            restore.committed = true;
+            save_restore(state.backup_dir(), &restore)?;
+            recover(state.backup_dir(), &location)
+        })();
+        if result.is_err() {
+            if journal(state.backup_dir()).exists() {
+                recover(state.backup_dir(), &location)?;
+            } else {
+                for swap in &restore.swaps {
+                    remove(&swap.staged)?;
+                }
+            }
+        }
+        result
+    })
+}
+
+pub fn delete(state: &AppState, path: &Path) -> AppResult<()> {
+    let _gate = state.edit_gate.lock();
+    let path = checked(state.backup_dir(), path)?;
+    if path.is_dir() {
+        manifest(&path, &state.location()?)?;
+    } else {
+        for suffix in ["-wal", "-shm"] {
+            remove(&sidecar(&path, suffix))?;
+        }
+    }
+    remove(&path)?;
+    crate::durable::sync_dir(state.backup_dir()).map_err(error)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    fn fixture() -> (tempfile::TempDir, AppState, rbl_db::LibraryLocation) {
+        let dir = tempfile::tempdir().unwrap();
+        let location =
+            rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        (dir, state, location)
+    }
+    #[test]
+    fn editing_is_allowed_without_a_backup_and_after_the_last_is_deleted() {
+        let (_dir, state, _location) = fixture();
+        let track = rbl_db::fixture::track_id(1);
+        state.write(|w| w.set_rating(&track, 4)).unwrap();
+        assert_eq!(rating(&state), 4);
+        let path = PathBuf::from(create(&state).unwrap());
+        delete(&state, &path).unwrap();
+        state.write(|w| w.set_rating(&track, 2)).unwrap();
+        assert_eq!(rating(&state), 2);
+    }
+
+    #[test]
+    fn progress_reports_bytes_and_cancellation_discards_only_the_partial_copy() {
+        let (_dir, state, location) = fixture();
+        let file = analysis(&location).join("test/ANLZ0000.DAT");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, vec![1; 3 * 1024 * 1024]).unwrap();
+        let mut last = (0, 0);
+        let saved = create_with_progress(&state, &mut |phase, copied, total| {
+            if phase == "copying" {
+                assert!(copied >= last.0);
+                assert!(copied <= total);
+                last = (copied, total);
+            }
+            Ok(())
+        }).unwrap();
+        assert!(last.0 > 3 * 1024 * 1024);
+        assert_eq!(last.0, last.1);
+        let before = rating(&state);
+        let result = create_with_progress(&state, &mut |phase, copied, _| {
+            if phase == "copying" && copied > 0 {
+                Err(AppError::new(crate::error::ErrorKind::Cancelled, "Backup stopped."))
+            } else { Ok(()) }
+        });
+        assert_eq!(result.unwrap_err().kind, crate::error::ErrorKind::Cancelled);
+        assert_eq!(rating(&state), before);
+        assert_eq!(list(&state).unwrap().len(), 1);
+        assert_eq!(PathBuf::from(&list(&state).unwrap()[0].path), PathBuf::from(saved).canonicalize().unwrap());
+        assert!(fs::read_dir(state.backup_dir()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
+        assert_eq!(fs::metadata(file).unwrap().len(), 3 * 1024 * 1024);
+    }
+
+    #[test]
+    fn background_job_rejects_duplicates_and_can_be_stopped_while_waiting() {
+        let (_dir, state, _location) = fixture();
+        let state = std::sync::Arc::new(state);
+        let gate = state.edit_gate.lock();
+        start(state.clone()).unwrap();
+        assert!(state.backup_progress.lock().running);
+        assert!(start(state.clone()).is_err());
+        cancel(&state);
+        assert_eq!(state.backup_progress.lock().phase, "stopping");
+        drop(gate);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while state.backup_progress.lock().running {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(state.backup_progress.lock().phase, "cancelled");
+        assert!(list(&state).unwrap().is_empty());
+    }
+
+    fn rating(state: &AppState) -> u8 {
+        state
+            .read_db(|db| {
+                Ok(db.connection().query_row(
+                    "SELECT Rating FROM djmdContent WHERE ID=?1",
+                    [rbl_db::fixture::track_id(1)],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap()
+    }
+    #[test]
+    fn backups_round_trip_database_analysis_and_wal_and_delete_only_the_snapshot() {
+        let (_dir, state, location) = fixture();
+        let track = rbl_db::fixture::track_id(1);
+        // Keep a WAL connection alive to ensure committed WAL pages are included.
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        db.connection()
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;")
+            .unwrap();
+        db.connection().execute("UPDATE djmdContent SET Rating=3 WHERE ID=?1", [&track]).unwrap();
+        let file = analysis(&location).join("test/ANLZ0000.DAT");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, b"original grid").unwrap();
+        let music = location.share_root.join("music.mp3");
+        fs::write(&music, b"music stays here").unwrap();
+        let path = PathBuf::from(create(&state).unwrap());
+        drop(db);
+        let entries = list(&state).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].bytes > 0 && entries[0].created_at > 0 && entries[0].includes_analysis);
+        assert!(!path.join("music.mp3").exists());
+        state.write(|w| w.set_rating(&track, 5)).unwrap();
+        assert_eq!(rating(&state), 5); // Prime the cached reader before restore.
+        fs::write(&file, b"edited grid").unwrap();
+        let extra = analysis(&location).join("later.DAT");
+        fs::write(&extra, b"new analysis").unwrap();
+        restore(&state, &path).unwrap();
+        assert_eq!(rating(&state), 3);
+        assert_eq!(fs::read(&file).unwrap(), b"original grid");
+        assert!(!extra.exists());
+        assert_eq!(fs::read(&music).unwrap(), b"music stays here");
+        assert!(!journal(state.backup_dir()).exists());
+        // Reopening the app still sees the backup, rather than a memory-only list.
+        assert_eq!(list(&state).unwrap().len(), 1);
+        delete(&state, &path).unwrap();
+        assert!(list(&state).unwrap().is_empty());
+        assert_eq!(rating(&state), 3);
+        assert!(file.exists());
+        assert!(delete(&state, &location.master_db).is_err());
+    }
+    #[test]
+    fn legacy_database_backups_remain_restorable_without_replacing_analysis() {
+        let (_dir, state, location) = fixture();
+        let before = rating(&state);
+        let backup = rbl_db::write::Writer::open(location.clone(), state.backup_dir().to_path_buf()).unwrap().back_up_now().unwrap();
+        state
+            .write(|w| w.set_rating(&rbl_db::fixture::track_id(1), (before + 1) % 6))
+            .unwrap();
+        let file = analysis(&location).join("current.DAT");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, b"current analysis").unwrap();
+        let entries = list(&state).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].includes_analysis);
+        restore(&state, &backup).unwrap();
+        assert_eq!(rating(&state), before);
+        assert_eq!(fs::read(&file).unwrap(), b"current analysis");
+        delete(&state, &backup).unwrap();
+        assert!(list(&state).unwrap().is_empty());
+    }
+
+    #[test]
+    fn corrupt_or_incomplete_backup_does_not_change_the_live_library() {
+        let (_dir, state, location) = fixture();
+        let path = PathBuf::from(create(&state).unwrap());
+        let before = rating(&state);
+        fs::write(path.join("master.db"), b"broken").unwrap();
+        assert!(restore(&state, &path).is_err());
+        assert_eq!(rating(&state), before);
+        assert!(!journal(state.backup_dir()).exists());
+        fs::remove_dir(path.join("analysis")).unwrap();
+        assert!(restore(&state, &path).is_err());
+        assert!(location.master_db.exists());
+    }
+    #[test]
+    fn interrupted_restore_rolls_back_and_committed_restore_only_cleans_up() {
+        let (_dir, state, location) = fixture();
+        fs::create_dir_all(state.backup_dir()).unwrap();
+        let target = analysis(&location);
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("grid"), b"before").unwrap();
+        let parent = target.parent().unwrap();
+        let staged = parent.join(".rbxport-restore-test-new");
+        let previous = parent.join(".rbxport-restore-test-old");
+        for committed in [false, true] {
+            fs::create_dir(&staged).unwrap();
+            fs::write(staged.join("grid"), b"after").unwrap();
+            let intent = Restore {
+                library: location.master_db.clone(),
+                committed,
+                swaps: vec![Swap {
+                    target: target.clone(),
+                    staged: staged.clone(),
+                    previous: previous.clone(),
+                    existed: true,
+                }],
+            };
+            save_restore(state.backup_dir(), &intent).unwrap();
+            assert!(state
+                .write(|w| w.set_rating(&rbl_db::fixture::track_id(1), 5))
+                .is_err());
+            fs::rename(&target, &previous).unwrap();
+            fs::rename(&staged, &target).unwrap();
+            recover(state.backup_dir(), &location).unwrap();
+            recover(state.backup_dir(), &location).unwrap();
+            assert_eq!(
+                fs::read(target.join("grid")).unwrap(),
+                if committed {
+                    b"after".as_slice()
+                } else {
+                    b"before".as_slice()
+                }
+            );
+            assert!(!previous.exists());
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlink_backup_and_analysis_paths_are_refused() {
+        let (_dir, state, location) = fixture();
+        fs::create_dir_all(state.backup_dir()).unwrap();
+        let alias = state.backup_dir().join("master-link.db");
+        std::os::unix::fs::symlink(&location.master_db, &alias).unwrap();
+        assert!(delete(&state, &alias).is_err());
+        assert!(restore(&state, &alias).is_err());
+        fs::create_dir_all(analysis(&location)).unwrap();
+        std::os::unix::fs::symlink(&location.master_db, analysis(&location).join("escape"))
+            .unwrap();
+        assert!(create(&state).is_err());
+        assert!(location.master_db.exists());
+    }
+}

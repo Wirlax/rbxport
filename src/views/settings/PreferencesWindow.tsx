@@ -43,20 +43,27 @@ export function PreferencesWindow() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  // The library's facts, for Advanced › Database; read here, since this
-  // window has no shell of its own holding them.
+  // This window has no shell polling the process state for it. Keep the
+  // backup controls and library facts current while Preferences stays open.
   useEffect(() => {
     let live = true;
-    void getBackend()
-      .then((backend) => backend.librarySummary())
-      .then((read) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const backend = await getBackend();
+        if (!live) return;
+        const read = await backend.librarySummary();
         if (live) setSummary(read);
-      })
-      .catch(() => {
-        // Not up yet: the facts show dashes, as the main window's would.
-      });
+      } catch {
+        // Keep the last known status while the library is unavailable.
+      } finally {
+        if (live) timer = setTimeout(() => void refresh(), 2000);
+      }
+    };
+    void refresh();
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, []);
 

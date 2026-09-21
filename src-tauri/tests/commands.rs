@@ -886,6 +886,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         vec![stick.path().display().to_string()],
         None,
         None,
+        None,
     ))
     .unwrap();
     let synced = reports[0].report.as_ref().expect("written");
@@ -956,11 +957,14 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
         ],
         None,
         Some(true),
+        Some(true),
     ))
     .unwrap();
     assert_eq!(reports.len(), 3);
     let written_a = reports[0].report.as_ref().expect("stick A written");
     assert!(reports[0].error.is_none());
+    assert!(!reports[0].ejected);
+    assert!(reports[0].eject_error.as_deref().unwrap().contains("incomplete"), "skipped tracks keep the device mounted");
     assert_eq!(written_a.playlists, 1);
     assert_eq!(written_a.tracks, 1);
     assert!(written_a.verified);

@@ -13,10 +13,10 @@
  * export name (link export is not built), hot cue GATE, loop export,
  * Recordings, and every streaming service.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { Backend, Backup, Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
+import type { Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
 import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -174,7 +174,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
         readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary}
       />
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
-      <BackupSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
     </>
   );
 }
@@ -272,92 +271,6 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
           {note ? <Note>{note}</Note> : null}
         </>
       )}
-    </Section>
-  );
-}
-
-/** Bytes as the panel shows them: a tenth of a megabyte is enough for a database. */
-function megabytes(bytes: number): string {
-  return `${(bytes / 1_048_576).toFixed(1)} MB`;
-}
-
-/** When a backup was taken, read off its name: `master-2026-09-17-09-12-04-…`. */
-function takenAt(name: string): string {
-  const match = /^master-(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})/.exec(name);
-  if (!match) return name;
-  return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]} UTC`;
-}
-
-/**
- * Database management: manually requested backups, kept five deep,
- * with one to be taken now and any to be put back. Restoring replaces the
- * library file, so it asks first and is refused while rekordbox holds the file.
- */
-function BackupSection({ readOnly }: { readOnly: boolean }) {
-  const [backups, setBackups] = useState<Backup[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
-
-  const refresh = async () => {
-    const backend = await getBackend();
-    setBackups(await backend.listBackups());
-  };
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  const run = (work: (backend: Backend) => Promise<string>) => {
-    setBusy(true);
-    void (async () => {
-      try {
-        const backend = await getBackend();
-        setNote({ text: await work(backend), failed: false });
-        await refresh();
-      } catch (e) {
-        setNote({ text: e instanceof Error ? e.message : "That could not be done.", failed: true });
-      } finally {
-        setBusy(false);
-      }
-    })();
-  };
-
-  return (
-    <Section title="Database management">
-      <div className={styles.actions}>
-        <Button disabled={busy} onClick={() => run(async (b) => `Backed up to ${await b.backUpLibrary()}.`)}>
-          Back up now
-        </Button>
-      </div>
-      {backups === null ? null : backups.length === 0 ? (
-        <Note>No backups yet.</Note>
-      ) : (
-        <ul className={styles.list} aria-label="Backups">
-          {backups.map((backup) => (
-            <li key={backup.path}>
-              <span className={styles.listTitle}>{takenAt(backup.name)} · {megabytes(backup.bytes)}</span>
-              <span className={styles.listPath}>{backup.path}</span>
-              <div className={styles.actions}>
-                <Button
-                  disabled={busy || readOnly}
-                  onClick={() => {
-                    run(async (b) => {
-                      const sure = await b.confirm(
-                        `Restore the library from ${takenAt(backup.name)}? Every change since then is lost.`,
-                      );
-                      if (!sure) return "Nothing restored.";
-                      await b.restoreBackup(backup.path);
-                      return `Restored the library from ${takenAt(backup.name)}.`;
-                    });
-                  }}
-                >
-                  Restore
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {note ? <Note failed={note.failed}>{note.text}</Note> : null}
     </Section>
   );
 }

@@ -12,6 +12,18 @@ The application reads a local library by default. Writes require an explicit
 action and are refused while a conflicting library process is running. Before
 using write features, make an independent backup of your library.
 
+## Backups
+
+Preferences → Backups lists each saved backup's date and size. Create a backup
+there, or restore or delete an existing one. New backups include the library
+database and `PIONEER/USBANLZ` cue/grid analysis files; music files are excluded.
+Backups are kept until you delete them. Older database-only backups remain
+available and are labelled accordingly.
+
+Quit rekordbox before creating or restoring a backup, and turn off PRO DJ LINK
+before restoring. Library Protection must be off to restore. A restore replaces
+the saved library and analysis, unloads the decks, and refreshes the collection.
+
 ## Development
 
 ```sh

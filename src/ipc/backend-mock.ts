@@ -12,7 +12,7 @@
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
 import type {
-  AppErrorDto, Backend, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
+  AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady,
@@ -1285,6 +1285,32 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return linkOff();
   };
 
+  const ancillary = () => ({ tree, membership: [...membership], tagList, smartRules: [...smartRules],
+    details: [...details], cues: [...cueStore], grids: [...gridStore], colors: Array.from(colors), nextId, nextCueId });
+  const snapshot = () => ({ rows: all.map(row => JSON.stringify(row)), data: JSON.stringify(ancillary()) });
+  type Snapshot = ReturnType<typeof snapshot>;
+  const restoreMap = <K, V>(map: Map<K, V>, values: [K, V][]) => { map.clear(); for (const [key, value] of values) map.set(key, value); };
+  const restore = (saved: Snapshot) => {
+    const before = JSON.parse(saved.data) as ReturnType<typeof ancillary>;
+    all.splice(0, all.length, ...saved.rows.map(row => JSON.parse(row) as RowDto));
+    tree.splice(0, tree.length, ...before.tree);
+    tagList.splice(0, tagList.length, ...before.tagList); colors.set(before.colors);
+    restoreMap(membership, before.membership); restoreMap(smartRules, before.smartRules);
+    restoreMap(details, before.details); restoreMap(cueStore, before.cues); restoreMap(gridStore, before.grids);
+    nextId = before.nextId; nextCueId = before.nextCueId;
+  };
+  const backups = new Map<string, { backup: Backup; saved: Snapshot }>();
+  let backupSizes: BackupSizes | null = null;
+  let backupProgress: BackupProgress = { running: false, phase: "", copiedBytes: 0, totalBytes: 0, error: null, path: null };
+  const saveBackup = () => {
+    const createdAt = Date.now();
+    const name = `library-${createdAt}-${crypto.randomUUID()}`;
+    const path = `/mock/backups/${name}`;
+    const saved = snapshot();
+    backups.set(path, { saved, backup: { path, name, createdAt, includesAnalysis: true, bytes: new Blob([JSON.stringify(saved)]).size } });
+    return path;
+  };
+
   return {
     librarySummary: () =>
       ready
@@ -1600,14 +1626,49 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       window.open(url, "_blank", "noopener");
       return wait(undefined);
     },
-    // Two backups, as a session that has edited twice would have.
-    listBackups: () =>
-      wait([
-        { path: "/mock/backups/master-2026-09-17-09-12-04-000--00-00.db", name: "master-2026-09-17-09-12-04-000--00-00.db", bytes: 41_943_040 },
-        { path: "/mock/backups/master-2026-09-16-18-40-51-000--00-00.db", name: "master-2026-09-16-18-40-51-000--00-00.db", bytes: 41_811_968 },
-      ]),
-    backUpLibrary: () => wait("/mock/backups/master-2026-09-17-21-00-00-000--00-00.db"),
-    restoreBackup: () => bump(),
+    backupDirectory: () => wait("/mock/backups"),
+    openBackupDirectory: () => wait(undefined),
+    backupSizes: (refresh = false) => {
+      if (!backupSizes || refresh) backupSizes = { updatedAt: Date.now(), database: 48 * 1024 ** 2, waveforms: 240 * 1024 ** 2,
+        cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 4 * 1024 ** 2 };
+      return wait({ ...backupSizes });
+    },
+    listBackups: () => wait([...backups.values()].map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
+    backUpLibrary: () => wait(saveBackup()),
+    backupProgress: () => wait({ ...backupProgress }),
+    cancelBackup: () => {
+      if (backupProgress.running) backupProgress = { ...backupProgress, phase: "stopping" };
+      return wait(undefined);
+    },
+    startBackup: () => {
+      if (backupProgress.running) return refuse("A backup is already running.");
+      backupProgress = { running: true, phase: "preparing", copiedBytes: 0, totalBytes: 100, error: null, path: null };
+      setTimeout(() => { if (backupProgress.phase !== "stopping") backupProgress = { ...backupProgress, phase: "copying", copiedBytes: 50 }; }, 300);
+      setTimeout(() => {
+        if (backupProgress.phase === "stopping") {
+          backupProgress = { ...backupProgress, running: false, phase: "cancelled" };
+          return;
+        }
+        try {
+          const path = saveBackup();
+          backupProgress = { ...backupProgress, running: false, phase: "complete", copiedBytes: 100, path };
+        } catch (e) {
+          backupProgress = { ...backupProgress, running: false, phase: "failed", error: String(e) };
+        }
+      }, 1000);
+      return wait(undefined);
+    },
+    restoreBackup: async (path) => {
+      if (!(options.writable ?? readFlagFromUrl("writable"))) return refuse("Quit rekordbox before restoring a backup.");
+      const entry = backups.get(path);
+      if (!entry) return notFound("Backup not found.");
+      restore(entry.saved);
+      return bump();
+    },
+    deleteBackup: (path) => {
+      if (!backups.delete(path)) return notFound("Backup not found.");
+      return wait(undefined);
+    },
     // A browser cannot ask; the answer is yes, so the flow can be driven.
     confirm: () => Promise.resolve(true),
 

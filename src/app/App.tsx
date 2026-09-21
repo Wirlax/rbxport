@@ -295,6 +295,7 @@ export function App() {
   const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
   // Every write path reads this one flag: rekordbox holding the database,
   // or Library Protection in Preferences, refuse the same way.
+  const backupJob = useBackupProgress();
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
   useEffect(() => {
     let live = true;
@@ -2125,6 +2126,9 @@ export function App() {
 
       <StatusBar
         onReportBug={openReport}
+        backupActivity={backupJob.error || backupJob.text}
+        onCancelBackup={backupJob.progress.running ? () => void backupJob.stop() : undefined}
+        backupStopping={backupJob.progress.phase === "stopping"}
         version={version}
         activity={
           analysis.running
@@ -2145,6 +2149,7 @@ export function App() {
         selection={selectionText}
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}
+        onExplainReadOnly={() => { setPlayerError(null); explainEditLock(); }}
       />
     </div>
     </PreferencesProvider>

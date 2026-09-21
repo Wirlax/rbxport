@@ -3707,6 +3707,7 @@ name = "rbxport"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "libc",
  "parking_lot",
  "rbl-analysis",
  "rbl-anlz",
@@ -3740,6 +3741,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

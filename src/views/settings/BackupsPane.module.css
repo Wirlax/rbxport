@@ -1,0 +1,30 @@
+.tableScroll { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--f-size-sm); }
+.table th { color: var(--c-text-dim); font-weight: 400; }
+.table th, .table td { padding: 12px 8px; border-bottom: 1px solid var(--c-raised); vertical-align: middle; }
+.table tbody tr:hover { background: var(--c-raised); }
+.table time { font-variant-numeric: tabular-nums; line-height: 1.5; }
+.size { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.actions { display: flex; gap: 8px; }
+.error { color: var(--c-error); line-height: 1.5; }
+.status { color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
+.status:empty { display: none; }
+
+.breakdown { margin: 24px 0; }
+.breakdownHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.breakdownHeading > span { color: var(--c-text-dim); font-size: var(--f-size-sm); font-variant-numeric: tabular-nums; }
+.sizeBar { display: flex; height: 34px; border-radius: 4px; overflow: hidden; background: var(--c-raised); }
+.sizeBar > span { flex: none; height: 100%; }
+.sizeLegend { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 24px; list-style: none; padding: 0; margin: 16px 0 0; font-size: var(--f-size-sm); }
+.sizeLegend li { display: flex; align-items: center; gap: 8px; }
+.sizeDot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.sizeValue { margin-left: auto; font-variant-numeric: tabular-nums; }
+.sizeBarFrame { position: relative; }
+.sizeCalculating { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 4px; background: var(--c-raised); color: var(--c-text); font-size: var(--f-size-sm); }
+.sizeSpinner { flex: none; animation: backup-size-spin 1s linear infinite; }
+@keyframes backup-size-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sizeSpinner { animation: none; } }
+.sizeFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
+
+.directoryLink { padding: 0; border: 0; background: none; color: var(--c-accent); font: inherit; text-align: left; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; cursor: pointer; }
+.directoryLink:hover { color: var(--c-label-aqua); }

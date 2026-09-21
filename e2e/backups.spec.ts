@@ -1,0 +1,82 @@
+import { expect, test } from "@playwright/test";
+
+test("Preferences creates, restores, and deletes a library backup", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const settings = page.getByRole("banner").getByRole("button", { name: "Settings" });
+  const preferences = page.getByRole("dialog", { name: "Preferences", exact: true });
+  await settings.click();
+  await expect(preferences.getByRole("tab", { name: "Time Machine", exact: true })).toHaveCount(0);
+  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await expect(preferences.getByText("No backups yet.")).toBeVisible();
+  const contents = preferences.getByRole("figure", { name: "Backup contents" });
+  await expect(contents.getByRole("img")).toBeVisible();
+  await expect(contents.getByText("320.0 MB total")).toBeVisible();
+  await expect(contents.getByRole("list", { name: "Backup size breakdown" }).getByRole("listitem")).toHaveCount(6);
+  await preferences.getByRole("button", { name: "Create backup", exact: true }).click();
+  await expect(preferences.getByText("Backup created.")).toBeVisible();
+  const table = preferences.getByRole("table", { name: "Library backups" });
+  await expect(table.locator("tbody tr")).toHaveCount(1);
+  await expect(table.getByRole("columnheader")).toHaveText(["Date", "Size", "Includes", "Actions"]);
+  await expect(table.locator("time")).toHaveAttribute("datetime", /^\d{4}-/);
+  await expect(table.getByText("Database + analysis")).toBeVisible();
+  await page.keyboard.press("Escape");
+  const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  const original = await title.innerText();
+  await title.click();
+  await title.click();
+  await title.locator("input").fill("Changed since backup");
+  await title.locator("input").press("Enter");
+  await expect(title).toHaveText("Changed since backup");
+  await settings.click();
+  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await table.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(preferences.getByText("Backup restored.")).toBeVisible();
+  await expect(title).toHaveText(original);
+  await table.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(preferences.getByText("Backup deleted.")).toBeVisible();
+  await expect(preferences.getByText("No backups yet.")).toBeVisible();
+});
+
+test("backup progress survives closing Preferences and can be stopped from the footer", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/?writable=1");
+  const settings = page.getByRole("banner").getByRole("button", { name: "Settings" });
+  const preferences = page.getByRole("dialog", { name: "Preferences", exact: true });
+  const footer = page.getByRole("contentinfo");
+  await settings.click();
+  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await expect(preferences.getByText("No backups yet.")).toBeVisible();
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  await preferences.getByRole("button", { name: "Create backup", exact: true }).click();
+  await page.clock.runFor(600);
+  await expect(preferences.getByRole("status")).toContainText("50%");
+  const card = preferences.getByRole("region", { name: "Backup your Library" });
+  await expect(card.getByRole("progressbar")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Stop backup", exact: true })).toBeVisible();
+  await expect(footer.getByRole("status")).toContainText("50%");
+  await page.keyboard.press("Escape");
+  await expect(preferences).not.toBeVisible();
+  await footer.getByRole("button", { name: "Stop backup", exact: true }).click();
+  await page.clock.runFor(1000);
+  await expect(footer.getByRole("status")).toHaveText("Backup stopped.");
+  await settings.click();
+  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await expect(preferences.getByRole("status")).toHaveText("Backup stopped.");
+  await expect(preferences.getByText("No backups yet.")).toBeVisible();
+});
+
+
+test("library editing is available before creating any backups", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const preferences = page.getByRole("dialog", { name: "Preferences", exact: true });
+  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await expect(preferences.getByText("No backups yet.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await title.click();
+  await title.click();
+  await title.locator("input").fill("Edited without a backup");
+  await title.locator("input").press("Enter");
+  await expect(title).toHaveText("Edited without a backup");
+});

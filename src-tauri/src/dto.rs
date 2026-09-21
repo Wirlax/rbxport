@@ -357,10 +357,12 @@ pub struct XmlImportReportDto {
     pub tracks: Vec<ImportedTrackDto>,
 }
 
-/// One backup of the library, for Preferences › Advanced › Database.
+/// One explicit library backup, for Preferences › Backups.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupDto {
+    pub created_at: u64,
+    pub includes_analysis: bool,
     pub path: String,
     /// The file's name, which carries when it was taken.
     pub name: String,

@@ -109,6 +109,7 @@ fn analyse_and_save(
     })?;
     let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, preset.options());
 
+    let _edit_guard = state.edit_gate.lock();
     let _files_guard = state.analysis_write.lock();
     let location = state.location()?;
     crate::file_journal::recover(state.backup_dir(), &location)?;
@@ -230,6 +231,8 @@ pub async fn edit_phrase<R: tauri::Runtime>(
             return Err(AppError::new(ErrorKind::NotFound, "That track has no analysis."));
         }
         let ext = rbl_anlz::sibling(&rbl_anlz::resolve(&share, relative), "EXT");
+        let _edit_guard = state.edit_gate.lock();
+        let _files = state.analysis_write.lock();
         let file = rbl_anlz::Anlz::read(&ext).map_err(|e| {
             AppError::new(ErrorKind::NotFound, "That track's analysis file could not be read.").with_detail(e.to_string())
         })?;
@@ -372,6 +375,7 @@ mod tests {
         let state = AppState::with_backups(dir.path().join("backups"));
         let share = location.share_root.clone();
         state.set_library(library, false, None, 0, location.clone());
+        crate::backups::create(&state).unwrap();
         let library = state.library().unwrap();
 
         let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport).expect("analysed");

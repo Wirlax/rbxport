@@ -7,6 +7,9 @@ export interface StatusBarProps {
   version?: string | null;
   /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
   activity?: string;
+  backupActivity?: string;
+  onCancelBackup?: (() => void) | undefined;
+  backupStopping?: boolean;
   /**
    * Something went wrong, said in red.
    *
@@ -19,6 +22,7 @@ export interface StatusBarProps {
   readOnly?: boolean;
   /** Library Protection in Preferences is why, rather than rekordbox running. */
   protectedLibrary?: boolean;
+  onExplainReadOnly?: (() => void) | undefined;
   onOpenProtection?: (() => void) | undefined;
   onReportBug?: (() => void) | undefined;
   /** Present only while analysis is running, so it can be stopped. */
@@ -30,10 +34,14 @@ export interface StatusBarProps {
 export function StatusBar({
   version = null,
   activity = "",
+  backupActivity = "",
+  onCancelBackup,
+  backupStopping = false,
   error = null,
   selection = "",
   readOnly = false,
   protectedLibrary = false,
+  onExplainReadOnly,
   onOpenProtection,
   onReportBug,
   onCancelAnalysis,
@@ -47,9 +55,9 @@ export function StatusBar({
         {version === null ? null : <> <span className={styles.version}>{version}</span></>}
       </span>
       {readOnly ? (
-        <span className={styles.readOnly} title={refusal(protectedLibrary)}>
+        <button type="button" className={styles.readOnly} title={refusal(protectedLibrary)} onClick={onExplainReadOnly}>
           Read-only
-        </span>
+        </button>
       ) : null}
       {/*
         Stop comes before the progress text, not after it. After it the button
@@ -71,6 +79,8 @@ export function StatusBar({
           ) : null}
         </span>
       )}
+      {backupActivity ? <span className={styles.backupActivity} role="status" aria-live="polite">{backupActivity}</span> : null}
+      {onCancelBackup ? <button type="button" className={styles.stop} disabled={backupStopping} onClick={onCancelBackup}>Stop backup</button> : null}
       <span className={styles.activity}>{activity}</span>
       {analysisFailures > 0 ? (
         <span

@@ -5,7 +5,7 @@
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
 import type {
-  AnalysisResult, AudioDevices, Backend, Backup, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
+  AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
@@ -175,9 +175,16 @@ async function realBackend(): Promise<Backend> {
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
     listBackups: () => invoke<Backup[]>("list_backups"),
+    backupDirectory: () => invoke<string>("backup_directory"),
+    openBackupDirectory: () => invoke<void>("open_backup_directory"),
+    backupSizes: (refresh = false) => invoke<BackupSizes>("backup_sizes", { refresh }),
+    startBackup: () => invoke<void>("start_backup"),
+    cancelBackup: () => invoke<void>("cancel_backup"),
+    backupProgress: () => invoke<BackupProgress>("backup_progress"),
     openUrl: (url) => invoke<void>("open_url", { url }),
     backUpLibrary: () => invoke<string>("back_up_library"),
     restoreBackup: (path) => invoke<number>("restore_backup", { path }),
+    deleteBackup: (path) => invoke<void>("delete_backup", { path }),
     confirm: async (message) => {
       const { ask } = await import("@tauri-apps/plugin-dialog");
       return ask(message, { kind: "warning" });
