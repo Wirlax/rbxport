@@ -191,12 +191,6 @@ export interface AdvancedPreferences {
   updateFrequency: UpdateFrequency;
   /** A track played for a minute goes on today's history and its count goes up. */
   recordHistory: boolean;
-  /**
-   * Tell rbxport.com about this launch: an install id, the version and the
-   * OS, once per run, so downloads can be counted against installs. Nothing
-   * about the library goes.
-   */
-  usageStats: boolean;
 }
 
 /** Keyboard: the keys changed from the preset, by binding id (`shortcuts.ts`). */
@@ -278,9 +272,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
     checkUpdates: true,
-    updateFrequency: "daily",
+    updateFrequency: "weekly",
     recordHistory: true,
-    usageStats: true,
   },
   keyboard: {
     overrides: {},
@@ -435,7 +428,6 @@ export function sanitisePreferences(value: unknown): Preferences {
       quantizeBeat: oneOf(advanced.quantizeBeat, QUANTIZE_BEATS, d.advanced.quantizeBeat),
       checkUpdates: bool(advanced.checkUpdates, d.advanced.checkUpdates),
       updateFrequency: oneOf(advanced.updateFrequency, UPDATE_FREQUENCIES, d.advanced.updateFrequency),
-      usageStats: bool(advanced.usageStats, d.advanced.usageStats),
     },
     keyboard: {
       overrides: chords(keyboard.overrides),

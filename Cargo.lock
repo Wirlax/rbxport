@@ -3723,8 +3723,6 @@ dependencies = [
  "rbl-onelibrary",
  "rbl-pdb",
  "rbl-prolink",
- "reqwest",
- "rustls",
  "semver",
  "serde",
  "serde_json",

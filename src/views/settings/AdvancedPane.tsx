@@ -5,7 +5,7 @@
  * Database holds the library's own facts and the missing-file manager,
  * with rekordbox's Auto Relocate Search Folders feeding it. Browse holds
  * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
- * quantize beat value, the Update Manager and the usage-statistics switch.
+ * quantize beat value and play history.
  *
  * Not here: iTunes and rekordbox xml (neither is read), Auto Export and
  * Database management (neither is built), My Tag, colour names, display
@@ -95,54 +95,6 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             checked={advanced.syncDoubleHalf}
             onChange={(syncDoubleHalf) => set({ syncDoubleHalf })}
           />
-        </Section>
-        <Section title="Update Manager">
-          <Toggle
-            label="Keep rbxport up to date: check for a new version when it starts and install it in the background."
-            checked={advanced.checkUpdates}
-            onChange={(checkUpdates) => set({ checkUpdates })}
-          />
-          <Radios
-            label="How often"
-            nested
-            dim={!advanced.checkUpdates}
-            value={advanced.updateFrequency}
-            choices={[
-              { value: "start", label: "Every start" },
-              { value: "daily", label: "Once a day" },
-              { value: "weekly", label: "Once a week" },
-            ]}
-            onChange={(updateFrequency) => set({ updateFrequency })}
-          />
-          <Note>
-            A new version is downloaded and put in place without asking, and
-            is the one that runs the next time rbxport opens. On Windows it
-            is installed when rbxport quits.
-          </Note>
-          <div className={styles.actions} data-gap-above>
-            <Button
-              onClick={() => {
-                // The Update Manager belongs to the main window, so the
-                // check is asked for there — this pane may be a window of
-                // its own.
-                void getBackend().then((backend) => backend.requestPreferencesReset("updates"));
-              }}
-            >
-              Check for Updates…
-            </Button>
-          </div>
-        </Section>
-        <Section title="Usage statistics">
-          <Toggle
-            label="Send anonymous usage statistics"
-            checked={advanced.usageStats}
-            onChange={(usageStats) => set({ usageStats })}
-          />
-          <Note>
-            An install id, the app version and your OS, once per launch, so
-            rbxport.com can count installs and see which downloads become
-            users. Nothing about your library.
-          </Note>
         </Section>
       </>
     );

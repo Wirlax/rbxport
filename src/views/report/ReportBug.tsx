@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import { loadPreferences } from "@/lib/preferences";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
 
 export function ReportBug({ onClose, windowed = false }: { onClose: () => void; windowed?: boolean }) {
   const [email, setEmail] = useState("");
   const [description, setDescription] = useState("");
-  const [include, setInclude] = useState(() => loadPreferences().advanced.usageStats);
+  const [include, setInclude] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [busy, setBusy] = useState(false);

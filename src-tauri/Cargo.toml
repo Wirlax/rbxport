@@ -47,11 +47,6 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"
 dirs = "5"
 tauri-plugin-updater = "2"
-# The launch ping (`telemetry.rs`). The same client, TLS and provider the
-# updater already links, so none of this is a new dependency; the provider
-# is named here because the ping may go out before the updater ever runs.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
 uuid = { version = "1", features = ["v4"] }
 semver = "1"
 time = { version = "0.3", features = ["formatting"] }

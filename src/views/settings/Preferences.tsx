@@ -61,9 +61,9 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
   { id: "audio", label: "Audio", Icon: PrefAudioIcon },
   { id: "analysis", label: "Analysis", Icon: PrefAnalysisIcon },
   { id: "djSystem", label: "DJ System", Icon: PrefDjSystemIcon },
-  { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+  { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "usbExport", label: "USB Export", Icon: UsbStickIcon },
   { id: "backups", label: "Backups", Icon: ArchiveRestore },
   { id: "about", label: "About", Icon: PrefAboutIcon },
@@ -241,6 +241,7 @@ export function Preferences({
             <ul className={styles.panes} role="tablist" aria-orientation="vertical">
               {PANES.map(({ id, label, Icon }) => (
                 <li key={id}>
+                  {id === "link" ? <h4 className={styles.paneGroupHeading}>RBExport</h4> : null}
                   <button
                     type="button"
                     role="tab"

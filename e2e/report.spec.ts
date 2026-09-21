@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("bug reports open the attachment externally and honor the usage-statistics default", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ advanced: { usageStats: false } })));
+test("bug reports include diagnostics only when selected and open the attachment externally", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
   const report = page.getByRole("dialog", { name: "Report bug", exact: true });

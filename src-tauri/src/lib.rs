@@ -33,7 +33,6 @@ mod device_settings;
 pub mod dto;
 mod error;
 pub mod state;
-mod telemetry;
 mod test_port;
 mod update;
 
@@ -456,7 +455,6 @@ pub fn run() {
             update::check_for_update,
             update::download_update,
             update::restart_to_update,
-            telemetry::report_launch,
             commands::deck_tempo,
             commands::deck_metronome,
             commands::deck_key_shift,

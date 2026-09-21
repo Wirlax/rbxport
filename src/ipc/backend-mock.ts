@@ -1853,7 +1853,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       };
     },
     // A browser is not an install; nothing is counted.
-    reportLaunch: () => wait(undefined),
     masterLimiter: () => wait({ ...limiter }),
     setMasterLimiter: (wanted) => {
       limiter = {

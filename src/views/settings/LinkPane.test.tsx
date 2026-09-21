@@ -1,0 +1,64 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { LinkStatus } from "@/ipc/types";
+import { LinkPane } from "./LinkPane";
+
+const held = vi.hoisted(() => ({
+  backend: { linkStatus: vi.fn(), onLinkStatus: vi.fn(), startLinkExport: vi.fn(), stopLinkExport: vi.fn() },
+}));
+vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
+vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null } }, update: vi.fn() }) }));
+const off: LinkStatus = { on: false, problem: null, interface: null, interfaces: [], players: [], master: false, masterBpm: 120, state: "off", number: null };
+const blocked = { ...off, problem: "rekordbox is running and holds the link ports. Quit it to turn LINK on." };
+let host: HTMLDivElement;
+let root: Root;
+let unsubscribe: ReturnType<typeof vi.fn>;
+const connect = () => [...host.querySelectorAll("button")].find(button => button.textContent === "Connect to PRO DJ LINK");
+beforeEach(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.useFakeTimers();
+  vi.resetAllMocks();
+  unsubscribe = vi.fn();
+  held.backend.onLinkStatus.mockReturnValue(unsubscribe);
+  host = document.createElement("div");
+  root = createRoot(host);
+});
+afterEach(() => { act(() => root.unmount()); vi.useRealTimers(); });
+it("detects rekordbox quitting and reopening without a LINK event", async () => {
+  held.backend.linkStatus.mockResolvedValue(blocked);
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(blocked.problem);
+  expect(connect()).toBeUndefined();
+  held.backend.linkStatus.mockResolvedValue(off);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(connect()?.disabled).toBe(false);
+  held.backend.linkStatus.mockResolvedValue(blocked);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(connect()).toBeUndefined();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(blocked.problem);
+});
+it("does not overwrite a newer LINK event with a delayed status read", async () => {
+  let resolve!: (status: LinkStatus) => void;
+  held.backend.linkStatus.mockReturnValue(new Promise<LinkStatus>(done => { resolve = done; }));
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  const listener = held.backend.onLinkStatus.mock.calls[0]![0] as (status: LinkStatus) => void;
+  act(() => listener({ ...off, on: true, state: "up" }));
+  await act(async () => { resolve(blocked); await Promise.resolve(); });
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("Connected");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+it("recovers from a failed status check and stops polling when closed", async () => {
+  held.backend.linkStatus.mockRejectedValueOnce(new Error("temporary failure")).mockResolvedValue(off);
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("temporary failure");
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(connect()?.disabled).toBe(false);
+  act(() => root.render(null));
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  expect(held.backend.linkStatus).toHaveBeenCalledTimes(2);
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
