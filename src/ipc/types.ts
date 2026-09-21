@@ -629,10 +629,12 @@ export interface Backend {
      * next plugged in the same playlists are written to it again unasked.
      */
     automatic?: boolean,
+    ejectAfterSync?: boolean,
   ): Promise<SyncDeviceReport[]>;
 
   /** What a stick was last synced with, and what it holds now. */
   deviceSyncState(path: string): Promise<DeviceSyncState>;
+  importUsb(path: string, cues: boolean, history: boolean, settings: boolean): Promise<{ tracks: number; histories: number; settings: number; skipped: number; warnings?: string[] }>;
 
   /**
    * An intelligent playlist's rule, for the editor; an empty "all" for a
@@ -887,6 +889,7 @@ export interface Device {
   path: string;
   totalBytes: number;
   freeBytes: number;
+  fileSystem?: string;
   /** Whether the OS calls it removable. External SSDs often say no. */
   removable: boolean;
   /**
@@ -926,6 +929,8 @@ export interface ExportReport {
 
 /** What one destination got out of a sync: its report, or why it got none. */
 export interface SyncDeviceReport {
+  ejected?: boolean;
+  ejectError?: string;
   /** The mount point it was written to. */
   path: string;
   report?: ExportReport;
@@ -945,6 +950,7 @@ export interface DeviceSyncState {
   selected: SyncPlaylist[];
   /** The playlist names in its export, folders left out; empty without one. */
   onDevice: string[];
+  libraries?: { name: string; nodes: { id: string; parentId: string; name: string; folder: boolean }[] }[];
   /**
    * The stick asks to be synced again when it is plugged in — its sync
    * record's Automatic synchronization, and the record is this library's.
@@ -955,7 +961,7 @@ export interface DeviceSyncState {
 /** One step of a sync: a stick being written, then done or failed. */
 export interface SyncProgress {
   path: string;
-  state: "writing" | "done" | "failed";
+  state: "writing" | "ejecting" | "done" | "failed";
 }
 
 /**

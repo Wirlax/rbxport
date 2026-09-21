@@ -211,6 +211,7 @@ export interface Preferences {
   djSystem: DjSystemPreferences;
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
+  usbExport: { importSettings: boolean; importHistory: boolean };
 }
 
 export type PreferencePane = keyof Preferences;
@@ -268,6 +269,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     createDatabaseFolders: true,
     linkInterface: null,
   },
+  usbExport: { importSettings: false, importHistory: true },
   advanced: {
     relocateFolders: [],
     protectLibrary: false,
@@ -372,8 +374,10 @@ export function sanitisePreferences(value: unknown): Preferences {
   const dj = part<DjSystemPreferences>(raw.djSystem);
   const advanced = part<AdvancedPreferences>(raw.advanced);
   const keyboard = part<KeyboardPreferences>(raw.keyboard);
+  const usb = part<Preferences["usbExport"]>(raw.usbExport);
   const d = DEFAULT_PREFERENCES;
   return {
+    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true) },
     view: {
       vuMeter: oneOf(view.vuMeter, ["normal", "fabulous"] as const, d.view.vuMeter),
       tempoSlider: bool(view.tempoSlider, d.view.tempoSlider),

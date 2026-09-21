@@ -703,6 +703,7 @@ pub async fn sync_devices<R: tauri::Runtime>(
     // The Sync Manager's "Automatic synchronization": recorded on each
     // stick, and read back when it is next plugged in.
     automatic: Option<bool>,
+    eject_after_sync: Option<bool>,
 ) -> AppResult<Vec<SyncDeviceReportDto>> {
     let library = state.library()?;
     let share = state.share_root();
@@ -724,12 +725,27 @@ pub async fn sync_devices<R: tauri::Runtime>(
             let written = selection
                 .for_stick(&state, &library, &share, stick)
                 .and_then(|selection| write_export(stick, &selection, defaults.as_ref(), &mut |_| {}));
-            progress(if written.is_ok() { "done" } else { "failed" });
             reports.push(match written {
-                Ok(report) => SyncDeviceReportDto { path: destination, report: Some(report), error: None },
+                Ok(report) => {
+                    let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
+                    if eject_after_sync.unwrap_or(false) {
+                        if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty()) {
+                            progress("ejecting");
+                            match rbl_devices::eject::eject(stick) {
+                                Ok(()) => result.ejected = true,
+                                Err(e) => result.eject_error = Some(e.to_string()),
+                            }
+                        } else {
+                            result.eject_error = Some("The sync was incomplete or could not be verified. Review it before ejecting.".to_owned());
+                        }
+                    }
+                    progress("done");
+                    result
+                },
                 Err(e) => {
+                    progress("failed");
                     tracing::warn!(destination, error = %e, "sync to one device failed");
-                    SyncDeviceReportDto { path: destination, report: None, error: Some(e.message) }
+                    SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
                 }
             });
         }
@@ -835,6 +851,7 @@ pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) ->
         Ok(DeviceSyncStateDto {
             selected,
             on_device: playlists_on_device(mount),
+            libraries: crate::usb_import::library_trees(mount)?,
             automatic: ours.is_some_and(|r| r.automatic),
         })
     })
@@ -1089,6 +1106,10 @@ pub(crate) fn write_export(
             "That device is no longer connected. It may have been unplugged or renamed.",
         ));
     }
+    let settings_root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport/usb-settings");
+    let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
+        .filter(|name| !destination.join("PIONEER").join(name).exists())
+        .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();
     let library_defaults = defaults.map(crate::device_settings::library_defaults);
     let report = rbl_export::export_full(
         destination,
@@ -1104,6 +1125,9 @@ pub(crate) fn write_export(
         crate::device_settings::write_dev_defaults(destination, defaults)?;
     }
 
+    for (name, bytes) in imported_settings {
+        crate::durable::write(&destination.join("PIONEER").join(name), &bytes).map_err(|e| AppError::internal(e.to_string()))?;
+    }
     // Re-read what was written with the independent parser: an export that
     // cannot be read back is not an export.
     let check = rbl_export::verify(destination)
@@ -1138,6 +1162,7 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
                     path: device.mount_point.to_string_lossy().into_owned(),
                     total_bytes: device.total_bytes,
                     free_bytes: device.free_bytes,
+                    file_system: device.file_system,
                     removable: device.removable,
                     volume_id: device.volume_id,
                     export: found.map(|export| DeviceExportDto {
@@ -1235,7 +1260,7 @@ pub async fn track_beats(
 /// A track's beat grid from its `.DAT`: milliseconds, the beat's number in
 /// the bar (1 is the downbeat) and the tempo there x100, at most `MAX_BEATS`
 /// of them. Empty for a track without one.
-fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8, u16)> {
+pub(crate) fn read_beat_grid(share: &std::path::Path, relative: &str) -> Vec<(u32, u8, u16)> {
     let path = share.join(relative.trim_start_matches(['/', '\\']));
     let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
     let Ok(file) = rbl_anlz::parse(&bytes) else { return Vec::new() };

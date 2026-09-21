@@ -13,11 +13,12 @@
  * reading the stick.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, LoaderCircle, Search, Usb, X } from "lucide-react";
 
 import { FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSyncState, TreeNode } from "@/ipc/types";
-import { capacityText } from "@/lib/devices";
+import { formatSpace } from "@/lib/devices";
 import { exportSummary } from "@/lib/exportSummary";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
@@ -90,18 +91,37 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedDevices, setTickedDevices] = useState<ReadonlySet<string>>(new Set());
+  const [expandedDevices, setExpandedDevices] = useState<ReadonlySet<string>>(new Set());
+  const [deviceErrors, setDeviceErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [states, setStates] = useState<ReadonlyMap<string, DeviceSyncState>>(new Map());
-  /** Devices to sync again on their own when plugged in. */
-  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [loadingTree, setLoadingTree] = useState(true);
+  const [treeError, setTreeError] = useState("");
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [devicesError, setDevicesError] = useState("");
+  const [operation, setOperation] = useState<"sync" | "import" | null>(null);
+  const busy = operation !== null;
+  const [ejectAfterSync, setEjectAfterSync] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
   // DJ System in Preferences is what a stick with no settings of its own
   // gets, as it is on every export from the shell.
-  const stickDefaults = usePreferences().djSystem;
+  const preferences = usePreferences();
+  const stickDefaults = preferences.djSystem;
 
   const nodes = useMemo(() => playlistNodes(tree), [tree]);
+  const playlists = useMemo(() => nodes.filter(node => node.kind === "playlist"), [nodes]);
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n] as const)), [nodes]);
-  const visible = useMemo(() => visibleNodes(nodes, collapsed), [nodes, collapsed]);
+  const search = query.trim().toLocaleLowerCase();
+  const visible = useMemo(() => search
+    ? playlists.filter(node => node.name.toLocaleLowerCase().includes(search))
+    : visibleNodes(nodes, collapsed), [nodes, playlists, collapsed, search]);
+  const selectedCount = playlists.filter(node => ticked.has(node.id)).length;
+  const selectionSummary = `${selectedCount} playlist${selectedCount === 1 ? "" : "s"} → ${tickedDevices.size} USB device${tickedDevices.size === 1 ? "" : "s"}`;
+  const selectionHint = selectedCount === 0 && tickedDevices.size === 0 ? "Select playlists and a USB device."
+    : selectedCount === 0 ? "Select playlists to sync."
+    : tickedDevices.size === 0 ? "Select a USB device to sync to."
+    : "Selected playlists will sync to each selected device.";
 
   // The same tree the shell fetches, once, on open. Its folders open one
   // level deep, as rekordbox's manager opens them: the top folders show,
@@ -115,22 +135,28 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         setTree(read);
         setCollapsed(new Set(playlistNodes(read).filter((n) => n.kind === "folder" && n.depth > 1).map((n) => n.id)));
       })
-      .catch(() => {
-        // Not up yet: the panel stays empty, as the shell's tree would.
-      });
+      .catch(() => { if (live) setTreeError("Couldn’t load playlists. Reopen Sync Manager to try again."); })
+      .finally(() => { if (live) setLoadingTree(false); });
     return () => {
       live = false;
     };
   }, []);
 
   const refreshDevices = useCallback(async () => {
-    const backend = await getBackend();
-    const found = await backend.listDevices();
-    setDevices(found);
-    // A stick that was pulled is not a destination any more.
-    const present = new Set(found.map((d) => d.path));
-    setTickedDevices((current) => new Set([...current].filter((path) => present.has(path))));
-    return found;
+    setLoadingDevices(true);
+    setDevicesError("");
+    try {
+      const backend = await getBackend();
+      const found = await backend.listDevices();
+      setDevices(found);
+      // A stick that was pulled is not a destination any more.
+      const present = new Set(found.map((d) => d.path));
+      setTickedDevices((current) => new Set([...current].filter((path) => present.has(path))));
+      return found;
+    } catch (e) {
+      setDevicesError("Couldn’t read USB devices. Click Refresh to try again.");
+      throw e;
+    } finally { setLoadingDevices(false); }
   }, []);
   useEffect(() => {
     void refreshDevices().catch(() => {
@@ -151,6 +177,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const readDevice = useCallback(async (path: string, restore: boolean) => {
     const backend = await getBackend();
     const read = await backend.deviceSyncState(path);
+    setDeviceErrors(current => { const next = new Map(current); next.delete(path); return next; });
     setStates((current) => new Map(current).set(path, read));
     if (restore && read.selected.length > 0) {
       setTicked((current) => {
@@ -172,8 +199,8 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     // ticked sticks, so a second stick adds to the first's rather than
     // replacing it. Unticking takes nothing away.
     if (on) {
-      void readDevice(path, true).catch(() => {
-        setStates((current) => new Map(current).set(path, { selected: [], onDevice: [], automatic: false }));
+      void readDevice(path, true).catch(e => {
+        setDeviceErrors(current => new Map(current).set(path, e instanceof Error ? e.message : "Could not read this USB device."));
       });
     }
   }, [readDevice]);
@@ -198,7 +225,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     });
   }, [nodes, byId]);
 
-  const canSync = ticked.size > 0 && tickedDevices.size > 0 && !busy;
+  const canSync = selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
 
   const sync = useCallback(() => {
     if (!canSync) return;
@@ -206,28 +233,56 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     const playlists = nodes.filter((n) => n.kind === "playlist" && ticked.has(n.id)).map((n) => n.id);
     const destinations = devices.filter((d) => tickedDevices.has(d.path)).map((d) => d.path);
     const nameOf = (path: string) => devices.find((d) => d.path === path)?.name ?? path;
-    setBusy(true);
-    setStatus([]);
+    setOperation("sync");
+    setStatus(["Preparing sync…"]);
     void (async () => {
-      const backend = await getBackend();
-      const stop = backend.onSyncProgress((progress) => {
-        if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
-      });
+      let stop = () => {};
       try {
-        const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false);
-        setStatus(reports.map((r) => (r.report ? exportSummary(nameOf(r.path), r.report) : `${nameOf(r.path)}: ${r.error ?? "The sync failed."}`)));
+        const backend = await getBackend();
+        stop = backend.onSyncProgress((progress) => {
+          if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
+          if (progress.state === "ejecting") setStatus([`Ejecting ${nameOf(progress.path)}…`]);
+        });
+        const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync);
+        setStatus(reports.map((r) => {
+          const summary = r.report ? exportSummary(nameOf(r.path), r.report) : `${nameOf(r.path)}: ${r.error ?? "The sync failed."}`;
+          return summary + (r.ejected ? " Safely ejected." : r.ejectError ? ` Not ejected: ${r.ejectError}` : "");
+        }));
         // What the sticks hold now, without touching the ticks.
-        await refreshDevices();
-        await Promise.all(destinations.map((path) => readDevice(path, false).catch(() => {})));
+        await refreshDevices().catch(() => {});
+        await Promise.all(reports.filter(r => !r.ejected).map(({ path }) => readDevice(path, false).catch(() => {})));
         onSynced?.();
       } catch (e) {
         setStatus([e instanceof Error ? e.message : "The sync could not be written."]);
       } finally {
         stop();
-        setBusy(false);
+        setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, refreshDevices, readDevice, onSynced]);
+  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, refreshDevices, readDevice, onSynced]);
+
+  const importCues = () => {
+    if (busy || tickedDevices.size === 0) return;
+    setOperation("import");
+    setStatus([]);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (!await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
+        const results: string[] = [];
+        for (const device of devices.filter(d => tickedDevices.has(d.path))) {
+          setStatus([`Importing cues and beat grids from ${device.name}…`]);
+          try {
+            const result = await backend.importUsb(device.path, true, false, false);
+            results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
+          } catch (e) { results.push(`${device.name}: ${e instanceof Error ? e.message : String(e)}`); }
+        }
+        setStatus(results);
+        onSynced?.();
+      } catch (e) { setStatus([e instanceof Error ? e.message : String(e)]); }
+      finally { setOperation(null); }
+    })();
+  };
 
   const body = (
     <div
@@ -253,9 +308,19 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         )}
         Sync Manager
       </header>
+      <div className={styles.intro}>Choose the playlists to take with you and the USB devices to sync them to.</div>
       <div className={styles.body}>
         <section className={styles.column} aria-label="rbxport">
-          <h2 className={styles.heading}>rbxport</h2>
+          <div className={styles.headingRow}>
+            <div><h2 className={styles.heading}>Playlists</h2><p className={styles.columnNote}>{selectedCount} of {playlists.length} selected</p></div>
+            <button type="button" className={styles.textButton} disabled={busy || selectedCount === 0}
+              onClick={() => setTicked(new Set())}>Clear selection</button>
+          </div>
+          <div className={styles.search}>
+            <Search size={14} aria-hidden="true" />
+            <input type="search" aria-label="Search playlists" placeholder="Search playlists" value={query} onChange={e => setQuery(e.currentTarget.value)} />
+            {query ? <button type="button" aria-label="Clear playlist search" onClick={() => setQuery("")}><X size={14} aria-hidden="true" /></button> : null}
+          </div>
           <div className={styles.list} role="tree" aria-label="Playlists">
             {visible.map((node) => {
               const folder = node.kind === "folder";
@@ -268,7 +333,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                   role="treeitem"
                   aria-expanded={folder ? open : undefined}
                   aria-selected={state === "on"}
-                  style={{ paddingLeft: `${8 + (node.depth - 1) * 18}px` }}
+                  style={{ paddingLeft: `${8 + (search ? 0 : node.depth - 1) * 18}px` }}
                 >
                   <button
                     type="button"
@@ -279,17 +344,25 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                     tabIndex={folder ? 0 : -1}
                     onClick={() => folder && setCollapsed((current) => toggle(current, node.id))}
                   />
+                  <label className={styles.rowSelection}>
                   {folder ? <FolderIcon className={styles.icon} /> : <ListIcon className={styles.icon} />}
                   <span className={styles.name}>{node.name}</span>
                   <TickBox state={state} label={node.name} disabled={busy} onChange={(on) => tickNode(node, on)} />
+                  </label>
                 </div>
               );
             })}
-            {tree.length > 0 && nodes.length === 0 ? <p className={styles.empty}>No playlists yet.</p> : null}
+            {loadingTree ? <p className={styles.empty}>Loading playlists…</p>
+              : treeError ? <p className={styles.empty} role="alert">{treeError}</p>
+              : nodes.length === 0 ? <p className={styles.empty}>No playlists yet. Create a playlist in your library to get started.</p>
+              : visible.length === 0 ? <p className={styles.empty}>No playlists match “{query.trim()}”.</p> : null}
           </div>
         </section>
 
         <div className={styles.middle}>
+          <div className={styles.syncActions}>
+          <span className={styles.direction}>Library <ArrowRight size={14} aria-hidden="true" /> USB</span>
+          <strong className={styles.selectionSummary}>{selectionSummary}</strong>
           <button
             type="button"
             className={styles.sync}
@@ -297,68 +370,95 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
             disabled={!canSync}
             aria-label="SYNC"
             aria-busy={busy || undefined}
+            aria-describedby="sync-selection-hint"
           >
-            SYNC <span className={styles.chevron} aria-hidden>›</span>
+            {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>Sync <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
+          <label className={styles.ejectOption}>
+            <input type="checkbox" className={styles.tick} checked={ejectAfterSync} disabled={busy}
+              aria-label="Eject after syncing" onChange={e => setEjectAfterSync(e.currentTarget.checked)} />
+            Eject after syncing
+          </label>
+          <p id="sync-selection-hint" className={styles.actionHint}>{selectionHint}</p>
+          </div>
+          <div className={styles.importActions}>
+          <span className={styles.direction}>Library <ArrowLeft size={14} aria-hidden="true" /> USB</span>
+          <button type="button" className={styles.button} onClick={importCues}
+            disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary}
+            title={preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids." : "Import cues and beat grids from USB to rbxport"}>
+            {operation === "import" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" ? "Importing…" : "Import cues & grids"}
+          </button>
+          <p className={styles.actionHint}>{preferences.advanced.protectLibrary ? "Turn off Library Protection to import changes." : "Bring cue and beat-grid changes back to your library."}</p>
+          </div>
         </div>
 
         <section className={styles.column} aria-label="Device">
           <div className={styles.headingRow}>
-            <h2 className={styles.heading}>Device</h2>
+            <div><h2 className={styles.heading}>USB devices</h2><p className={styles.columnNote}>{tickedDevices.size} of {devices.length} selected</p></div>
             <button
               type="button"
               className={styles.refresh}
               onClick={() => void refreshDevices().catch(() => {})}
-              disabled={busy}
+              disabled={busy || loadingDevices}
             >
-              Refresh
+              {loadingDevices ? "Refreshing…" : "Refresh"}
             </button>
           </div>
-          <div className={styles.list} role="list" aria-label="Devices">
+          <p className={styles.deviceHint}>Use the arrow to browse a device’s playlists.</p>
+          {devicesError ? <p className={styles.empty} role="alert">{devicesError}</p> : null}
+          <div className={styles.list} role="tree" aria-label="Devices">
             {devices.map((device) => {
               const on = tickedDevices.has(device.path);
+              const expanded = expandedDevices.has(device.path);
               const read = states.get(device.path);
-              return (
-                <div key={device.path} className={styles.device} role="listitem" data-ticked={on || undefined}>
-                  <div className={styles.row}>
-                    <span className={styles.name}>{device.name}</span>
-                    <TickBox
-                      state={on ? "on" : "off"}
-                      label={device.name}
-                      disabled={busy}
-                      onChange={(next) => tickDevice(device.path, next)}
-                    />
-                  </div>
-                  {on ? (
-                    <div className={styles.library} aria-label={`${device.name} library`}>
-                      <div className={styles.libraryHead}>Device Library</div>
-                      {read === undefined ? (
-                        <div className={styles.libraryNote}>Reading…</div>
-                      ) : read.onDevice.length === 0 ? (
-                        <div className={styles.libraryNote}>No playlists on this device yet.</div>
-                      ) : (
-                        <ul className={styles.libraryList}>
-                          {read.onDevice.map((name, i) => (
-                            // Names can repeat on a stick; the position is what tells them apart.
-                            <li key={`${i}:${name}`}>{name}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <div className={styles.capacity}>{capacityText(device)}</div>
-                    </div>
-                  ) : null}
+              const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
+              const free = device.totalBytes > 0 ? `${device.freeBytes === 0 ? "0.0 GB" : formatSpace(device.freeBytes)} free (${Math.round(device.freeBytes / device.totalBytes * 100)}%)` : "Space unknown";
+              const freePercent = device.totalBytes > 0 ? Math.max(0, Math.min(100, device.freeBytes / device.totalBytes * 100)) : null;
+              const usedPercent = freePercent === null ? null : 100 - freePercent;
+              const used = device.totalBytes > 0 ? formatSpace(Math.max(0, device.totalBytes - device.freeBytes)) || "0.0 GB" : "";
+              return <div key={device.path} className={styles.device} role="treeitem" aria-expanded={expanded} data-ticked={on || undefined}>
+                <div className={styles.row}>
+                  <button type="button" className={styles.twisty} data-open={expanded ? "" : undefined}
+                    aria-label={`${expanded ? "Collapse" : "Expand"} ${device.name}`} disabled={busy} onClick={() => {
+                      setExpandedDevices(current => toggle(current, device.path));
+                      if (!expanded) void readDevice(device.path, false).catch(e => setDeviceErrors(current => new Map(current).set(device.path, e instanceof Error ? e.message : "Could not read this USB device.")));
+                    }} />
+                  <label className={styles.rowSelection}>
+                  <Usb size={16} className={styles.usbIcon} aria-hidden="true" />
+                  <span className={styles.name} title={device.path}>{device.name}</span>
+                  <TickBox state={on ? "on" : "off"} label={device.name} disabled={busy} onChange={(next) => tickDevice(device.path, next)} />
+                  </label>
                 </div>
-              );
+                <div className={styles.storage}>
+                  <p className={styles.capacity}>{fileSystem}{device.totalBytes > 0 ? ` · ${formatSpace(device.totalBytes)} total` : ""}</p>
+                  <div className={styles.spaceBar} role={freePercent === null ? "img" : "meter"}
+                    aria-label={`${device.name} storage used`} aria-valuemin={usedPercent === null ? undefined : 0}
+                    aria-valuemax={usedPercent === null ? undefined : 100} aria-valuenow={usedPercent ?? undefined}
+                    aria-valuetext={usedPercent === null ? "Space unknown" : `${used} used; ${free}`} title={free}>
+                    {usedPercent !== null ? <span style={{ width: `${usedPercent}%` }} /> : null}
+                  </div>
+                  <div className={styles.storageLabels}>{usedPercent !== null ? <span><i aria-hidden="true" />{used} used</span> : null}<span>{free}</span></div>
+                </div>
+                {!expanded && deviceErrors.has(device.path) ? <p className={styles.capacity} role="alert">{deviceErrors.get(device.path)}</p> : null}
+                {expanded ? <div className={styles.library} role="group" aria-label={`${device.name} library`}>
+                  {deviceErrors.has(device.path) ? <p role="alert">{deviceErrors.get(device.path)}</p> : read === undefined ? <div className={styles.libraryNote}>Reading…</div>
+                    : <DeviceLibraries libraries={read.libraries ?? [{ name: "Device Library", nodes: read.onDevice.map((name, i) => ({ id: String(i+1), parentId: "0", name, folder: false })) }]} />}
+                </div> : null}
+              </div>;
             })}
-            {devices.length === 0 ? <p className={styles.empty}>No devices connected.</p> : null}
+            {devices.length === 0 ? <p className={styles.empty}>{loadingDevices ? "Looking for USB devices…" : "Connect a USB device, then click Refresh."}</p> : null}
           </div>
         </section>
       </div>
       <footer className={styles.footer}>
         <div className={styles.status} role="status" aria-live="polite">
+          {busy ? <LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> : null}
+          <div>
           {status.map((line) => (
             <div key={line}>{line}</div>
           ))}
+          {status.length === 0 ? <span className={styles.idleStatus}>{selectionHint}</span> : null}
+          </div>
         </div>
         <button type="button" className={styles.button} onClick={onClose}>
           Close
@@ -373,4 +473,23 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
       {body}
     </div>
   );
+}
+
+function DeviceLibraries({ libraries }: { libraries: NonNullable<DeviceSyncState["libraries"]> }) {
+  if (libraries.length === 0) return <p className={styles.libraryNote}>No libraries on this device yet.</p>;
+  return <>{libraries.map(library => {
+    const children = (parent: string, ancestors: Set<string>): React.ReactNode => library.nodes
+      .filter(node => node.parentId === parent && !ancestors.has(node.id))
+      .map(node => node.folder ? <details key={node.id} open role="treeitem">
+        <summary><FolderIcon className={styles.icon} /> {node.name}</summary>
+        <div role="group">{children(node.id, new Set([...ancestors, node.id]))}</div>
+      </details> : <div key={node.id} className={styles.playlistLeaf} role="treeitem"><ListIcon className={styles.icon} /> {node.name}</div>);
+    return <details key={library.name} open role="treeitem">
+      <summary>{library.name}</summary>
+      <div role="group"><details open role="treeitem">
+        <summary><FolderIcon className={styles.icon} /> Playlists</summary>
+        <div role="group">{library.nodes.length ? children("0", new Set()) : <p className={styles.libraryNote}>No playlists on this device yet.</p>}</div>
+      </details></div>
+    </details>;
+  })}</>;
 }

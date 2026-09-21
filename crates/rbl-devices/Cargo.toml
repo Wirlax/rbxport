@@ -21,3 +21,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 rbl-anlz = { path = "../rbl-anlz" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_System_Ioctl"] }

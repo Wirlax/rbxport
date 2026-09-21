@@ -8,6 +8,7 @@
 mod windowfit;
 pub mod analysis;
 pub mod commands;
+mod usb_import;
 pub mod cues;
 pub mod details;
 pub mod grid;
@@ -492,6 +493,7 @@ pub fn run() {
             commands::sync_devices,
             commands::export_tracks_to_device,
             commands::device_sync_state,
+            usb_import::import_usb,
             device_settings::reference_stick_settings,
             commands::create_playlist,
             commands::smart_rule,

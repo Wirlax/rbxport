@@ -59,6 +59,7 @@ import { useAnalysis } from "@/store/useAnalysis";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
+import { useUsbImports } from "@/store/useUsbImports";
 import { useTooltip } from "@/store/usePreferences";
 
 /**
@@ -418,6 +419,7 @@ export function App() {
   const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
+  useUsbImports(devices, prefs.preferences.usbExport, readOnly || summary === null, report);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
   useEffect(() => {
     setNote((current) => {

@@ -32,6 +32,7 @@ import { AnalysisPane, ANALYSIS_TABS, type AnalysisTab } from "./AnalysisPane";
 import { AudioPane, AUDIO_TABS, type AudioTab } from "./AudioPane";
 import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
 import { KeyboardPane } from "./KeyboardPane";
+import { UsbExportPane } from "./UsbExportPane";
 import { BackupsPane } from "./BackupsPane";
 import { ArchiveRestore } from "lucide-react";
 import { LinkPane } from "./LinkPane";
@@ -43,9 +44,17 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  * The sidebar, in the capture's order and wording, less PLAN and CLOUD, and
  * with About at the end — ours, for the version and the update check.
  */
-export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "about";
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "usbExport" | "about";
 
 export type PreferencesTarget = Pane | "libraryProtection";
+
+function UsbStickIcon(props: SVGProps<SVGSVGElement>) {
+  return <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+    <path d="M8 9V2h8v7M10 4v2m4-2v2" />
+    <rect x="6" y="9" width="12" height="13" rx="3" />
+    <path d="M10 18h4" />
+  </svg>;
+}
 
 const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: "view", label: "View", Icon: PrefViewIcon },
@@ -55,6 +64,7 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
   { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+  { id: "usbExport", label: "USB Export", Icon: UsbStickIcon },
   { id: "backups", label: "Backups", Icon: ArchiveRestore },
   { id: "about", label: "About", Icon: PrefAboutIcon },
 ];
@@ -66,6 +76,7 @@ const RESETS: Partial<Record<Pane, PreferencePane>> = {
   analysis: "analysis",
   djSystem: "djSystem",
   advanced: "advanced",
+  usbExport: "usbExport",
 };
 
 export interface PreferencesProps {
@@ -280,6 +291,8 @@ export function Preferences({
                   <LinkPane />
                 ) : pane === "keyboard" ? (
                   <KeyboardPane />
+                ) : pane === "usbExport" ? (
+                  <UsbExportPane />
                 ) : pane === "backups" ? (
                   <BackupsPane readOnly={summary?.readOnly ?? false} />
                 ) : pane === "about" ? (

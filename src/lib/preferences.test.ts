@@ -109,3 +109,8 @@ describe("the sliders and the quantize value", () => {
     expect(quantizeFraction("1/8")).toBe(0.125);
   });
 });
+
+ it("defaults USB imports to history only and preserves saved choices", () => {
+  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true });
+  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false });
+});

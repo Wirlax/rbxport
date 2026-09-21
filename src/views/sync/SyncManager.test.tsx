@@ -51,6 +51,7 @@ const report = (path: string, tracks: number): SyncDeviceReport => ({
 
 let host: HTMLDivElement;
 let root: Root;
+let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
 let progress: ((p: SyncProgress) => void) | null;
 let onClose: ReturnType<typeof vi.fn>;
@@ -73,6 +74,7 @@ beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
   onClose = vi.fn();
+  importUsb = vi.fn(() => Promise.resolve({ tracks: 2, histories: 0, settings: 0, skipped: 0 }));
   syncDevices = vi.fn((playlists: string[], destinations: string[]) =>
     Promise.resolve(destinations.map((path) => report(path, playlists.length * 10))),
   );
@@ -84,6 +86,8 @@ beforeEach(async () => {
       return state ? Promise.resolve(state) : Promise.reject(new Error("gone"));
     },
     syncDevices,
+    importUsb,
+    confirm: () => Promise.resolve(true),
     onSyncProgress: (listener: (p: SyncProgress) => void) => {
       progress = listener;
       return () => {
@@ -108,9 +112,36 @@ afterEach(() => {
 
 describe("SyncManager", () => {
   it("lists the playlists and folders, not All Tracks or the heading", () => {
-    const names = [...host.querySelectorAll('[role="treeitem"]')].map((row) => row.textContent?.trim());
+    const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
     expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Closing"]);
     expect(host.querySelector('button[aria-label="SYNC"]')).toHaveProperty("disabled", true);
+  });
+
+  it("shows used space as the filled portion and labels the remaining free space", () => {
+    const meter = host.querySelector('[role="meter"][aria-label="USB A storage used"]');
+    expect(meter?.getAttribute("aria-valuenow")).toBe("25");
+    expect(meter?.getAttribute("aria-valuetext")).toBe("8.0 GB used; 24.0 GB free (75%)");
+    expect(meter?.querySelector("span")?.style.width).toBe("25%");
+  });
+
+  it("requests post-sync ejection and distinguishes eject errors from sync errors", async () => {
+    syncDevices.mockResolvedValueOnce([
+      { ...report("/Volumes/USB A", 5), ejected: true },
+      { ...report("/Volumes/USB B", 5), ejectError: "Device is busy." },
+    ]);
+    expect(box("Eject after syncing")?.checked).toBe(false);
+    click(box("USB A"));
+    click(box("USB B"));
+    click(box("Eject after syncing"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    expect(box("Eject after syncing")?.disabled).toBe(true);
+    await settle();
+    expect(syncDevices.mock.calls[0]?.[4]).toBe(true);
+    expect(status()).toContain("Exported 5 tracks to USB A");
+    expect(status()).toContain("Safely ejected.");
+    expect(status()).toContain("Exported 5 tracks to USB B");
+    expect(status()).toContain("Not ejected: Device is busy.");
   });
 
   it("ticking a folder ticks every playlist under it, and part of it shows as mixed", () => {
@@ -135,17 +166,24 @@ describe("SyncManager", () => {
     expect(box("Main Set")?.checked).toBe(false);
   });
 
-  it("ticking a device ticks what it was last synced with and shows what it holds", async () => {
+  it("ticking a device restores its selection without expanding it", async () => {
     expect(box("Closing")?.checked).toBe(false);
     click(box("USB A"));
     await settle();
     expect(box("Closing")?.checked).toBe(true);
+    expect(host.querySelector('[aria-label="USB A library"]')).toBeNull();
+    expect(box("USB A")?.closest('[role="treeitem"]')?.getAttribute("aria-expanded")).toBe("false");
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
+    await settle();
     const library = host.querySelector('[aria-label="USB A library"]');
     expect(library?.textContent).toContain("Device Library");
     expect(library?.textContent).toContain("Closing");
-    expect(library?.textContent).toContain("24.0 GB free of 32.0 GB");
+    expect(host.textContent).toContain("24.0 GB free (75%)");
     // A stick with nothing on it says so, and ticks nothing.
     click(box("USB B"));
+    await settle();
+    expect(host.querySelector('[aria-label="USB B library"]')).toBeNull();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB B"]'));
     await settle();
     expect(host.querySelector('[aria-label="USB B library"]')?.textContent).toContain("No playlists on this device yet.");
     expect(box("Warm Up")?.checked).toBe(false);
@@ -179,6 +217,7 @@ describe("SyncManager", () => {
     expect(playlists).toEqual(["p1", "p2", "p3"]);
     expect(destinations).toEqual(["/Volumes/USB A", "/Volumes/USB B"]);
     expect(automatic).toBe(false);
+    expect(syncDevices.mock.calls[0]?.[4]).toBe(false);
     expect(box("Automatic synchronization for USB A")).toBeNull();
     expect(box("Automatic synchronization for USB B")).toBeNull();
     expect(status()).toContain("Exported 30 tracks to USB A");
@@ -209,4 +248,23 @@ describe("SyncManager", () => {
     });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+});
+
+it("imports cue/grid information from selected devices only", async () => {
+  const button = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("Import cues & grids"))!;
+  expect(button.disabled).toBe(true);
+  click(box("USB A"));
+  await settle();
+  click(button);
+  await settle();
+  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", true, false, false);
+  expect(importUsb).toHaveBeenCalledTimes(1);
+  expect(status()).toContain("updated 2 tracks");
+});
+
+it("expanding a USB does not select it for synchronization", async () => {
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
+  await settle();
+  expect(box("USB A")?.checked).toBe(false);
+  expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Closing");
 });

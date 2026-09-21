@@ -238,7 +238,7 @@ impl DevSetting {
 pub fn export_root(mount_point: &Path) -> PathBuf {
     for name in ["PIONEER", ".PIONEER"] {
         let root = mount_point.join(name);
-        if root.join("rekordbox/export.pdb").is_file() || root.join("DEVSETTING.DAT").is_file() {
+        if root.join("rekordbox/export.pdb").is_file() || root.join("rekordbox/exportLibrary.db").is_file() || root.join("DEVSETTING.DAT").is_file() {
             return root;
         }
     }

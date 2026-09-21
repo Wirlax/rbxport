@@ -1577,7 +1577,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // Stick after stick, each announced before and after, as the real run
     // is. A destination that is not a mock device is a stick that was
     // pulled: its entry carries the error and the others their reports.
-    syncDevices: async (playlists, destinations, defaults, automatic) => {
+    syncDevices: async (playlists, destinations, defaults, automatic, ejectAfterSync) => {
       if (playlists.length === 0) throw new Error("That playlist has no tracks to export.");
       const reports = [];
       for (const path of destinations) {
@@ -1588,7 +1588,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         await wait(undefined);
         const device = devices.find((d) => d.path === path);
         if (device) {
-          reports.push({ path, report: writeTo(device, playlists, defaults) });
+          const report = writeTo(device, playlists, defaults);
+          const ejected = Boolean(ejectAfterSync && report.verified && report.skipped.length === 0);
+          if (ejected) {
+            tell("ejecting");
+            devices.splice(devices.indexOf(device), 1);
+          }
+          reports.push({ path, report, ejected });
           if (automatic) autoSync.add(path);
           else autoSync.delete(path);
           tell("done");
@@ -1600,6 +1606,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return reports;
     },
     smartRule: (playlist) => wait(smartRules.get(playlist) ?? { logic: "all", conditions: [] }),
+    importUsb: () => Promise.resolve({ tracks: 0, histories: 0, settings: 0, skipped: 0 }),
     deviceSyncState: (path) => {
       if (!devices.some((d) => d.path === path)) {
         return Promise.reject(new Error("That device is no longer connected."));
@@ -1607,6 +1614,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait({
         selected: (syncSelections.get(path) ?? []).map((p) => ({ ...p })),
         onDevice: [...(deviceLibraries.get(path) ?? [])],
+        libraries: ["Device Library", "OneLibrary"].map(name => ({ name, nodes: (deviceLibraries.get(path) ?? []).map((name, i) => ({ id: String(i+1), parentId: "0", name, folder: false })) })),
         automatic: autoSync.has(path),
       });
     },
@@ -1619,7 +1627,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
-    listDevices: () => wait(devices.map((device) => ({ ...device }))),
+    listDevices: () => wait(devices.map((device) => ({ ...device, fileSystem: "FAT32" }))),
     onExportProgress: () => () => undefined,
     // A browser opens the address itself.
     openUrl: (url) => {

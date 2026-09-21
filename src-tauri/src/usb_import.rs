@@ -1,0 +1,249 @@
+//! USB-to-library reads. Never infer track identity from a title or USB row id.
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
+use serde::Serialize;
+use tauri::{State, Manager};
+use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult}, state::AppState};
+
+fn err(e: impl std::fmt::Display) -> AppError { AppError::internal(format!("USB import: {e}")) }
+fn within(root: &Path, relative: &str) -> AppResult<PathBuf> {
+    let path = root.join(relative.trim_start_matches('/')).canonicalize().map_err(err)?;
+    if !path.starts_with(root.canonicalize().map_err(err)?) { return Err(err("File lies outside the USB device")); }
+    Ok(path)
+}
+
+pub fn library_trees(root: &Path) -> AppResult<Vec<DeviceLibraryTreeDto>> {
+    let export = rbl_devices::settings::export_root(root);
+    let mut libraries = Vec::new();
+    let pdb = export.join("rekordbox/export.pdb");
+    if pdb.exists() {
+        let bytes = std::fs::read(pdb).map_err(err)?;
+        let parsed = rbl_pdb::Pdb::parse(&bytes).map_err(err)?;
+        let mut nodes = parsed.table(rbl_pdb::PageType::PlaylistTree).map(|t| parsed.playlist_nodes(t)).unwrap_or_default();
+        nodes.sort_by_key(|n| (n.parent_id, n.sort_order));
+        libraries.push(DeviceLibraryTreeDto { name: "Device Library".into(), nodes: nodes.into_iter().map(|n| DevicePlaylistNodeDto {
+            id: n.id.to_string(), parent_id: n.parent_id.to_string(), name: n.name, folder: n.is_folder,
+        }).collect() });
+    }
+    let one = export.join("rekordbox/exportLibrary.db");
+    if one.exists() {
+        let db = rbl_onelibrary::ExportLibrary::open_read_only(&one).map_err(err)?;
+        let mut q = db.connection().prepare("SELECT playlist_id, COALESCE(playlist_id_parent,0), name, attribute FROM playlist ORDER BY sequenceNo").map_err(err)?;
+        let nodes = q.query_map([], |r| Ok(DevicePlaylistNodeDto { id: r.get::<_,i64>(0)?.to_string(), parent_id: r.get::<_,i64>(1)?.to_string(), name: r.get(2)?, folder: r.get::<_,i64>(3)? != 0 })).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+        libraries.push(DeviceLibraryTreeDto { name: "OneLibrary".into(), nodes });
+    }
+    Ok(libraries)
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct ImportReport {
+    tracks: usize, histories: usize, settings: usize, skipped: usize,
+    warnings: Vec<String>,
+    #[serde(skip)] changed: Vec<String>,
+}
+
+/// Explicit cue/grid imports and connect-time history/settings imports share identity checks.
+#[tauri::command]
+pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, path: String, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
+    let state = Arc::clone(&state);
+    let worker = Arc::clone(&state);
+    if !rbl_devices::list().iter().any(|d| d.mount_point == Path::new(&path)) { return Err(err("Device is no longer connected")); }
+    let editor = Arc::clone(&app.state::<Arc<crate::grid::GridEditor>>());
+    let result = blocking("import_usb", move || import(&worker, &editor, Path::new(&path), cues, history, settings)).await;
+    match result {
+        Ok(result) => {
+            if result.tracks > 0 || result.histories > 0 { reload(app.clone(), state).await?; }
+            for id in &result.changed {
+                let _ = tauri::Emitter::emit(&app, "grid:changed", id);
+                let _ = tauri::Emitter::emit(&app, "cues:changed", id);
+            }
+            Ok(result)
+        }
+        Err(e) => { let _ = reload(app, state).await; Err(e) }
+    }
+}
+
+fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let mut report = ImportReport::default();
+    let location = state.location()?;
+    let export = rbl_devices::settings::export_root(root);
+    let one_path = export.join("rekordbox/exportLibrary.db");
+    let one = if one_path.exists() { Some(rbl_onelibrary::ExportLibrary::open_read_only(&one_path).map_err(err)?) } else { None };
+    let db_id = state.read_db(|db| rbl_db::export_info::db_id(db.connection())).map_err(write_error)?;
+    // USB id -> master id, analysis path. masterDbId prevents importing another library's ids.
+    let mut tracks: HashMap<u32, (String, String)> = HashMap::new();
+    if let Some(db) = &one {
+        let mut q = db.connection().prepare("SELECT content_id, masterContentId, COALESCE(analysisDataFilePath,'') FROM content WHERE masterDbId=?1 AND masterContentId>0").map_err(err)?;
+        for entry in q.query_map([db_id as i64], |r| Ok((r.get::<_,u32>(0)?, (r.get::<_,i64>(1)?.to_string(), r.get::<_,String>(2)?)))).map_err(err)? {
+            let (id, value) = entry.map_err(err)?; tracks.insert(id, value);
+        }
+    }
+    // Our manifest also works on legacy-only exports; validate its source path against master.db.
+    if let Some(manifest) = rbl_export::Manifest::load(root) {
+        for t in manifest.tracks {
+            let id = t.library_id.to_string();
+            let matched = state.read_db(|db| Ok(db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_,String>(0)).ok().as_deref() == Some(t.source.as_str()))).map_err(write_error)?;
+            if matched && !t.anlz_dir.is_empty() { tracks.entry(t.export_id).or_insert((id, format!("{}/ANLZ0000.DAT", t.anlz_dir))); }
+        }
+    }
+    if cues && tracks.is_empty() { return Err(err("No tracks from this library were found on the device.")); }
+    if cues {
+        // Open the guarded writer even for an empty device; read-only must not look like success.
+        state.write(|_| Ok(())).map_err(write_error)?;
+        for (id, analysis) in tracks.values() {
+            if editor.is_locked(id) { report.skipped += 1; continue; }
+            if analysis.is_empty() { report.skipped += 1; continue; }
+            let source = within(root, analysis)?;
+            let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
+            let source_ext = source.with_extension("EXT");
+            let source_cues = if source_ext.exists() { rbl_anlz::Anlz::read(&within(root, &source_ext.strip_prefix(root).map_err(err)?.to_string_lossy())?).map_err(err)? } else { source_dat.clone() };
+            if source_cues.section(b"PCO2").is_none() { report.skipped += 1; continue; }
+            let entries = source_cues.cue_entries();
+            let beats = source_dat.beat_grid().unwrap_or_default();
+            let previous_bpm = state.read_db(|db| Ok(db.connection().query_row("SELECT COALESCE(BPM,0) FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [id], |r| r.get::<_,u32>(0))?)).map_err(write_error)?;
+            let bpm = beats.first().map_or(previous_bpm, |b| u32::from(b.tempo_x100));
+            let relative = state.write(|w| w.analysis_data_path_for(id)).map_err(write_error)?;
+            let target = rbl_anlz::resolve(&location.share_root, &relative);
+            let mut files = Vec::new();
+            for extension in ["DAT", "EXT"] {
+                let target = target.with_extension(extension);
+                if !target.exists() { continue; }
+                let mut dest = rbl_anlz::Anlz::read(&target).map_err(err)?;
+                let src = if extension == "DAT" { &source_dat } else { &source_cues };
+                dest.sections.retain(|s| !s.is_cue_list());
+                dest.sections.extend(src.sections.iter().filter(|s| s.is_cue_list()).cloned());
+                if extension == "DAT" && !beats.is_empty() {
+                    dest.sections.retain(|s| s.as_beat_grid().is_none());
+                    if let Some(grid) = source_dat.section(b"PQTZ") { dest.sections.push(grid.clone()); }
+                }
+                let bytes = if extension == "EXT" { dest.with_extended_grid_cleared().unwrap_or_else(|| dest.to_bytes()) } else { dest.to_bytes() };
+                files.push((target, bytes));
+            }
+            if files.is_empty() { report.skipped += 1; continue; }
+            let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
+            if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
+            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.rollback()?; return Err(write_error(e)); }
+            journal.commit()?;
+            editor.forget_history(id);
+            report.changed.push(id.clone());
+            report.tracks += 1;
+        }
+    }
+    if history {
+        if one.is_none() && export.join("rekordbox/export.pdb").exists() {
+            report.warnings.push("History import currently requires OneLibrary; legacy Device Library history was not imported.".into());
+        }
+        if let Some(db) = &one {
+            let mut q = db.connection().prepare("SELECT history_id, name FROM history WHERE attribute=0 ORDER BY sequenceNo").map_err(err)?;
+            let sessions = q.query_map([], |r| Ok((r.get::<_,i64>(0)?, r.get::<_,String>(1)?))).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+            for (session, name) in sessions {
+                let mut q = db.connection().prepare("SELECT content_id FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(err)?;
+                let ids = q.query_map([session], |r| r.get::<_,u32>(0)).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+                let matched: Vec<String> = ids.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
+                if matched.len() != ids.len() { report.skipped += ids.len() - matched.len(); continue; }
+                if matched.is_empty() { continue; }
+                let key = format!("{}:{session}:{name}", rbl_devices::volume_id(root));
+                let hash = rbl_export::manifest::hash(key.as_bytes());
+                let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffffffffffff);
+                report.histories += state.write(|w| w.import_usb_history(&format!("{name} (USB {:06x})", hash & 0xffffff), &uuid, &matched)).map_err(write_error)?;
+            }
+        }
+    }
+    if settings {
+        let destination = state.backup_dir().parent().unwrap_or(state.backup_dir()).join("usb-settings");
+        for name in ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"] {
+            let source = export.join(name);
+            if !source.exists() { continue; }
+            let bytes = std::fs::read(within(root, &source.strip_prefix(root).map_err(err)?.to_string_lossy())?).map_err(err)?;
+            validate_settings(name, &bytes)?;
+            std::fs::create_dir_all(&destination).map_err(err)?;
+            crate::durable::write(&destination.join(name), &bytes).map_err(err)?;
+            report.settings += 1;
+        }
+    }
+    Ok(report)
+}
+
+fn validate_settings(name: &str, bytes: &[u8]) -> AppResult<()> {
+    if bytes.len() < 108 || bytes.len() > 4096 { return Err(err(format!("Invalid {name}"))); }
+    let size = u32::from_le_bytes(bytes[100..104].try_into().map_err(err)?) as usize;
+    if size + 108 != bytes.len() || bytes[0..4] != [96, 0, 0, 0] { return Err(err(format!("Invalid {name} length"))); }
+    let end = 104 + size;
+    let mut crc = 0u16;
+    for byte in &bytes[if name == "DJMMYSETTING.DAT" { 0 } else { 104 }..end] {
+        crc ^= u16::from(*byte) << 8;
+        for _ in 0..8 { crc = if crc & 0x8000 == 0 { crc << 1 } else { (crc << 1) ^ 0x1021 }; }
+    }
+    let stored = u16::from_le_bytes([bytes[end], bytes[end+1]]);
+    if stored != crc { return Err(err(format!("Invalid {name} checksum"))); }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    #[test]
+    fn imports_only_cues_and_grid_preserving_local_path_and_waveform() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        let id = rbl_db::fixture::track_id(0);
+        let source_path: String = db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1", [&id], |r| r.get(0)).unwrap();
+        drop(db);
+        let relative = state.write(|w| w.analysis_data_path_for(&id)).unwrap();
+        state.write(|w| w.register_analysis(&id, &rbl_db::write::AnalysisRegistration { bpm_x100: 12000, key: None, analysis_data_path: &relative })).unwrap();
+        let target = rbl_anlz::resolve(&location.share_root, &relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let mut original = rbl_anlz::write::AnlzBuilder::new();
+        original.path("/original.mp3").waveform_preview(b"PWAV", &[1,2,3]).beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12000, time_ms: 0 }]).cue_lists(true);
+        std::fs::write(&target, original.finish()).unwrap();
+        let usb = dir.path().join("usb");
+        let anlz = "PIONEER/USBANLZ/test";
+        std::fs::create_dir_all(usb.join(anlz)).unwrap();
+        let mut changed = rbl_anlz::write::AnlzBuilder::new();
+        changed.path("/usb.mp3").beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }]).cue_lists(true);
+        std::fs::write(usb.join(anlz).join("ANLZ0000.DAT"), changed.finish()).unwrap();
+        rbl_export::Manifest { version: 1, written: String::new(), playlists: vec![], loose: vec![], tracks: vec![rbl_export::manifest::ManifestTrack {
+            export_id: 1, library_id: id.parse().unwrap(), source: source_path, audio: "audio.mp3".into(), anlz_dir: anlz.into(), size: 0, modified: 0, analysis: 0, artwork: String::new(),
+        }] }.save(&usb).unwrap();
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+        let report = import(&state, &editor, &usb, true, false, false).unwrap();
+        assert_eq!(report.tracks, 1);
+        let result = rbl_anlz::Anlz::read(&target).unwrap();
+        assert_eq!(result.path().as_deref(), Some("/original.mp3"));
+        assert_eq!(result.waveform(b"PWAV").unwrap().1, &[1,2,3]);
+        assert_eq!(result.beat_grid().unwrap()[0].time_ms, 250);
+        assert_eq!(result.beat_grid().unwrap()[0].tempo_x100, 12800);
+        editor.set_locked(&id, true).unwrap();
+        assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
+    }
+
+    #[test]
+    fn onelibrary_tree_is_read_without_a_legacy_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("PIONEER/rekordbox/exportLibrary.db");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut builder = rbl_onelibrary::build::Builder::create(&path).unwrap();
+        builder.add_playlist(1, "Set", 0, 0).unwrap();
+        builder.finish("USB", "2026-09-21", 0).unwrap();
+        let trees = library_trees(dir.path()).unwrap();
+        assert_eq!(trees.len(), 1);
+        assert_eq!(trees[0].name, "OneLibrary");
+        assert_eq!(trees[0].nodes[0].name, "Set");
+    }
+
+    #[test]
+    fn invalid_settings_and_escaped_paths_are_rejected() {
+        assert!(validate_settings("MYSETTING.DAT", &[0; 148]).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("usb")).unwrap();
+        std::fs::write(dir.path().join("outside"), b"x").unwrap();
+        assert!(within(&dir.path().join("usb"), "../outside").is_err());
+    }
+}

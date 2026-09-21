@@ -323,13 +323,15 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_sync_window");
       return true;
     },
-    syncDevices: (playlists, destinations, defaults, automatic) =>
+    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync) =>
       invoke<SyncDeviceReport[]>("sync_devices", {
         playlists,
         destinations,
         defaults: defaults ?? null,
         automatic: automatic ?? false,
+        ejectAfterSync: ejectAfterSync ?? false,
       }),
+    importUsb: (path, cues, history, settings) => invoke("import_usb", { path, cues, history, settings }),
     deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),
     smartRule: (playlist) => invoke<SmartRule>("smart_rule", { playlist }),
     onSyncProgress: (listener) => subscribe<SyncProgress>("sync:progress", listener),

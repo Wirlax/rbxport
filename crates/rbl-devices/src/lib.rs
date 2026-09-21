@@ -13,6 +13,7 @@
 pub mod settings;
 pub mod explorer;
 pub mod mounts;
+pub mod eject;
 
 pub use mounts::MountWatcher;
 
@@ -30,6 +31,7 @@ pub struct Device {
     pub mount_point: PathBuf,
     pub total_bytes: u64,
     pub free_bytes: u64,
+    pub file_system: String,
     /// Whether the OS calls it removable. External SSDs often say no, so this
     /// is shown, not used to decide what to list.
     pub removable: bool,
@@ -87,6 +89,7 @@ fn devices_from(disks: &sysinfo::Disks) -> Vec<Device> {
             mount_point: disk.mount_point().to_owned(),
             total_bytes: disk.total_space(),
             free_bytes: disk.available_space(),
+            file_system: filesystem_name(disk.mount_point(), &disk.file_system().to_string_lossy()),
             removable: disk.is_removable(),
             volume_id: volume_id(disk.mount_point()),
         })
@@ -105,6 +108,7 @@ fn fake_device(path: &Path) -> Device {
         mount_point: path.to_owned(),
         total_bytes: 0,
         free_bytes: 0,
+        file_system: String::new(),
         removable: true,
         volume_id: volume_id(path),
     }
@@ -281,9 +285,26 @@ mod tests {
             mount_point: PathBuf::new(),
             total_bytes: 100,
             free_bytes: 400,
+            file_system: String::new(),
             volume_id: String::new(),
             removable: true,
         };
         assert_eq!(device.used_bytes(), 0);
     }
+}
+
+fn filesystem_name(path: &Path, raw: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if matches!(raw.to_ascii_lowercase().as_str(), "msdos" | "fat") {
+        if let Ok(output) = std::process::Command::new("/usr/sbin/diskutil").args(["info", "-plist"]).arg(path).output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(value) = text.split("<key>FilesystemName</key>").nth(1)
+                .and_then(|v| v.split("<string>").nth(1)).and_then(|v| v.split("</string>").next()) {
+                return value.trim().trim_start_matches("MS-DOS ").to_owned();
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+    raw.to_owned()
 }

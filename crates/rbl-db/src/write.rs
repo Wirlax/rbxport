@@ -1280,6 +1280,62 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// Replaces a track's cues from a USB export and updates its grid metadata atomically.
+    pub fn import_usb_cues(&mut self, content: &str, cues: &[rbl_anlz::CueEntry], bpm: u32) -> Result<()> {
+        self.prepare()?;
+        if cues.iter().any(|c| c.hot_cue > 16 || !matches!(c.kind, 1 | 2) || (c.kind == 2 && c.loop_time_ms <= c.time_ms)) {
+            return Err(DbError::WriteRefused("Invalid USB cue data".into()));
+        }
+        let ids: Vec<_> = cues.iter().map(|_| self.unused_id_below("djmdCue", MAX_CUE_ID)).collect::<Result<_>>()?;
+        let uuids: Vec<_> = cues.iter().map(|_| self.rng.uuid4()).collect();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owner: String = tx.query_row("SELECT UUID FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [content], |r| r.get(0))?;
+        let stamp = time::now();
+        let usn = next_usn(&tx);
+        tx.execute("UPDATE djmdCue SET rb_local_deleted=1, rb_local_usn=?2, updated_at=?3 WHERE ContentID=?1 AND rb_local_deleted=0", params![content, usn, stamp])?;
+        for ((cue, id), uuid) in cues.iter().zip(ids).zip(uuids) {
+            let kind = if cue.hot_cue >= 4 { cue.hot_cue + 1 } else { cue.hot_cue };
+            let end = (cue.kind == 2).then_some(i64::from(cue.loop_time_ms));
+            tx.execute("INSERT INTO djmdCue (ID, ContentID, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, Kind, Color, ColorTableIndex, ActiveLoop, Comment, ContentUUID, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,0,0,0,?4,?5,?6,?7,0,?8,?9,?10,0,0,0,0,?11,?12,?12)", params![id, content, cue.time_ms, end, kind, if kind == 0 {255} else {-1}, cue.color_code.unwrap_or(cue.color_id), cue.comment.as_deref().unwrap_or(""), owner, uuid, usn, stamp])?;
+        }
+        tx.execute("UPDATE djmdContent SET BPM=CASE WHEN ?2>0 THEN ?2 ELSE BPM END, AnalysisUpdated=CAST(COALESCE(AnalysisUpdated, '0') AS INTEGER)+1, rb_local_usn=?3, updated_at=?4 WHERE ID=?1", params![content, bpm, usn, stamp])?;
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Imports a USB session once, preserving order and repeated plays.
+    pub fn import_usb_history(&mut self, name: &str, source_uuid: &str, tracks: &[String]) -> Result<usize> {
+        self.prepare()?;
+        let candidate = self.unused_id("djmdHistory")?;
+        let stamp = time::now();
+        let created = time::local_stamp();
+        let ids: Vec<_> = tracks.iter().map(|_| (self.rng.uuid4(), self.rng.uuid4())).collect();
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<String> = tx.query_row("SELECT ID FROM djmdHistory WHERE UUID=?1 AND rb_local_deleted=0", [source_uuid], |r| r.get(0)).optional()?;
+        let session = match existing {
+            Some(id) => id,
+            None => history_node(&tx, name, ROOT, 0, &candidate, source_uuid, &created, &stamp)?,
+        };
+        let previous: i64 = tx.query_row("SELECT COUNT(*) FROM djmdSongHistory WHERE HistoryID=?1 AND rb_local_deleted=0", [&session], |r| r.get(0))?;
+        let previous_tracks: Vec<String> = tx.prepare("SELECT ContentID FROM djmdSongHistory WHERE HistoryID=?1 AND rb_local_deleted=0 ORDER BY TrackNo")?
+            .query_map([&session], |r| r.get(0))?.collect::<std::result::Result<_,_>>()?;
+        if !tracks.starts_with(&previous_tracks) {
+            return Err(DbError::WriteRefused("This USB history changed since its last import; it was left unchanged.".into()));
+        }
+        if previous_tracks.len() == tracks.len() { return Ok(0); }
+        let mut count = 0;
+        let usn = next_usn(&tx);
+        for (index, (content, (id, uuid))) in tracks.iter().zip(ids).enumerate().skip(previous.max(0) as usize) {
+            if !content_exists(&tx, content)? { return Err(DbError::WriteRefused("USB history contains an unknown track".into())); }
+            tx.execute("INSERT INTO djmdSongHistory (ID, HistoryID, ContentID, TrackNo, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced, rb_local_usn, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,0,0,0,0,?6,?7,?7)", params![id, session, content, (index+1) as i64, uuid, usn, stamp])?;
+            count += 1;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(count)
+    }
+
     // --------------------------------------------------------------- history
 
     /// Records a play: the track goes on the end of today's history session
@@ -2071,7 +2127,7 @@ fn write_artwork_sizes(target: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn next_usn(conn: &Connection) -> i64 {
+pub(crate) fn next_usn(conn: &Connection) -> i64 {
     let counter: i64 = conn
         .query_row(
             "SELECT COALESCE(int_1, 0) FROM agentRegistry WHERE registry_id = 'localUpdateCount'",
@@ -2094,7 +2150,7 @@ fn next_usn(conn: &Connection) -> i64 {
 /// Writes the registry counter. Always last in a transaction, so a crash
 /// leaves the counter behind the rows rather than ahead of them — behind is
 /// recoverable by taking the maximum, ahead silently skips a row.
-fn set_counter(conn: &Connection, usn: i64) -> Result<()> {
+pub(crate) fn set_counter(conn: &Connection, usn: i64) -> Result<()> {
     conn.execute(
         "UPDATE agentRegistry SET int_1 = ?1, updated_at = ?2 WHERE registry_id = 'localUpdateCount'",
         params![usn, time::now()],

@@ -259,6 +259,7 @@ pub struct DeviceDto {
     pub path: String,
     pub total_bytes: u64,
     pub free_bytes: u64,
+    pub file_system: String,
     pub removable: bool,
     /// Names the medium across a rename; `rbl_devices::volume_id`.
     pub volume_id: String,
@@ -308,6 +309,9 @@ pub struct SyncDeviceReportDto {
     pub report: Option<ExportReportDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    pub ejected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eject_error: Option<String>,
 }
 
 /// One playlist a stick was last synced with.
@@ -330,6 +334,7 @@ pub struct DeviceSyncStateDto {
     /// The playlist names in its `export.pdb`, folders left out; empty
     /// when it holds no export.
     pub on_device: Vec<String>,
+    pub libraries: Vec<DeviceLibraryTreeDto>,
     /// The stick's sync record asks to be synced again when it is plugged
     /// in, and the record is this library's.
     pub automatic: bool,
@@ -500,4 +505,19 @@ pub struct SmartConditionDto {
     pub right: String,
     /// `day`, `week`, `month` or `year` for "in the last"; empty otherwise.
     pub unit: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLibraryTreeDto {
+    pub name: String,
+    pub nodes: Vec<DevicePlaylistNodeDto>,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePlaylistNodeDto {
+    pub id: String,
+    pub parent_id: String,
+    pub name: String,
+    pub folder: bool,
 }

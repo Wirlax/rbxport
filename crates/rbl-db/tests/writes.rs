@@ -1924,3 +1924,27 @@ fn embedded_cover_is_registered_with_thumbnails_and_never_replaces_custom_art() 
     assert!(!f.writer.import_artwork(&id).unwrap());
     assert_eq!(f.one::<String>("SELECT ImagePath FROM djmdContent WHERE ID = ?1", &[&id]), custom);
 }
+
+#[test]
+fn usb_cues_replace_old_cues_and_preserve_loop_details() {
+    let mut f = fixture();
+    let track = track_id(0).to_string();
+    f.writer.add_cue(&track, 1, 100).unwrap();
+    let cue = rbl_anlz::CueEntry { hot_cue: 4, kind: 2, time_ms: 1000, loop_time_ms: 5000, color_id: 0, comment: Some("USB loop".into()), color_code: Some(21), rgb: None };
+    f.writer.import_usb_cues(&track, &[cue], 12800).unwrap();
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdCue WHERE rb_local_deleted=0"), 1);
+    let values: (i64, i64, String) = f.conn().query_row("SELECT Kind, OutMsec, Comment FROM djmdCue WHERE rb_local_deleted=0", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+    assert_eq!(values, (5, 5000, "USB loop".into()));
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track]), 12800);
+}
+
+#[test]
+fn usb_history_is_repeat_safe_and_appends_new_plays() {
+    let mut f = fixture();
+    let track = track_id(0).to_string();
+    let uuid = "00000000-0000-4000-8000-000000000001";
+    assert_eq!(f.writer.import_usb_history("USB session", uuid, &[track.clone(), track.clone()]).unwrap(), 2);
+    assert_eq!(f.writer.import_usb_history("USB session", uuid, &[track.clone(), track.clone()]).unwrap(), 0);
+    assert_eq!(f.writer.import_usb_history("USB session", uuid, &[track.clone(), track.clone(), track]).unwrap(), 1);
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongHistory WHERE rb_local_deleted=0 AND HistoryID IN (SELECT ID FROM djmdHistory WHERE UUID='00000000-0000-4000-8000-000000000001')"), 3);
+}
