@@ -1,7 +1,7 @@
-//! `exportLibrary.db` — the database rekordbox reads a stick back from.
+//! `exportLibrary.db` — the Device Library Plus / OneLibrary database.
 //!
-//! A CDJ never opens this: it plays from `export.pdb`. This is what lets
-//! rekordbox itself import a stick, and what makes an export round-trip.
+//! Keep it consistent with the legacy `export.pdb` library when exporting
+//! both formats. It also carries master-library identities for round trips.
 //!
 //! Encrypted with `SQLCipher` 4 under a passphrase that is the same on every
 //! stick (see [`key`]), because any machine has to be able to read it.

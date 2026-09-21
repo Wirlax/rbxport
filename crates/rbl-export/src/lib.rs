@@ -102,7 +102,7 @@ pub struct DeviceTrack {
 
 /// One My Tag of the library, to be listed on the stick: a category
 /// (`attribute` 1, `parent` 0) or a tag under one (`attribute` 0).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceMyTag {
     pub id: u64,
     pub seq: u32,
@@ -584,6 +584,11 @@ pub fn export_with_options(
     before.check_baseline(previous.as_ref(), db_id)?;
     let (tracks, playlists) = reconcile::prepare(destination, &before, previous.as_ref(), tracks, playlists, db_id)?;
     let tracks = tracks.as_slice();
+    let mut merged_tags = my_tags.to_vec();
+    for tag in &before.my_tags {
+        if !merged_tags.iter().any(|t|t.id==tag.id) { merged_tags.push(tag.clone()); }
+    }
+    let my_tags = merged_tags.as_slice();
     let playlists = playlists.as_slice();
     let playlist_ids = playlist_ids(playlists, previous.as_ref())?;
     let ids = assign_ids(tracks, previous.as_ref());
@@ -889,6 +894,11 @@ pub fn export_with_options(
         report.playlists += 1;
     }
 
+    // Carry device colour labels into both database formats.
+    let existing_database = db_dir.join("exportLibrary.db");
+    let settings = if existing_database.exists() {
+        Some(rbl_onelibrary::settings::StickSettings::read(&existing_database).map_err(|e| one_library_error(&e))?)
+    } else { None };
     // The artwork table names the small image of each; a player derives the
     // others from the same name [ASSUME: what the `artwork` row of a
     // rekordbox export names, of the four files it writes per image].
@@ -907,6 +917,7 @@ pub fn export_with_options(
         entries: &entry_rows,
         artwork: &artwork_rows,
         history: &before.history,
+        colors: settings.as_ref().or(defaults).map_or(&[], |s| &s.colors),
     });
     report.pdb_bytes = pdb.len();
     let staged_db = publication.stage().join(root_name).join("rekordbox");
@@ -916,11 +927,6 @@ pub fn export_with_options(
     let master_db_id = my_tag_master_db_id(sync);
     rbl_core::durable::write(&staged_db.join("exportExt.pdb"), &ext_pdb::build(my_tags, master_db_id))?;
 
-    // A player never opens this; rekordbox does, to read the stick back.
-    let existing_database = db_dir.join("exportLibrary.db");
-    let settings = if existing_database.exists() {
-        Some(rbl_onelibrary::settings::StickSettings::read(&existing_database).map_err(|e| one_library_error(&e))?)
-    } else { None };
     write_one_library(&staged_db, &one_library_tracks, playlists, &playlist_ids, &export_ids, &artwork_paths, my_tags, settings.as_ref().or(defaults), master_db_id, &before, Some(&existing_database))?;
     report.one_library = true;
 
@@ -1007,6 +1013,7 @@ struct PdbTables<'a> {
     /// Empty on a stick with no artwork, and on a blank one.
     artwork: &'a [Vec<u8>],
     history: &'a [snapshot::History],
+    colors: &'a [rbl_onelibrary::settings::ColorName],
 }
 
 /// Builds `export.pdb` with the twenty tables rekordbox writes, in its
@@ -1029,7 +1036,11 @@ fn build_pdb(tables: &PdbTables<'_>) -> Vec<u8> {
         &COLORS
             .iter()
             .enumerate()
-            .map(|(i, name)| color_row(u16::try_from(i).unwrap_or(0) + 1, name))
+            .map(|(i, name)| {
+                let id=u16::try_from(i).unwrap_or(0)+1;
+                let name=tables.colors.iter().find(|c|c.id==i64::from(id)).map_or(*name,|c|c.name.as_str());
+                color_row(id,name)
+            })
             .collect::<Vec<_>>(),
     );
     file.add_table(7, tables.playlists);
@@ -1109,6 +1120,7 @@ pub fn create_library(
         entries: &[],
         artwork: &[],
         history: &[],
+        colors: defaults.map_or(&[], |s| &s.colors),
     });
     rbl_core::durable::write(&db_dir.join("export.pdb"), &pdb)?;
     // The library's tags go on even a stick with no tracks [OBS 7.2.11:

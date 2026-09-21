@@ -84,11 +84,14 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     // Our manifest also works on legacy-only exports; validate its source path against master.db.
-    if let Some(manifest) = rbl_export::Manifest::load(root) {
+    if let Some(manifest) = rbl_export::Manifest::load(root).filter(|m| m.db_id == 0 || m.db_id == db_id) {
         for t in manifest.tracks {
             let id = t.library_id.to_string();
             let matched = state.read_db(|db| Ok(db.connection().query_row("SELECT FolderPath FROM djmdContent WHERE ID=?1 AND rb_local_deleted=0", [&id], |r| r.get::<_,String>(0)).ok().as_deref() == Some(t.source.as_str()))).map_err(write_error)?;
-            if matched && !t.anlz_dir.is_empty() { tracks.entry(t.export_id).or_insert((id, format!("{}/ANLZ0000.DAT", t.anlz_dir))); }
+            if matched {
+                let analysis = if t.anlz_dir.is_empty() { String::new() } else { format!("{}/ANLZ0000.DAT", t.anlz_dir) };
+                tracks.entry(t.export_id).or_insert((id, analysis));
+            }
         }
     }
     if cues && tracks.is_empty() { return Err(err("No tracks from this library were found on the device.")); }
@@ -222,6 +225,12 @@ mod tests {
         assert_eq!(result.beat_grid().unwrap()[0].time_ms, 250);
         assert_eq!(result.beat_grid().unwrap()[0].tempo_x100, 12800);
         editor.set_locked(&id, true).unwrap();
+        assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
+        editor.set_locked(&id, false).unwrap();
+        let mut manifest = rbl_export::Manifest::load(&usb).unwrap();
+        manifest.tracks[0].anlz_dir.clear();
+        manifest.save(&usb).unwrap();
+        // Identity remains available for history even without cue analysis.
         assert_eq!(import(&state, &editor, &usb, true, false, false).unwrap().skipped, 1);
     }
 
