@@ -59,7 +59,7 @@ it("reconnects to a background job after reopening Preferences and can stop it",
   });
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
   await act(async () => { button("Create backup").click(); await Promise.resolve(); });
-  expect(button("Create backup").disabled).toBe(true);
+  expect(button("Create backup")).toBeUndefined();
   expect(button("Restore").disabled).toBe(true);
   expect(host.querySelector('[role="status"]')?.textContent).toContain("50%");
   act(() => root.unmount());
@@ -71,7 +71,7 @@ it("reconnects to a background job after reopening Preferences and can stop it",
     return Promise.resolve();
   });
   await act(async () => { button("Stop backup").click(); await Promise.resolve(); });
-  expect(button("Stop backup").disabled).toBe(true);
+  expect(button("Stopping…").disabled).toBe(true);
   held.backend.backupProgress.mockResolvedValue({ ...progress, running: false, phase: "cancelled" });
   await act(async () => { await vi.advanceTimersByTimeAsync(500); });
   expect(host.querySelector('[role="status"]')?.textContent).toBe("Backup stopped.");

@@ -50,22 +50,38 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     finally { running.current = false; setBusy(""); }
   };
   const unavailable = loading || busy !== "" || job.progress.running;
+  const copying = job.progress.phase === "copying" && job.progress.totalBytes > 0;
+  const percent = Math.min(100, Math.max(0, Math.floor(job.progress.copiedBytes / (job.progress.totalBytes || 1) * 100)));
+  const stopping = job.progress.phase === "stopping";
   return <Section title="Backups">
-    <section className={layout.summary} aria-label="Backup your Library">
+    <section className={`${layout.summary} ${job.progress.running ? styles.activeBackup : ""}`} aria-label="Backup your Library">
+      {job.progress.running ? <div className={styles.backupProgress}>
+        <div className={styles.progressHeading} role="status" aria-live="polite">
+          <strong>{job.progress.phase === "copying" ? "Backing up your library" : job.text}</strong>
+          {copying ? <span className={styles.percent}>{percent}%</span> : null}
+        </div>
+        <progress className={styles.progressBar} aria-label="Backup progress" max={100}
+          value={copying ? percent : undefined} />
+        <div className={styles.progressDetails}>
+          {copying ? `${formatBytes(job.progress.copiedBytes)} of ${formatBytes(job.progress.totalBytes)}`
+            : stopping ? "Removing the unfinished backup…"
+              : job.progress.phase === "validating" ? "Checking the saved files before finishing."
+                : "Getting your library files ready."}
+        </div>
+        <div className={styles.progressFooter}>
+          <p>You can keep using RBXport while this runs.</p>
+          <Button disabled={stopping} onClick={() => void job.stop()}>{stopping ? "Stopping…" : "Stop backup"}</Button>
+        </div>
+      </div> : <>
       <div>
         <strong>Backup your Library</strong>
         <p className={layout.help}>Backs up the database, memory, hot cues, beat grid, and waveform previews. Music files are not backed up.</p>
-        <p className={styles.status} role="status" aria-live="polite">{job.progress.running ? job.text : busy || message || job.text || (loading ? "Loading backups…" : "")}</p>
-        {job.progress.running ? <p className={layout.help}>Backup started in the background. You can continue to use rbexport while it's backing up.</p> : null}
-        {job.progress.running ? <div className={styles.actions}>
-          <progress aria-label="Backup progress" max={job.progress.totalBytes || 1}
-            value={job.progress.phase === "copying" ? job.progress.copiedBytes : undefined} />
-          <Button disabled={job.progress.phase === "stopping"} onClick={() => void job.stop()}>Stop backup</Button>
-        </div> : null}
+        <p className={styles.status} role="status" aria-live="polite">{busy || message || (job.error ? "" : job.text) || (loading ? "Loading backups…" : "")}</p>
       </div>
       <Button disabled={unavailable || readOnly} onClick={() => {
         setError(""); setMessage(""); void job.start();
       }}>Create backup</Button>
+      </>}
     </section>
     {readOnly ? <p className={layout.notice}>Quit rekordbox before creating or restoring a backup.</p> : null}
     {preferences.advanced.protectLibrary ? <p className={layout.notice}>Library Protection is on. Turn it off in Advanced to restore a backup.</p> : null}
