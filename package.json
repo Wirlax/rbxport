@@ -52,6 +52,7 @@
     "cross-env": "^7.0.3",
     "eslint": "^9.18.0",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "javascript-obfuscator": "^5.8.0",
     "jsdom": "^26.0.0",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.19.2",

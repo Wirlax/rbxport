@@ -60,6 +60,14 @@ the saved library and analysis, unloads the decks, and refreshes the collection.
 
 ## Development
 
+`pnpm build` obfuscates application JavaScript and omits source maps; Tauri's
+installer builds run this automatically. Third-party dependencies stay minified
+without obfuscation, and `pnpm dev` remains readable. The output is JavaScript
+compatible with WebKit/WebView2, not V8 bytecode. Obfuscation discourages casual
+inspection but does not protect secrets. Release builds produce separate
+`darwin-aarch64` (Apple Silicon) and `darwin-x86_64` (Intel) installers and updater
+payloads.
+
 Waveform dragging uses a velocity-controlled low-pass filter: slow scrubs sound
 darker, and faster scrubs open the high frequencies. See
 [waveform scrubbing](docs/waveform-scrubbing.md) for the cutoff curve and behavior.

@@ -12,13 +12,24 @@
  * page. Those are listed in the policy from the scheme the shell registers,
  * and are not exercised here.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import process from "node:process";
 
 import { expect, test } from "@playwright/test";
 
 /** The preview server, one port above the dev server (see playwright.config.ts). */
 const preview = `http://localhost:${(Number(process.env.E2E_PORT) || 1420) + 1}/`;
+
+test("production assets do not expose source maps", () => {
+  const assets = readdirSync("dist", { recursive: true }) as string[];
+  expect(assets.filter((file) => file.endsWith(".map"))).toEqual([]);
+  const scripts = assets.filter((file) => file.endsWith(".js"));
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const file of scripts) {
+    expect(readFileSync(join("dist", file), "utf8"), file).not.toContain("sourceMappingURL=");
+  }
+});
 
 /** The policy the shell ships, read from the config so the two cannot drift. */
 function shippedPolicy(): string {
