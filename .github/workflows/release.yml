@@ -37,7 +37,7 @@ on:
         type: string
 
 concurrency:
-  group: release-${{ inputs.release_tag || github.ref_name }}
+  group: release-installers
   cancel-in-progress: false
 
 env:
@@ -53,6 +53,9 @@ jobs:
     # WebKit. Both Mac architectures build on the Apple Silicon host.
     strategy:
       fail-fast: false
+      # Serialize signing on shared hosts without job-level concurrency:
+      # arc discovers queued/in_progress runs, not concurrency-pending runs.
+      max-parallel: 1
       matrix:
         include:
           - host: [self-hosted, macos, arm64]
@@ -78,10 +81,6 @@ jobs:
             bundles: appimage,deb
             slug: linux-x86_64
     runs-on: ${{ matrix.host }}
-    # Both Mac jobs share the signing keychain search list on the same host.
-    concurrency:
-      group: ${{ startsWith(matrix.slug, 'darwin-') && 'release-macos-signing' || format('release-{0}-{1}', github.run_id, matrix.slug) }}
-      cancel-in-progress: false
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
       # anything to sign with is decided once, here.
