@@ -197,14 +197,15 @@ test("the deck's metronome button is live once a track is loaded", async ({ page
   await open(page);
   // The GRID EDIT row lives behind the pad row's GRID tab.
   await player(page).getByRole("tab", { name: "GRID" }).click();
-  const metronome = player(page).getByRole("button", { name: "Metronome" });
+  const metronome = player(page).getByRole("button", { name: /^Metronome:/ });
   await expect(metronome).toBeDisabled();
   await load(page);
   await expect(metronome).toBeEnabled();
-  await metronome.click();
-  await expect(metronome).toHaveAttribute("aria-pressed", "true");
-  await metronome.click();
-  await expect(metronome).toHaveAttribute("aria-pressed", "false");
+  for (const level of ["Low", "Medium", "High", "Off", "Low"]) {
+    await metronome.click();
+    await expect(metronome).toHaveAccessibleName(`Metronome: ${level}`);
+    await expect(metronome).toHaveAttribute("aria-pressed", String(level !== "Off"));
+  }
 });
 
 test("Keyboard lists rekordbox's ten groups, with the unbuilt rows greyed", async ({ page }) => {

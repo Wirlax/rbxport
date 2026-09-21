@@ -597,7 +597,7 @@ function gridButton(
   id: string,
   editor: ReturnType<typeof useGridEditor>,
   hold: ReturnType<typeof useHoldRepeat>,
-  deck: { metronome: boolean; toggleMetronome: () => void; idle: boolean; readOnly: boolean },
+  deck: { metronome: boolean; metronomeLevel: string; metronomeBusy: boolean; toggleMetronome: () => void; idle: boolean; readOnly: boolean },
 ): GridButton {
   const reason = !editor.hasGrid
     ? "This track has no beat grid to edit"
@@ -664,9 +664,9 @@ function gridButton(
       };
     case "metronome":
       return {
-        disabled: deck.idle,
+        disabled: deck.idle || deck.metronomeBusy,
         pressed: deck.metronome,
-        title: "Metronome: a click on every beat while the deck plays",
+        title: `Metronome: ${deck.metronomeLevel}. Click to cycle Low → Medium → High → Off.`,
         handlers: { onClick: deck.toggleMetronome },
       };
     case "lock":
@@ -766,17 +766,25 @@ export const Player = memo(function Player({
    * loop and mix taken from it inherits that.
    */
   const [quantize, setQuantize] = useState(true);
-  // The metronome: a click on every beat of the grid while the deck plays.
-  // Off on every load, as rekordbox's is; the engine holds the grid.
-  const [metronome, setMetronome] = useState(false);
-  const toggleMetronome = useCallback(() => {
-    const on = !metronome;
-    setMetronome(on);
-    void getBackend()
-      .then((backend) => backend.deckMetronome(deck, on))
-      .catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The metronome could not be switched."));
-  }, [metronome, deck, onError]);
   const { preferences, update: updatePreferences } = usePreferencesContext();
+  const [metronome, setMetronome] = useState(false);
+  const [metronomeBusy, setMetronomeBusy] = useState(false);
+  const metronomePending = useRef(false);
+  const metronomeLevel = !metronome ? "Off" : preferences.audio.metronomeVolume === "small" ? "Low" : preferences.audio.metronomeVolume === "middle" ? "Medium" : "High";
+  const toggleMetronome = useCallback(() => {
+    if (metronomePending.current) return;
+    const volume = !metronome ? "small" : preferences.audio.metronomeVolume === "small" ? "middle" : "large";
+    const on = !metronome || preferences.audio.metronomeVolume !== "large";
+    metronomePending.current = true;
+    setMetronomeBusy(true);
+    void getBackend().then(async (backend) => {
+      if (on) await backend.setMetronome(preferences.audio.metronomeSound, volume);
+      await backend.deckMetronome(deck, on);
+      if (on) updatePreferences("audio", { metronomeVolume: volume });
+      setMetronome(on);
+    }).catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The metronome could not be changed."))
+      .finally(() => { metronomePending.current = false; setMetronomeBusy(false); });
+  }, [metronome, preferences.audio.metronomeVolume, preferences.audio.metronomeSound, updatePreferences, deck, onError]);
   const { view: viewPrefs, advanced: advancedPrefs } = preferences;
   // The ≡ menu at the foot of the deck.
   const [deckMenuAt, setDeckMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -2016,7 +2024,7 @@ export const Player = memo(function Player({
                       ) : null}
                       {group.map((edit) => {
                         const button = gridButton(edit.id, gridEditor, hold, {
-                          metronome, toggleMetronome, idle: playback.idle, readOnly,
+                          metronome, metronomeLevel, metronomeBusy, toggleMetronome, idle: playback.idle, readOnly,
                         });
                         // The padlock closes when the grid is locked.
                         const Icon = edit.id === "lock" && button.pressed ? GridLockIcon : EDIT_ICONS[edit.id];
@@ -2025,7 +2033,8 @@ export const Player = memo(function Player({
                             key={edit.id}
                             type="button"
                             className={styles.editButton}
-                            aria-label={edit.label}
+                            aria-label={edit.id === "metronome" ? `Metronome: ${metronomeLevel}` : edit.label}
+                            data-metronome={edit.id === "metronome" ? metronomeLevel : undefined}
                             disabled={button.disabled}
                             aria-pressed={button.pressed}
                             title={tip(button.title)}

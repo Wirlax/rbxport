@@ -1217,3 +1217,8 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
   font-size: var(--f-size-xs);
   pointer-events: none;
 }
+
+/* Lit bars show the metronome's Low / Medium / High level. */
+.editButton[data-metronome="Low"] rect:not(:first-child),
+.editButton[data-metronome="Medium"] rect:last-child,
+.editButton[data-metronome="Off"] rect { opacity: .25; }

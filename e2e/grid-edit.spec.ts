@@ -167,10 +167,11 @@ test("tapping shows the taps' tempo and writes it once the tapping stops", async
 });
 
 test("a read-only library greys every edit but the metronome and the lock", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ view: { tooltips: true } })));
   await load(page, "");
   await expect(button(page, "Double the tempo")).toBeDisabled();
   await expect(button(page, "Shift the grid earlier")).toBeDisabled();
   await expect(button(page, "Double the tempo")).toHaveAttribute("title", /read-only/);
-  await expect(button(page, "Metronome")).toBeEnabled();
+  await expect(button(page, "Metronome: Off")).toBeEnabled();
   await expect(button(page, "Lock the grid")).toBeEnabled();
 });
