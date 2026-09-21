@@ -1307,7 +1307,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const name = `library-${createdAt}-${crypto.randomUUID()}`;
     const path = `/mock/backups/${name}`;
     const saved = snapshot();
-    backups.set(path, { saved, backup: { path, name, createdAt, includesAnalysis: true, bytes: new Blob([JSON.stringify(saved)]).size } });
+    backups.set(path, { saved, backup: { path, name, createdAt, includesAnalysis: true, includesArtwork: true, bytes: new Blob([JSON.stringify(saved)]).size } });
     return path;
   };
 
@@ -1637,8 +1637,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     backupDirectory: () => wait("/mock/backups"),
     openBackupDirectory: () => wait(undefined),
     backupSizes: (refresh = false) => {
-      if (!backupSizes || refresh) backupSizes = { updatedAt: Date.now(), database: 48 * 1024 ** 2, waveforms: 240 * 1024 ** 2,
-        cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 4 * 1024 ** 2 };
+      if (!backupSizes || refresh) backupSizes = { updatedAt: Date.now(), trackCount: all.length, artwork: 8 * 1024 ** 2, vocals: 2 * 1024 ** 2, database: 48 * 1024 ** 2, waveforms: 240 * 1024 ** 2,
+        cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 2 * 1024 ** 2 };
       return wait({ ...backupSizes });
     },
     listBackups: () => wait([...backups.values()].map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
@@ -1650,18 +1650,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     startBackup: () => {
       if (backupProgress.running) return refuse("A backup is already running.");
-      backupProgress = { running: true, phase: "preparing", copiedBytes: 0, totalBytes: 100, error: null, path: null };
-      setTimeout(() => { if (backupProgress.phase !== "stopping") backupProgress = { ...backupProgress, phase: "copying", copiedBytes: 50 }; }, 300);
+      backupProgress = { running: true, phase: "preparing", copiedBytes: 0, totalBytes: 100, error: null, path: null, currentItem: "Scanning analysis files" };
+      setTimeout(() => { if (backupProgress.phase !== "stopping") backupProgress = { ...backupProgress, phase: "copying", copiedBytes: 50, currentItem: "Analysis files · USBANLZ/001/ANLZ0000.DAT" }; }, 300);
       setTimeout(() => {
         if (backupProgress.phase === "stopping") {
-          backupProgress = { ...backupProgress, running: false, phase: "cancelled" };
+          backupProgress = { ...backupProgress, running: false, phase: "cancelled", currentItem: null };
           return;
         }
         try {
           const path = saveBackup();
-          backupProgress = { ...backupProgress, running: false, phase: "complete", copiedBytes: 100, path };
+          backupProgress = { ...backupProgress, running: false, phase: "complete", copiedBytes: 100, path, currentItem: null };
         } catch (e) {
-          backupProgress = { ...backupProgress, running: false, phase: "failed", error: String(e) };
+          backupProgress = { ...backupProgress, running: false, phase: "failed", error: String(e), currentItem: null };
         }
       }, 1000);
       return wait(undefined);

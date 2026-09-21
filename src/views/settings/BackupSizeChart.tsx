@@ -12,6 +12,8 @@ const PARTS = [
   { key: "cues", label: "Memory & hot cues", color: "var(--c-label-orange)" },
   { key: "beatGrids", label: "Beat grids", color: "var(--c-label-purple)" },
   { key: "phrases", label: "Phrase analysis", color: "var(--c-label-pink)" },
+  { key: "artwork", label: "Artwork thumbnails", color: "var(--c-label-green)" },
+  { key: "vocals", label: "Vocal analysis", color: "var(--c-label-yellow)" },
   { key: "other", label: "Other analysis", color: "var(--c-text-dim)" },
 ] as const;
 
@@ -53,7 +55,7 @@ export function BackupSizeChart() {
   return <figure className={styles.breakdown} aria-label="Backup contents">
     <figcaption className={styles.breakdownHeading}>
       <strong>Rekordbox Data</strong>
-      {sizes ? <span>{size(total)} total</span> : null}
+      {sizes ? <span>{size(total)} total · {sizes.trackCount.toLocaleString()} {sizes.trackCount === 1 ? "track" : "tracks"}</span> : null}
     </figcaption>
     <div className={styles.sizeBarFrame} aria-busy={loading}>
       <div className={styles.sizeBar} role="img" aria-label={!sizes ? "Rekordbox data size not calculated yet" : total === 0 ? "No data to back up" : PARTS.map(part => `${part.label}: ${size(sizes[part.key])}`).join(", ")}>

@@ -8,8 +8,7 @@ export interface StatusBarProps {
   /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
   activity?: string;
   backupActivity?: string;
-  onCancelBackup?: (() => void) | undefined;
-  backupStopping?: boolean;
+  backupProgress?: { phase: string; copiedBytes: number; totalBytes: number } | undefined;
   /**
    * Something went wrong, said in red.
    *
@@ -35,8 +34,7 @@ export function StatusBar({
   version = null,
   activity = "",
   backupActivity = "",
-  onCancelBackup,
-  backupStopping = false,
+  backupProgress,
   error = null,
   selection = "",
   readOnly = false,
@@ -48,6 +46,8 @@ export function StatusBar({
   analysisFailures = 0,
 }: StatusBarProps) {
   const tip = useTooltip();
+  const backupPercent = backupProgress && backupProgress.totalBytes > 0
+    ? Math.min(100, Math.max(0, Math.floor(backupProgress.copiedBytes / backupProgress.totalBytes * 100))) : 0;
   return (
     <footer className={styles.statusBar}>
       <span className={styles.logo}>
@@ -79,8 +79,13 @@ export function StatusBar({
           ) : null}
         </span>
       )}
-      {backupActivity ? <span className={styles.backupActivity} role="status" aria-live="polite">{backupActivity}</span> : null}
-      {onCancelBackup ? <button type="button" className={styles.stop} disabled={backupStopping} onClick={onCancelBackup}>Stop backup</button> : null}
+      {backupProgress ? <span className={styles.backupMeter} title={backupActivity}>
+        <span>Backup</span>
+        <progress className={styles.backupProgress} aria-label="Backup progress"
+          max={100} value={backupProgress.totalBytes > 0 ? backupPercent : undefined} />
+        <span className={styles.backupPercent}>({backupPercent}%)</span>
+      </span>
+        : backupActivity ? <span className={styles.backupActivity} role="status">{backupActivity}</span> : null}
       <span className={styles.activity}>{activity}</span>
       {analysisFailures > 0 ? (
         <span

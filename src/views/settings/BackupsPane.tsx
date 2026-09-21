@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorMessage";
 import { useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { Backend, Backup } from "@/ipc/types";
@@ -25,7 +26,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     let live = true;
     void getBackend().then(b => Promise.all([b.listBackups(), b.backupDirectory()])).then(([entries, path]) => {
       if (live) { setBackups(entries); setDirectory(path); }
-    }).catch(e => { if (live) setError(String(e instanceof Error ? e.message : e)); })
+    }).catch(e => { if (live) setError(errorMessage(e)); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, []);
@@ -34,7 +35,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     let live = true;
     void getBackend().then(b => b.listBackups()).then(entries => {
       if (live) setBackups(entries);
-    }).catch(e => { if (live) setError(String(e)); });
+    }).catch(e => { if (live) setError(errorMessage(e)); });
     return () => { live = false; };
   }, [job.progress.path]);
   const run = async (label: string, action: (backend: Backend) => Promise<string>) => {
@@ -46,7 +47,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
       const message = await action(backend);
       setMessage(message);
       setBackups(await backend.listBackups());
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errorMessage(e)); }
     finally { running.current = false; setBusy(""); }
   };
   const unavailable = loading || busy !== "" || job.progress.running;
@@ -65,9 +66,13 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
         <div className={styles.progressDetails}>
           {copying ? `${formatBytes(job.progress.copiedBytes)} of ${formatBytes(job.progress.totalBytes)}`
             : stopping ? "Removing the unfinished backup…"
+              : job.progress.phase === "compressing" ? "Finishing your compressed ZIP backup."
               : job.progress.phase === "validating" ? "Checking the saved files before finishing."
                 : "Getting your library files ready."}
         </div>
+        {!stopping && job.progress.currentItem ? <div className={styles.currentItem} title={job.progress.currentItem} aria-label="Current backup item">
+          {job.progress.currentItem}
+        </div> : null}
         <div className={styles.progressFooter}>
           <p>You can keep using RBXport while this runs.</p>
           <Button disabled={stopping} onClick={() => void job.stop()}>{stopping ? "Stopping…" : "Stop backup"}</Button>
@@ -75,7 +80,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
       </div> : <>
       <div>
         <strong>Backup your Library</strong>
-        <p className={layout.help}>Backs up the database, memory, hot cues, beat grid, and waveform previews. Music files are not backed up.</p>
+        <p className={layout.help}>Save your library in a compressed ZIP. Music files are not backed up.</p>
         <p className={styles.status} role="status" aria-live="polite">{busy || message || (job.error ? "" : job.text) || (loading ? "Loading backups…" : "")}</p>
       </div>
       <Button disabled={unavailable || readOnly} onClick={() => {
@@ -94,24 +99,24 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     </div>
     {directory ? <p className={layout.help}>Your backups will be stored in <button type="button" role="link" className={styles.directoryLink} onClick={() => {
       setError("");
-      void getBackend().then(b => b.openBackupDirectory()).catch(e => setError(e instanceof Error ? e.message : String(e)));
+      void getBackend().then(b => b.openBackupDirectory()).catch(e => setError(errorMessage(e)));
     }}>{directory}</button></p> : null}
     {!loading && backups.length === 0 ? <div className={layout.empty}>
       <strong>{error ? "Backups unavailable" : "No backups yet."}</strong>
       <p>{error ? "Reopen this page to try again." : "Create your first backup to save a restore point for your library."}</p>
     </div> : null}
     {backups.length > 0 ? <div className={styles.tableScroll}><table className={styles.table} aria-label="Library backups">
-      <thead><tr><th>Date</th><th>Size</th><th>Includes</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Date</th><th>Size on disk</th><th>Includes</th><th>Actions</th></tr></thead>
       <tbody>{backups.map(backup => {
         const date = new Date(backup.createdAt).toLocaleString();
         return <tr key={backup.path}>
           <td><time dateTime={new Date(backup.createdAt).toISOString()}>{date}</time></td>
           <td className={styles.size}>{formatBytes(backup.bytes)}</td>
-          <td>{backup.includesAnalysis ? "Database + analysis" : "Database only"}</td>
+          <td>{backup.includesArtwork ? "Database + analysis + artwork" : backup.includesAnalysis ? "Database + analysis" : "Database only"}</td>
           <td><div className={styles.actions}>
             <Button disabled={unavailable || readOnly || preferences.advanced.protectLibrary} onClick={() => void run("Restoring backup…", async b => {
               if (protectedLibrary.current) throw new Error("Turn off Library Protection before restoring.");
-              if (!await b.confirm(`Restore the backup from ${date}? This replaces your current library${backup.includesAnalysis ? " and cue/grid analysis" : " database"}. Changes made since this backup will be lost.`)) return "";
+              if (!await b.confirm(`Restore the backup from ${date}? This replaces your current library${backup.includesArtwork ? ", analysis, and artwork" : backup.includesAnalysis ? " and cue/grid analysis" : " database"}. Changes made since this backup will be lost.`)) return "";
               if (protectedLibrary.current) throw new Error("Turn off Library Protection before restoring.");
               await b.restoreBackup(backup.path);
               return "Backup restored.";

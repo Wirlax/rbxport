@@ -1050,6 +1050,9 @@ export interface LinkStatus {
 /** One backup of the library. */
 export interface BackupSizes {
   updatedAt: number;
+  trackCount: number;
+  artwork: number;
+  vocals: number;
   database: number;
   waveforms: number;
   cues: number;
@@ -1060,7 +1063,9 @@ export interface BackupSizes {
 
 export interface BackupProgress {
   running: boolean;
-  phase: "" | "preparing" | "copying" | "validating" | "complete" | "failed" | "stopping" | "cancelled";
+  /** Periodically sampled section / relative file path; cleared when the job finishes. */
+  currentItem?: string | null;
+  phase: "" | "preparing" | "copying" | "compressing" | "validating" | "complete" | "failed" | "stopping" | "cancelled";
   copiedBytes: number;
   totalBytes: number;
   error: string | null;
@@ -1070,6 +1075,7 @@ export interface BackupProgress {
 export interface Backup {
   createdAt: number;
   includesAnalysis: boolean;
+  includesArtwork?: boolean;
   path: string;
   /** The file's name, which carries when it was taken. */
   name: string;

@@ -15,6 +15,7 @@ pub mod grid;
 mod durable;
 mod backups;
 mod backup_copy;
+mod backup_zip;
 mod backup_sizes;
 mod file_journal;
 mod diagnostics;

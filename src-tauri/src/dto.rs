@@ -368,6 +368,7 @@ pub struct XmlImportReportDto {
 pub struct BackupDto {
     pub created_at: u64,
     pub includes_analysis: bool,
+    pub includes_artwork: bool,
     pub path: String,
     /// The file's name, which carries when it was taken.
     pub name: String,

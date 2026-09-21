@@ -11,7 +11,7 @@
 .status:empty { display: none; }
 
 .activeBackup { padding: 20px; }
-.backupProgress { width: 100%; }
+.backupProgress { width: 100%; min-width: 0; }
 .progressHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
 .percent { color: var(--c-accent); font-size: 20px; font-variant-numeric: tabular-nums; }
 .progressBar { display: block; appearance: none; width: 100%; height: 8px; margin: 16px 0 10px; border: 0; border-radius: 4px; overflow: hidden; background: var(--c-raised); accent-color: var(--c-accent); }
@@ -23,6 +23,7 @@
 .progressDetails { color: var(--c-text-dim); font-size: var(--f-size-sm); font-variant-numeric: tabular-nums; }
 .progressFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--c-raised); }
 .progressFooter p { margin: 0; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
+.currentItem { margin-top: 8px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @keyframes backup-progress { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .progressBar:indeterminate { animation: none; }

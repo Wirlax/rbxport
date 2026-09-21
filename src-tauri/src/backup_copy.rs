@@ -39,7 +39,11 @@ fn copy_tree_with_workers(
     progress: &mut Progress<'_>,
     workers: usize,
 ) -> io::Result<u64> {
-    TreeCopyPlan::prepare(source, target, progress)?.copy_with_workers(&mut |bytes, _| progress(bytes), workers)
+    TreeCopyPlan::prepare(source, target, progress)?.copy_with_workers(
+        &mut |bytes, _| progress(bytes),
+        workers,
+        false,
+    )
 }
 
 pub struct TreeCopyPlan {
@@ -83,13 +87,21 @@ impl TreeCopyPlan {
     }
 
     pub fn copy(self, progress: &mut TreeProgress<'_>) -> io::Result<u64> {
-        let workers = std::thread::available_parallelism()
-            .map_or(2, usize::from)
-            .min(4);
-        self.copy_with_workers(progress, workers)
+        let workers = std::thread::available_parallelism().map_or(2, usize::from);
+        self.copy_with_workers(progress, workers, false)
     }
 
-    fn copy_with_workers(self, progress: &mut TreeProgress<'_>, workers: usize) -> io::Result<u64> {
+    pub fn compress(self, progress: &mut TreeProgress<'_>) -> io::Result<u64> {
+        let workers = std::thread::available_parallelism().map_or(2, usize::from);
+        self.copy_with_workers(progress, workers, true)
+    }
+
+    fn copy_with_workers(
+        self,
+        progress: &mut TreeProgress<'_>,
+        workers: usize,
+        compressed: bool,
+    ) -> io::Result<u64> {
         use std::sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
             mpsc,
@@ -119,7 +131,12 @@ impl TreeCopyPlan {
                         let Some((source, target)) = files.get(index) else {
                             break;
                         };
-                        let result = copy_file(source, target, &mut |bytes| {
+                        let operation = if compressed {
+                            crate::backup_zip::compress_file
+                        } else {
+                            copy_file
+                        };
+                        let result = operation(source, target, &mut |bytes| {
                             if stopped.load(Ordering::Acquire) {
                                 return Err(io::Error::new(
                                     io::ErrorKind::Interrupted,
@@ -374,7 +391,19 @@ mod tests {
         // The app holds the edit gate during both phases. A new unrelated
         // entry here demonstrates that copying consumes the prepared list.
         fs::write(source.join("later.dat"), b"not in plan").unwrap();
-        assert_eq!(plan.copy(&mut |_| Ok(())).unwrap(), 4 * 64 * 1024);
+        let mut reported_files = std::collections::HashSet::new();
+        assert_eq!(
+            plan.copy(&mut |_, path| {
+                if let Some(path) = path {
+                    reported_files.insert(path.to_path_buf());
+                }
+                Ok(())
+            })
+            .unwrap(),
+            4 * 64 * 1024
+        );
+        assert_eq!(reported_files.len(), 4);
+        assert!(reported_files.iter().all(|path| path.starts_with(&source)));
         assert!(!target.join("later.dat").exists());
         assert!(target.join("0000/analysis.dat").is_file());
     }

@@ -2118,8 +2118,7 @@ export function App() {
       <StatusBar
         onReportBug={openReport}
         backupActivity={backupJob.error || backupJob.text}
-        onCancelBackup={backupJob.progress.running ? () => void backupJob.stop() : undefined}
-        backupStopping={backupJob.progress.phase === "stopping"}
+        backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}
         activity={
           analysis.running

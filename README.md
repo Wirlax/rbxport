@@ -16,8 +16,12 @@ using write features, make an independent backup of your library.
 
 Preferences → Backups lists each saved backup's date and size. Create a backup
 there, or restore or delete an existing one. New backups include the library
-database and `PIONEER/USBANLZ` cue/grid analysis files; music files are excluded.
-Backups are kept until you delete them. Older database-only backups remain
+database (including playlists, tags, ratings and history), the complete
+`PIONEER/USBANLZ` analysis folder (cues, grids, waveforms, phrases and vocals),
+and `PIONEER/Artwork` images and thumbnails. Playlist sync selections and the
+Automix playlist are included when present. Music files are not backed up.
+New backups are single ZIP files using maximum Deflate compression. Compression
+runs in parallel based on available CPU capacity. Backups are kept until you delete them. Older database-only backups remain
 available and are labelled accordingly.
 
 Quit rekordbox before creating or restoring a backup, and turn off PRO DJ LINK

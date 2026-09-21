@@ -21,7 +21,7 @@ beforeEach(() => {
   held.backend.listBackups.mockResolvedValue([entry]);
   held.backend.backupDirectory.mockResolvedValue("/backups");
   held.backend.confirm.mockResolvedValue(false);
-  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1700000000000, database: 1024, waveforms: 4096, cues: 256, beatGrids: 512, phrases: 128, other: 128 });
+  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1700000000000, trackCount: 1234, artwork: 32, vocals: 64, database: 1024, waveforms: 4096, cues: 256, beatGrids: 512, phrases: 128, other: 128 });
   held.backend.backupProgress.mockResolvedValue({ running: false, phase: "", copiedBytes: 0, totalBytes: 0, path: null, error: null });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
@@ -52,7 +52,7 @@ it("shows a restore error and re-enables the controls", async () => {
 });
 it("reconnects to a background job after reopening Preferences and can stop it", async () => {
   vi.useFakeTimers();
-  const progress = { running: true, phase: "copying", copiedBytes: 50, totalBytes: 100, path: null, error: null };
+  const progress = { running: true, phase: "copying", copiedBytes: 50, totalBytes: 100, path: null, error: null, currentItem: "Database · master.db" };
   held.backend.startBackup.mockImplementation(() => {
     held.backend.backupProgress.mockResolvedValue(progress);
     return Promise.resolve();
@@ -62,6 +62,10 @@ it("reconnects to a background job after reopening Preferences and can stop it",
   expect(button("Create backup")).toBeUndefined();
   expect(button("Restore").disabled).toBe(true);
   expect(host.querySelector('[role="status"]')?.textContent).toContain("50%");
+  expect(host.querySelector('[aria-label="Current backup item"]')?.textContent).toBe("Database · master.db");
+  held.backend.backupProgress.mockResolvedValue({ ...progress, currentItem: "Analysis files · USBANLZ/001/ANLZ0000.DAT" });
+  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+  expect(host.querySelector('[aria-label="Current backup item"]')?.textContent).toBe("Analysis files · USBANLZ/001/ANLZ0000.DAT");
   act(() => root.unmount());
   root = createRoot(host);
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
@@ -72,6 +76,7 @@ it("reconnects to a background job after reopening Preferences and can stop it",
   });
   await act(async () => { button("Stop backup").click(); await Promise.resolve(); });
   expect(button("Stopping…").disabled).toBe(true);
+  expect(host.querySelector('[aria-label="Current backup item"]')).toBeNull();
   held.backend.backupProgress.mockResolvedValue({ ...progress, running: false, phase: "cancelled" });
   await act(async () => { await vi.advanceTimersByTimeAsync(500); });
   expect(host.querySelector('[role="status"]')?.textContent).toBe("Backup stopped.");
@@ -98,7 +103,7 @@ it("shows the empty graph, legend and spinner during the initial calculation", a
   expect(bar?.parentElement?.getAttribute("aria-busy")).toBe("true");
   expect(bar?.parentElement?.querySelector('[role="status"]')?.textContent).toBe("Calculating Rekordbox data size");
   expect(bar?.parentElement?.querySelector("svg")).not.toBeNull();
-  expect(host.querySelector('[aria-label="Backup size breakdown"]')?.children).toHaveLength(6);
+  expect(host.querySelector('[aria-label="Backup size breakdown"]')?.children).toHaveLength(8);
   expect(host.textContent).toContain("Last updated: —");
   expect(button("Refresh").disabled).toBe(true);
   expect(held.backend.backupSizes).toHaveBeenCalledWith(false);
@@ -111,11 +116,13 @@ it("refreshes explicitly and keeps the last successful reading on failure", asyn
   expect(held.backend.backupSizes).toHaveBeenLastCalledWith(true);
   expect(host.querySelector("time")?.dateTime).toBe(previousTime);
   expect(host.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain("Waveform previews: 4.0 KB");
-  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1800000000000, database: 2048, waveforms: 0, cues: 0, beatGrids: 0, phrases: 0, other: 0 });
+  expect(host.textContent).toContain("1,234 tracks");
+  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1800000000000, trackCount: 1, artwork: 0, vocals: 0, database: 2048, waveforms: 0, cues: 0, beatGrids: 0, phrases: 0, other: 0 });
   await act(async () => { button("Refresh").click(); await Promise.resolve(); });
   expect(host.querySelector("time")?.dateTime).toBe(new Date(1800000000000).toISOString());
   expect(host.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain("Database: 2.0 KB");
   expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).toContain("2.0 KB total · 1 track");
 });
 it("keeps backup actions usable if sizes cannot be measured, and lets the user retry", async () => {
   held.backend.backupSizes.mockRejectedValueOnce(new Error("unavailable"));
@@ -123,13 +130,22 @@ it("keeps backup actions usable if sizes cannot be measured, and lets the user r
   expect(button("Create backup").disabled).toBe(false);
   expect(host.textContent).toContain("Couldn’t calculate Rekordbox data size.");
   await act(async () => { button("Refresh").click(); await Promise.resolve(); });
-  expect(host.querySelector('[aria-label="Backup size breakdown"]')?.children).toHaveLength(6);
+  expect(host.querySelector('[aria-label="Backup size breakdown"]')?.children).toHaveLength(8);
   expect(host.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain("Waveform previews: 4.0 KB");
 });
 it("shows an empty size bar without invalid segment widths when there is no data", async () => {
-  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1700000000000, database: 0, waveforms: 0, cues: 0, beatGrids: 0, phrases: 0, other: 0 });
+  held.backend.backupSizes.mockResolvedValue({ updatedAt: 1700000000000, trackCount: 0, artwork: 0, vocals: 0, database: 0, waveforms: 0, cues: 0, beatGrids: 0, phrases: 0, other: 0 });
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
   const bar = host.querySelector('[role="img"]');
   expect(bar?.getAttribute("aria-label")).toBe("No data to back up");
   expect(bar?.children).toHaveLength(0);
+});
+
+it("shows the message from a structured backend delete error", async () => {
+  held.backend.confirm.mockResolvedValue(true);
+  held.backend.deleteBackup.mockRejectedValue({ kind: "internal", message: "Backup: Permission denied" });
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { button("Delete").click(); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Backup: Permission denied");
+  expect(button("Delete").disabled).toBe(false);
 });

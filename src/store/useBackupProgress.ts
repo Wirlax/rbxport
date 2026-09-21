@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorMessage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { BackupProgress } from "@/ipc/types";
@@ -8,7 +9,8 @@ const EMPTY: BackupProgress = { running: false, phase: "", copiedBytes: 0, total
 export function backupStatus(progress: BackupProgress): string {
   switch (progress.phase) {
     case "preparing": return "Preparing backup…";
-    case "copying": return `Creating backup: ${progress.totalBytes > 0 ? Math.min(100, Math.floor(progress.copiedBytes / progress.totalBytes * 100)) : 0}% — ${formatBytes(progress.copiedBytes)} of ${formatBytes(progress.totalBytes)}`;
+    case "copying": return `Creating backup: ${progress.totalBytes > 0 ? Math.min(100, Math.floor(progress.copiedBytes / progress.totalBytes * 100)) : 0}% — ${formatBytes(progress.copiedBytes)} of ${formatBytes(progress.totalBytes)}${progress.currentItem ? ` · ${progress.currentItem}` : ""}`;
+    case "compressing": return "Compressing backup…";
     case "validating": return "Verifying backup…";
     case "stopping": return "Stopping backup…";
     case "complete": return "Backup created.";
@@ -49,7 +51,7 @@ export function useBackupProgress() {
       await backend.startBackup();
       setProgress(await backend.backupProgress());
     } catch (e) {
-      setRequestError(e instanceof Error ? e.message : String(e));
+      setRequestError(errorMessage(e));
       setProgress(EMPTY);
     } finally { pending.current = false; }
   }, [progress.running]);
@@ -59,7 +61,7 @@ export function useBackupProgress() {
       const backend = await getBackend();
       await backend.cancelBackup();
       setProgress(await backend.backupProgress());
-    } catch (e) { setRequestError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setRequestError(errorMessage(e)); }
   }, []);
   return { progress, start, stop, text: backupStatus(progress), error: requestError || progress.error };
 }

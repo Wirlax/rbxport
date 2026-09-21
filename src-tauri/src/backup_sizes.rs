@@ -15,6 +15,9 @@ use std::{
 #[serde(rename_all = "camelCase")]
 pub struct BackupSizes {
     pub updated_at: u64,
+    pub track_count: u32,
+    pub artwork: u64,
+    pub vocals: u64,
     pub database: u64,
     pub waveforms: u64,
     pub cues: u64,
@@ -25,6 +28,8 @@ pub struct BackupSizes {
 impl BackupSizes {
     fn add(&mut self, other: Self) {
         self.database += other.database;
+        self.artwork += other.artwork;
+        self.vocals += other.vocals;
         self.waveforms += other.waveforms;
         self.cues += other.cues;
         self.beat_grids += other.beat_grids;
@@ -87,7 +92,7 @@ impl SizeCache {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<SavedSizes>(&bytes).ok())
             {
-                if saved.version == 1 && saved.database == database && saved.analysis == analysis {
+                if saved.version == 2 && saved.database == database && saved.analysis == analysis {
                     self.value = Some(Ok(saved.sizes));
                 }
             }
@@ -95,7 +100,7 @@ impl SizeCache {
         self.get(refresh, || {
             let sizes = scan()?;
             let saved = SavedSizes {
-                version: 1,
+                version: 2,
                 database: database.into(),
                 analysis: analysis.into(),
                 sizes: sizes.clone(),
@@ -130,11 +135,14 @@ pub fn cached(state: &AppState, refresh: bool) -> AppResult<BackupSizes> {
 
 fn measure(state: &AppState) -> AppResult<BackupSizes> {
     let location = state.location()?;
+    let track_count = state.read_db(|db| db.live_track_count()).map_err(|e| AppError::internal(e.to_string()))?;
     measure_paths(
         &location.master_db,
         &location.share_root.join("PIONEER/USBANLZ"),
+        &location.share_root.join("PIONEER/Artwork"),
     )
     .map(|mut sizes| {
+        sizes.track_count = track_count;
         sizes.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -156,11 +164,20 @@ fn regular_size(path: &Path) -> io::Result<u64> {
     }
     Ok(meta.len())
 }
-fn measure_paths(database: &Path, analysis: &Path) -> io::Result<BackupSizes> {
+fn measure_paths(database: &Path, analysis: &Path, artwork: &Path) -> io::Result<BackupSizes> {
     let mut sizes = BackupSizes {
         database: regular_size(database)?,
         ..Default::default()
     };
+    if let Some(root) = database.parent() {
+        for name in crate::backups::LIBRARY_FILES {
+            match regular_size(&root.join(name)) {
+                Ok(bytes) => sizes.database += bytes,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
     let mut wal = database.as_os_str().to_os_string();
     wal.push("-wal");
     match regular_size(Path::new(&wal)) {
@@ -168,14 +185,16 @@ fn measure_paths(database: &Path, analysis: &Path) -> io::Result<BackupSizes> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    match walk(analysis, &mut sizes) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound && !analysis.exists() => {}
-        Err(e) => return Err(e),
+    for (path, is_artwork) in [(analysis, false), (artwork, true)] {
+        match walk(path, &mut sizes, is_artwork) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound && !path.exists() => {}
+            Err(e) => return Err(e),
+        }
     }
     Ok(sizes)
 }
-fn walk(path: &Path, sizes: &mut BackupSizes) -> io::Result<()> {
+fn walk(path: &Path, sizes: &mut BackupSizes, is_artwork: bool) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         return Err(io::Error::new(
@@ -185,10 +204,14 @@ fn walk(path: &Path, sizes: &mut BackupSizes) -> io::Result<()> {
     }
     if meta.is_dir() {
         for entry in fs::read_dir(path)? {
-            walk(&entry?.path(), sizes)?;
+            walk(&entry?.path(), sizes, is_artwork)?;
         }
     } else if meta.is_file() {
-        sizes.add(analysis_sizes(path, meta.len())?);
+        if is_artwork {
+            sizes.artwork += meta.len();
+        } else {
+            sizes.add(analysis_sizes(path, meta.len())?);
+        }
     } else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -234,6 +257,7 @@ fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
             b"PCOB" | b"PCO2" => sizes.cues += section_len,
             b"PQTZ" | b"PQT2" => sizes.beat_grids += section_len,
             b"PSSI" => sizes.phrases += section_len,
+            b"PVDI" => sizes.vocals += section_len,
             _ => sizes.other += section_len,
         }
         at += section_len;
@@ -402,13 +426,14 @@ mod tests {
         let db = dir.path().join("master.db");
         fs::write(&db, [0; 100]).unwrap();
         fs::write(dir.path().join("master.db-wal"), [0; 20]).unwrap();
+        fs::write(dir.path().join("masterPlaylists6.xml"), [0; 10]).unwrap();
         fs::write(dir.path().join("music.mp3"), [0; 99]).unwrap();
         let anlz = dir.path().join("analysis");
         fs::create_dir(&anlz).unwrap();
         let mut bytes = b"PMAI".to_vec();
         bytes.extend(12u32.to_be_bytes());
         bytes.extend(0u32.to_be_bytes());
-        for tag in [b"PWV7", b"PCOB", b"PQTZ", b"PSSI", b"PPTH"] {
+        for tag in [b"PWV7", b"PCOB", b"PQTZ", b"PSSI", b"PVDI", b"PPTH"] {
             bytes.extend(tag);
             bytes.extend(12u32.to_be_bytes());
             bytes.extend(16u32.to_be_bytes());
@@ -416,15 +441,20 @@ mod tests {
         }
         fs::write(anlz.join("ANLZ.2EX"), &bytes).unwrap();
         fs::write(anlz.join("unknown"), [0; 7]).unwrap();
-        let sizes = measure_paths(&db, &anlz).unwrap();
-        assert_eq!(sizes.database, 120);
+        let artwork = dir.path().join("artwork");
+        fs::create_dir_all(artwork.join("abc")).unwrap();
+        fs::write(artwork.join("abc/artwork_m.jpg"), [0; 31]).unwrap();
+        let sizes = measure_paths(&db, &anlz, &artwork).unwrap();
+        assert_eq!(sizes.artwork, 31);
+        assert_eq!(sizes.vocals, 16);
+        assert_eq!(sizes.database, 130);
         assert_eq!(
             (sizes.waveforms, sizes.cues, sizes.beat_grids, sizes.phrases),
             (16, 16, 16, 16)
         );
         assert_eq!(sizes.other, 12 + 16 + 7);
         assert_eq!(
-            sizes.waveforms + sizes.cues + sizes.beat_grids + sizes.phrases + sizes.other,
+            sizes.waveforms + sizes.cues + sizes.beat_grids + sizes.phrases + sizes.vocals + sizes.other,
             bytes.len() as u64 + 7
         );
     }
@@ -434,7 +464,7 @@ mod tests {
         let db = dir.path().join("master.db");
         fs::write(&db, [0; 8]).unwrap();
         assert_eq!(
-            measure_paths(&db, &dir.path().join("absent"))
+            measure_paths(&db, &dir.path().join("absent"), &dir.path().join("no-artwork"))
                 .unwrap()
                 .database,
             8

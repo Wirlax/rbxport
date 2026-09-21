@@ -10,15 +10,15 @@ test("Preferences creates, restores, and deletes a library backup", async ({ pag
   await expect(preferences.getByText("No backups yet.")).toBeVisible();
   const contents = preferences.getByRole("figure", { name: "Backup contents" });
   await expect(contents.getByRole("img")).toBeVisible();
-  await expect(contents.getByText("320.0 MB total")).toBeVisible();
-  await expect(contents.getByRole("list", { name: "Backup size breakdown" }).getByRole("listitem")).toHaveCount(6);
+  await expect(contents.getByText(/328.0 MB total · [\d,]+ tracks/)).toBeVisible();
+  await expect(contents.getByRole("list", { name: "Backup size breakdown" }).getByRole("listitem")).toHaveCount(8);
   await preferences.getByRole("button", { name: "Create backup", exact: true }).click();
   await expect(preferences.getByText("Backup created.")).toBeVisible();
   const table = preferences.getByRole("table", { name: "Library backups" });
   await expect(table.locator("tbody tr")).toHaveCount(1);
-  await expect(table.getByRole("columnheader")).toHaveText(["Date", "Size", "Includes", "Actions"]);
+  await expect(table.getByRole("columnheader")).toHaveText(["Date", "Size on disk", "Includes", "Actions"]);
   await expect(table.locator("time")).toHaveAttribute("datetime", /^\d{4}-/);
-  await expect(table.getByText("Database + analysis")).toBeVisible();
+  await expect(table.getByText("Database + analysis + artwork")).toBeVisible();
   await page.keyboard.press("Escape");
   const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
   const original = await title.innerText();
@@ -37,7 +37,7 @@ test("Preferences creates, restores, and deletes a library backup", async ({ pag
   await expect(preferences.getByText("No backups yet.")).toBeVisible();
 });
 
-test("backup progress survives closing Preferences and can be stopped from the footer", async ({ page }) => {
+test("backup progress survives closing Preferences and shows only a progress bar in the footer", async ({ page }) => {
   await page.clock.install();
   await page.goto("/?writable=1");
   const settings = page.getByRole("banner").getByRole("button", { name: "Settings" });
@@ -52,15 +52,21 @@ test("backup progress survives closing Preferences and can be stopped from the f
   await expect(preferences.getByRole("status")).toContainText("50%");
   const card = preferences.getByRole("region", { name: "Backup your Library" });
   await expect(card.getByRole("progressbar")).toBeVisible();
+  await expect(card.getByLabel("Current backup item")).toHaveText("Analysis files · USBANLZ/001/ANLZ0000.DAT");
   await expect(card.getByRole("button", { name: "Stop backup", exact: true })).toBeVisible();
-  await expect(footer.getByRole("status")).toContainText("50%");
+  await expect(footer.getByRole("progressbar", { name: "Backup progress" })).toHaveAttribute("value", "50");
+  await expect(footer.getByText("Backup", { exact: true })).toBeVisible();
+  await expect(footer.getByText("(50%)", { exact: true })).toBeVisible();
+  await expect(footer.getByRole("button", { name: "Stop backup" })).toHaveCount(0);
+  await expect(footer.getByRole("status")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(preferences).not.toBeVisible();
-  await footer.getByRole("button", { name: "Stop backup", exact: true }).click();
-  await page.clock.runFor(1000);
-  await expect(footer.getByRole("status")).toHaveText("Backup stopped.");
+  await expect(footer.getByRole("progressbar")).toBeVisible();
   await settings.click();
   await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
+  await preferences.getByRole("button", { name: "Stop backup", exact: true }).click();
+  await page.clock.runFor(1000);
+  await expect(footer.getByRole("status")).toHaveText("Backup stopped.");
   await expect(preferences.getByRole("status")).toHaveText("Backup stopped.");
   await expect(preferences.getByText("No backups yet.")).toBeVisible();
 });

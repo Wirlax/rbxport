@@ -99,6 +99,11 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 fn analysis(location: &rbl_db::LibraryLocation) -> PathBuf {
     location.share_root.join("PIONEER/USBANLZ")
 }
+fn artwork(location: &rbl_db::LibraryLocation) -> PathBuf {
+    location.share_root.join("PIONEER/Artwork")
+}
+// Library selections live beside master.db, outside the SQL database.
+pub const LIBRARY_FILES: [&str; 2] = ["masterPlaylists6.xml", "automixPlaylist6.xml"];
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
@@ -106,6 +111,10 @@ struct Manifest {
     library: PathBuf,
     created_at: u64,
     bytes: u64,
+    #[serde(default)]
+    includes_artwork: bool,
+    #[serde(default)]
+    library_files: Vec<String>,
 }
 
 // Refuse symlinks, including within a tree, so a backup never follows files
@@ -179,7 +188,7 @@ fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
-    if !(name.starts_with("library-") && meta.is_dir()
+    if !(name.starts_with("library-") && (meta.is_dir() || (meta.is_file() && path.extension().is_some_and(|e| e == "zip")))
         || name.starts_with("master-")
             && path.extension().is_some_and(|e| e == "db")
             && meta.is_file())
@@ -189,10 +198,13 @@ fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
     Ok(path)
 }
 fn manifest(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<Manifest> {
-    let saved: Manifest =
-        serde_json::from_slice(&fs::read(path.join("manifest.json")).map_err(error)?)
-            .map_err(error)?;
-    if saved.version != 1 || saved.library != location.master_db {
+    let bytes = if path.is_dir() { fs::read(path.join("manifest.json")).map_err(error)? }
+        else { crate::backup_zip::manifest(path).map_err(error)? };
+    let saved: Manifest = serde_json::from_slice(&bytes).map_err(error)?;
+    if saved.library_files.iter().any(|name| !LIBRARY_FILES.contains(&name.as_str())) {
+        return Err(error("Unsupported library file in backup."));
+    }
+    if !matches!(saved.version, 1 | 2) || saved.library != location.master_db {
         return Err(error(
             "This backup belongs to another library or an unsupported version.",
         ));
@@ -214,11 +226,11 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
         let Ok(path) = checked(state.backup_dir(), &path) else {
             continue;
         };
-        let (created_at, bytes, includes_analysis) = if path.is_dir() {
+        let (created_at, bytes, includes_analysis, includes_artwork) = if path.is_dir() || path.extension().is_some_and(|e| e == "zip") {
             let Ok(saved) = manifest(&path, &location) else {
                 continue;
             };
-            (saved.created_at, saved.bytes, true)
+            (saved.created_at, if path.is_file() { fs::metadata(&path).map_err(error)?.len() } else { saved.bytes }, true, saved.includes_artwork)
         } else {
             let meta = fs::metadata(&path).map_err(error)?;
             let created = meta
@@ -235,7 +247,7 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
                     .filter_map(|suffix| fs::metadata(sidecar(&path, suffix)).ok())
                     .map(|m| m.len())
                     .sum::<u64>();
-            (created, bytes, false)
+            (created, bytes, false, false)
         };
         result.push(BackupDto {
             name: path
@@ -247,6 +259,7 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
             bytes,
             created_at,
             includes_analysis,
+            includes_artwork,
         });
     }
     result.sort_by(|a, b| {
@@ -270,13 +283,15 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     }
     crate::file_journal::recover(state.backup_dir(), &location)?;
     let tree = analysis(&location);
+    let art = artwork(&location);
     let wal = sidecar(&location.master_db, "-wal");
     let root = state.backup_dir();
     crate::durable::create_dir_all(root).map_err(error)?;
     let created_at = millis();
     let id = uuid::Uuid::new_v4();
     let partial = root.join(format!(".partial-{id}"));
-    let target = root.join(format!("library-{created_at}-{id}"));
+    let target = root.join(format!("library-{created_at}-{id}.zip"));
+    let archive = root.join(format!(".partial-{id}.zip"));
     let result = (|| {
         fs::create_dir(&partial).map_err(error)?;
         let mut refused = None;
@@ -290,18 +305,37 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
             if let Some(error) = refused { return Err(error); }
             Some(prepared.map_err(error)?)
         } else { None };
+        let art_plan = if art.exists() {
+            let prepared = crate::backup_copy::TreeCopyPlan::prepare(&art, &partial.join("artwork"), &mut |_| {
+                progress("preparing", 0, 0, "Scanning artwork thumbnails").map_err(|e| {
+                    refused = Some(e);
+                    std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+                })
+            });
+            if let Some(error) = refused { return Err(error); }
+            Some(prepared.map_err(error)?)
+        } else { None };
         let mut check = || progress("preparing", 0, 0, "Measuring database files");
+        let library_root = location.master_db.parent().ok_or_else(|| error("Invalid database path"))?;
+        let library_files: Vec<_> = LIBRARY_FILES.into_iter().filter(|name| library_root.join(name).exists()).collect();
+        let mut library_bytes = 0;
+        for name in &library_files {
+            library_bytes += tree_size(&library_root.join(name), &mut check)?;
+        }
         let total = tree_size(&location.master_db, &mut check)?
+            + library_bytes
             + if wal.exists() { tree_size(&wal, &mut check)? } else { 0 }
-            + plan.as_ref().map_or(0, |plan| plan.bytes);
+            + plan.as_ref().map_or(0, |plan| plan.bytes)
+            + art_plan.as_ref().map_or(0, |plan| plan.bytes);
         progress("copying", 0, total, "Database · master.db")?;
         let mut copied = 0;
         let mut copied_file = |bytes, source: Option<&Path>| {
             copied += bytes;
             let item = match source {
-                Some(path) if path.starts_with(&tree) => format!("Analysis files · USBANLZ/{}", path.strip_prefix(&tree).unwrap_or(path).display()),
+                Some(path) if path.starts_with(&art) => format!("Artwork thumbnails · Artwork/{}", path.strip_prefix(&art).unwrap_or(path).to_string_lossy().replace('\\', "/")),
+                Some(path) if path.starts_with(&tree) => format!("Analysis files · USBANLZ/{}", path.strip_prefix(&tree).unwrap_or(path).to_string_lossy().replace('\\', "/")),
                 Some(path) => format!("Database · {}", path.file_name().unwrap_or_default().to_string_lossy()),
-                None => "Analysis files · Preparing folders / saving copied files".to_owned(),
+                None => "Analysis files".to_owned(),
             };
             progress("copying", copied, total, &item)
         };
@@ -310,9 +344,10 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         if wal.exists() {
             bytes += copy_progress(&wal, &partial.join("master.db-wal"), &mut |bytes| copied_file(bytes, Some(&wal)))?;
         }
+        for (plan, directory) in [(plan, "analysis"), (art_plan, "artwork")] {
         if let Some(plan) = plan {
             let mut refused = None;
-            let copied = plan.copy(&mut |bytes, source| {
+            let copied = plan.compress(&mut |bytes, source| {
                 copied_file(bytes, source).map_err(|e| {
                     refused = Some(e);
                     std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
@@ -321,16 +356,47 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
             if let Some(error) = refused { return Err(error); }
             bytes += copied.map_err(error)?;
         } else {
-            fs::create_dir(partial.join("analysis")).map_err(error)?;
+            fs::create_dir(partial.join(directory)).map_err(error)?;
+        }
         }
         progress("validating", bytes, total, "Checking database · master.db")?;
         validate_database(&partial.join("master.db"), &location)?;
         remove(&partial.join("master.db-shm"))?;
+        for name in &library_files {
+            let source = library_root.join(name);
+            let target = partial.join(name);
+            let mut refused = None;
+            let compressed = crate::backup_zip::compress_file(&source, &target, &mut |delta| {
+                bytes += delta;
+                progress("copying", bytes, total, &format!("Library settings · {name}")).map_err(|e| {
+                    refused = Some(e);
+                    std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+                })
+            });
+            if let Some(error) = refused { return Err(error); }
+            compressed.map_err(error)?;
+        }
+        for name in ["master.db", "master.db-wal"] {
+            let source = partial.join(name);
+            if !source.exists() { continue; }
+            let mut refused = None;
+            let compressed = crate::backup_zip::compress_file(&source, &source, &mut |_| {
+                progress("compressing", bytes, total, &format!("Compressing database · {name}")).map_err(|e| {
+                    refused = Some(e);
+                    std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+                })
+            });
+            if let Some(error) = refused { return Err(error); }
+            compressed.map_err(error)?;
+            remove(&source)?;
+        }
         let saved = Manifest {
-            version: 1,
+            version: 2,
             library: location.master_db.clone(),
             created_at,
             bytes,
+            includes_artwork: true,
+            library_files: library_files.into_iter().map(str::to_owned).collect(),
         };
         crate::durable::write(
             &partial.join("manifest.json"),
@@ -338,12 +404,23 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         )
         .map_err(error)?;
         progress("validating", bytes, total, "Finishing backup · manifest.json")?;
-        fs::rename(&partial, &target).map_err(error)?;
+        let mut refused = None;
+        let packed = crate::backup_zip::assemble(&partial, &archive, &mut || {
+            progress("compressing", bytes, total, "Finishing ZIP archive").map_err(|e| {
+                refused = Some(e);
+                std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+            })
+        });
+        if let Some(error) = refused { return Err(error); }
+        packed.map_err(error)?;
+        remove(&partial)?;
+        fs::rename(&archive, &target).map_err(error)?;
         crate::durable::sync_dir(root).map_err(error)?;
         Ok(target.to_string_lossy().into_owned())
     })();
     if result.is_err() {
         let _ = remove(&partial);
+        let _ = remove(&archive);
     }
     result
 }
@@ -403,9 +480,11 @@ pub fn recover(root: &Path, location: &rbl_db::LibraryLocation) -> AppResult<()>
         &sidecar(&location.master_db, "-wal"),
         &sidecar(&location.master_db, "-shm"),
         &analysis(location),
+        &artwork(location),
     ];
     for swap in &restore.swaps {
-        if !allowed.contains(&&swap.target)
+        let library_file = LIBRARY_FILES.iter().any(|name| location.master_db.parent().is_some_and(|root| root.join(name) == swap.target));
+        if (!allowed.contains(&&swap.target) && !library_file)
             || swap.staged.parent() != swap.target.parent()
             || swap.previous.parent() != swap.target.parent()
             || !swap
@@ -469,12 +548,26 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
         return Err(error("Turn off PRO DJ LINK before restoring the library."));
     }
     let path = checked(state.backup_dir(), path)?;
-    if path.is_dir() {
+    let unpacked = if path.extension().is_some_and(|e| e == "zip") {
         manifest(&path, &location)?;
+        Some(crate::backup_zip::extract(&path, state.backup_dir()).map_err(error)?)
+    } else { None };
+    let path = unpacked.as_ref().map_or(path, |value| value.0.clone());
+    let (includes_artwork, library_files) = if path.is_dir() {
+        let saved = manifest(&path, &location)?;
         if !path.join("analysis").is_dir() {
             return Err(error("The backup analysis folder is missing."));
         }
-    }
+        if saved.includes_artwork && !path.join("artwork").is_dir() {
+            return Err(error("The backup artwork folder is missing."));
+        }
+        for name in &saved.library_files {
+            if !path.join(name).is_file() {
+                return Err(error("A backup library settings file is missing."));
+            }
+        }
+        (saved.includes_artwork, saved.library_files)
+    } else { (false, Vec::new()) };
     state.with_closed_reader(|| {
         recover(state.backup_dir(), &location)?;
         crate::file_journal::recover(state.backup_dir(), &location)?;
@@ -493,6 +586,13 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
         ];
         if path.is_dir() {
             sources.push((analysis(&location), Some(path.join("analysis"))));
+        }
+        if includes_artwork {
+            sources.push((artwork(&location), Some(path.join("artwork"))));
+        }
+        for name in &library_files {
+            let root = location.master_db.parent().ok_or_else(|| error("Invalid database path"))?;
+            sources.push((root.join(name), Some(path.join(name))));
         }
         let mut restore = Restore {
             library: location.master_db.clone(),
@@ -558,7 +658,7 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
 pub fn delete(state: &AppState, path: &Path) -> AppResult<()> {
     let _gate = state.edit_gate.lock();
     let path = checked(state.backup_dir(), path)?;
-    if path.is_dir() {
+    if path.is_dir() || path.extension().is_some_and(|e| e == "zip") {
         manifest(&path, &state.location()?)?;
     } else {
         for suffix in ["-wal", "-shm"] {
@@ -663,6 +763,59 @@ mod tests {
             .unwrap()
     }
     #[test]
+    fn artwork_vocals_and_library_selections_round_trip() {
+        let (_dir, state, location) = fixture();
+        let art = artwork(&location).join("abc/cover/artwork_m.jpg");
+        fs::create_dir_all(art.parent().unwrap()).unwrap();
+        fs::write(&art, b"thumbnail bytes").unwrap();
+        let vocals = analysis(&location).join("abc/ANLZ0000.2EX");
+        fs::create_dir_all(vocals.parent().unwrap()).unwrap();
+        let mut anlz = b"PMAI".to_vec();
+        for word in [12u32, 40] { anlz.extend(word.to_be_bytes()); }
+        anlz.extend(b"PVDI");
+        for word in [24u32, 28, 1024, 0x56220001, 4] { anlz.extend(word.to_be_bytes()); }
+        anlz.extend([0, 2, 4, 1]);
+        fs::write(&vocals, &anlz).unwrap();
+        let root = location.master_db.parent().unwrap();
+        for name in LIBRARY_FILES { fs::write(root.join(name), b"original selections").unwrap(); }
+        let mut items = Vec::new();
+        let snapshot = create_with_progress(&state, &mut |_, _, _, item| { items.push(item.to_owned()); Ok(()) }).unwrap();
+        assert!(list(&state).unwrap()[0].includes_artwork);
+        assert!(items.iter().any(|s| s.contains("Artwork thumbnails · Artwork/abc/cover/artwork_m.jpg")));
+        fs::write(&art, b"changed artwork").unwrap();
+        fs::write(&vocals, b"changed vocals").unwrap();
+        for name in LIBRARY_FILES { fs::write(root.join(name), b"changed selections").unwrap(); }
+        restore(&state, Path::new(&snapshot)).unwrap();
+        assert_eq!(fs::read(&art).unwrap(), b"thumbnail bytes");
+        assert_eq!(fs::read(&vocals).unwrap(), anlz);
+        assert_eq!(rbl_anlz::Anlz::read(&vocals).unwrap().vocals().unwrap(), &[0, 2, 4, 1]);
+        for name in LIBRARY_FILES { assert_eq!(fs::read(root.join(name)).unwrap(), b"original selections"); }
+    }
+
+    #[test]
+    fn missing_artwork_rejects_new_snapshots_but_legacy_snapshots_preserve_live_artwork() {
+        let (_dir, state, location) = fixture();
+        let zip = PathBuf::from(create(&state).unwrap());
+        let unpacked = crate::backup_zip::extract(&zip, state.backup_dir()).unwrap();
+        let snapshot = state.backup_dir().join("library-missing-artwork");
+        fs::rename(&unpacked.0, &snapshot).unwrap();
+        fs::remove_dir_all(snapshot.join("artwork")).unwrap();
+        let art = artwork(&location).join("current.jpg");
+        fs::create_dir_all(art.parent().unwrap()).unwrap();
+        fs::write(&art, b"keep artwork").unwrap();
+        let before = rating(&state);
+        assert!(restore(&state, &snapshot).is_err());
+        assert_eq!(rating(&state), before);
+        let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(snapshot.join("manifest.json")).unwrap()).unwrap();
+        saved.as_object_mut().unwrap().remove("includes_artwork");
+        saved.as_object_mut().unwrap().remove("library_files");
+        fs::write(snapshot.join("manifest.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
+        restore(&state, &snapshot).unwrap();
+        assert_eq!(fs::read(&art).unwrap(), b"keep artwork");
+        assert!(!list(&state).unwrap().iter().find(|entry| entry.name == "library-missing-artwork").unwrap().includes_artwork);
+    }
+
+    #[test]
     fn backups_round_trip_database_analysis_and_wal_and_delete_only_the_snapshot() {
         let (_dir, state, location) = fixture();
         let track = rbl_db::fixture::track_id(1);
@@ -682,6 +835,7 @@ mod tests {
         let entries = list(&state).unwrap();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].bytes > 0 && entries[0].created_at > 0 && entries[0].includes_analysis);
+        assert_eq!(entries[0].bytes, fs::metadata(&path).unwrap().len(), "saved size is the compressed ZIP size");
         assert!(!path.join("music.mp3").exists());
         state.write(|w| w.set_rating(&track, 5)).unwrap();
         assert_eq!(rating(&state), 5); // Prime the cached reader before restore.
@@ -724,15 +878,34 @@ mod tests {
     }
 
     #[test]
+    fn older_directory_snapshots_still_restore_and_delete() {
+        let (_dir, state, location) = fixture();
+        let before = rating(&state);
+        let zip = PathBuf::from(create(&state).unwrap());
+        let unpacked = crate::backup_zip::extract(&zip, state.backup_dir()).unwrap();
+        let old = state.backup_dir().join("library-legacy-directory");
+        fs::rename(&unpacked.0, &old).unwrap();
+        let mut saved = manifest(&old, &location).unwrap();
+        saved.version = 1;
+        fs::write(old.join("manifest.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
+        state.write(|w| w.set_rating(&rbl_db::fixture::track_id(1), (before + 1) % 6)).unwrap();
+        restore(&state, &old).unwrap();
+        assert_eq!(rating(&state), before);
+        delete(&state, &old).unwrap();
+        assert!(zip.exists());
+    }
+
+    #[test]
     fn corrupt_or_incomplete_backup_does_not_change_the_live_library() {
         let (_dir, state, location) = fixture();
         let path = PathBuf::from(create(&state).unwrap());
         let before = rating(&state);
-        fs::write(path.join("master.db"), b"broken").unwrap();
+        assert_eq!(path.extension().unwrap(), "zip");
+        fs::write(&path, b"broken").unwrap();
         assert!(restore(&state, &path).is_err());
         assert_eq!(rating(&state), before);
         assert!(!journal(state.backup_dir()).exists());
-        fs::remove_dir(path.join("analysis")).unwrap();
+        fs::write(&path, b"PK").unwrap();
         assert!(restore(&state, &path).is_err());
         assert!(location.master_db.exists());
     }
