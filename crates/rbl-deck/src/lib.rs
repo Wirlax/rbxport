@@ -30,7 +30,8 @@
 mod block;
 mod clock;
 mod deck;
-mod decode;
+/// Streaming decoder, also used by the close-zoom PCM waveform command.
+pub mod decode;
 mod fade;
 mod limiter;
 mod metronome;

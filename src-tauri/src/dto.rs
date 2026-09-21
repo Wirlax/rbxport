@@ -31,6 +31,8 @@ pub struct RowDto {
     /// track, so a page of 64 rows stays inside the 64 KB response cap even
     /// when every row is full.
     pub hot_cues: Vec<RowCueDto>,
+    /// Saved memory-cue positions in milliseconds, including memory-loop starts.
+    pub memory_cues: Vec<u32>,
     /// Deterministic tint, drawn when a track has no artwork — a little under
     /// half the reference library.
     pub artwork_hue: u16,

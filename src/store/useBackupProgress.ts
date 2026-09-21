@@ -6,6 +6,12 @@ import { formatBytes } from "@/lib/format";
 
 const EMPTY: BackupProgress = { running: false, phase: "", copiedBytes: 0, totalBytes: 0, error: null, path: null };
 
+function unchanged(a: BackupProgress, b: BackupProgress): boolean {
+  return a.running === b.running && a.phase === b.phase && a.copiedBytes === b.copiedBytes
+    && a.totalBytes === b.totalBytes && a.error === b.error && a.path === b.path
+    && (a.currentItem ?? null) === (b.currentItem ?? null);
+}
+
 export function backupStatus(progress: BackupProgress): string {
   switch (progress.phase) {
     case "preparing": return "Preparing backup…";
@@ -31,7 +37,7 @@ export function useBackupProgress() {
     const refresh = async () => {
       try {
         const next = await (await getBackend()).backupProgress();
-        if (live && !pending.current) setProgress(next);
+        if (live && !pending.current) setProgress(current => unchanged(current, next) ? current : next);
       } catch {
         // Preserve the last known job while the backend is temporarily unavailable.
       } finally {

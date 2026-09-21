@@ -196,6 +196,7 @@ fn loose_row(position: usize, name: &str, id: &str, tags: Option<&rbl_index::fol
         date_added: String::new(),
         release_date: String::new(),
         hot_cues: Vec::new(),
+        memory_cues: Vec::new(),
         artwork_hue: 0,
         has_artwork: false,
         file_name: name.to_owned(),

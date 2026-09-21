@@ -19,9 +19,13 @@
 export const SLOTS = 3;
 export const ANALYSIS_SLOTS = [1, 2, 3, 4] as const;
 
+import type { AnalysisSettings } from "@/ipc/types";
+import type { AnalysisMode } from "./preferences";
+
 export interface QueueItem {
   id: string;
   title: string;
+  analysis?: AnalysisSettings & { mode: AnalysisMode };
 }
 
 export interface QueueState {

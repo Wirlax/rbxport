@@ -298,6 +298,8 @@ impl Reader<'_> {
 /// when the kick band's envelope is given, placing a tempo change where it
 /// says the new tempo's beat has arrived and judging which half of the
 /// beat a stretch's kicks are on.
+/// Transitions without usable kick or click timing can follow emphasised
+/// full-band transients with a short release; settled fits use the originals.
 #[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
 pub fn detect_tempo_with(
     onsets: &OnsetEnvelope,
@@ -895,14 +897,15 @@ pub fn walk_report(
     let x_of = |secs: f64| (secs - onsets.origin_secs) * onsets.rate;
     let a_period = onsets.rate * 60.0 / from_bpm;
     let b_period = onsets.rate * 60.0 / to_bpm;
+    let transients = TransitionTransients::new(reader, x_of(from_secs).max(0.0) as usize, x_of(to_secs).max(0.0) as usize);
     // Phase the old grid from the strongest hit near `from_secs`.
-    let mut t = reader.snap(x_of(from_secs), a_period * 0.5).map_or(x_of(from_secs), |(at, _)| at);
+    let mut t = transients.snap(reader, x_of(from_secs), a_period, a_period * 0.5).map_or(x_of(from_secs), |(at, _)| at);
     let mut period = a_period;
     let mut out = Vec::new();
     let mut why = "reached the end";
     while out.len() < MAX_WALKED_BEATS && t < x_of(to_secs) {
         let predicted = t + period;
-        let Some((next, _)) = reader.snap(predicted, (RAMP_REACH * period).max(1.0)) else {
+        let Some((next, _)) = transients.snap(reader, predicted, period, (RAMP_REACH * period).max(1.0)) else {
             why = "no hit within reach";
             break;
         };
@@ -933,9 +936,11 @@ const SEGMENT_MIN_WINDOWS: usize = 3;
 /// A dotted-eighth delay puts a real period at four thirds of the beat; a
 /// triplet feel at three halves. Windows that measure such a period have not
 /// changed tempo, and a DJ edit that happens to jump by exactly that ratio
-/// is rarer than the pattern.
+/// is rarer than the pattern. With interpolated local estimates, a 1%
+/// neighbourhood preserves that guard without swallowing nearby real
+/// changes such as 128 to 174 (about 2% away from four thirds).
 fn rhythmic_ratio(ratio: f64) -> bool {
-    [1.5, 2.0 / 3.0, 4.0 / 3.0, 0.75].iter().any(|r| (ratio - r).abs() < 0.03 * r)
+    [1.5, 2.0 / 3.0, 4.0 / 3.0, 0.75].iter().any(|r| (ratio - r).abs() < 0.01 * r)
 }
 
 /// Labels every window with a tempo and cuts the track into stretches to
@@ -961,7 +966,10 @@ fn label_runs(
     let differs = |ratio: f64| (ratio - 1.0).abs() > options.segment_threshold && !rhythmic_ratio(ratio);
     let mut clusters: Vec<(f64, usize)> = Vec::new(); // (mean ratio, count)
     for ratio in local.iter().flatten().copied().filter(|&r| differs(r)) {
-        match clusters.iter_mut().find(|(centre, _)| (ratio - *centre).abs() < options.segment_threshold) {
+        // A new steady tempo needs repeatable measurements, not a broad
+        // cluster of drifting rhythmic aliases. Use half the change
+        // threshold relative to that candidate (1% by default).
+        match clusters.iter_mut().find(|(centre, _)| (ratio - *centre).abs() < options.segment_threshold * *centre * 0.5) {
             Some((centre, count)) => {
                 *centre = (*centre * *count as f64 + ratio) / (*count as f64 + 1.0);
                 *count += 1;
@@ -1075,6 +1083,7 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
 
     let mut segments: Vec<Segment> = Vec::new();
     let runs = label_runs(&local, &starts, window, n, bpm, options);
+    tracing::debug!(bpm, ?local, ?runs, "local tempo segments");
 
     // (change from, settled from, settled to, fit)
     let mut fits: Vec<(usize, usize, usize, Fit)> = Vec::new();
@@ -1086,11 +1095,11 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
         return segments;
     }
 
-    // Between each pair of fits: walk the change bar by bar from the old
-    // grid until the bars come out at the new tempo. Each walked bar is a
-    // segment of its own, and the new grid is re-phased to start at the
-    // last walked downbeat. Where the walk finds nothing — a break with no
-    // kicks — the change goes where the onsets change sides.
+    // Between each pair of fits: walk the change beat by beat from the old
+    // grid until four beats agree with the new tempo and phase. Each
+    // measured interval is its own segment; then use the settled fit.
+    // Where neither kicks nor emphasised transients carry the walk, place
+    // a cut using the support for the old and new grids.
     let to_secs = |x: f64| origin_secs + x / rate;
     let mut from_sample = -origin_secs * rate;
     let mut pending: Option<Fit> = None; // the fit whose segment is open
@@ -1123,11 +1132,15 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
         };
         // The walk starts in the old tempo's last settled window and may
         // run on into the new tempo's settled stretch until it settles.
-        let bars = walk_bars(reader, current, next, change_from, to_next);
-        let (cut, next_fit) = match bars.first() {
-            Some(&(first_bar_start, _)) => {
-                let last_end = bars.last().map_or(first_bar_start, |&(_, end)| end);
-                (first_bar_start, Fit { phase: last_end, period: next.period })
+        let walked = walk_beats(reader, current, next, change_from, to_next);
+        let (cut, next_fit) = match walked.first() {
+            Some(&(first_beat_start, _)) => {
+                let last_end = walked.last().map_or(first_beat_start, |&(_, end)| end);
+                // The walk has reached the settled grid within 2 ms. Use the
+                // fitted phase there, rather than carrying one quantized
+                // attack's error through the whole final stretch.
+                let phase = next.phase + ((last_end - next.phase) / next.period).round() * next.period;
+                (first_beat_start, Fit { phase, period: next.period })
             }
             // No ramp to follow: the change is a cut, placed where the new
             // beat arrives reliably, searched over the gap and the new
@@ -1135,7 +1148,7 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
             None => (boundary(reader, change_from, to_next, from_next, to_next, current, next), next),
         };
         if cut > from_sample {
-            // A grid re-phased at a walked downbeat keeps that phase; any
+            // A grid re-phased at a walked beat keeps that phase; any
             // other is refitted over its whole stretch.
             let current = if pending.is_some() { current } else { refit(current, from_sample, cut) };
             segments.push(Segment {
@@ -1145,15 +1158,15 @@ fn segment(reader: Reader<'_>, bpm: f64, options: TempoOptions, trace: Option<&m
                 phase_secs: to_secs(current.phase),
             });
         }
-        for &(start, end) in &bars {
+        for &(start, end) in &walked {
             segments.push(Segment {
                 from_secs: to_secs(start),
                 to_secs: to_secs(end),
-                period_secs: (end - start) / 4.0 / rate,
+                period_secs: (end - start) / rate,
                 phase_secs: to_secs(start),
             });
         }
-        from_sample = bars.last().map_or(cut, |&(_, end)| end);
+        from_sample = if walked.is_empty() { cut } else { next_fit.phase };
         pending = Some(next_fit);
     }
     split_gaps(reader, &segments, options, trace)
@@ -1188,13 +1201,19 @@ fn local_tempo(window: &[f64], rate: f64, bpm: f64, options: TempoOptions) -> Op
     if best.0 <= 0.0 {
         return None;
     }
-    let peak_bpm = rate * 60.0 / (best.1 + min_lag) as f64;
-    // Fold onto the octave of the track's tempo.
+    // Interpolate the peak before comparing rhythmic ratios. At the short
+    // lags of fast tempos, integer bins can be more than a percent apart.
+    let (left, middle, right) = (acf[best.1 - 1], acf[best.1], acf[best.1 + 1]);
+    let curvature = left - 2.0 * middle + right;
+    let offset = if curvature.abs() > f64::EPSILON { 0.5 * (left - right) / curvature } else { 0.0 };
+    let peak_bpm = rate * 60.0 / ((best.1 + min_lag) as f64 + offset.clamp(-0.5, 0.5));
+    // Fold onto the track's octave only while the result stays in the
+    // requested BPM range. 128 relative to 174 must not become 256 BPM.
     let mut ratio = peak_bpm / bpm;
-    while ratio > 1.5 {
+    while ratio > 1.5 && ratio * bpm / 2.0 >= options.min_bpm {
         ratio /= 2.0;
     }
-    while ratio < 0.75 {
+    while ratio < 0.75 && ratio * bpm * 2.0 <= options.max_bpm {
         ratio *= 2.0;
     }
     // The track's own tempo still correlates well: no change. A different
@@ -1218,19 +1237,82 @@ const RAMP_REACH: f64 = 0.1;
 /// still ends.
 const MAX_WALKED_BEATS: usize = 1024;
 
+/// Emphasise quiet percussion only while resolving a tempo transition.
+/// Positive flux rises get four times the gain and a 20 ms release; held
+/// energy cannot keep the envelope open or manufacture another beat.
+const TRANSIENT_GAIN: f64 = 4.0;
+const TRANSIENT_RELEASE_SECS: f64 = 0.020;
+
+struct TransitionTransients {
+    values: Vec<f64>,
+    start: usize,
+}
+
+impl TransitionTransients {
+    fn new(reader: Reader<'_>, from: usize, to: usize) -> Self {
+        // Include context for the first search and the release follower.
+        let start = from.saturating_sub(reader.rate.ceil() as usize).min(reader.values.len());
+        let end = to.saturating_add(reader.rate.ceil() as usize).min(reader.values.len()).max(start);
+        let decay = (-1.0 / (reader.rate * TRANSIENT_RELEASE_SECS)).exp();
+        let mut previous = start.checked_sub(1).map_or(0.0, |i| reader.values[i]);
+        let mut released = 0.0_f64;
+        let values = reader.values[start..end].iter().map(|&value| {
+            let attack = (value - previous).max(0.0) * TRANSIENT_GAIN;
+            previous = value;
+            released = attack.max(released * decay);
+            released
+        }).collect();
+        Self { values, start }
+    }
+
+    fn peak(&self, reader: Reader<'_>, x: f64, reach: f64) -> Option<(f64, f64)> {
+        let local = x - self.start as f64;
+        let (at, height) = peaks_in(&self.values, local - reach, local + reach, HIT_FLOOR)
+            .into_iter()
+            .max_by(|a, b| a.1.total_cmp(&b.1))?;
+        // Use emphasis to select the hit, but keep the original envelope's
+        // timestamp: the asymmetric release must not move the fitted phase.
+        let (at, _) = local_peak(reader.values, at + self.start as f64, 1.0)?;
+        ((at - x).abs() <= reach).then_some((at, height))
+    }
+
+    fn snap(&self, reader: Reader<'_>, x: f64, period: f64, reach: f64) -> Option<(f64, f64)> {
+        let evidence = reader.evidence(x, period);
+        if evidence.kick >= KICK_PRESENT {
+            return reader.snap(x, reach);
+        }
+        // A clear click still gives finer timing than spectral flux.
+        if reader.attacks.is_some() {
+            if let Some(hit) = reader.snap(x, reach) {
+                return Some(hit);
+            }
+        }
+        self.peak(reader, x, reach)
+    }
+
+    fn emphasise(&self, reader: Reader<'_>, beats: &mut [(f64, Evidence)], period: f64) {
+        for (at, evidence) in beats {
+            if evidence.kick < KICK_PRESENT {
+                evidence.flux = self.peak(reader, *at, (period * 0.1).max(1.0)).map_or(0.0, |(_, h)| h);
+            }
+        }
+    }
+}
+
 /// Walks a tempo change beat by beat, from the last beat of `a` before
-/// `from`, until a bar comes out at `b`'s tempo or the walk reaches `to`.
+/// `from`, until four beats agree with `b`'s tempo and phase or the walk reaches `to`.
 ///
 /// Each next beat is predicted from the period of the beat before it and
 /// looked for within a tenth of a beat either side, through the reader
-/// (the kick's attack when there is an attack map). The period may drift
+/// (the kick's attack when there is an attack map, emphasised transients
+/// when neither kick nor click can place it). The period may drift
 /// by up to `RAMP_STEP` per beat: that follows a rise or fall, gradual or
-/// not, and stops at a jump, which is a cut. Returns the walked bars as
-/// `(start, end)` envelope samples — four beats each, from the first
+/// not, and stops at a jump, which is a cut. Returns the walked intervals as
+/// `(start, end)` envelope samples — one beat each, from the first
 /// walked beat — or nothing when the walk did not reach `b`'s tempo, when
 /// the two tempos are too far apart to be a change of pace, or when no
 /// beat could be placed.
-fn walk_bars(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<(f64, f64)> {
+fn walk_beats(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<(f64, f64)> {
     if a.period < 2.0 || b.period < 2.0 {
         return Vec::new();
     }
@@ -1238,11 +1320,12 @@ fn walk_bars(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<
     if !(0.6..=1.67).contains(&ratio) {
         return Vec::new();
     }
+    let transients = TransitionTransients::new(reader, from, to);
     // The first beat of `a` at or after `from`, moved onto the hit nearest
     // it: the walk measures every period from a hit to a hit.
     let k = ((from as f64 - a.phase) / a.period).ceil();
     let grid_point = a.phase + k * a.period;
-    let Some((mut t, _)) = reader.snap(grid_point, (RAMP_REACH * a.period).max(1.0)) else {
+    let Some((mut t, _)) = transients.snap(reader, grid_point, a.period, (RAMP_REACH * a.period).max(1.0)) else {
         return Vec::new();
     };
     let mut period = a.period;
@@ -1250,7 +1333,7 @@ fn walk_bars(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<
     let mut settled_run = 0usize;
     while beats.len() < MAX_WALKED_BEATS && t < to as f64 {
         let predicted = t + period;
-        let Some((next, _)) = reader.snap(predicted, (RAMP_REACH * period).max(1.0)) else { break };
+        let Some((next, _)) = transients.snap(reader, predicted, period, (RAMP_REACH * period).max(1.0)) else { break };
         let next_period = next - t;
         if next_period <= 0.0 || (next_period - period).abs() > period * RAMP_STEP {
             break;
@@ -1259,7 +1342,10 @@ fn walk_bars(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<
         t = next;
         beats.push(t);
         // Settled once a whole bar has come out at the new tempo.
-        if (period - b.period).abs() <= b.period * SETTLED_TOLERANCE {
+        let settled_beat = b.phase + ((t - b.phase) / b.period).round() * b.period;
+        if (period - b.period).abs() <= b.period * SETTLED_TOLERANCE
+            && (t - settled_beat).abs() <= reader.rate * 0.002
+        {
             settled_run += 1;
             if settled_run >= 4 {
                 break;
@@ -1271,12 +1357,9 @@ fn walk_bars(reader: Reader<'_>, a: Fit, b: Fit, from: usize, to: usize) -> Vec<
     if settled_run < 4 {
         return Vec::new();
     }
-    // Whole bars only; a trailing partial bar belongs to the new grid.
-    beats
-        .windows(5)
-        .step_by(4)
-        .map(|w| (w[0], w[4]))
-        .collect()
+    // Keep the measured attack of every beat. Replacing four measured
+    // intervals with their mean loses the curvature within a bar.
+    beats.windows(2).map(|w| (w[0], w[1])).collect()
 }
 
 /// A bar of the new grid reads the kick when the kick band averages this
@@ -1338,7 +1421,8 @@ const LIVE_SOURCE: f64 = 0.1;
 ///
 /// Should no run qualify — the new tempo's stretch is a breakdown with no
 /// kick of its own — the change goes where the onsets stop following `a`
-/// and start following `b`, the earliest such beat when several tie: the
+/// and start following `b`, emphasising transient rises where the kick is
+/// absent. The earliest supported beat wins when several tie: the
 /// impact that ends a section belongs to the section after it.
 fn boundary(reader: Reader<'_>, from: usize, to: usize, settled_from: usize, settled_to: usize, a: Fit, b: Fit) -> f64 {
     let n = reader.values.len();
@@ -1443,10 +1527,18 @@ fn boundary(reader: Reader<'_>, from: usize, to: usize, settled_from: usize, set
         }
     }
 
-    // For every possible boundary (each beat of b), the support for a before
-    // it plus the support for b from it on; ties go to the earlier cut.
+    // No reliable kick run: exaggerate the other transients where the kick
+    // is absent so quiet percussion can say which grid owns the change.
+    let transients = TransitionTransients::new(reader, lo, hi);
+    let (mut beats_a, mut beats_b) = (beats_a, beats_b);
+    transients.emphasise(reader, &mut beats_a, a.period);
+    transients.emphasise(reader, &mut beats_b, b.period);
+
+    // For every supported beat of b, the support for a before it plus the
+    // support for b from it on; ties go to the earlier cut. An empty beat
+    // before the first transient must not win that tie.
     let mut best = (f64::NEG_INFINITY, hi as f64);
-    for &(cut, _) in beats_b.iter().filter(|(at, _)| *at < hi as f64) {
+    for &(cut, _) in beats_b.iter().filter(|(at, e)| *at < hi as f64 && e.sum() >= HIT_FLOOR) {
         let score: f64 = beats_a.iter().filter(|(t, _)| *t < cut).map(|(_, e)| e.sum()).sum::<f64>()
             + beats_b.iter().filter(|(t, _)| *t >= cut && *t < hi as f64).map(|(_, e)| e.sum()).sum::<f64>();
         if score > best.0 {
@@ -2012,6 +2104,107 @@ mod tests {
     use super::*;
 
     const RATE: f64 = 44_100.0 / 256.0;
+
+    #[test]
+    fn transition_transients_have_a_short_rate_independent_release() {
+        for rate in [1000.0, 44_100.0 / 256.0, 48_000.0 / 256.0] {
+            let mut values = vec![0.01; rate as usize];
+            values[0] = 0.0;
+            let reader = Reader { values: &values, rate, origin_secs: 0.0, attacks: None, kicks: None };
+            let transients = TransitionTransients::new(reader, 0, values.len());
+            assert!((transients.values[1] - 0.04).abs() < 1e-10);
+            let after = (TRANSIENT_RELEASE_SECS * rate).round() as usize;
+            let expected = 0.04 * (-(after as f64) / (rate * TRANSIENT_RELEASE_SECS)).exp();
+            assert!((transients.values[1 + after] - expected).abs() < 1e-10);
+            // A held sound and its release do not become later beats.
+            assert!(transients.peak(reader, rate * 0.5, rate * 0.05).is_none());
+        }
+    }
+
+    #[test]
+    fn a_quiet_transition_without_kick_attacks_is_walked() {
+        let rate = 1000.0;
+        let mut hits = vec![1000_usize];
+        let mut period = 500;
+        for _ in 0..20 {
+            hits.push(hits.last().unwrap() + period);
+            period -= 5;
+        }
+        let settled = *hits.last().unwrap();
+        for _ in 0..8 {
+            hits.push(hits.last().unwrap() + period);
+        }
+        let end = hits.last().unwrap() + 100;
+        let mut values = vec![0.0; end];
+        for &hit in &hits {
+            values[hit] = 0.01; // Below the ordinary hit floor.
+        }
+        let attacks = AttackMap::new(&[], 1000, crate::attack::AttackOptions::default());
+        let kicks = OnsetEnvelope { values: vec![0.0; end], rate, origin_secs: 0.0 };
+        let reader = Reader { values: &values, rate, origin_secs: 0.0, attacks: Some(&attacks), kicks: Some(&kicks) };
+        assert!(reader.snap(1000.0, 50.0).is_none());
+        let a = Fit { phase: 1000.0, period: 500.0 };
+        let b = Fit { phase: settled as f64, period: 400.0 };
+        let walked = walk_beats(reader, a, b, 1000, end);
+        assert!(walked.len() >= 24, "{walked:?}");
+        for ((start, finish), expected) in walked.iter().zip(hits.windows(2)) {
+            assert!((start - expected[0] as f64).abs() < 1e-8);
+            assert!((finish - expected[1] as f64).abs() < 1e-8);
+        }
+        // Silence or tiny background fluctuations cannot replace those hits.
+        for level in [0.0, 0.001] {
+            let quiet: Vec<f64> = values.iter().map(|v| if *v > 0.0 { level } else { 0.0 }).collect();
+            assert!(walk_beats(Reader { values: &quiet, ..reader }, a, b, 1000, end).is_empty());
+        }
+    }
+
+    #[test]
+    fn transition_emphasis_keeps_kick_timing_and_envelope_coordinates() {
+        let mut values = vec![0.0; 5000];
+        values[3100] = 0.1;
+        values[3130] = 1.0;
+        let mut kicks = OnsetEnvelope { values: vec![0.0; 5000], rate: 1000.0, origin_secs: 0.25 };
+        kicks.values[3100] = 1.0;
+        let reader = Reader { values: &values, rate: 1000.0, origin_secs: 0.25, attacks: None, kicks: Some(&kicks) };
+        let transients = TransitionTransients::new(reader, 3000, 4000);
+        assert!(transients.start > 0);
+        assert_eq!(transients.snap(reader, 3100.0, 500.0, 50.0), reader.snap(3100.0, 50.0));
+        let (at, height) = transients.peak(reader, 3100.0, 10.0).unwrap();
+        assert!((at - 3100.0).abs() < 1e-8);
+        assert!((height - 0.4).abs() < 1e-8);
+    }
+
+    #[test]
+    fn a_kickless_cut_follows_quiet_transients() {
+        let mut values = vec![0.0; 16_000];
+        for at in (1100..8100).step_by(500).chain((8100..16_000).step_by(400)) {
+            values[at] = 0.01;
+        }
+        let reader = Reader { values: &values, rate: 1000.0, origin_secs: 0.0, attacks: None, kicks: None };
+        let cut = boundary(reader, 5000, 12_000, 10_000, 15_000,
+            Fit { phase: 1100.0, period: 500.0 }, Fit { phase: 8100.0, period: 400.0 });
+        assert!((cut - 8100.0).abs() < 1e-8, "cut at {cut}");
+    }
+
+    #[test]
+    fn nearby_real_tempos_are_not_rhythmic_subdivisions() {
+        assert!(rhythmic_ratio(4.0 / 3.0));
+        assert!(rhythmic_ratio(2.0 / 3.0));
+        assert!(!rhythmic_ratio(174.0 / 128.0));
+        assert!(!rhythmic_ratio(128.0 / 174.0));
+    }
+
+    #[test]
+    fn drifting_rhythmic_aliases_do_not_form_a_steady_tempo() {
+        // Approximate two-thirds patterns must not merge into one broad
+        // candidate and relabel earlier, exact two-thirds windows as a cut.
+        let local = [0.6668, 0.6655, 0.6657, 0.6637, 1.0, 1.0, 1.0, 1.0,
+            0.6774, 0.6776, 0.6956, 0.6884, 1.0, 1.0, 1.0, 1.0].map(Some);
+        let starts: Vec<usize> = (0..local.len()).map(|i| i * 80).collect();
+        let runs = label_runs(&local, &starts, 160, 1_360, 175.0, TempoOptions::default());
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert!((runs[0].2 - 175.0).abs() < f64::EPSILON);
+    }
 
     /// An onset envelope with a peak at each of `hits`, in seconds.
     fn envelope(hits: &[f64], secs: f64) -> OnsetEnvelope {

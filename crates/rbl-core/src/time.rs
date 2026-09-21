@@ -60,6 +60,12 @@ pub fn local_stamp() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// Local date and 24-hour time for backup filenames, `YYYYMMDD-HHMM`.
+#[must_use]
+pub fn local_backup_stamp() -> String {
+    chrono::Local::now().format("%Y%m%d-%H%M").to_string()
+}
+
 /// Civil date from a count of days since 1970-01-01.
 ///
 /// Hinnant's algorithm: shift the era so March is the first month, which makes

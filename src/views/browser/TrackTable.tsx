@@ -7,6 +7,8 @@
  * instead of rewriting every cell.
  */
 import { SearchField } from "@/components/SearchField";
+import { reportStartupPaint } from "@/lib/startup";
+import { useEventCallback } from "@/store/useEventCallback";
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -518,6 +520,7 @@ const TrackRow = memo(function TrackRow({
                   width={col.width - 6}
                   height={PREVIEW_BAND_H}
                   hotCues={previewCues ? row.hotCues : NO_CUES}
+                  memoryCues={previewCues ? row.memoryCues : undefined}
                   durationSec={row.durationSec}
                 />
               ) : null}
@@ -704,7 +707,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
   { id: "b", label: "PLAYER B - Traffic Light", short: "PLAYER B" },
 ];
 
-export function TrackTable({
+export const TrackTable = memo(function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
   onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
@@ -752,6 +755,7 @@ export function TrackTable({
     if (!onFirstRows || view.loading || view.count === 0) return;
     const first = view.rowAt(0);
     if (!first) return;
+    reportStartupPaint("first-rows-painted");
     const stamp = `${view.token}:${view.count}:${first.id}`;
     if (reported.current === stamp) return;
     reported.current = stamp;
@@ -963,27 +967,25 @@ export function TrackTable({
   const carrying = useRef<readonly string[] | null>(null);
   const [dropAt, setDropAt] = useState<{ index: number; below: boolean } | null>(null);
 
-  const startDraggingTracks = useCallback(
+  const startDraggingTracks = useEventCallback(
     (row: RowDto) => {
       carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
       startDragOut(row);
     },
-    [selection.ids, startDragOut],
   );
 
-  const endDraggingTracks = useCallback(() => {
+  const endDraggingTracks = useEventCallback(() => {
     carrying.current = null;
     setDropAt(null);
     onDragTracks?.(null);
-  }, [onDragTracks]);
+  });
 
   /** Where the carried rows would go, as the pointer moves over a row. */
-  const reorderOver = useCallback(
+  const reorderOver = useEventCallback(
     (index: number, below: boolean) => {
       if (!onReorder || carrying.current === null) return;
       setDropAt((at) => (at?.index === index && at.below === below ? at : { index, below }));
     },
-    [onReorder],
   );
 
   /**
@@ -993,7 +995,7 @@ export function TrackTable({
    * rewrites `TrackNo` from what it is handed, and a partial list would leave
    * the rest of the playlist to be appended in its old order.
    */
-  const reorderDrop = useCallback(() => {
+  const reorderDrop = useEventCallback(() => {
     const moved = carrying.current;
     const at = dropAt;
     setDropAt(null);
@@ -1012,9 +1014,9 @@ export function TrackTable({
       if (lifted.length === 0) return;
       onReorder([...staying.slice(0, insertAt), ...lifted, ...staying.slice(insertAt)]);
     })();
-  }, [dropAt, onReorder, view]);
+  });
 
-  const handleSelect = useCallback(
+  const handleSelect = useEventCallback(
     (index: number, id: string, e: React.MouseEvent) => {
       const modifier = modifierFor(e);
       if (modifier === "range" && selection.anchorIndex !== null) {
@@ -1026,7 +1028,6 @@ export function TrackTable({
       }
       setSelection((s) => applyClick(s, { id, index }, modifier));
     },
-    [selection.anchorIndex, view],
   );
 
   /**
@@ -1036,11 +1037,10 @@ export function TrackTable({
    * different intentions — arrowing through a playlist to see what is in it
    * should not load forty tracks on the way past.
    */
-  const handleOpen = useCallback(
+  const handleOpen = useEventCallback(
     (index: number) => {
       onFocusedRow?.(view.rowAt(index) ?? null);
     },
-    [view, onFocusedRow],
   );
 
   useEffect(() => {
@@ -1415,4 +1415,4 @@ export function TrackTable({
       ) : null}
     </div>
   );
-}
+});

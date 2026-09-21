@@ -105,7 +105,7 @@ test("each default column is its measured width", async ({ page }) => {
 
 test("the player is laid out the way the capture measures it", async ({ page }) => {
   // Every number here is measured off a 2x capture of rekordbox 7.2.11
-  // running — see the `source` on each token in design/tokens/tokens.json.
+  // running — see the `source` on each token in design/tokens/theme.json.
   const player = await page.getByRole("region", { name: "Preview player" }).boundingBox();
   expect(player?.height).toBe(279);
 

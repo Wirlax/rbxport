@@ -12,8 +12,8 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /** Before the first repeat, and between repeats after it. */
-export const HOLD_DELAY_MS = 400;
-export const HOLD_REPEAT_MS = 80;
+export const HOLD_DELAY_MS = 1000;
+export const HOLD_REPEAT_MS = 100;
 
 export interface HoldHandlers {
   onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
@@ -23,7 +23,7 @@ export interface HoldHandlers {
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
-export function useHoldRepeat(): (action: () => void) => HoldHandlers {
+export function useHoldRepeat(): (action: (held?: boolean) => void) => HoldHandlers {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stop = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -32,9 +32,9 @@ export function useHoldRepeat(): (action: () => void) => HoldHandlers {
   useEffect(() => stop, [stop]);
 
   return useCallback(
-    (action: () => void): HoldHandlers => {
+    (action: (held?: boolean) => void): HoldHandlers => {
       const tick = () => {
-        action();
+        action(true);
         timer.current = setTimeout(tick, HOLD_REPEAT_MS);
       };
       return {

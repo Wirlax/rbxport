@@ -9,7 +9,7 @@ import { memo, useEffect, useRef } from "react";
 import { getBackend } from "@/ipc/client";
 import type { RowCue } from "@/ipc/types";
 import {
-  drawPreviewCues, renderPreview, waveformKindOf, WaveformCache, type RenderedWaveform, type WavePalette,
+  drawPreviewMemoryCues, drawPreviewCues, renderPreview, waveformKindOf, WaveformCache, type RenderedWaveform, type WavePalette,
 } from "@/canvas";
 import { usePreferences } from "@/store/usePreferences";
 
@@ -123,6 +123,7 @@ export interface WaveformPreviewProps {
    * edited in the app would otherwise keep its old badge until then.
    */
   hotCues: readonly RowCue[];
+  memoryCues?: readonly number[] | undefined;
   durationSec: number;
 }
 
@@ -131,6 +132,7 @@ export const WaveformPreview = memo(function WaveformPreview({
   width,
   height,
   hotCues,
+  memoryCues,
   durationSec,
 }: WaveformPreviewProps) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -152,6 +154,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       ctx.drawImage(entry.bitmap, 0, 0, canvas.width, canvas.height);
       // CDJ: every badge the fallback green, whatever the cue was given.
       const badges = hotCueColor === "cdj" ? hotCues.map(([letter, at]) => [letter, at, null] as const) : hotCues;
+      drawPreviewMemoryCues(ctx, memoryCues ?? [], durationSec * 1000, canvas.width, dpr);
       drawPreviewCues(ctx, badges, durationSec * 1000, canvas.width, dpr);
     };
 
@@ -173,7 +176,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [trackId, width, height, hotCues, durationSec, palette, hotCueColor]);
+  }, [trackId, width, height, hotCues, memoryCues, durationSec, palette, hotCueColor]);
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return (

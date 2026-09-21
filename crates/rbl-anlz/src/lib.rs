@@ -40,7 +40,7 @@ pub type Result<T> = std::result::Result<T, AnlzError>;
 
 pub use phrase::{Mood, Phrase, PhraseEdit, SongStructure};
 pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
-pub use encode::{author, AnalysisFiles, BandColumn, Existing};
+pub use encode::{author, author_with_overview, AnalysisFiles, BandColumn, Existing};
 pub use write::AnlzBuilder;
 
 /// Bytes of section framing before the tag-specific header fields.
@@ -422,23 +422,10 @@ impl Anlz {
         write::render(&self.header_extra, &self.sections)
     }
 
-    /// Whether the file carries `PQT2`, the extended beat grid.
-    ///
-    /// 112 of the first 120 `.EXT` files in the reference library have one
-    /// [OBS]; the eight that do not also lack `PSSI`. Its 44-byte header
-    /// decodes as: two reserved words, the constant `0x0100_0002`, then
-    /// `(first beat number << 16) | tempo`, the first beat's time in
-    /// milliseconds, `(last beat number << 16) | tempo`, the last beat's
-    /// time, and the beat count — each confirmed against the `PQTZ` grid in
-    /// the sibling `.DAT` [OBS]. Its payload is one big-endian `u16` per beat
-    /// whose meaning is **[UNKNOWN]**: the values fall by roughly 84 per beat
-    /// modulo about a thousand, which looks like a phase but does not divide
-    /// evenly into the beat interval.
-    ///
-    /// That last unknown is why nothing here writes a filled `PQT2`. A grid
-    /// edit invalidates it, and inventing a payload would put a guess into
-    /// the user's library; [`Anlz::with_extended_grid_cleared`] empties it
-    /// instead.
+    /// Whether this file carries extended beat data. Its payload contains an
+    /// opaque 16-bit value per beat. Grid saves preserve it only when the
+    /// old-grid checksum, endpoints, times and tempos remain compatible;
+    /// see [`Anlz::with_extended_grid_edit`].
     #[must_use]
     pub fn has_extended_grid(&self) -> bool {
         self.section(b"PQT2").is_some()
@@ -465,6 +452,42 @@ impl Anlz {
             *slot = write::extended_grid_empty_section();
         }
         Some(write::render(&self.header_extra, &sections))
+    }
+
+    /// Preserve extended payload only when its old-grid checksum, endpoints,
+    /// offset and every new time/tempo still agree (CAnalyzerIF's save path).
+    /// Beat-number-only edits refresh the header without inventing payload.
+    #[must_use]
+    pub fn with_extended_grid_edit(&self, old: &[Beat], new: &[Beat], offset: i16) -> Option<Vec<u8>> {
+        let at = self.sections.iter().position(|s| s.tag == FourCc::new(b"PQT2"))?;
+        let section = self.sections.get(at)?;
+        let word = |at: usize| section.header.get(at..at + 4)
+            .and_then(|b| <[u8; 4]>::try_from(b).ok()).map(u32::from_be_bytes);
+        let packed = |b: &Beat| (u32::from(b.beat_number) << 16) | u32::from(b.tempo_x100);
+        let checksum = |beats: &[Beat]| beats.iter().fold(0_u32, |sum, b| sum.wrapping_add(b.time_ms).wrapping_add(u32::from(b.beat_number)).wrapping_add(u32::from(b.tempo_x100)));
+        let preserve = !old.is_empty() && old.len() == new.len()
+            && section.header.len() >= 36 && section.payload.len() == old.len() * 2
+            && word(28) == u32::try_from(old.len()).ok()
+            && word(12) == old.first().map(packed) && word(16) == old.first().map(|b| b.time_ms)
+            && word(20) == old.last().map(packed) && word(24) == old.last().map(|b| b.time_ms)
+            && word(32) == Some(checksum(old))
+            && section.header.get(8..10) == Some(offset.to_be_bytes().as_slice())
+            && old.iter().zip(new).all(|(a,b)| i64::from(a.time_ms) + i64::from(offset) == i64::from(b.time_ms) && a.tempo_x100 == b.tempo_x100);
+        let mut next = self.clone();
+        let slot = next.sections.get_mut(at)?;
+        if slot.header.len() < 36 { *slot = write::extended_grid_empty_section(); }
+        else {
+            slot.header.get_mut(8..36)?.fill(0);
+            if preserve {
+                let first = new.first()?;
+                let last = new.last()?;
+                for (at, value) in [(12, packed(first)), (16, first.time_ms), (20, packed(last)), (24, last.time_ms), (28, u32::try_from(new.len()).ok()?), (32, checksum(new))] {
+                    slot.header.get_mut(at..at + 4)?.copy_from_slice(&value.to_be_bytes());
+                }
+            } else { slot.payload.clear(); }
+        }
+        let bytes = next.to_bytes();
+        (bytes != self.to_bytes()).then_some(bytes)
     }
 
     /// The file with its beat grid replaced and every other section

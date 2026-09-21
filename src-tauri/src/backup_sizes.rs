@@ -11,6 +11,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const WEEK_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSizes {
@@ -97,7 +99,11 @@ impl SizeCache {
                 }
             }
         }
-        self.get(refresh, || {
+        let now = rbl_core::time::unix_millis();
+        let stale = self.value.as_ref().is_some_and(|value| {
+            value.as_ref().is_ok_and(|sizes| now.saturating_sub(sizes.updated_at) >= WEEK_MS)
+        });
+        self.get(refresh || stale, || {
             let sizes = scan()?;
             let saved = SavedSizes {
                 version: 2,
@@ -123,7 +129,7 @@ impl SizeCache {
 pub fn cached(state: &AppState, refresh: bool) -> AppResult<BackupSizes> {
     let location = state.location()?;
     // Loading the saved reading requires one small JSON read, no library scan.
-    // Only Refresh requests a new reading; its original timestamp stays visible.
+    // Reuse it for a week; manual Refresh can request a new reading sooner.
     state.backup_sizes.lock().persisted(
         &state.backup_dir().join(".size-cache.json"),
         &location.master_db,
@@ -271,7 +277,33 @@ fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
 mod tests {
     use super::*;
     #[test]
+    fn week_old_readings_refresh_automatically_and_persist_the_new_estimate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sizes.json");
+        let db = dir.path().join("master.db");
+        let analysis = dir.path().join("analysis");
+        let now = rbl_core::time::unix_millis();
+        SizeCache::default().persisted(&path, &db, &analysis, false, || {
+            Ok(BackupSizes { updated_at: now - WEEK_MS - 1, database: 10, ..Default::default() })
+        }).unwrap();
+        let mut restarted = SizeCache::default();
+        assert!(restarted.persisted(&path, &db, &analysis, false, || Err(AppError::internal("offline"))).is_err());
+        let saved: SavedSizes = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.sizes.database, 10);
+        let refreshed = restarted.persisted(&path, &db, &analysis, false, || {
+            Ok(BackupSizes { updated_at: now, database: 20, ..Default::default() })
+        }).unwrap();
+        assert_eq!(refreshed.database, 20);
+        let saved = SizeCache::default().persisted(&path, &db, &analysis, false, || {
+            panic!("a fresh weekly estimate must be reused")
+        }).unwrap();
+        assert_eq!(saved.database, 20);
+        assert_eq!(saved.updated_at, now);
+    }
+
+    #[test]
     fn saved_reading_survives_restart_and_only_refresh_rescans() {
+        let now = rbl_core::time::unix_millis();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sizes.json");
         let db = dir.path().join("master.db");
@@ -280,7 +312,7 @@ mod tests {
         first
             .persisted(&path, &db, &analysis, false, || {
                 Ok(BackupSizes {
-                    updated_at: 42,
+                    updated_at: now,
                     database: 100,
                     waveforms: 200,
                     ..Default::default()
@@ -295,12 +327,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             (saved.updated_at, saved.database, saved.waveforms),
-            (42, 100, 200)
+            (now, 100, 200)
         );
         restarted
             .persisted(&path, &db, &analysis, true, || {
                 Ok(BackupSizes {
-                    updated_at: 99,
+                    updated_at: now + 1,
                     database: 300,
                     ..Default::default()
                 })
@@ -311,11 +343,12 @@ mod tests {
                 panic!("refresh should persist")
             })
             .unwrap();
-        assert_eq!((saved.updated_at, saved.database), (99, 300));
+        assert_eq!((saved.updated_at, saved.database), (now + 1, 300));
     }
 
     #[test]
     fn failed_refresh_keeps_the_persisted_success() {
+        let now = rbl_core::time::unix_millis();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sizes.json");
         let db = dir.path().join("master.db");
@@ -324,7 +357,7 @@ mod tests {
         cache
             .persisted(&path, &db, &analysis, false, || {
                 Ok(BackupSizes {
-                    updated_at: 42,
+                    updated_at: now,
                     ..Default::default()
                 })
             })
@@ -341,7 +374,7 @@ mod tests {
                 ))
                 .unwrap()
                 .updated_at,
-            42
+            now
         );
     }
 

@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::settings::StickSettings;
 use crate::{key, unlock, Error, Result};
@@ -161,6 +161,12 @@ fn annotated(name: &str) -> String {
 /// Ids are the stick-local ones an export assigns, not rekordbox's.
 #[derive(Debug, Clone, Default)]
 pub struct Track {
+    pub year: i64,
+    pub release_date: String,
+    pub bitrate: i64,
+    pub sample_rate: i64,
+    pub master_db_id: i64,
+    pub master_content_id: i64,
     pub content_id: i64,
     pub title: String,
     pub artist_id: Option<i64>,
@@ -191,6 +197,8 @@ pub struct Track {
 #[derive(Debug)]
 pub struct Builder {
     conn: Connection,
+    staged: tempfile::TempPath,
+    target: std::path::PathBuf,
     tracks: i64,
     /// Carried from the settings into `property` when the database is
     /// finished; never interpreted here.
@@ -215,11 +223,15 @@ impl Builder {
         if path.exists() {
             return Err(Error::Exists(path.display().to_string()));
         }
-        let conn = Connection::open(path)
+        let staged = tempfile::NamedTempFile::new_in(path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))?.into_temp_path();
+        let conn = Connection::open(&staged)
             .map_err(|source| Error::Open { path: path.display().to_string(), source })?;
         // The cipher settings must precede every other statement, or the file
         // is created as plain SQLite and no player can read it.
         unlock(&conn, &key::passphrase()?)?;
+
+        crate::durable_writes(&conn)?;
+        conn.execute_batch("BEGIN IMMEDIATE")?;
 
         for statement in SCHEMA {
             conn.execute(statement, [])?;
@@ -262,7 +274,7 @@ impl Builder {
             )?;
         }
 
-        Ok(Self { conn, tracks: 0, background_color_type: settings.background_color_type })
+        Ok(Self { conn, staged, target: path.to_owned(), tracks: 0, background_color_type: settings.background_color_type })
     }
 
     /// Adds a lookup row and returns its id, reusing one that already matches.
@@ -280,7 +292,7 @@ impl Builder {
                 params![name],
                 |r| r.get(0),
             )
-            .ok();
+            .optional()?;
         if let Some(id) = existing {
             return Ok(id);
         }
@@ -291,7 +303,7 @@ impl Builder {
                 [],
                 |r| r.get(0),
             )
-            .unwrap_or(1);
+            ?;
         if table == "artist" {
             // Artist is the only lookup the reference export fills a search
             // column for.
@@ -315,9 +327,9 @@ impl Builder {
                 (content_id, title, titleForSearch, bpmx100, length, trackNo,
                  artist_id_artist, album_id, genre_id, label_id, key_id, color_id,
                  djComment, rating, dateAdded, path, fileName, fileSize,
-                 analysisDataFilePath, djPlayCount, hasModified, image_id)
+                 analysisDataFilePath, djPlayCount, hasModified, image_id, masterDbId, masterContentId, releaseYear, releaseDate, bitrate, samplingRate)
              VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                     ?12, ?13, ?14, ?15, ?16, ?17, ?18, 0, 0, ?19)",
+                     ?12, ?13, ?14, ?15, ?16, ?17, ?18, 0, 0, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 track.content_id,
                 track.title,
@@ -339,6 +351,9 @@ impl Builder {
                 track.analysis_path,
             
                 track.image_id,
+                track.master_db_id,
+                track.master_content_id,
+                track.year, track.release_date, track.bitrate, track.sample_rate,
             ],
         )?;
         self.tracks += 1;
@@ -350,11 +365,15 @@ impl Builder {
     /// `parent` is 0 for the top level — a number, unlike `master.db`, which
     /// spells the same thing as the string `"root"`.
     pub fn add_playlist(&mut self, id: i64, name: &str, parent: i64, seq: i64) -> Result<()> {
+        self.add_playlist_node(id, name, parent, seq, false)
+    }
+
+    pub fn add_playlist_node(&mut self, id: i64, name: &str, parent: i64, seq: i64, folder: bool) -> Result<()> {
         self.conn.execute(
             "INSERT INTO playlist
                 (playlist_id, sequenceNo, name, image_id, attribute, playlist_id_parent)
-             VALUES (?1, ?2, ?3, NULL, 0, ?4)",
-            params![id, seq, name, parent],
+             VALUES (?1, ?2, ?3, NULL, ?5, ?4)",
+            params![id, seq, name, parent, i64::from(folder)],
         )?;
         Ok(())
     }
@@ -400,6 +419,36 @@ impl Builder {
         Ok(())
     }
 
+    /// Carry format-specific cue fields without guessing their encoding. Track IDs
+    /// remain stable; records for deliberately removed tracks are omitted.
+    pub fn preserve_cues(&mut self, source: &Path) -> Result<()> {
+        let db = crate::ExportLibrary::open_read_only(source)?;
+        let mut stmt = db.connection().prepare("SELECT * FROM cue ORDER BY cue_id")?;
+        let columns = stmt.column_names().iter().map(|n| format!("\"{}\"", n.replace('"', "\"\""))).collect::<Vec<_>>();
+        let placeholders = vec!["?"; columns.len()].join(",");
+        let insert = format!("INSERT INTO cue ({}) VALUES ({placeholders})", columns.join(","));
+        let content_column = stmt.column_index("content_id")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let content: i64 = row.get(content_column)?;
+            let exists: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM content WHERE content_id=?1)", [content], |r| r.get(0))?;
+            if exists {
+                let values = (0..columns.len()).map(|i| row.get::<_,rusqlite::types::Value>(i)).collect::<std::result::Result<Vec<_>,_>>()?;
+                self.conn.execute(&insert, rusqlite::params_from_iter(values))?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn add_history(&mut self, id: i64, name: &str, parent: i64, seq: i64, folder: bool) -> Result<()> {
+        self.conn.execute("INSERT INTO history VALUES (?1,?2,?3,?4,?5)", params![id,seq,name,i64::from(folder),parent])?;
+        Ok(())
+    }
+    pub fn add_history_track(&mut self, history: i64, content: i64, seq: i64) -> Result<()> {
+        self.conn.execute("INSERT INTO history_content VALUES (?1,?2,?3)", params![history,content,seq])?;
+        Ok(())
+    }
+
     /// Writes the property row and closes the database.
     ///
     /// `created` is a date, `YYYY-MM-DD`, which is what the reference export
@@ -417,8 +466,11 @@ impl Builder {
         )?;
         // A stick must not be left with pages only in the WAL: a device that
         // does not replay it would read a database missing everything written.
-        self.conn.pragma_update(None, "journal_mode", "DELETE")?;
+        self.conn.execute_batch("COMMIT")?;
         drop(self.conn);
+        std::fs::OpenOptions::new().write(true).open(&self.staged)?.sync_all()?;
+        self.staged.persist_noclobber(&self.target).map_err(|e| e.error)?;
+        rbl_core::durable::sync_dir(self.target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))?;
         Ok(())
     }
 }

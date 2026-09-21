@@ -164,6 +164,7 @@ pub fn analyse_with(samples: &[f32], sample_rate: u32, options: AnalysisOptions)
         _ => grid.downbeat_secs,
     };
     tempo.beats = tempo::beats_of(&tempo.segments, phase_for(&tempo.segments, downbeat_secs));
+    anchor_file_start(&mut tempo, samples, sample_rate, downbeat_secs);
     // The key rules may read the bass on or between beats and after phrase
     // starts; when one does, the key waits for the grid and is found here.
     let key = match key {
@@ -210,4 +211,91 @@ fn level(samples: &[f32]) -> (f32, f32) {
     }
     let rms = if samples.is_empty() { 0.0 } else { (sum_squares / samples.len() as f64).sqrt() as f32 };
     (peak, rms)
+}
+
+/// Restore a boundary beat lost when the fit falls just before zero. Only
+/// correct a grid near zero (including an opening cut shorter than 20 ms), with
+/// audio starting in the first millisecond. A later onset or silent intro
+/// must not become beat 1.1 at zero. This uses full-band audio, not a
+/// particular instrument or the kick detector's frequency band.
+fn anchor_file_start(tempo: &mut TempoResult, samples: &[f32], sample_rate: u32, downbeat_secs: f64) {
+    let Some(first) = tempo.segments.first() else { return };
+    let reach = attack::AttackOptions::default().reach_secs;
+    if sample_rate == 0 || first.from_secs > reach || first.period_secs <= 0.0 || tempo.beats.is_empty() {
+        return;
+    }
+    // Preserve a distinct later musical downbeat. The fallback downbeat
+    // at the first emitted beat may itself be the boundary omission.
+    let cut = opening_cut_secs(first, samples, sample_rate);
+    let bar = 4.0 * first.period_secs;
+    let downbeat_phase = (downbeat_secs + cut.max(0.0)).rem_euclid(bar);
+    if downbeat_secs > first.start_secs() + reach && downbeat_phase.min(bar - downbeat_phase) > reach {
+        return;
+    }
+    let phase = first.phase_secs.rem_euclid(first.period_secs);
+    let clipped = cut > 0.5 / f64::from(sample_rate);
+    if (clipped && cut >= 0.020 - 0.5 / f64::from(sample_rate))
+        || (!clipped && phase.min(first.period_secs - phase) > reach)
+    {
+        return;
+    }
+    // A sample at exactly zero may be a waveform's zero crossing. Compare
+    // the first millisecond with the local peak, allowing that crossing but
+    // rejecting a later attack and negligible leading noise.
+    let opening = (sample_rate as usize / 1000).max(1);
+    let window = (f64::from(sample_rate) * reach).ceil() as usize;
+    let peak = |n| samples.iter().take(n).fold(0.0_f32, |p, s| p.max(s.abs()));
+    let local_peak = peak(window);
+    if local_peak < 1e-5 || peak(opening) < local_peak * 0.1 {
+        return;
+    }
+    if clipped {
+        // Keep the fitted segment and every later beat in place. A one-beat
+        // opening segment represents the shortened interval without changing
+        // the track's BPM; serialization reads the explicit beat timestamps.
+        let next = first.start_secs();
+        let opening = tempo::Segment { from_secs: 0.0, to_secs: next, phase_secs: 0.0, ..*first };
+        tempo.segments[0].from_secs = next;
+        tempo.segments.insert(0, opening);
+        tempo.first_beat_secs = 0.0;
+        tempo.beats.insert(0, Beat { beat_number: 1, tempo_x100: tempo.beats[0].tempo_x100, time_ms: 0 });
+        for (i, beat) in tempo.beats.iter_mut().enumerate() {
+            beat.beat_number = (i % 4 + 1) as u16;
+        }
+        return;
+    }
+    // The envelope starts at its first frame centre, a few milliseconds
+    // into the file. Include the recovered boundary beat in the segment.
+    tempo.segments[0].from_secs = 0.0;
+    tempo.segments[0].phase_secs = 0.0;
+    tempo.first_beat_secs = 0.0;
+    tempo.beats = tempo::beats_of(&tempo.segments, 0);
+}
+
+/// Estimate how far the opening beat precedes the file. An isolated next
+/// attack can refine the estimate to a sample: the RMS attack fit is about
+/// a millisecond early, which must not turn a 19 ms trim into a 20 ms one.
+/// With continuous audio around that beat, keep the fitted estimate.
+fn opening_cut_secs(first: &tempo::Segment, samples: &[f32], sample_rate: u32) -> f64 {
+    let next = first.start_secs();
+    let inferred = first.period_secs - next;
+    if inferred <= 0.0 || inferred > 0.035 {
+        return 0.0;
+    }
+    let rate = f64::from(sample_rate);
+    let lo = ((next - 0.015).max(0.0) * rate) as usize;
+    let hi = (((next + 0.015) * rate) as usize).min(samples.len());
+    let Some(window) = samples.get(lo..hi) else { return inferred };
+    let peak = window.iter().fold(0.0_f32, |p, s| p.max(s.abs()));
+    let threshold = peak * 0.01;
+    let Some(index) = window.iter().position(|s| s.abs() > threshold) else { return inferred };
+    // Require quiet before this attack. Otherwise this could be a waveform
+    // crossing in sustained audio rather than the start of the next beat.
+    if index < (sample_rate as usize / 1000).max(1) || peak < 1e-5 {
+        return inferred;
+    }
+    let now = f64::from(window[index].abs());
+    let previous = f64::from(window[index - 1].abs());
+    let onset_sample = (lo as f64 + index as f64 - now / (now - previous)).round();
+    first.period_secs - onset_sample / rate
 }

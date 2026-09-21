@@ -89,7 +89,7 @@ fn main() {
             .iter()
             .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
             .collect();
-        let files = rbl_anlz::author(path, &beats, &columns, rbl_anlz::Existing { dat: None, ext: None, two_ex: None });
+        let files = rbl_anlz::author_with_overview(path, &beats, &columns, analysis.waveform.overview.as_slice().try_into().ok(), rbl_anlz::Existing { dat: None, ext: None, two_ex: None });
 
         let relative = format!("/PIONEER/USBANLZ/P{:03}/{:08X}/ANLZ0000.DAT", i, 10_000 + i);
         let dat = rbl_anlz::resolve(&location.share_root, &relative);

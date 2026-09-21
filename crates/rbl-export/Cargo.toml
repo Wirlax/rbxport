@@ -10,6 +10,9 @@ description = "Writes rekordbox-compatible USB exports."
 workspace = true
 
 [dependencies]
+unicode-normalization = "0.1"
+rbl-audio = { path = "../rbl-audio" }
+tempfile = "3"
 rbl-core = { path = "../rbl-core" }
 rbl-pdb = { path = "../rbl-pdb" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }
@@ -20,6 +23,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 tempfile = "3"
 rbl-anlz = { path = "../rbl-anlz" }
 rbl-db = { path = "../rbl-db" }

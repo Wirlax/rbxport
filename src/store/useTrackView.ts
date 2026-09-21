@@ -66,6 +66,9 @@ export function useTrackView(
   });
   const cache = useRef(new RowCache<RowDto>(PAGE_SIZE));
   const inFlight = useRef(new Set<number>());
+  // Weak keys follow the page cache's lifetime. Repeated reads of one pending
+  // edit keep object identity without retaining evicted rows or stale patches.
+  const overlays = useRef(new WeakMap<RowDto, { edit: Partial<RowDto>; row: RowDto }>());
   // Bumped when a page lands, to re-render the rows it filled.
   const [pagesLoaded, setPagesLoaded] = useState(0);
 
@@ -163,9 +166,12 @@ export function useTrackView(
         void backend.trackCues(trackId).then((cues) => {
           if (!live) return;
           const hotCues = rowCuesOf(cues);
+          const memoryCues = cues.filter(cue => cue.memory).map(cue => cue.positionMs);
           const changed = cache.current.patch(
-            (row) => row.id === trackId && !sameRowCues(row.hotCues, hotCues),
-            (row) => ({ ...row, hotCues }),
+            (row) => row.id === trackId && (!sameRowCues(row.hotCues, hotCues)
+              || (row.memoryCues?.length ?? 0) !== memoryCues.length
+              || memoryCues.some((position, i) => row.memoryCues?.[i] !== position)),
+            (row) => ({ ...row, hotCues, memoryCues }),
           );
           if (changed) setPagesLoaded((n) => n + 1);
         }).catch(() => {
@@ -221,7 +227,12 @@ export function useTrackView(
       // The cached row is what the backend last said; the overlay is what the
       // user just did. Merging rather than mutating keeps the cache honest.
       const edit = pending.get(row.id);
-      return edit ? { ...row, ...edit } : row;
+      if (!edit) return row;
+      const held = overlays.current.get(row);
+      if (held?.edit === edit) return held.row;
+      const merged = { ...row, ...edit };
+      overlays.current.set(row, { edit, row: merged });
+      return merged;
     },
     // `pagesLoaded` is not read here on purpose: the cache is a ref, so this
     // counter is the only signal that a page arrived and callers must redraw.

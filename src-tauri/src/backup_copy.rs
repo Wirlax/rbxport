@@ -86,6 +86,7 @@ impl TreeCopyPlan {
         })
     }
 
+    #[cfg(test)]
     pub fn copy(self, progress: &mut TreeProgress<'_>) -> io::Result<u64> {
         let workers = std::thread::available_parallelism().map_or(2, usize::from);
         self.copy_with_workers(progress, workers, false)

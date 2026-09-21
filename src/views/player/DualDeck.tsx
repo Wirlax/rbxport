@@ -1,3 +1,5 @@
+import { useHoldRepeat } from "./useHoldRepeat";
+import type { GridEditorActions } from "./useGridEditor";
 /**
  * What a deck draws in the two-deck layouts and nowhere else.
  *
@@ -20,18 +22,13 @@ import { LoopInIcon, LoopOutIcon, MagnifierMinusIcon, MagnifierPlusIcon } from "
 import { READ_ONLY_REASON } from "./useMemoryCues";
 import styles from "./DualDeck.module.css";
 import { TempoToggle } from "./TempoToggle";
+import { TimeReadouts, type PositionSource } from "./TimeReadouts";
 import { useTooltip } from "@/store/usePreferences";
-
-/** A time split the way `splitTime` returns it. */
-interface Split {
-  main: string;
-  tenths: string;
-}
 
 export interface DualHeadProps {
   track: RowDto | null;
-  remaining: Split;
-  elapsed: Split;
+  positionSource: PositionSource;
+  total: number;
   /** The sleeve button, which `Player` builds because it owns load and eject. */
   sleeve: ReactNode;
   keyControl: ReactNode;
@@ -53,7 +50,7 @@ export interface DualHeadProps {
  * it there, and the row itself is the same either way up.
  */
 export const DualHead = memo(function DualHead({
-  track, remaining, elapsed, sleeve, keyControl, bpmX100, onBeatSync, synced, isMaster, onMaster,
+  track, positionSource, total, sleeve, keyControl, bpmX100, onBeatSync, synced, isMaster, onMaster,
 }: DualHeadProps) {
   const tip = useTooltip();
   return (
@@ -75,14 +72,7 @@ export const DualHead = memo(function DualHead({
           {track ? (
             <>
               <span className={styles.cell}>
-                <span className={styles.remaining} data-testid="player-time">
-                  -{remaining.main}
-                  <i className={styles.tenths}>.{remaining.tenths}</i>
-                </span>
-                <span className={styles.elapsed}>
-                  {elapsed.main}
-                  <i className={styles.tenths}>.{elapsed.tenths}</i>
-                </span>
+                <TimeReadouts source={positionSource} total={total} classes={styles} />
               </span>
               <TempoToggle className={styles.cell} bpmX100={bpmX100} />
             </>
@@ -138,6 +128,7 @@ export const DualHead = memo(function DualHead({
 });
 
 export interface DualControlsProps {
+  gridEditor: GridEditorActions;
   readOnly: boolean;
   /** MEMORY, the one memory-cue control the row draws; the rest stay on keys. */
   memory: {
@@ -154,24 +145,24 @@ export interface DualControlsProps {
  * Left to right, as the capture has it: the three grid-shift buttons, MEMORY,
  * AU | MA, the loop length with a step either side,
  * the two loop buttons; then at the right, Q. The grid buttons
- * and the loops are drawn and inert — grid editing needs the PQT2 tag and
- * loops are not built — with the reason on each.
+ * use the shared grid editor; the loop placeholders remain disabled.
  */
 export const DualControls = memo(function DualControls({
-  readOnly, memory, quantize, onQuantize,
+  gridEditor, readOnly, memory, quantize, onQuantize,
 }: DualControlsProps) {
-  const gridReason = "Grid editing needs the PQT2 tag, which is not yet understood";
+  const hold = useHoldRepeat();
+  const gridReason = "Edit the beat grid";
   const tip = useTooltip();
   return (
     <div className={styles.controls} role="group" aria-label="Deck controls" data-testid="player-controls">
       <div className={styles.group}>
-        <button type="button" className={styles.icon} aria-label="Shift the grid earlier" disabled title={tip(gridReason)}>
+        <button type="button" className={styles.icon} aria-label="Shift the grid earlier" {...hold(repeat => gridEditor.shift(-1, repeat))} disabled={!gridEditor.canEdit || gridEditor.fromMs !== null} title={tip(gridReason)}>
           <span className={styles.gridGlyph} data-dir="back" aria-hidden />
         </button>
-        <button type="button" className={styles.mark} aria-label="Mark the downbeat here" disabled title={tip(gridReason)}>
+        <button type="button" className={styles.mark} aria-label="Mark the downbeat here" onClick={gridEditor.mark} disabled={!gridEditor.canEdit || gridEditor.fromMs !== null} title={tip(gridReason)}>
           <span className={styles.markGlyph} aria-hidden />
         </button>
-        <button type="button" className={styles.icon} aria-label="Shift the grid later" disabled title={tip(gridReason)}>
+        <button type="button" className={styles.icon} aria-label="Shift the grid later" {...hold(repeat => gridEditor.shift(1, repeat))} disabled={!gridEditor.canEdit || gridEditor.fromMs !== null} title={tip(gridReason)}>
           <span className={styles.gridGlyph} data-dir="forward" aria-hidden />
         </button>
       </div>

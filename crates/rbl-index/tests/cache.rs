@@ -96,11 +96,9 @@ fn a_snapshot_keeps_every_track_s_cues_with_their_colours() {
 }
 
 #[test]
-fn cue_bounds_out_of_order_are_refused() {
-    // The cue index is the last thing in the file: the second-to-last u32 is
-    // the last track's start, and pushing it past the end bound would hand
-    // that track a slice `cues_of` clamps to nothing while an earlier one
-    // silently gained cues. Refuse the file instead.
+fn damage_at_the_end_of_the_snapshot_is_refused() {
+    // The search arena and checksum now follow the cue index. Corruption at
+    // the end must be rejected just as damage to the header is.
     let mut bytes = encode(&built(), fingerprint());
     let at = bytes.len() - 8;
     bytes[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
@@ -108,9 +106,8 @@ fn cue_bounds_out_of_order_are_refused() {
 }
 
 #[test]
-fn the_rebuilt_ranks_and_search_still_work() {
-    // They are derived rather than stored, so this is the check that
-    // rebuilding them actually happened.
+fn the_persisted_ranks_and_search_still_work() {
+    // Persisted derived columns must preserve sort and search behavior.
     let restored = decode(&encode(&built(), fingerprint()), fingerprint()).expect("decodes");
     let spec = |sort, query: &str| ViewSpec {
         source: TrackSource::Collection,
@@ -127,6 +124,25 @@ fn the_rebuilt_ranks_and_search_still_work() {
         .collect();
     assert_eq!(by_title, vec!["apple", "Ébano", "Zebra"]);
     assert_eq!(restored.open_view(&spec(SortColumn::Title, "artbat")).rows.len(), 1);
+}
+
+#[test]
+fn prepared_snapshot_requires_live_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.snapshot");
+    rbl_index::cache::save(&path, &built(), fingerprint()).unwrap();
+    assert!(rbl_index::cache::prepare(&path).unwrap().validated(Fingerprint { content: 99, ..fingerprint() }).is_none());
+    assert!(rbl_index::cache::prepare(&path).unwrap().validated(fingerprint()).is_some());
+}
+
+#[test]
+fn corruption_anywhere_in_payload_is_rejected() {
+    let original = encode(&built(), fingerprint());
+    for at in (0..original.len()).step_by(13) {
+        let mut damaged = original.clone();
+        damaged[at] ^= 1;
+        assert!(decode(&damaged, fingerprint()).is_none(), "byte {at}");
+    }
 }
 
 #[test]

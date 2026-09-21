@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import { usePreferences } from "./usePreferences";
 import type { AnalysisResult } from "@/ipc/types";
+import type { AnalysisPreferences } from "@/lib/preferences";
 import {
   cancel as cancelQueue,
   emptyQueue,
@@ -28,7 +29,7 @@ export interface Analysis {
   state: QueueState;
   running: boolean;
   total: number;
-  add: (items: readonly QueueItem[]) => void;
+  add: (items: readonly QueueItem[], settings?: QueueItem["analysis"]) => void;
   cancel: () => void;
   clear: () => void;
 }
@@ -37,8 +38,10 @@ export function useAnalysis(
   onAnalysed?: (trackId: string, result: AnalysisResult) => void,
   /** Called once when a run ends, whether it finished, failed or was stopped. */
   onDrained?: () => void,
+  preferences?: AnalysisPreferences,
 ): Analysis {
-  const { mode, concurrentTracks } = usePreferences().analysis;
+  const storedPreferences = usePreferences().analysis;
+  const { mode, concurrentTracks } = preferences ?? storedPreferences;
   const [state, setState] = useState<QueueState>(emptyQueue);
   // The tracks whose request is in flight, so the effect below never sends
   // one twice.
@@ -69,7 +72,7 @@ export function useAnalysis(
       void (async () => {
         try {
           const backend = await getBackend();
-          const result = await backend.analyseTrack(track.id, mode);
+          const result = await backend.analyseTrack(track.id, track.analysis?.mode ?? mode, track.analysis);
           setState((s) => succeed(s, track.id));
           onAnalysed?.(track.id, result);
         } catch (e) {
@@ -81,7 +84,12 @@ export function useAnalysis(
     }
   }, [state, onAnalysed, mode, concurrentTracks]);
 
-  const add = useCallback((items: readonly QueueItem[]) => setState((s) => enqueue(s, items)), []);
+  const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
+    // Capture settings at enqueue time, including automatic imports. Later
+    // preference changes must not alter tracks still waiting in this batch.
+    const chosen = settings ?? { mode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180 };
+    setState((s) => enqueue(reset(s), items.map(item => ({ ...item, analysis: { ...chosen } }))));
+  }, [mode]);
   const cancel = useCallback(() => setState(cancelQueue), []);
   const clear = useCallback(() => setState(reset), []);
 

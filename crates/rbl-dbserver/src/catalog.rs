@@ -124,6 +124,8 @@ pub enum Analysis {
 
 /// The library, as a player browses it.
 pub trait Catalog: Send + Sync {
+    /// Key menu display order; protocol identifiers remain unchanged.
+    fn key_ids(&self) -> Vec<u32> { (1..=24).collect() }
     /// The rows of a menu, whole and in order.
     fn list(&self, query: &Query) -> Vec<Row>;
 

@@ -871,6 +871,7 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         vec![second.clone()],
         stick.path().display().to_string(),
         None,
+        None,
     ))
     .unwrap();
     assert_eq!((written.tracks, written.playlists), (1, 0));
@@ -884,6 +885,8 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         s.state(),
         vec![playlist_id(1)],
         vec![stick.path().display().to_string()],
+        None,
+        None,
         None,
         None,
         None,
@@ -904,9 +907,48 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
         vec![first],
         stick.path().display().to_string(),
         None,
+        None,
     ))
     .unwrap();
     assert_eq!((again.tracks, again.playlists, again.removed), (2, 1, 0));
+
+    // Both playlist entry points honor cleanup. Only recorded USB copies
+    // may disappear, never the source or an unrelated file on the stick.
+    let unrelated = stick.path().join("Keep me.wav");
+    write_wav(&unrelated, 1);
+    let original_one = std::fs::read(&one).unwrap();
+    let original_two = std::fs::read(&two).unwrap();
+    let unrelated_bytes = std::fs::read(&unrelated).unwrap();
+    for single_playlist in [false, true] {
+        run(commands::export_tracks_to_device(
+            s.handle(), s.state(), vec![second.clone()], stick.path().display().to_string(), None, None,
+        )).unwrap();
+        let before = rbl_export::Manifest::load(stick.path()).unwrap();
+        let loose = before.tracks.iter().find(|t| t.library_id.to_string() == second).unwrap();
+        let loose_audio = stick.path().join(loose.audio.trim_start_matches('/'));
+        let loose_analysis = stick.path().join(loose.anlz_dir.trim_start_matches('/'));
+        assert!(loose_audio.exists());
+        let cleaned = if single_playlist {
+            run(commands::export_playlist(
+                s.handle(), s.state(), playlist_id(1), stick.path().display().to_string(), None, Some(true), None,
+            )).unwrap()
+        } else {
+            run(commands::sync_devices(
+                s.handle(), s.state(), vec![playlist_id(1)], vec![stick.path().display().to_string()],
+                None, None, None, Some(true), None,
+            )).unwrap().remove(0).report.unwrap()
+        };
+        assert_eq!((cleaned.tracks, cleaned.playlists, cleaned.removed), (1, 1, 1));
+        assert!(!loose_audio.exists());
+        if !loose.anlz_dir.is_empty() { assert!(!loose_analysis.exists()); }
+        let after = rbl_export::Manifest::load(stick.path()).unwrap();
+        assert!(after.loose.is_empty());
+        assert_eq!(after.tracks.len(), 1);
+        assert!(stick.path().join(after.tracks[0].audio.trim_start_matches('/')).exists());
+        assert_eq!(std::fs::read(&one).unwrap(), original_one);
+        assert_eq!(std::fs::read(&two).unwrap(), original_two);
+        assert_eq!(std::fs::read(&unrelated).unwrap(), unrelated_bytes);
+    }
 }
 
 #[test]
@@ -958,6 +1000,8 @@ fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them
         None,
         Some(true),
         Some(true),
+        None,
+        None,
     ))
     .unwrap();
     assert_eq!(reports.len(), 3);

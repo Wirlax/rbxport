@@ -9,6 +9,7 @@
  * a five-pixel strip is a lot of layout for something this small.
  */
 import { memo, useEffect, useRef, useState } from "react";
+import theme from "../../../design/tokens/theme.json";
 
 import { getBackend } from "@/ipc/client";
 import { backingSize } from "@/lib/canvasSize";
@@ -83,7 +84,7 @@ export const VocalStrip = memo(function VocalStrip({ trackId }: { trackId: strin
     if (!data || data.length === 0) return;
 
     ctx.fillStyle =
-      getComputedStyle(canvas).getPropertyValue("--c-vocal").trim() || "#3FA9F5";
+      getComputedStyle(canvas).getPropertyValue("--c-vocal").trim() || theme.color.vocal.value;
     const step = data.length / w;
     for (let x = 0; x < w; x++) {
       // The loudest column in this pixel's span, so a short vocal phrase is

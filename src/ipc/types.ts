@@ -32,6 +32,8 @@ export interface RowDto {
    * every slot set stays inside the 64 KB response cap.
    */
   hotCues: RowCue[];
+  /** Memory-cue and memory-loop start positions, in milliseconds. */
+  memoryCues?: number[];
   artworkHue: number;
   /** Whether the backend can serve artwork for this track. */
   hasArtwork: boolean;
@@ -184,6 +186,11 @@ export interface Backend {
     /** Window into the tag, in entries. The detail tag is far past the cap. */
     window?: { from: number; len: number },
   ): Promise<Uint8Array>;
+  /**
+   * A decoded stereo PCM peak envelope for a short window around the
+   * playhead. Each point is left min/max then right min/max as i16 values.
+   */
+  trackPcmWaveform(trackId: string, fromMs: number, toMs: number, columns: number): Promise<Uint8Array>;
 
   /**
    * Editing. Each returns the library's new generation, which invalidates every
@@ -253,7 +260,7 @@ export interface Backend {
    *
    * Slow — a decode and a DSP pass — so callers run these one at a time.
    */
-  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport"): Promise<AnalysisResult>;
+  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings): Promise<AnalysisResult>;
 
   /**
    * A track's whole beat grid, as raw bytes: seven per beat, a little-endian
@@ -324,13 +331,18 @@ export interface Backend {
     destination?: string,
     /** What a stick with no settings of its own is given; see `StickDefaults`. */
     defaults?: StickDefaults,
+    /** Remove RBXport-exported music outside the playlists being synced. */
+    deleteUnlistedMusic?: boolean,
+    /** Convert incompatible USB copies; undefined preserves the source format. */
+    compatibilityFormat?: "wav" | "mp3",
   ): Promise<ExportReport | null>;
 
   /**
    * Export Track: puts tracks on a stick on their own, in no playlist,
-   * beside what the stick already holds. A later sync keeps them there.
+   * beside what the stick already holds. A later sync keeps them unless
+   * deleteUnlistedMusic is enabled.
    */
-  exportTracksToDevice(tracks: string[], destination: string, defaults?: StickDefaults): Promise<ExportReport>;
+  exportTracksToDevice(tracks: string[], destination: string, defaults?: StickDefaults, compatibilityFormat?: "wav" | "mp3"): Promise<ExportReport>;
 
   /**
    * rekordbox's reference browse categories and sort options: what a
@@ -371,6 +383,10 @@ export interface Backend {
   backUpLibrary(): Promise<string>;
   /** Puts a backup back as the library and re-reads it. Refused while rekordbox runs. */
   restoreBackup(path: string): Promise<number>;
+  /** Pick and inspect an RBXport ZIP anywhere on disk; null on cancellation. */
+  pickBackupZip(): Promise<Backup | null>;
+  /** Persist the default folder used for future backups. Existing files stay where they are. */
+  setBackupDirectory(directory: string): Promise<string>;
   deleteBackup(path: string): Promise<void>;
   /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
@@ -403,7 +419,7 @@ export interface Backend {
    * interface (the first one when none is given) and serves the library to
    * every player that asks. Refused, with the reason, while rekordbox runs.
    */
-  startLinkExport(iface?: string): Promise<LinkStatus>;
+  startLinkExport(iface?: string, keySort?: "alphabetical" | "musical"): Promise<LinkStatus>;
   stopLinkExport(): Promise<LinkStatus>;
   /** Tells a CDJ on the link to load a specific track from our library. */
   loadTrackOnLink(playerNumber: number, trackId: string): Promise<void>;
@@ -624,6 +640,10 @@ export interface Backend {
      */
     automatic?: boolean,
     ejectAfterSync?: boolean,
+    /** Remove RBXport-exported music outside the playlists being synced. */
+    deleteUnlistedMusic?: boolean,
+    /** Convert incompatible USB copies; undefined preserves the source format. */
+    compatibilityFormat?: "wav" | "mp3",
   ): Promise<SyncDeviceReport[]>;
 
   /** What a stick was last synced with, and what it holds now. */
@@ -1089,9 +1109,20 @@ export interface ExportProgress {
   title: string;
 }
 
+/** Results selected for replacement, and timing options for this batch. */
+export interface AnalysisSettings {
+  bpmGrid: boolean;
+  key: boolean;
+  highPrecision: boolean;
+  minBpm: number;
+  maxBpm: number;
+}
+
 /** What analysing one track found, now written to the library. */
 export interface AnalysisResult {
   trackId: string;
+  /** Key-only analysis preserves the existing analysed marker. */
+  analysed?: number;
   bpmX100: number;
   key: string;
   beats: number;
@@ -1266,7 +1297,7 @@ export interface Edits {
    * so through `onGridChanged`; an edit that changes the tempo also writes
    * the row's BPM and reloads the library.
    *
-   * `fromMs` applies the edit from the beat nearest that time on — the CUT
+   * `fromMs` applies the edit from the beat nearest that time on — the scope
    * point, or the playhead for the from-here buttons — and `deck` names the
    * deck the track is loaded on, so its metronome follows the new grid.
    * Every one resolves to the grid's state afterwards.
@@ -1290,14 +1321,20 @@ export type GridEdit =
   | { kind: "downbeat"; timeMs: number }
   /** Re-space the grid at `bpmX100`, a beat held at `anchorMs`. */
   | { kind: "tempo"; bpmX100: number; anchorMs: number }
-  /** Change the tempo by hundredths of a BPM, the first beat held. */
-  | { kind: "stretch"; byX100: number }
+  /** Move the target beat by milliseconds, holding the first editable beat. */
+  | { kind: "stretch"; byMs: number; timeMs: number }
+  | { kind: "tap"; bpm: number; anchorMs: number }
   /** Move the grid so the beat nearest `timeMs` lands on it. */
   | { kind: "align"; timeMs: number };
 
 export interface GridEditOptions {
+  durationMs?: number;
   /** Apply from the beat nearest this time on; omitted, the whole grid. */
   fromMs?: number;
+  /** Explicit confirmation before flattening a variable-tempo section. */
+  allowDynamic?: boolean;
+  /** Consecutive TAP updates in this run share one undo transaction. */
+  transaction?: string;
   /** The deck the track is loaded on, whose metronome follows. */
   deck?: DeckId;
 }
@@ -1309,6 +1346,9 @@ export interface GridState {
   beats: number;
   canUndo: boolean;
   canRedo: boolean;
+  /** The next action in each history stack, when supplied by the backend. */
+  undoLabel?: string | null;
+  redoLabel?: string | null;
   locked: boolean;
 }
 

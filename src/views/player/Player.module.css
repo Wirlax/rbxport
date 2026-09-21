@@ -1,6 +1,6 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal.
    Every size was measured off a 2x capture of rekordbox 7.2.11 running — see
-   the `source` on each token in design/tokens/tokens.json. */
+   the `source` on each token in design/tokens/theme.json. */
 /* Nothing loaded: no playhead and no position bar. A head at zero over an
    empty strip reads as a track sitting at its start, which it is not. */
 .player[data-empty] .playhead,
@@ -701,11 +701,12 @@
 .cueHead {
   position: absolute;
   top: 0;
-  left: calc(-1 * var(--s-cue-head-w));
+  left: 0;
+  translate: -50% 0;
   width: var(--s-cue-head-w);
   height: var(--s-cue-head-h);
   background: var(--c-cue-head);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
 /* In the detail a memory cue is a red triangle pointing down at what it marks,
@@ -780,6 +781,10 @@
   pointer-events: none;
 }
 .downbeat { background: var(--c-downbeat); }
+
+/* Keep thicker PCM markers centred on the same beat timestamp. */
+.detail[data-pcm] .beat { width: 2px; margin-left: -0.5px; background: #b3b3b3; }
+.detail[data-pcm] .downbeat { width: 2px; margin-left: -0.5px; background: #fff; }
 
 .beat::before,
 .beat::after,
@@ -1195,18 +1200,19 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
   right: 0;
   width: 76px;
   display: grid;
-  box-shadow: -4px 0 12px rgb(0 0 0 / 40%);
+  box-shadow: -4px 0 12px var(--c-shadow-side);
 }
 .player[data-dual] .tempoOverlay { top: var(--s-player-dual-title-h); bottom: 0; }
 .player[data-dual][data-flipped] .tempoOverlay { top: 0; bottom: var(--s-player-dual-title-hb); }
 
 .cueTempo {
+  --tempo-color: var(--c-tempo-annotation);
   position: absolute;
   z-index: 1;
   left: 4px;
   bottom: 1px;
   padding: 1px 4px;
-  color: var(--c-text);
+  color: var(--tempo-color);
   background: var(--c-panel);
   font-size: var(--f-size-cue-tempo);
   font-variant-numeric: tabular-nums;
@@ -1222,3 +1228,51 @@ button.cueDelete:disabled { color: var(--c-icon-off); }
 .editButton[data-metronome="Low"] rect:not(:first-child),
 .editButton[data-metronome="Medium"] rect:last-child,
 .editButton[data-metronome="Off"] rect { opacity: .25; }
+
+/* One annotation across a measured tempo ramp, not one label per beat. */
+.detailTempo,
+.tempoRamp {
+  bottom: calc(var(--s-beat-marker-bottom) + var(--s-beat-head-h) + 2px);
+  pointer-events: none;
+}
+.tempoRamp {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-tempo-annotation);
+  font-size: var(--f-size-cue-tempo);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tempoRamp > span:not(.tempoRampArrow) {
+  padding: 1px 4px;
+  background: var(--c-panel);
+  flex-shrink: 0;
+}
+.tempoRampArrow {
+  position: relative;
+  flex: 1;
+  min-width: 12px;
+  height: 1px;
+  background: currentColor;
+}
+.tempoRampArrow::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -3px;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-top: 1px solid currentColor;
+  transform: rotate(45deg);
+}
+.overviewRamp { bottom: 1px; font-size: var(--f-size-xs); gap: 4px; }
+.player[data-flipped] .detailTempo,
+.player[data-flipped] .tempoRamp:not(.overviewRamp) {
+  bottom: calc(var(--s-beat-marker-top) + var(--s-beat-head-h) + 2px);
+}

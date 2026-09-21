@@ -66,8 +66,11 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
 fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
+    rbl_devices::settings::recover(root).map_err(err)?;
+    let _device_read = rbl_core::durable::read_lock(root).map_err(err)?;
     let mut report = ImportReport::default();
     let location = state.location()?;
+    crate::file_journal::recover(state.backup_dir(), &location)?;
     let export = rbl_devices::settings::export_root(root);
     let one_path = export.join("rekordbox/exportLibrary.db");
     let one = if one_path.exists() { Some(rbl_onelibrary::ExportLibrary::open_read_only(&one_path).map_err(err)?) } else { None };
@@ -93,7 +96,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         // Open the guarded writer even for an empty device; read-only must not look like success.
         state.write(|_| Ok(())).map_err(write_error)?;
         for (id, analysis) in tracks.values() {
-            if editor.is_locked(id) { report.skipped += 1; continue; }
+            if editor.is_locked(id) || crate::grid::database_locked(&state.location()?, id)? { report.skipped += 1; continue; }
             if analysis.is_empty() { report.skipped += 1; continue; }
             let source = within(root, analysis)?;
             let source_dat = rbl_anlz::Anlz::read(&source).map_err(err)?;
@@ -124,7 +127,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             if files.is_empty() { report.skipped += 1; continue; }
             let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, id, bpm, None, true, &files)?;
             if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
-            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.rollback()?; return Err(write_error(e)); }
+            if let Err(e) = state.write(|w| w.import_usb_cues(id, &entries, bpm)) { journal.reconcile(&location)?; return Err(write_error(e)); }
             journal.commit()?;
             editor.forget_history(id);
             report.changed.push(id.clone());
@@ -132,23 +135,21 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     if history {
-        if one.is_none() && export.join("rekordbox/export.pdb").exists() {
-            report.warnings.push("History import currently requires OneLibrary; legacy Device Library history was not imported.".into());
-        }
-        if let Some(db) = &one {
-            let mut q = db.connection().prepare("SELECT history_id, name FROM history WHERE attribute=0 ORDER BY sequenceNo").map_err(err)?;
-            let sessions = q.query_map([], |r| Ok((r.get::<_,i64>(0)?, r.get::<_,String>(1)?))).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
-            for (session, name) in sessions {
-                let mut q = db.connection().prepare("SELECT content_id FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(err)?;
-                let ids = q.query_map([session], |r| r.get::<_,u32>(0)).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
-                let matched: Vec<String> = ids.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
-                if matched.len() != ids.len() { report.skipped += ids.len() - matched.len(); continue; }
-                if matched.is_empty() { continue; }
-                let key = format!("{}:{session}:{name}", rbl_devices::volume_id(root));
-                let hash = rbl_export::manifest::hash(key.as_bytes());
-                let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffffffffffff);
-                report.histories += state.write(|w| w.import_usb_history(&format!("{name} (USB {:06x})", hash & 0xffffff), &uuid, &matched)).map_err(write_error)?;
+        let snapshot = rbl_export::snapshot::Snapshot::read(root).map_err(err)?;
+        for session in snapshot.history.iter().filter(|h| !h.folder) {
+            let matched: Vec<String> = session.tracks.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
+            if matched.len() != session.tracks.len() {
+                report.skipped += session.tracks.len() - matched.len();
+                report.warnings.push(format!("History '{}' contains tracks that could not be matched to this library; it was left on the USB.", session.name));
+                continue;
             }
+            if matched.is_empty() { continue; }
+            // A session keeps one identity as more tracks are appended. The
+            // writer rejects a changed prefix instead of silently duplicating it.
+            let key = format!("{}:{}:{}", rbl_devices::volume_id(root), session.id, session.name);
+            let hash = rbl_export::manifest::hash(key.as_bytes());
+            let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffffffffffff);
+            report.histories += state.write(|w| w.import_usb_history(&format!("{} (USB {:06x})", session.name, hash & 0xffffff), &uuid, &matched)).map_err(write_error)?;
         }
     }
     if settings {
@@ -209,8 +210,8 @@ mod tests {
         let mut changed = rbl_anlz::write::AnlzBuilder::new();
         changed.path("/usb.mp3").beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 250 }]).cue_lists(true);
         std::fs::write(usb.join(anlz).join("ANLZ0000.DAT"), changed.finish()).unwrap();
-        rbl_export::Manifest { version: 1, written: String::new(), playlists: vec![], loose: vec![], tracks: vec![rbl_export::manifest::ManifestTrack {
-            export_id: 1, library_id: id.parse().unwrap(), source: source_path, audio: "audio.mp3".into(), anlz_dir: anlz.into(), size: 0, modified: 0, analysis: 0, artwork: String::new(),
+        rbl_export::Manifest { db_id: 0, baseline: None, version: 1, written: String::new(), playlists: vec![], loose: vec![], tracks: vec![rbl_export::manifest::ManifestTrack { audio_hash: 0,
+            export_id: 1, library_id: id.parse().unwrap(), source: source_path, audio: "audio.mp3".into(), anlz_dir: anlz.into(), size: 0, modified: 0, analysis: 0, artwork: String::new(), conversion: String::new(), conversion_source_hash: 0,
         }] }.save(&usb).unwrap();
         let editor = crate::grid::GridEditor::at(state.backup_dir());
         let report = import(&state, &editor, &usb, true, false, false).unwrap();

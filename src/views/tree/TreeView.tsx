@@ -308,7 +308,7 @@ export interface TreeViewProps {
   onDeleteShortcut?: (id: string) => void;
 }
 
-export function TreeView({
+export const TreeView = memo(function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
@@ -551,4 +551,4 @@ export function TreeView({
       ) : null}
     </nav>
   );
-}
+});

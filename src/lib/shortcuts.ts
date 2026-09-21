@@ -163,8 +163,11 @@ export function menuAccelerator(chord: KeyChord, platform: Platform): string | n
   if (platform.mac || chord.ctrlKey !== true || chord.metaKey === true || chord.altKey === true) {
     return null;
   }
+  if (chord.key.toLowerCase() === "z") return chord.shiftKey === true ? "redo" : "undo";
   if (chord.shiftKey === true) return null;
   switch (chord.key.toLowerCase()) {
+    case "y":
+      return "redo";
     case ",":
       return "settings";
     case "o":

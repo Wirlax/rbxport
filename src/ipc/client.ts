@@ -17,6 +17,13 @@ import type {
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** Keep the native Edit menu in sync with the focused editor's history. */
+export async function setHistoryMenu(undo: string | null, redo: string | null): Promise<void> {
+  if (!isTauri) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("set_history_menu", { undo, redo });
+}
+
 /**
  * Subscribes to a backend event, returning its own unsubscribe.
  *
@@ -58,7 +65,14 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
-    analyseTrack: (trackId, mode = "rbxport") => invoke<AnalysisResult>("analyse_track", { trackId, mode }),
+    trackPcmWaveform: async (trackId, fromMs, toMs, columns) => {
+      const bytes = await invoke<ArrayBuffer | number[] | Uint8Array>("track_pcm_waveform", {
+        trackId, fromMs, toMs, columns,
+      });
+      if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+      return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+    },
+    analyseTrack: (trackId, mode = "rbxport", settings) => invoke<AnalysisResult>("analyse_track", { trackId, mode, settings }),
     trackBeats: async (trackId) => {
       // Raw bytes rather than a JSON array of objects: a long mix has tens of
       // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an
@@ -150,7 +164,7 @@ async function realBackend(): Promise<Backend> {
       if (typeof picked !== "string") return null;
       return invoke<number>("export_xml", { path: picked });
     },
-    exportPlaylist: async (playlistId, destination, defaults) => {
+    exportPlaylist: async (playlistId, destination, defaults, deleteUnlistedMusic, compatibilityFormat) => {
       let target = destination;
       if (target === undefined) {
         const { open } = await import("@tauri-apps/plugin-dialog");
@@ -167,10 +181,12 @@ async function realBackend(): Promise<Backend> {
         playlist: playlistId,
         destination: target,
         defaults: defaults ?? null,
+        deleteUnlistedMusic: deleteUnlistedMusic ?? false,
+        compatibilityFormat: compatibilityFormat ?? null,
       });
     },
-    exportTracksToDevice: (tracks, destination, defaults) =>
-      invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null }),
+    exportTracksToDevice: (tracks, destination, defaults, compatibilityFormat) =>
+      invoke<ExportReport>("export_tracks_to_device", { tracks, destination, defaults: defaults ?? null, compatibilityFormat: compatibilityFormat ?? null }),
     referenceStickSettings: () => invoke<ReferenceStickSettings>("reference_stick_settings"),
     listDevices: () => invoke<Device[]>("list_devices"),
     onExportProgress: (listener) => subscribe<ExportProgress>("export:progress", listener),
@@ -184,6 +200,13 @@ async function realBackend(): Promise<Backend> {
     openUrl: (url) => invoke<void>("open_url", { url }),
     backUpLibrary: () => invoke<string>("back_up_library"),
     restoreBackup: (path) => invoke<number>("restore_backup", { path }),
+    pickBackupZip: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const path = await open({ title: "Restore from a backup ZIP", multiple: false, directory: false,
+        filters: [{ name: "RBXport backup ZIP", extensions: ["zip"] }] });
+      return typeof path === "string" ? invoke<Backup>("inspect_backup", { path }) : null;
+    },
+    setBackupDirectory: (directory) => invoke<string>("set_backup_directory", { directory }),
     deleteBackup: (path) => invoke<void>("delete_backup", { path }),
     confirm: async (message) => {
       const { ask } = await import("@tauri-apps/plugin-dialog");
@@ -251,7 +274,7 @@ async function realBackend(): Promise<Backend> {
     linkStatus: () => invoke<LinkStatus>("link_status"),
     linkPeers: () => invoke<LinkPeerSeen[]>("link_peers"),
     onLinkPeers: (listener) => subscribe<LinkPeerSeen[]>("link:peers", listener),
-    startLinkExport: (iface) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null }),
+    startLinkExport: (iface, keySort) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null, alphabeticalKeys: keySort === "alphabetical" }),
     stopLinkExport: () => invoke<LinkStatus>("stop_link_export"),
     loadTrackOnLink: (playerNumber, trackId) => invoke<void>("link_load_track", { playerNumber, trackId }),
     setLinkMaster: (on) => invoke<LinkStatus>("link_set_master", { on }),
@@ -322,13 +345,15 @@ async function realBackend(): Promise<Backend> {
       await invoke<void>("open_sync_window");
       return true;
     },
-    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync) =>
+    syncDevices: (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat) =>
       invoke<SyncDeviceReport[]>("sync_devices", {
         playlists,
         destinations,
         defaults: defaults ?? null,
         automatic: automatic ?? false,
         ejectAfterSync: ejectAfterSync ?? false,
+        deleteUnlistedMusic: deleteUnlistedMusic ?? false,
+        compatibilityFormat: compatibilityFormat ?? null,
       }),
     importUsb: (path, cues, history, settings) => invoke("import_usb", { path, cues, history, settings }),
     deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),
@@ -389,7 +414,7 @@ async function realBackend(): Promise<Backend> {
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
       gridEdit: (track, edit, options) =>
         invoke<GridState>("grid_edit", {
-          track, edit, fromMs: options?.fromMs ?? null, deck: options?.deck ?? null,
+          track, edit, fromMs: options?.fromMs ?? null, deck: options?.deck ?? null, options,
         }),
       gridUndo: (track, deck) => invoke<GridState>("grid_undo", { track, deck: deck ?? null }),
       gridRedo: (track, deck) => invoke<GridState>("grid_redo", { track, deck: deck ?? null }),

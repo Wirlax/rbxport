@@ -129,3 +129,26 @@ describe("the mock's Explorer", () => {
     expect(view.len).toBe(2);
   });
 });
+
+describe("USB music cleanup", () => {
+  it("keeps individually exported music by default, then removes only music outside all synced playlists", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Cleanup A", TREE_ROOT);
+    await backend.edits.createPlaylist("Cleanup B", TREE_ROOT);
+    const tree = await backend.playlistTree();
+    const a = tree.find(n => n.name === "Cleanup A")!.id;
+    const b = tree.find(n => n.name === "Cleanup B")!.id;
+    await backend.edits.addTracksToPlaylist(a, ["100000"]);
+    await backend.edits.addTracksToPlaylist(b, ["100001"]);
+    const destination = (await backend.listDevices()).find(d => !d.export)?.path;
+    expect(destination).toBeDefined();
+    await backend.exportTracksToDevice(["100001", "100002"], destination!);
+    const kept = await backend.syncDevices([a, b], [destination!], undefined);
+    expect(kept[0]?.report).toMatchObject({ tracks: 3, removed: 0 });
+    const cleaned = await backend.syncDevices([a, b], [destination!], undefined, false, false, true);
+    expect(cleaned[0]?.report).toMatchObject({ tracks: 2, removed: 1 });
+    await backend.exportTracksToDevice(["100002"], destination!);
+    const exported = await backend.exportPlaylist(a, destination, undefined, true);
+    expect(exported).toMatchObject({ tracks: 1, removed: 2 });
+  });
+});

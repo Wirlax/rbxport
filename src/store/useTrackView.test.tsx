@@ -105,9 +105,10 @@ let latest: { count: number; error: string | null; rowAt: (i: number) => RowDto 
 let window_: { start: number; end: number } = { start: 0, end: 32 };
 /** The last screen of the previous run, as `App` hands it over. */
 let seed: { count: number; rows: RowDto[] } | undefined;
+let edits: ReadonlyMap<string, Partial<RowDto>> | undefined;
 
 function Probe() {
-  const view = useTrackView(SPEC, 0, undefined, seed);
+  const view = useTrackView(SPEC, 0, edits, seed);
   latest = view;
   // A table asks for the window it is showing; this stands in for that.
   view.ensureRange(window_.start, window_.end);
@@ -122,6 +123,7 @@ beforeEach(async () => {
   opens = 0;
   window_ = { start: 0, end: 32 };
   seed = undefined;
+  edits = undefined;
   ({ __setBackend: setBackend } = await import("@/ipc/client"));
   setBackend(makeBackend());
   ({ useTrackView } = await import("./useTrackView"));
@@ -137,6 +139,22 @@ afterEach(() => {
 });
 
 describe("useTrackView, against a library that is not up yet", () => {
+  it("reuses pending overlay rows until the patch changes or clears", async () => {
+    ready = true;
+    edits = new Map([["0", { rating: 5 }]]);
+    act(() => root.render(<Probe />));
+    await settle();
+    const first = latest.rowAt(0);
+    expect(first?.rating).toBe(5);
+    expect(latest.rowAt(0)).toBe(first);
+    edits = new Map([["0", { rating: 3 }]]);
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(3);
+    expect(latest.rowAt(0)).not.toBe(first);
+    edits = undefined;
+    act(() => root.render(<Probe />));
+    expect(latest.rowAt(0)?.rating).toBe(0);
+  });
   it("opens the view itself once the library becomes ready", async () => {
     act(() => {
       root.render(<Probe />);

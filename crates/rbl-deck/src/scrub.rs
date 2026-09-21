@@ -18,6 +18,10 @@
 //! cutting to silence the moment the head rests is a step from wherever the
 //! waveform happened to be, and on bass that is a crack every time the hand
 //! holds still. See `fade`.
+//!
+//! Scrub audio also passes through a velocity-controlled low-pass: slow
+//! movement is dark, and faster movement opens the cutoff. Its state lives
+//! only for the drag; normal playback never passes through this filter.
 
 use crate::fade::Ramp;
 
@@ -35,6 +39,61 @@ pub const WINDOW_REACH: u64 = 44_100 * 2;
 /// Past this a flick of the wrist is a burst of noise rather than a sound you
 /// can aim with, and the interpolation has nothing useful left to read.
 const MAX_RATE: f64 = 8.0;
+
+/// A two-pole Butterworth low-pass, with a 5 ms coefficient glide. The
+/// trapezoidal integrators remain stable as the cutoff moves. Each channel
+/// has its own history, and expensive cutoff calculations happen per block.
+struct ScrubFilter {
+    sample_rate: f64,
+    glide: f64,
+    g: f64,
+    target_g: f64,
+    integrator1: [f64; 2],
+    integrator2: [f64; 2],
+}
+
+impl ScrubFilter {
+    fn new(sample_rate: u32) -> Self {
+        let mut filter = Self {
+            sample_rate: f64::from(sample_rate.max(1)),
+            glide: 0.0,
+            g: 0.0,
+            target_g: 0.0,
+            integrator1: [0.0; 2],
+            integrator2: [0.0; 2],
+        };
+        filter.glide = 1.0 - (-1.0 / (0.005 * filter.sample_rate)).exp();
+        filter.set_rate(0.0);
+        filter.g = filter.target_g;
+        filter
+    }
+
+    fn set_rate(&mut self, rate: f64) {
+        // 400 Hz at rest, 4.3 kHz at normal playback speed, reaching 16 kHz
+        // at 4x. Direction does not affect brightness. Leave headroom below
+        // Nyquist even on devices with unusually low sample rates.
+        let cutoff = (400.0 + 15_600.0 * (rate.abs() / 4.0).min(1.0)).min(self.sample_rate * 0.4);
+        self.target_g = (std::f64::consts::PI * cutoff / self.sample_rate).tan();
+    }
+
+    fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+        self.g += (self.target_g - self.g) * self.glide;
+        let damping = std::f64::consts::SQRT_2;
+        let a1 = 1.0 / (1.0 + self.g * (self.g + damping));
+        let a2 = self.g * a1;
+        let a3 = self.g * a2;
+        let mut output = [0.0; 2];
+        for (channel, input) in [left, right].into_iter().enumerate() {
+            let delta = f64::from(input) - self.integrator2[channel];
+            let band = a1 * self.integrator1[channel] + a2 * delta;
+            let low = self.integrator2[channel] + a2 * self.integrator1[channel] + a3 * delta;
+            self.integrator1[channel] = 2.0 * band - self.integrator1[channel];
+            self.integrator2[channel] = 2.0 * low - self.integrator2[channel];
+            output[channel] = low as f32;
+        }
+        (output[0], output[1])
+    }
+}
 
 /// How sharply the rate follows the pointer, per block.
 ///
@@ -248,6 +307,7 @@ pub struct Scrubber {
     ///
     /// Ramped rather than switched: see `fade::FADE_FRAMES`.
     gain: Ramp,
+    filter: ScrubFilter,
     /// Whether the pointer has said anything yet.
     ///
     /// Until it has, the head has nowhere to go and would render silence. The
@@ -296,7 +356,7 @@ pub struct Scrubber {
 }
 
 impl Scrubber {
-    pub fn new(at: u64) -> Self {
+    pub fn new(at: u64, sample_rate: u32) -> Self {
         Self {
             cursor: at as f64,
             target: at as f64,
@@ -308,6 +368,7 @@ impl Scrubber {
             block: 512.0,
             aimed: false,
             gain: Ramp::silent(),
+            filter: ScrubFilter::new(sample_rate),
         }
     }
 
@@ -516,6 +577,7 @@ impl Scrubber {
     pub fn render(&mut self, window: &PcmWindow, out: &mut [f32]) -> usize {
         let frames = out.len() / 2;
         let rate = self.plan(frames);
+        self.filter.set_rate(rate);
         for i in 0..frames {
             // The head cannot get in front of the hand. A record only turns
             // as far as it has been pushed, and holding the head at the
@@ -532,6 +594,9 @@ impl Scrubber {
             // rather than an abrupt zero. A held sample reaching zero is a
             // decay; a held sample held is the hum `REST_RATE` guards against.
             let (left, right) = window.sample(self.cursor);
+            // Filter before the stop envelope so a resting hand still fades
+            // to exact silence, without a filter tail after the stop.
+            let (left, right) = self.filter.process(left, right);
             if let Some(slot) = out.get_mut(i * 2) {
                 *slot = left * gain;
             }
@@ -559,6 +624,61 @@ mod tests {
     use super::*;
     use crate::fade::FADE_FRAMES;
 
+    fn filtered_tone_gain(sample_rate: u32, rate: f64, hz: f64) -> f64 {
+        let mut filter = ScrubFilter::new(sample_rate);
+        filter.set_rate(rate);
+        let mut input_energy = 0.0;
+        let mut output_energy = 0.0;
+        for frame in 0..sample_rate {
+            let phase = std::f64::consts::TAU * hz * f64::from(frame) / f64::from(sample_rate);
+            let input = phase.sin() as f32;
+            let (left, right) = filter.process(input, 0.0);
+            assert_eq!(right, 0.0, "filter history must not leak between channels");
+            if frame > sample_rate / 2 {
+                input_energy += f64::from(input).powi(2);
+                output_energy += f64::from(left).powi(2);
+            }
+        }
+        (output_energy / input_energy).sqrt()
+    }
+
+    #[test]
+    fn slow_scrubs_remove_treble_and_fast_scrubs_open_the_filter() {
+        for sample_rate in [44_100, 48_000, 96_000] {
+            let slow = filtered_tone_gain(sample_rate, 0.1, 8_000.0);
+            let medium = filtered_tone_gain(sample_rate, 1.0, 8_000.0);
+            let fast = filtered_tone_gain(sample_rate, 4.0, 8_000.0);
+            assert!(slow < 0.02, "slow drag should strongly suppress treble: {slow}");
+            assert!(medium > slow && medium < fast);
+            assert!(fast > 0.95, "fast drag should open the treble: {fast}");
+            assert!(filtered_tone_gain(sample_rate, 0.1, 100.0) > 0.99);
+            assert_eq!(slow, filtered_tone_gain(sample_rate, -0.1, 8_000.0));
+            assert_eq!(fast, filtered_tone_gain(sample_rate, -4.0, 8_000.0));
+        }
+    }
+
+    #[test]
+    fn scrub_cutoff_glides_and_stays_finite_at_low_device_rates() {
+        for sample_rate in [8_000, 44_100, 48_000, 96_000] {
+            let mut filter = ScrubFilter::new(sample_rate);
+            let initial = filter.g;
+            filter.set_rate(MAX_RATE);
+            assert_eq!(filter.g, initial, "a velocity report must not snap the cutoff");
+            let target = filter.target_g;
+            filter.process(0.0, 0.0);
+            assert!(filter.g > initial && filter.g < initial + (target - initial) * 0.03);
+            for frame in 0..sample_rate {
+                if frame % 37 == 0 {
+                    filter.set_rate(if frame % 74 == 0 { 0.0 } else { -MAX_RATE });
+                }
+                let input = if frame % 2 == 0 { 1.0 } else { -1.0 };
+                let (left, right) = filter.process(input, -input);
+                assert!(left.is_finite() && left.abs() < 2.0);
+                assert_eq!(left, -right);
+            }
+        }
+    }
+
     /// A window whose left channel is its own frame number, so what came out
     /// says where it was read from.
     fn ramp(start: u64, frames: u64) -> PcmWindow {
@@ -583,7 +703,7 @@ mod tests {
         // two. The head cannot render that distance and does not try: it is
         // pulled up to within `MAX_LAG`, plays that, and the deck lands on the
         // pointer. Landing on the head instead made the press spring back.
-        let mut scrubber = Scrubber::new(1_000);
+        let mut scrubber = Scrubber::new(1_000, 44_100);
         scrubber.aim(2_000_000, 0.0);
         let window = ramp(0, 8_000);
         let mut out = vec![0.0; 512];
@@ -636,7 +756,7 @@ mod tests {
     fn the_rate_follows_the_distance_to_the_pointer() {
         // A pointer that has run ahead pulls the head after it; one that has
         // not moved lets it come to rest.
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         scrubber.aim(10_000, 0.0);
         let first = scrubber.plan(512);
         assert!(first > 0.0, "{first}");
@@ -649,7 +769,7 @@ mod tests {
 
     #[test]
     fn dragging_backwards_plays_backwards() {
-        let mut scrubber = Scrubber::new(10_000);
+        let mut scrubber = Scrubber::new(10_000, 44_100);
         scrubber.aim(0, 0.0);
         assert!(scrubber.plan(512) < 0.0);
     }
@@ -658,7 +778,7 @@ mod tests {
     fn a_slow_drag_is_never_pulled_up_and_stays_continuous() {
         // The cap is for flicks. A hand moving at anything like playback speed
         // never reaches it, so nothing is skipped and the sound is unbroken.
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         let window = ramp(0, 44_100 * 4);
         let mut out = vec![0.0_f32; 512 * 2];
         let mut at = 0_u64;
@@ -702,7 +822,7 @@ mod tests {
         // and about playback speed, neighbouring samples differ by well under
         // a hundredth; anything above that came from the head, not the music.
         let window = bass(0, 44_100 * 4);
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         let mut out = vec![0.0_f32; 512 * 2];
         let mut at = 0_u64;
         let mut stream: Vec<f32> = Vec::new();
@@ -729,7 +849,7 @@ mod tests {
         // stopped" silenced two blocks in three, which is heard as a stutter
         // over what should be an unbroken vinyl sound.
         let window = ramp(0, 44_100 * 4);
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         let mut out = vec![0.0_f32; 512 * 2];
         let mut at = 0_u64;
         let mut silent = 0;
@@ -765,7 +885,7 @@ mod tests {
         for speed in [1.0_f64, 0.5, 0.2, 0.05] {
             let frames = (RATE * 3.0 * speed.max(1.0) + RATE) as u64;
             let window = ramp(0, frames);
-            let mut scrubber = Scrubber::new(0);
+            let mut scrubber = Scrubber::new(0, 44_100);
             let mut out = vec![0.0_f32; BLOCK * 2];
 
             let block_ms = BLOCK as f64 / RATE * 1000.0;
@@ -894,7 +1014,7 @@ mod tests {
     fn drag_varying(legs: &[(f64, f64)]) -> Drag {
         let start = 1_000_000.0_f64;
         let window = bass(0, 2_000_000);
-        let mut scrubber = Scrubber::new(start as u64);
+        let mut scrubber = Scrubber::new(start as u64, 44_100);
         let mut out = vec![0.0_f32; BLOCK * 2];
         let mut drag =
             Drag { rates: Vec::new(), heads: Vec::new(), pointers: Vec::new(), stream: Vec::new() };
@@ -1168,7 +1288,7 @@ mod tests {
         // And the other half: a hand that has genuinely stopped goes quiet
         // within a few blocks rather than grinding on.
         let window = ramp(0, 44_100 * 4);
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         let mut out = vec![0.0_f32; 512 * 2];
         scrubber.aim(2_000, 0.0);
         for _ in 0..(SETTLE_BLOCKS as u32 + 6) {
@@ -1183,7 +1303,7 @@ mod tests {
         // A fast drag moves the pointer further than the head can render. It
         // plays the last stretch and skips the rest: grinding through at eight
         // times means audio still running long after the hand has stopped.
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         scrubber.aim(44_100 * 30, 0.0);
         assert!(
             (scrubber.target() as f64 - scrubber.cursor() as f64) <= MAX_LAG,
@@ -1194,7 +1314,7 @@ mod tests {
 
     #[test]
     fn dragging_back_fast_pulls_the_head_back_too() {
-        let mut scrubber = Scrubber::new(44_100 * 30);
+        let mut scrubber = Scrubber::new(44_100 * 30, 44_100);
         scrubber.aim(0, 0.0);
         assert!((scrubber.cursor() as f64) <= MAX_LAG, "at {}", scrubber.cursor());
     }
@@ -1204,7 +1324,7 @@ mod tests {
         // The whole shape of a fast drag: a burst, then silence, and the head
         // where the pointer is rather than somewhere behind it.
         let window = ramp(0, 44_100 * 8);
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         scrubber.aim(44_100 * 2, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         let mut sounding = 0;
@@ -1221,7 +1341,7 @@ mod tests {
 
     #[test]
     fn a_flick_is_clamped_rather_than_becoming_noise() {
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         scrubber.aim(u64::from(u32::MAX), 0.0);
         for _ in 0..50 {
             scrubber.plan(512);
@@ -1234,7 +1354,7 @@ mod tests {
         // The head only moves as blocks are produced, so this has to render
         // rather than plan: planning alone leaves the distance unchanged.
         let window = ramp(0, 40_000);
-        let mut scrubber = Scrubber::new(0);
+        let mut scrubber = Scrubber::new(0, 44_100);
         scrubber.aim(5_000, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         for _ in 0..60 {
@@ -1255,7 +1375,7 @@ mod tests {
     #[test]
     fn rendering_reads_the_window_where_the_head_is() {
         let window = ramp(0, 4_000);
-        let mut scrubber = Scrubber::new(1_000);
+        let mut scrubber = Scrubber::new(1_000, 44_100);
         scrubber.aim(1_000 + 512 * 2, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         assert_eq!(scrubber.render(&window, &mut out), 512);
@@ -1270,7 +1390,7 @@ mod tests {
     fn a_head_at_rest_writes_silence_rather_than_a_held_sample() {
         // A held sample is a click and then a hum; a stopped record is quiet.
         let window = ramp(0, 4_000);
-        let mut scrubber = Scrubber::new(1_000);
+        let mut scrubber = Scrubber::new(1_000, 44_100);
         scrubber.aim(1_000, 0.0);
         let mut out = vec![9.0_f32; 512 * 2];
         scrubber.render(&window, &mut out);
@@ -1280,7 +1400,7 @@ mod tests {
     #[test]
     fn the_head_never_runs_before_the_start_of_the_track() {
         let window = ramp(0, 4_000);
-        let mut scrubber = Scrubber::new(100);
+        let mut scrubber = Scrubber::new(100, 44_100);
         scrubber.aim(0, 0.0);
         let mut out = vec![0.0_f32; 512 * 2];
         for _ in 0..20 {

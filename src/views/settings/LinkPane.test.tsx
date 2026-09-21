@@ -6,10 +6,11 @@ import type { LinkStatus } from "@/ipc/types";
 import { LinkPane } from "./LinkPane";
 
 const held = vi.hoisted(() => ({
+  update: vi.fn(),
   backend: { linkStatus: vi.fn(), onLinkStatus: vi.fn(), startLinkExport: vi.fn(), stopLinkExport: vi.fn() },
 }));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
-vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null } }, update: vi.fn() }) }));
+vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null, linkKeySort: "musical" } }, update: held.update }) }));
 const off: LinkStatus = { on: false, problem: null, interface: null, interfaces: [], players: [], master: false, masterBpm: 120, state: "off", number: null };
 const blocked = { ...off, problem: "rekordbox is running and holds the link ports. Quit it to turn LINK on." };
 let host: HTMLDivElement;
@@ -61,4 +62,14 @@ it("recovers from a failed status check and stops polling when closed", async ()
   await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
   expect(held.backend.linkStatus).toHaveBeenCalledTimes(2);
   expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+it("shows key sort examples and saves the alphabetical choice", async () => {
+  held.backend.linkStatus.mockResolvedValue(off);
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  expect(host.textContent).toContain("Alphabetically — A, Ab, B, …");
+  expect(host.textContent).toContain("Musically — Abm, B, Ebm, F#, Bbm, …");
+  const radio = host.querySelector<HTMLInputElement>('input[name="link-key-sort"]');
+  act(() => radio?.click());
+  expect(held.update).toHaveBeenCalledWith("djSystem", {linkKeySort: "alphabetical"});
 });

@@ -16,3 +16,8 @@ dirs = "5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+# Unique sibling files for durable publication.
+tempfile = "3"
+serde_json = { workspace = true }
+fs2 = "0.4"

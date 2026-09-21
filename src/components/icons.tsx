@@ -179,7 +179,7 @@ export const HistoryIcon = (props: IconProps) => (
 
 export const InfoIcon = (props: IconProps) => (
   <svg viewBox="0 0 16 16" aria-hidden focusable="false" {...props}>
-    <circle cx="8" cy="8" r="6.4" fill="currentColor"/> <rect x="7.1" y="6.6" width="1.8" height="5.0" rx="0.6" fill="#000"/> <circle cx="8" cy="4.6" r="1.05" fill="#000"/>
+    <circle cx="8" cy="8" r="6.4" fill="currentColor"/> <rect x="7.1" y="6.6" width="1.8" height="5.0" rx="0.6" fill="var(--c-black)"/> <circle cx="8" cy="4.6" r="1.05" fill="var(--c-black)"/>
   </svg>
 );
 

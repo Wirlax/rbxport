@@ -127,4 +127,5 @@
 .backupProgress:indeterminate::-webkit-progress-bar { background: transparent; }
 
 .backupMeter { display: inline-flex; align-items: center; gap: 8px; margin-right: 12px; flex-shrink: 0; }
+.analysisMeter { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .backupPercent { min-width: 5ch; font-variant-numeric: tabular-nums; }

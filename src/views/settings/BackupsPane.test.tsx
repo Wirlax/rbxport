@@ -6,13 +6,13 @@ import { BackupsPane } from "./BackupsPane";
 
 const held = vi.hoisted(() => ({
   preferences: { advanced: { protectLibrary: false } },
-  backend: { backupSizes: vi.fn(), startBackup: vi.fn(), cancelBackup: vi.fn(), backupProgress: vi.fn(), backupDirectory: vi.fn(), listBackups: vi.fn(), backUpLibrary: vi.fn(), restoreBackup: vi.fn(), deleteBackup: vi.fn(), confirm: vi.fn() },
+  backend: { backupSizes: vi.fn(), startBackup: vi.fn(), cancelBackup: vi.fn(), backupProgress: vi.fn(), backupDirectory: vi.fn(), listBackups: vi.fn(), backUpLibrary: vi.fn(), restoreBackup: vi.fn(), pickBackupZip: vi.fn(), setBackupDirectory: vi.fn(), pickFolder: vi.fn(), deleteBackup: vi.fn(), confirm: vi.fn() },
 }));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
 vi.mock("@/store/usePreferences", () => ({ usePreferences: () => held.preferences }));
 let host: HTMLDivElement;
 let root: Root;
-const entry = { path: "/backups/library-test", name: "library-test", bytes: 1048576, createdAt: 1700000000000, includesAnalysis: true };
+const entry = { path: "/backups/library-test.zip", name: "library-test.zip", bytes: 1048576, createdAt: 1700000000000, includesAnalysis: true };
 const button = (name: string) => [...host.querySelectorAll("button")].find(b => b.textContent === name)!;
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,6 +39,8 @@ it("library protection disables restore, but allows creating and deleting backup
   held.preferences.advanced.protectLibrary = true;
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
   expect(button("Restore").disabled).toBe(true);
+  expect(button("Restore from ZIP…").disabled).toBe(true);
+  expect(button("Change folder…").disabled).toBe(false);
   expect(button("Create backup").disabled).toBe(false);
   expect(button("Delete").disabled).toBe(false);
 });
@@ -141,6 +143,24 @@ it("shows an empty size bar without invalid segment widths when there is no data
   expect(bar?.children).toHaveLength(0);
 });
 
+it("automatically refreshes the data bar when the saved reading becomes a week old", async () => {
+  vi.useFakeTimers();
+  const now = Date.now();
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const previous = await held.backend.backupSizes(false);
+  held.backend.backupSizes.mockClear();
+  held.backend.backupSizes.mockResolvedValue({ ...previous, updatedAt: now - week + 60_000 });
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  expect(held.backend.backupSizes).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(held.backend.backupSizes).toHaveBeenCalledTimes(1);
+  held.backend.backupSizes.mockResolvedValue({ ...previous, updatedAt: now + 60_000, database: 2048 });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(held.backend.backupSizes).toHaveBeenCalledTimes(2);
+  expect(held.backend.backupSizes).toHaveBeenLastCalledWith(false);
+  expect(host.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain("Database: 2.0 KB");
+});
+
 it("shows the message from a structured backend delete error", async () => {
   held.backend.confirm.mockResolvedValue(true);
   held.backend.deleteBackup.mockRejectedValue({ kind: "internal", message: "Backup: Permission denied" });
@@ -148,4 +168,70 @@ it("shows the message from a structured backend delete error", async () => {
   await act(async () => { button("Delete").click(); await Promise.resolve(); });
   expect(host.querySelector('[role="alert"]')?.textContent).toBe("Backup: Permission denied");
   expect(button("Delete").disabled).toBe(false);
+});
+
+it("changes the default folder and refreshes the list without moving or deleting backups", async () => {
+  held.backend.pickFolder.mockResolvedValue("/Volumes/Archive");
+  held.backend.setBackupDirectory.mockImplementation(() => {
+    held.backend.listBackups.mockResolvedValue([]);
+    return Promise.resolve("/Volumes/Archive");
+  });
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { button("Change folder…").click(); await Promise.resolve(); });
+  expect(held.backend.setBackupDirectory).toHaveBeenCalledWith("/Volumes/Archive");
+  expect(held.backend.deleteBackup).not.toHaveBeenCalled();
+  expect(host.querySelectorAll("tbody tr")).toHaveLength(0);
+  expect(host.textContent).toContain("Default backup folder updated.");
+  expect(button("Restore from ZIP…").disabled).toBe(false);
+  expect(host.querySelector('[role="link"]')?.textContent).toBe("/Volumes/Archive");
+});
+
+it("cancelling either picker does not change the destination or restore anything", async () => {
+  held.backend.pickFolder.mockResolvedValue(null);
+  held.backend.pickBackupZip.mockResolvedValue(null);
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { button("Change folder…").click(); await Promise.resolve(); });
+  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
+  expect(held.backend.setBackupDirectory).not.toHaveBeenCalled();
+  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
+  expect(held.backend.confirm).not.toHaveBeenCalled();
+});
+
+it("restores an external ZIP from an empty list only after confirmation", async () => {
+  const external = { ...entry, path: "/Volumes/Archive/renamed.zip" };
+  held.backend.listBackups.mockResolvedValue([]);
+  held.backend.pickBackupZip.mockResolvedValue(external);
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
+  expect(held.backend.confirm).toHaveBeenCalledWith(expect.stringContaining(external.path));
+  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
+  held.backend.confirm.mockResolvedValue(true);
+  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
+  expect(held.backend.restoreBackup).toHaveBeenCalledWith(external.path);
+  expect(host.textContent).toContain("Backup restored.");
+});
+
+it("rechecks Library Protection after choosing a ZIP", async () => {
+  held.backend.confirm.mockResolvedValue(true);
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  // The preference changes in another window while the native picker is open.
+  let resolvePicker!: (value: typeof entry) => void;
+  held.backend.pickBackupZip.mockReturnValue(new Promise(resolve => { resolvePicker = resolve; }));
+  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
+  held.preferences.advanced.protectLibrary = true;
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { resolvePicker(entry); await Promise.resolve(); });
+  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Turn off Library Protection");
+});
+
+it("a destination failure keeps the previous folder and makes actions available again", async () => {
+  held.backend.pickFolder.mockResolvedValue("/Volumes/Archive");
+  held.backend.setBackupDirectory.mockRejectedValue(new Error("The backup folder is not writable."));
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  await act(async () => { button("Change folder…").click(); await Promise.resolve(); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("not writable");
+  expect(host.querySelectorAll("tbody tr")).toHaveLength(1);
+  expect(host.querySelector('[role="link"]')?.textContent).toBe("/backups");
+  expect(button("Change folder…").disabled).toBe(false);
 });

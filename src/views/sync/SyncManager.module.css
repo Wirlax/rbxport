@@ -7,7 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 55%);
+  background: var(--c-modal-scrim);
 }
 
 /* rekordbox opens a window; this is that window drawn inside ours, title

@@ -1,5 +1,5 @@
 /* Every size and colour is a token measured off the two-player capture by
-   scanning its pixels — see the `mixer*` entries in design/tokens/tokens.json,
+   scanning its pixels — see the `mixer*` entries in design/tokens/theme.json,
    each of which carries the pixel range it came from. */
 
 .strip {

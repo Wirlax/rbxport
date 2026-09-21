@@ -5,8 +5,9 @@ import { refusal } from "@/lib/menu";
 export interface StatusBarProps {
   /** The build's version, shown beside the name; null until it is read. */
   version?: string | null;
-  /** e.g. "Analyzing: 8319 Tracks"; empty when idle. */
+  /** General status text; empty when idle. */
   activity?: string;
+  analysisProgress?: { completed: number; total: number } | undefined;
   backupActivity?: string;
   backupProgress?: { phase: string; copiedBytes: number; totalBytes: number } | undefined;
   /**
@@ -33,6 +34,7 @@ export interface StatusBarProps {
 export function StatusBar({
   version = null,
   activity = "",
+  analysisProgress,
   backupActivity = "",
   backupProgress,
   error = null,
@@ -46,6 +48,8 @@ export function StatusBar({
   analysisFailures = 0,
 }: StatusBarProps) {
   const tip = useTooltip();
+  const analysisPercent = analysisProgress && analysisProgress.total > 0
+    ? Math.min(100, Math.max(0, Math.floor(analysisProgress.completed / analysisProgress.total * 100))) : 0;
   const backupPercent = backupProgress && backupProgress.totalBytes > 0
     ? Math.min(100, Math.max(0, Math.floor(backupProgress.copiedBytes / backupProgress.totalBytes * 100))) : 0;
   return (
@@ -86,7 +90,12 @@ export function StatusBar({
         <span className={styles.backupPercent}>({backupPercent}%)</span>
       </span>
         : backupActivity ? <span className={styles.backupActivity} role="status">{backupActivity}</span> : null}
-      <span className={styles.activity}>{activity}</span>
+      {analysisProgress ? <span className={styles.analysisMeter}>
+        <span>Analyzing {analysisProgress.total} {analysisProgress.total === 1 ? "track" : "tracks"}</span>
+        <progress className={styles.backupProgress} aria-label="Analysis progress"
+          max={100} value={analysisPercent} />
+        <span className={styles.backupPercent}>({analysisPercent}%)</span>
+      </span> : <span className={styles.activity}>{activity}</span>}
       {analysisFailures > 0 ? (
         <span
           className={styles.failures}

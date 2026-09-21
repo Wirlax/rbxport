@@ -270,6 +270,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "autotools"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef941527c41b0fc0dd48511a8154cd5fc7e29200a0ff8b7203c5d777dbc795cf"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1345,6 +1354,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2566,6 +2585,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "mp3lame-encoder"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60cb9bdd89806317373e36ff745f264b7ed7ffc5bc5aab02dc7d1b837c16a8d4"
+dependencies = [
+ "mp3lame-sys",
+]
+
+[[package]]
+name = "mp3lame-sys"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e3b1772db47828840702e5a2e05694527f731abadf9b931355d54035f019d8"
+dependencies = [
+ "autotools",
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "muda"
 version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3484,6 +3523,8 @@ dependencies = [
 name = "rbl-audio"
 version = "0.1.0"
 dependencies = [
+ "mp3lame-encoder",
+ "rubato",
  "symphonia",
  "tempfile",
  "thiserror 2.0.20",
@@ -3496,7 +3537,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
+ "fs2",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
 ]
 
@@ -3553,6 +3597,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
  "rbl-anlz",
+ "rbl-core",
  "rbl-export",
  "rbl-onelibrary",
  "rbl-pdb",
@@ -3589,11 +3634,13 @@ dependencies = [
  "rbl-index",
  "rbl-onelibrary",
  "rbl-pdb",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -3611,6 +3658,7 @@ dependencies = [
 name = "rbl-index"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "memchr",
  "parking_lot",
  "rbl-core",

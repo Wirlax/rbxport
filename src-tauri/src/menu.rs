@@ -40,6 +40,25 @@ fn label(key: &str) -> String {
 /// another listener.
 pub const EVENT: &str = "menu";
 
+#[tauri::command]
+pub fn set_history_menu<R: Runtime>(
+    app: AppHandle<R>,
+    undo: Option<String>,
+    redo: Option<String>,
+) -> Result<(), String> {
+    let Some(menu) = app.menu() else { return Ok(()); };
+    let Some(edit) = menu.get("edit").and_then(|item| item.as_submenu().cloned()) else {
+        return Ok(());
+    };
+    for (id, title, action) in [("undo", "Undo", undo), ("redo", "Redo", redo)] {
+        if let Some(item) = edit.get(id).and_then(|item| item.as_menuitem().cloned()) {
+            let text = action.map_or_else(|| title.to_owned(), |action| format!("{title} {action}"));
+            item.set_text(text).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let settings = MenuItemBuilder::with_id("settings", "Settings…")
         .accelerator("CmdOrCtrl+,")
@@ -128,12 +147,19 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         )
         .build()?;
 
-    // Edit is predefined: without it the standard clipboard shortcuts do not
-    // reach the webview's text fields on macOS, and renaming a playlist stops
-    // accepting paste.
-    let edit = SubmenuBuilder::new(app, "Edit")
-        .item(&PredefinedMenuItem::undo(app, None)?)
-        .item(&PredefinedMenuItem::redo(app, None)?)
+    // History follows frontend focus (text field or active deck). Clipboard
+    // items stay predefined so macOS forwards them to the webview's fields.
+    let edit = SubmenuBuilder::with_id(app, "edit", "Edit")
+        .item(
+            &MenuItemBuilder::with_id("undo", "Undo")
+                .accelerator("CmdOrCtrl+Z")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("redo", "Redo")
+                .accelerator("CmdOrCtrl+Shift+Z")
+                .build(app)?,
+        )
         .separator()
         .item(&PredefinedMenuItem::cut(app, None)?)
         .item(&PredefinedMenuItem::copy(app, None)?)

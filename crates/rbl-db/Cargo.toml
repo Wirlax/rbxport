@@ -10,6 +10,7 @@ description = "Read access to rekordbox's SQLCipher master.db."
 workspace = true
 
 [dependencies]
+tempfile = "3"
 rbl-core = { path = "../rbl-core" }
 # For the BPM override, which retimes the track's beat grid in its analysis file.
 rbl-anlz = { path = "../rbl-anlz" }

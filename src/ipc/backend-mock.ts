@@ -10,6 +10,7 @@
  * parity test once `rbl-index` lands.
  */
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
+import theme from "../../design/tokens/theme.json";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
@@ -19,7 +20,7 @@ import type {
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
-import { applyEditFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
+import { applyEditFrom, validateEdit, isDynamicFrom, tempoX100, type EditableBeat } from "@/lib/gridEdit";
 import { toCamelot } from "@/lib/camelot";
 import { COLOR_NAMES, wholeBpm } from "@/lib/trackFilter";
 import { referenceDeviceSettings } from "./mock-device-settings";
@@ -47,13 +48,13 @@ const LABELS = ["Spinnin'", "Musical Freedom", "Defected", "Armada", "Toolroom",
  * so every measured colour is on screen somewhere.
  */
 const CUE_SETS: readonly (readonly (readonly [string, number, string | null])[])[] = [
-  [["A", 0.12, "#77E866"], ["B", 0.34, "#77E866"], ["C", 0.61, "#77E866"], ["D", 0.83, "#77E866"]],
-  [["E", 0.12, "#51AE7B"], ["F", 0.29, "#F09235"], ["G", 0.46, "#3A59F6"], ["H", 0.70, "#D9AC3A"]],
-  [["A", 0.12, "#E13A8A"], ["B", 0.26, "#6AAEEC"], ["C", 0.61, "#A8D54B"], ["D", 0.79, "#A274F7"]],
+  [["A", 0.12, theme.color.cueHot.value], ["B", 0.34, theme.color.cueHot.value], ["C", 0.61, theme.color.cueHot.value], ["D", 0.83, theme.color.cueHot.value]],
+  [["E", 0.12, theme.color.cueTeal.value], ["F", 0.29, theme.color.cueOrange.value], ["G", 0.46, theme.color.cueBlue.value], ["H", 0.70, theme.color.cueYellow.value]],
+  [["A", 0.12, theme.color.cuePink.value], ["B", 0.26, theme.color.cueAqua.value], ["C", 0.61, theme.color.cueLime.value], ["D", 0.79, theme.color.cuePurple.value]],
 ];
 
 /** What a hot cue added here draws: index 21, the default the writer stores. */
-const DEFAULT_CUE_COLOUR = "#77E866";
+const DEFAULT_CUE_COLOUR = theme.color.cueHot.value;
 
 /**
  * How long the mock pretends analysis takes.
@@ -164,6 +165,7 @@ function makeRows(count: number): RowDto[] {
       analysed,
       dateAdded,
       releaseDate,
+      memoryCues: analysed ? [Math.round(durationSec * 1000 * 0.02)] : [],
       hotCues: cueSet.map(([letter, at, colour]) => [letter, Math.round(durationSec * 1000 * at), colour]),
       artworkHue: Math.floor(rnd() * 360),
       // The mock has no files to serve, so every row falls back to the tint.
@@ -583,6 +585,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // rekordbox's, so it holds playlists but remembers no selection of ours;
   // DJ STICK holds nothing until something is written to it.
   const syncSelections = new Map<string, SyncPlaylist[]>();
+  const looseTracks = new Map<string, Set<string>>();
   /** Sticks whose record asks to be synced again when plugged in. */
   const autoSync = new Set<string>();
   const deviceLibraries = new Map<string, string[]>([
@@ -595,11 +598,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * the bookkeeping — what a later `listDevices`, `deviceSettings` and
    * `deviceSyncState` report — and the counts an export reports.
    */
-  const writeTo = (device: Device, playlistIds: string[], defaults: StickDefaults | undefined): ExportReport => {
+  const writeTo = (device: Device, playlistIds: string[], defaults: StickDefaults | undefined, deleteUnlistedMusic = false): ExportReport => {
     // The union of the playlists, each track counted once however many
     // hold it, as the real selection is built.
     const union = new Set<string>();
     for (const id of playlistIds) for (const track of membersOf(id)) union.add(track);
+    if (deleteUnlistedMusic) looseTracks.delete(device.path);
+    else for (const track of looseTracks.get(device.path) ?? []) union.add(track);
     const tracks = union.size;
     const already = device.export;
     const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
@@ -921,10 +926,19 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
       if (held.locked) return refuse("The beat grid is locked. Unlock it to edit.");
-      const next = applyEditFrom(held.beats, options?.fromMs ?? null, edit);
+      const invalid = validateEdit(held.beats, options?.fromMs ?? null, edit);
+      if (invalid) return refuse(invalid);
+      if (["stretch", "tempo"].includes(edit.kind) && !options?.allowDynamic && isDynamicFrom(held.beats, options?.fromMs ?? null)) return refuse("Confirm replacing this section's tempo changes.");
+      const duration = options?.durationMs ?? (all[Number.parseInt(track, 10) - 100000]?.durationSec ?? 0) * 1000;
+      const next = applyEditFrom(held.beats, options?.fromMs ?? null, edit, duration);
       if (next.length === 0) return failed("malformed", "That edit would leave the track without a beat.");
       if (sameGrid(next, held.beats)) return wait(gridStateOf(held));
-      held.undo.push(held.beats);
+      const label = edit.kind === "nudge"
+        ? (edit.ms < 0 ? "Shift Beat Grid Left" : "Shift Beat Grid Right")
+        : { double: "Double Tempo", halve: "Halve Tempo", downbeat: "Set Downbeat",
+          tempo: "Set Tempo", tap: "Tap Tempo", stretch: "Adjust Tempo", align: "Align Beat Grid" }[edit.kind];
+      if (!options?.transaction || held.transaction !== options.transaction) held.undo.push({ beats: held.beats, label });
+      held.transaction = edit.kind === "tap" ? options?.transaction : undefined;
       held.redo = [];
       held.beats = next;
       return gridChanged(track, held);
@@ -932,26 +946,28 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     gridUndo: (track) => {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
+      held.transaction = undefined;
       const previous = held.undo.pop();
       if (!previous) return notFound("Nothing to undo.");
-      held.redo.push(held.beats);
-      held.beats = previous;
+      held.redo.push({ beats: held.beats, label: previous.label });
+      held.beats = previous.beats;
       return gridChanged(track, held);
     },
     gridRedo: (track) => {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
+      held.transaction = undefined;
       const next = held.redo.pop();
       if (!next) return notFound("Nothing to redo.");
-      held.undo.push(held.beats);
-      held.beats = next;
+      held.undo.push({ beats: held.beats, label: next.label });
+      held.beats = next.beats;
       return gridChanged(track, held);
     },
     gridLock: (track, on) => {
       const held = gridOf(track);
       if (!held) return notFound("That track has no beat grid to edit.");
       held.locked = on;
-      return wait(gridStateOf(held));
+      return gridChanged(track, held);
     },
   };
 
@@ -964,8 +980,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    */
   interface HeldGrid {
     beats: EditableBeat[];
-    undo: EditableBeat[][];
-    redo: EditableBeat[][];
+    transaction?: string | undefined;
+    undo: { beats: EditableBeat[]; label: string }[];
+    redo: { beats: EditableBeat[]; label: string }[];
     locked: boolean;
   }
   const gridStore = new Map<string, HeldGrid>();
@@ -994,6 +1011,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     beats: held.beats.length,
     canUndo: held.undo.length > 0,
     canRedo: held.redo.length > 0,
+    undoLabel: held.undo.at(-1)?.label ?? null,
+    redoLabel: held.redo.at(-1)?.label ?? null,
     locked: held.locked,
   });
   const gridChanged = async (trackId: string, held: HeldGrid): Promise<GridState> => {
@@ -1111,6 +1130,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const syncRow = (trackId: string) => {
     const row = all[Number.parseInt(trackId, 10) - 100000];
     if (!row) return;
+    row.memoryCues = cuesOf(trackId).filter(cue => cue.memory).map(cue => cue.positionMs);
     row.hotCues = cuesOf(trackId)
       .filter((cue) => !cue.memory)
       .sort((a, b) => a.letter.localeCompare(b.letter))
@@ -1300,12 +1320,16 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     nextId = before.nextId; nextCueId = before.nextCueId;
   };
   const backups = new Map<string, { backup: Backup; saved: Snapshot }>();
+  let backupDirectory = "/mock/backups";
   let backupSizes: BackupSizes | null = null;
   let backupProgress: BackupProgress = { running: false, phase: "", copiedBytes: 0, totalBytes: 0, error: null, path: null };
   const saveBackup = () => {
     const createdAt = Date.now();
-    const name = `library-${createdAt}-${crypto.randomUUID()}`;
-    const path = `/mock/backups/${name}`;
+    const date = new Date(createdAt);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const name = `rbxport-backup-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}.zip`;
+    const path = `${backupDirectory}/${name}`;
+    if (backups.has(path)) throw new Error("A backup for this minute already exists. Try again in the next minute.");
     const saved = snapshot();
     backups.set(path, { saved, backup: { path, name, createdAt, includesAnalysis: true, includesArtwork: true, bytes: new Blob([JSON.stringify(saved)]).size } });
     return path;
@@ -1474,6 +1498,24 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return wait(out);
     },
+    trackPcmWaveform: (_trackId: string, _fromMs: number, _toMs: number, columns: number) => {
+      // A deterministic stereo peak envelope for the browser build. The real
+      // backend seeks into the source file and returns min/max pairs.
+      const count = Math.max(1, Math.min(columns, 7500));
+      const out = new Uint8Array(count * 8);
+      const view = new DataView(out.buffer);
+      for (let i = 0; i < count; i++) {
+        const left = Math.sin(i * 0.19) * (0.15 + 0.55 * Math.abs(Math.sin(i * 0.013)));
+        const right = Math.sin(i * 0.23 + 0.7) * (0.13 + 0.52 * Math.abs(Math.sin(i * 0.011)));
+        const spread = 0.08 + 0.11 * Math.abs(Math.sin(i * 0.071));
+        const clamp = (value: number) => Math.max(-1, Math.min(value, 1));
+        view.setInt16(i * 8, Math.round(clamp(left - spread) * 32767), true);
+        view.setInt16(i * 8 + 2, Math.round(clamp(left + spread) * 32767), true);
+        view.setInt16(i * 8 + 4, Math.round(clamp(right - spread) * 32767), true);
+        view.setInt16(i * 8 + 6, Math.round(clamp(right + spread) * 32767), true);
+      }
+      return wait(out);
+    },
 
     edits,
 
@@ -1542,7 +1584,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // No filesystem in a browser, so nothing is written — but the counts are
     // answered so the device panel's reporting can be driven end to end.
-    exportPlaylist: (playlistId, destination, defaults) => {
+    exportPlaylist: (playlistId, destination, defaults, deleteUnlistedMusic) => {
       if (destination === undefined) return wait(null);
       const device = devices.find((d) => d.path === destination);
       if (!device) {
@@ -1554,18 +1596,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           reused: 0, removed: 0, skipped: [], verified: true,
         });
       }
-      return wait(writeTo(device, [playlistId], defaults));
+      return wait(writeTo(device, [playlistId], defaults, deleteUnlistedMusic));
     },
-    exportTracksToDevice: (tracks, destination) => {
+    exportTracksToDevice: (tracks, destination, defaults) => {
       const device = devices.find((d) => d.path === destination);
       if (!device) return Promise.reject(new Error("That device is no longer connected."));
-      const already = device.export?.tracks ?? 0;
-      const playlists = device.export?.playlists ?? 0;
-      device.export = { tracks: already + tracks.length, playlists, ours: true, written: new Date().toISOString() };
-      return wait({
-        tracks: already + tracks.length, playlists, bytesCopied: tracks.length * 8_000_000,
-        analysisFiles: tracks.length, reused: already, removed: 0, skipped: [], verified: true,
-      });
+      const loose = looseTracks.get(destination) ?? new Set<string>();
+      for (const track of tracks) loose.add(track);
+      looseTracks.set(destination, loose);
+      return wait(writeTo(device, (syncSelections.get(destination) ?? []).map(p => p.libraryId), defaults));
     },
 
     // No windows in a browser: the shell draws the manager over itself.
@@ -1577,7 +1616,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // Stick after stick, each announced before and after, as the real run
     // is. A destination that is not a mock device is a stick that was
     // pulled: its entry carries the error and the others their reports.
-    syncDevices: async (playlists, destinations, defaults, automatic, ejectAfterSync) => {
+    syncDevices: async (playlists, destinations, defaults, automatic, ejectAfterSync, deleteUnlistedMusic) => {
       if (playlists.length === 0) throw new Error("That playlist has no tracks to export.");
       const reports = [];
       for (const path of destinations) {
@@ -1588,7 +1627,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         await wait(undefined);
         const device = devices.find((d) => d.path === path);
         if (device) {
-          const report = writeTo(device, playlists, defaults);
+          const report = writeTo(device, playlists, defaults, deleteUnlistedMusic);
           const ejected = Boolean(ejectAfterSync && report.verified && report.skipped.length === 0);
           if (ejected) {
             tell("ejecting");
@@ -1634,14 +1673,14 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       window.open(url, "_blank", "noopener");
       return wait(undefined);
     },
-    backupDirectory: () => wait("/mock/backups"),
+    backupDirectory: () => wait(backupDirectory),
     openBackupDirectory: () => wait(undefined),
     backupSizes: (refresh = false) => {
-      if (!backupSizes || refresh) backupSizes = { updatedAt: Date.now(), trackCount: all.length, artwork: 8 * 1024 ** 2, vocals: 2 * 1024 ** 2, database: 48 * 1024 ** 2, waveforms: 240 * 1024 ** 2,
+      if (!backupSizes || refresh || Date.now() - backupSizes.updatedAt >= 7 * 24 * 60 * 60 * 1000) backupSizes = { updatedAt: Date.now(), trackCount: all.length, artwork: 8 * 1024 ** 2, vocals: 2 * 1024 ** 2, database: 48 * 1024 ** 2, waveforms: 240 * 1024 ** 2,
         cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 2 * 1024 ** 2 };
       return wait({ ...backupSizes });
     },
-    listBackups: () => wait([...backups.values()].map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
+    listBackups: () => wait([...backups.values()].filter(({ backup }) => backup.path.startsWith(`${backupDirectory}/`)).map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
     backUpLibrary: () => wait(saveBackup()),
     backupProgress: () => wait({ ...backupProgress }),
     cancelBackup: () => {
@@ -1672,6 +1711,12 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (!entry) return notFound("Backup not found.");
       restore(entry.saved);
       return bump();
+    },
+    pickBackupZip: () => wait([...backups.values()].find(({ backup }) => !backup.path.startsWith(`${backupDirectory}/`))?.backup ?? null),
+    setBackupDirectory: (directory) => {
+      if (backupProgress.running) return refuse("Wait for the current backup to finish.");
+      backupDirectory = directory;
+      return wait(directory);
     },
     deleteBackup: (path) => {
       if (!backups.delete(path)) return notFound("Backup not found.");
@@ -1979,27 +2024,34 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.
-    analyseTrack: (trackId) => {
+    analyseTrack: (trackId, _mode, settings) => {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
       if (!row) return Promise.reject(new Error("That track is not in the library."));
+      if (gridOf(trackId)?.locked) return Promise.reject(new Error("This track's analysis is locked. Unlock it to analyze."));
+      if (settings && !settings.bpmGrid && !settings.key) return Promise.reject(new Error("Select BPM / Grid or KEY to analyze."));
       // Every seventh track fails, so the failure path is exercised too.
       if (index % 7 === 6) {
         return Promise.reject(new Error("That file could not be decoded."));
       }
-      row.analysed = 1;
       // Deliberately not instant. Real analysis is a decode and a DSP pass —
       // seconds per track — and a mock that answers immediately makes the
       // queue's progress, cancellation and failure handling unobservable.
       return new Promise((resolve) =>
         setTimeout(
           () => {
+            if (settings?.bpmGrid !== false) {
+              row.analysed = 1;
+              row.bpmX100 ||= 12_800;
+            }
+            if (settings?.key !== false) row.key ||= "Am";
             // As the shell says it: a deck showing the track redraws.
             for (const listener of analysisListeners) listener(trackId);
             resolve({
             trackId,
-            bpmX100: row.bpmX100 || 12_800,
-            key: row.key || "Am",
+            analysed: row.analysed,
+            bpmX100: row.bpmX100,
+            key: row.key,
             beats: Math.round((row.durationSec * (row.bpmX100 || 12_800)) / 6000),
             peak: 0.9,
             durationSec: row.durationSec,

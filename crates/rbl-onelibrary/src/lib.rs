@@ -16,6 +16,8 @@ use rusqlite::{Connection, OpenFlags};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     #[error("could not derive the passphrase: {0}")]
     Key(#[from] key::KeyError),
     #[error("{0}")]
@@ -95,4 +97,16 @@ impl ExportLibrary {
         let sql = format!("SELECT COUNT(*) FROM \"{}\"", table.replace('"', "\"\""));
         Ok(self.conn.query_row(&sql, [], |r| r.get(0))?)
     }
+}
+
+/// Use durable rollback journals for files consumed without WAL support.
+fn durable_writes(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "synchronous", "EXTRA")?;
+    conn.pragma_update(None, "fullfsync", true)?;
+    conn.pragma_update(None, "checkpoint_fullfsync", true)?;
+    let mode: String = conn.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
+    if !mode.eq_ignore_ascii_case("delete") {
+        return Err(Error::Sqlite(rusqlite::Error::InvalidQuery));
+    }
+    Ok(())
 }

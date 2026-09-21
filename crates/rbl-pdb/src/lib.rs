@@ -359,6 +359,17 @@ impl Pdb<'_> {
             .collect()
     }
 
+    /// Actual played-history tables are types 11/12; the reference tables
+    /// at 17/18 are browse settings, despite their historical enum names.
+    pub fn played_histories(&self) -> Vec<NamedRow> {
+        self.table(PageType::Other(11)).map(|t| self.simple_named(t, 0, 4)).unwrap_or_default()
+    }
+    pub fn played_history_entries(&self) -> Vec<PlaylistEntry> {
+        self.table(PageType::Other(12)).map(|t| self.rows(t).into_iter().map(|r| PlaylistEntry {
+            track_id: self.u4_at(r,0), playlist_id: self.u4_at(r,4), entry_index: self.u4_at(r,8),
+        }).collect()).unwrap_or_default()
+    }
+
     /// Decodes a name table, dispatching on its layout.
     pub fn named_rows(&self, table: &TableRef) -> Vec<NamedRow> {
         match table.page_type {

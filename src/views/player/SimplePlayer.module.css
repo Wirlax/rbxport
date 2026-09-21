@@ -1,7 +1,7 @@
 /* The simple player strip. Every size and colour is a token measured off the
    SIMPLE PLAYER capture (docs/screenshots, 2026-09-09 9.03.41 PM, 2x); see the
    `source` on each `--s-player-simple-*` and the sampled colours beside them
-   in design/tokens/tokens.json. */
+   in design/tokens/theme.json. */
 
 /* Five columns: the PLAY column, the sleeve, the title-and-overview column,
    the rating box, and the 3pt of black before the window's edge. The gaps

@@ -53,6 +53,9 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.play_count.push(t.play_count);
         lib.analysed.push(u8::from(t.bpm_x100 > 0));
         lib.year.push(t.year);
+        lib.bitrate.push(0);
+        lib.sample_rate.push(0);
+        lib.file_size.push(0);
     }
     lib.count = tracks.len();
     lib.set_cues(Cues::from_per_track(tracks.iter().map(|t| t.cues.clone()).collect()));

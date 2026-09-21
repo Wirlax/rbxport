@@ -80,7 +80,13 @@ Relaunching rekordbox alone touches nothing. `check` compares each copy's
 files and columns with what `analyse` wrote (kept in
 `target/multibpm/registered.tsv`) and says whether the grid survived.
 
-## Results
+## Recorded results before transient emphasis
+
+The measurements below predate the 4× transient-rise gain and 20 ms
+release used when a transition lacks usable kicks or clicks. They have
+not been rerun for that change; keep them as the baseline for the next
+playlist comparison. Synthetic coverage is listed in
+[grid-fixtures.md](grid-fixtures.md#transitions-without-kicks).
 
 BPM 9 / 9, key 9 / 9, downbeat 8 / 9, grid 4 / 9. The bpm and key are
 right on every edit; what this playlist tests is where the tempo change is
@@ -101,7 +107,11 @@ changes are within 3 ms.
 
 The three cut misses (Cannonball twice, Sao Paulo) are one kind: the hand
 grid switches at the impact that ends the old section, and the new
-tempo's kick comes much later. Onsets alone cannot tell that impact from
+tempo's kick comes much later. An isolated onset cannot tell that impact from
 the one that starts a breakdown in the middle of a section (Bring Me Back
-to Life at 60 s, which the hand grid holds through), so the rule stays
-"where the kick states the tempo" ([rules.md](rules.md)).
+to Life at 60 s, which the hand grid holds through). Reliable kick runs
+remain the preferred evidence for a cut. The transition walker now also
+tries emphasised transients when kick and click timing are unavailable;
+if no kick run qualifies for a cut, it compares transient support on both
+grids. This is not a claim that the three recorded misses are fixed;
+that requires a new playlist score ([rules.md](rules.md)).

@@ -216,11 +216,26 @@ impl Library {
         conn.pragma_update(None, "cipher", "sqlcipher")?;
         conn.pragma_update(None, "legacy", 4)?;
         conn.pragma_update(None, "key", &location.passphrase)?;
-        // Lets us read while rekordbox holds the WAL.
-        conn.pragma_update(None, "read_uncommitted", true)?;
+        // Readers use committed snapshots. Writers explicitly require durable
+        // journaling rather than depending on a connection's defaults.
+        if mode == OpenMode::ReadWrite {
+            configure_durability(&conn)?;
+        }
 
         // The first read is what actually proves the key: a wrong passphrase
         // fails here rather than at open time.
+        // Opening a hot rollback journal read-only cannot replay it. Recover
+        // through the normal guarded writable opener, then return a fresh RO
+        // handle. Never bypass the rekordbox/test write gates for recovery.
+        if mode == OpenMode::ReadOnly {
+            if let Err(rusqlite::Error::SqliteFailure(error, _)) = conn.query_row("PRAGMA schema_version", [], |r| r.get::<_, i64>(0)) {
+                if matches!(error.extended_code, 264 | 776) {
+                    drop(conn);
+                    drop(Self::open(location.clone(), OpenMode::ReadWrite)?);
+                    return Self::open(location, mode);
+                }
+            }
+        }
         let schema = SchemaProbe::probe(&conn)?;
 
         Ok(Self { conn, mode, location, schema })
@@ -300,6 +315,19 @@ pub fn resolve_folder_path(folder_path: &str, cloud_root: Option<&Path>) -> Stri
         (Some(_), Some(root)) => root.join(folder_path.trim_start_matches('/')).to_string_lossy().into_owned(),
         _ => folder_path.to_owned(),
     }
+}
+
+/// Require crash-safe journals and durable commits on every writable handle.
+pub fn configure_durability(conn: &Connection) -> Result<()> {
+    let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+    if !matches!(mode.to_ascii_lowercase().as_str(), "delete" | "truncate" | "persist" | "wal") {
+        return Err(DbError::WriteRefused(format!("unsafe database journal mode: {mode}")));
+    }
+    conn.pragma_update(None, "synchronous", "EXTRA")?;
+    conn.pragma_update(None, "fullfsync", true)?;
+    conn.pragma_update(None, "checkpoint_fullfsync", true)?;
+    conn.pragma_update(None, "read_uncommitted", false)?;
+    Ok(())
 }
 
 #[cfg(test)]

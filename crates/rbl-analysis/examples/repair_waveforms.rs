@@ -9,6 +9,7 @@ use rbl_db::write::Writer;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let playlist = std::env::args().nth(1).expect("playlist name required");
+    let overview_only = std::env::args().any(|arg| arg == "--overview-only");
     let location = rbl_db::detect()?;
     let share = location.share_root.clone();
     let backup = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -29,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!rows.is_empty(), "playlist is empty or missing");
     println!("Backup: {}", backup.display());
     for (id, title, relative) in rows {
-        let artwork = writer.import_artwork(&id)?;
+        let artwork = if overview_only { false } else { writer.import_artwork(&id)? };
         let bpm: u32 = writer.library().connection().query_row(
             "SELECT COALESCE(BPM, 0) FROM djmdContent WHERE ID = ?1", [&id], |r| r.get(0))?;
         let dat = rbl_anlz::resolve(&share, &relative);
@@ -40,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let columns: Vec<_> = waveform.columns.iter().map(|c| rbl_anlz::BandColumn {
             low: c.low, mid: c.mid, high: c.high, peak: c.peak,
         }).collect();
-        let generated = rbl_anlz::author(&audio_path, &[], &columns, rbl_anlz::Existing::default());
+        let generated = rbl_anlz::author_with_overview(&audio_path, &[], &columns, waveform.overview.as_slice().try_into().ok(), rbl_anlz::Existing::default());
         for (extension, bytes) in [("DAT", generated.dat), ("EXT", generated.ext), ("2EX", generated.two_ex)] {
             let path = dat.with_extension(extension);
             let mut file = Anlz::read(&path)?;
@@ -49,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for section in &mut file.sections {
                 // Replace waveforms only: keep all grids, cue lists, phrases,
                 // vocals and unknown records byte-for-byte.
-                if section.waveform().is_some() {
+                if section.waveform().is_some() && (!overview_only || section.tag.to_string() == "PWV6") {
                     if let Some(new) = replacement.sections.iter().find(|s| s.tag == section.tag) {
                         if section.header != new.header || section.payload != new.payload {
                             *section = new.clone();
@@ -68,9 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::rename(staged, path)?;
             }
         }
-        writer.set_analysis(&id, &rbl_db::write::AnalysisWrite {
+        if !overview_only { writer.set_analysis(&id, &rbl_db::write::AnalysisWrite {
             bpm_x100: bpm, key: None, analysis_path: &relative, length_sec: None,
-        })?;
+        })?; }
         println!("{title}: preview checked, artwork imported={artwork}");
     }
     Ok(())

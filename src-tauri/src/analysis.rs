@@ -29,11 +29,51 @@ use crate::state::AppState;
 /// longer than that is analysed up to the cap and drawn that far.
 const DECODE_CAP_SECS: f64 = 1800.0;
 
+/// Per-batch choices from the Analysis Setting dialog. Missing settings
+/// preserve the defaults used by imports and older callers.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AnalysisSettings {
+    pub bpm_grid: bool,
+    pub key: bool,
+    pub high_precision: bool,
+    pub min_bpm: f64,
+    pub max_bpm: f64,
+}
+
+impl Default for AnalysisSettings {
+    fn default() -> Self {
+        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0 }
+    }
+}
+
+impl AnalysisSettings {
+    fn options(self, preset: rbl_analysis::AnalysisPreset) -> AppResult<rbl_analysis::AnalysisOptions> {
+        if !self.bpm_grid && !self.key {
+            return Err(AppError::new(ErrorKind::Malformed, "Select BPM / Grid or KEY to analyze."));
+        }
+        if !self.min_bpm.is_finite() || !self.max_bpm.is_finite()
+            || self.min_bpm < 40.0 || self.max_bpm > 300.0 || self.min_bpm >= self.max_bpm {
+            return Err(AppError::new(ErrorKind::Malformed, "Choose a valid BPM range between 40 and 300."));
+        }
+        let mut options = preset.options();
+        options.tempo.min_bpm = self.min_bpm;
+        options.tempo.max_bpm = self.max_bpm;
+        options.tempo.placement = if self.high_precision {
+            rbl_analysis::tempo::Placement::Attack
+        } else {
+            rbl_analysis::tempo::Placement::Envelope
+        };
+        Ok(options)
+    }
+}
+
 /// What analysing one track produced.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisResultDto {
     pub track_id: String,
+    pub analysed: u8,
     /// BPM x100, as rekordbox stores it.
     pub bpm_x100: u32,
     pub key: String,
@@ -53,11 +93,14 @@ pub struct AnalysisResultDto {
 /// written to the share tree either in that case, since the files are only
 /// reachable through the row.
 #[tauri::command]
+#[allow(clippy::too_many_arguments, reason = "Tauri injects the application states alongside command arguments")]
 pub async fn analyse_track<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
+    editor: State<'_, Arc<crate::grid::GridEditor>>,
     track_id: String,
     mode: Option<String>,
+    settings: Option<AnalysisSettings>,
 ) -> AppResult<AnalysisResultDto> {
     let preset = match mode.as_deref().unwrap_or("rbxport") {
         "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
@@ -67,7 +110,11 @@ pub async fn analyse_track<R: tauri::Runtime>(
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
-    let result = blocking("analyse_track", move || analyse_and_save(&state, &library, &share, &track_id, preset)).await?;
+    let editor = Arc::clone(&editor);
+    let settings = settings.unwrap_or_default();
+    let result = blocking("analyse_track", move || {
+        analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor)
+    }).await?;
     // The track's id, well inside the 1 KB event cap: a deck showing the
     // track redraws its waveform and grid from the new files.
     let _ = tauri::Emitter::emit(&app, "analysis:changed", &result.track_id);
@@ -82,13 +129,17 @@ fn analyse_and_save(
     share: &std::path::Path,
     track_id: &str,
     preset: rbl_analysis::AnalysisPreset,
+    settings: &AnalysisSettings,
+    editor: &crate::grid::GridEditor,
 ) -> AppResult<AnalysisResultDto> {
+    let options = settings.options(preset)?;
     // By the id map rather than a scan: a queue analyses hundreds of
     // tracks, and each scan is 38,681 comparisons.
     let Some(row) = library.row_of(track_id) else {
         return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
     };
     let row = row as usize;
+    ensure_analysis_unlocked(state, editor, track_id)?;
     let path = library.folder_path.get(row);
     if path.is_empty() {
         return Err(AppError::new(ErrorKind::NotFound, "That track has no file path."));
@@ -107,9 +158,13 @@ fn analyse_and_save(
         AppError::new(ErrorKind::Malformed, "That file could not be decoded.")
             .with_detail(e.to_string())
     })?;
-    let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, preset.options());
+    if !settings.bpm_grid {
+        return analyse_key_only(state, library, row, track_id, &audio, editor, started);
+    }
+    let analysis = rbl_analysis::analyse_with(&audio.samples, audio.sample_rate, options);
 
     let _edit_guard = state.edit_gate.lock();
+    ensure_analysis_unlocked(state, editor, track_id)?;
     let _files_guard = state.analysis_write.lock();
     let location = state.location()?;
     crate::file_journal::recover(state.backup_dir(), &location)?;
@@ -141,17 +196,19 @@ fn analyse_and_save(
         .iter()
         .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
         .collect();
-    let files = rbl_anlz::author(
+    let files = rbl_anlz::author_with_overview(
         path,
         &beats,
         &columns,
+        analysis.waveform.overview.as_slice().try_into().ok(),
         rbl_anlz::Existing { dat: existing[0].as_ref(), ext: existing[1].as_ref(), two_ex: existing[2].as_ref() },
     );
     // Clamp before narrowing so the conversion cannot truncate.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamped into 0..=u32::MAX on the line above")]
     let to_u32 = |v: f64| v.round().clamp(0.0, f64::from(u32::MAX)) as u32;
     let bpm_x100 = to_u32(analysis.tempo.bpm * 100.0);
-    let key = analysis.key.map(|k| k.name).unwrap_or_default();
+    let detected_key = settings.key.then(|| analysis.key.map(|k| k.name)).flatten();
+    let key = detected_key.clone().unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned());
     let duration_sec = to_u32(audio.duration_secs());
     // The length is kept only when the whole file was decoded: a capped
     // decode's length would be the cap, not the track's.
@@ -172,7 +229,7 @@ fn analyse_and_save(
                 track_id,
                 &rbl_db::write::AnalysisWrite {
                     bpm_x100,
-                    key: (!key.is_empty()).then_some(key.as_str()),
+                    key: detected_key.as_deref(),
                     analysis_path: &relative,
                     length_sec,
                 },
@@ -180,13 +237,15 @@ fn analyse_and_save(
         })
         .map_err(write_error);
     if let Err(e) = written {
-        journal.rollback()?;
+        journal.reconcile(&location)?;
         return Err(e);
     }
     journal.commit()?;
+    editor.forget_history(track_id);
 
     Ok(AnalysisResultDto {
         track_id: track_id.to_owned(),
+        analysed: 1,
         bpm_x100,
         key,
         beats: u32::try_from(beats.len()).unwrap_or(u32::MAX),
@@ -194,6 +253,43 @@ fn analyse_and_save(
         duration_sec,
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: relative,
+    })
+}
+
+fn ensure_analysis_unlocked(state: &AppState, editor: &crate::grid::GridEditor, track: &str) -> AppResult<()> {
+    if editor.is_locked(track) || crate::grid::database_locked(&state.location()?, track)? {
+        return Err(AppError::new(ErrorKind::ReadOnly, "This track's analysis is locked. Unlock it to analyze."));
+    }
+    Ok(())
+}
+
+/// A key-only pass never authors files or updates grid metadata.
+fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, track_id: &str,
+    audio: &rbl_audio::Audio, editor: &crate::grid::GridEditor, started: std::time::Instant) -> AppResult<AnalysisResultDto> {
+    let key = rbl_analysis::detect_key(&audio.samples, audio.sample_rate).map(|key| key.name);
+    let _edit_guard = state.edit_gate.lock();
+    ensure_analysis_unlocked(state, editor, track_id)?;
+    // Match full analysis: only use keys already named by this library.
+    // A sparse imported library may not contain every recognised key.
+    let key = if let Some(key) = key {
+        state.write(|writer| {
+            let known: bool = writer.library().connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM djmdKey WHERE ScaleName = ?1 AND rb_local_deleted = 0)", [&key], |r| r.get(0),
+            )?;
+            if known { writer.set_field(track_id, rbl_db::write::TrackField::Key, &key)?; }
+            Ok(known.then_some(key))
+        }).map_err(write_error)?
+    } else { None };
+    Ok(AnalysisResultDto {
+        track_id: track_id.to_owned(),
+        analysed: library.analysed.get(row).copied().unwrap_or(0),
+        bpm_x100: library.bpm_x100.get(row).copied().unwrap_or(0),
+        key: key.unwrap_or_else(|| library.keys.name(library.key.get(row).copied().unwrap_or(0)).to_owned()),
+        beats: 0,
+        peak: audio.samples.iter().fold(0.0_f32, |peak, sample| peak.max(sample.abs())),
+        duration_sec: library.length_sec.get(row).copied().unwrap_or(0),
+        elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        analysis_path: library.analysis_path.get(row).to_owned(),
     })
 }
 
@@ -378,7 +474,9 @@ mod tests {
         crate::backups::create(&state).unwrap();
         let library = state.library().unwrap();
 
-        let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport).expect("analysed");
+        let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
+        let settings = AnalysisSettings::default();
+        let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).expect("analysed");
         assert_eq!(result.track_id, track_id(0));
         assert!(result.analysis_path.starts_with("/PIONEER/USBANLZ/P"), "{}", result.analysis_path);
         assert!(result.analysis_path.ends_with("/ANLZ0000.DAT"));
@@ -414,12 +512,54 @@ mod tests {
         assert_eq!(link, 0x002c_0600, "rekordbox needs the track registration to display its preview");
 
         // A second analysis lands in the same place, files rewritten in place.
-        let again = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport).expect("analysed again");
+        let again = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).expect("analysed again");
         assert_eq!(again.analysis_path, result.analysis_path);
         let names: Vec<String> = std::fs::read_dir(dat_path.parent().unwrap())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names.len(), 3, "{names:?}");
+
+        // A key-only pass preserves every analysis file and all grid metadata.
+        let (fresh, _) = rbl_index::load(&db).unwrap();
+        let saved_files: Vec<_> = [dat_path.clone(), rbl_anlz::sibling(&dat_path, "EXT"), rbl_anlz::sibling(&dat_path, "2EX")]
+            .into_iter().map(|path| { let bytes = std::fs::read(&path).unwrap(); (path, bytes) }).collect();
+        let metadata = || db.connection().query_row(
+            "SELECT BPM, AnalysisDataPath, Analysed, Length, AnalysisUpdated FROM djmdContent WHERE ID = ?1", [track_id(0)],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)),
+        ).unwrap();
+        let before = metadata();
+        let key_only = AnalysisSettings { bpm_grid: false, ..settings };
+        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).unwrap();
+        assert_eq!(metadata(), before);
+        assert_eq!(result.bpm_x100, again.bpm_x100);
+        for (path, bytes) in &saved_files { assert_eq!(std::fs::read(path).unwrap(), *bytes); }
+
+        // Unchecking KEY must leave its database reference untouched.
+        let key_before: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
+        let grid_only = AnalysisSettings { key: false, ..settings };
+        analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &grid_only, &editor).unwrap();
+        let key_after: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
+        assert_eq!(key_after, key_before);
+
+        // Locks refuse both kinds of analysis before any files are rewritten.
+        editor.set_locked(&track_id(0), true).unwrap();
+        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).is_err());
+        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).is_err());
+    }
+
+    #[test]
+    fn analysis_choices_validate_and_reach_the_tempo_options() {
+        let preset = rbl_analysis::AnalysisPreset::Rbxport;
+        let defaults = AnalysisSettings::default();
+        let chosen = AnalysisSettings { high_precision: false, min_bpm: 98.0, max_bpm: 195.0, ..defaults };
+        let options = chosen.options(preset).unwrap();
+        assert_eq!(options.tempo.placement, rbl_analysis::tempo::Placement::Envelope);
+        assert!((options.tempo.min_bpm - 98.0).abs() < f64::EPSILON);
+        assert!((options.tempo.max_bpm - 195.0).abs() < f64::EPSILON);
+        assert!(AnalysisSettings { bpm_grid: false, key: false, ..defaults }.options(preset).is_err());
+        for (min_bpm, max_bpm) in [(180.0, 70.0), (70.0, 70.0), (0.0, 180.0), (70.0, 301.0), (f64::NAN, 180.0)] {
+            assert!(AnalysisSettings { min_bpm, max_bpm, ..defaults }.options(preset).is_err());
+        }
     }
 }

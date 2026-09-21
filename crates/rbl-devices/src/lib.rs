@@ -187,6 +187,7 @@ fn is_drive_root(text: &str) -> bool {
 /// megabytes, and it is the thing that says whether a sync can be incremental.
 #[must_use]
 pub fn inspect(mount_point: &Path) -> Option<DeviceExport> {
+    settings::recover(mount_point).ok()?;
     // `PIONEER` or `.PIONEER`: rekordbox 7 can write the export hidden.
     let pdb = settings::export_root(mount_point).join("rekordbox/export.pdb");
     if !pdb.is_file() {

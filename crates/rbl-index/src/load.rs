@@ -137,7 +137,8 @@ pub fn content_version(db: &Db) -> rusqlite::Result<u64> {
         mixed = mix(mixed, usn, rows);
     }
     let (usn, last_row): (i64, i64) = conn.query_row(
-        "SELECT COALESCE(MAX(rb_local_usn), 0), COALESCE(MAX(rowid), 0) FROM djmdCue",
+        "SELECT (SELECT COALESCE(MAX(rb_local_usn), 0) FROM djmdCue),
+                (SELECT COALESCE(MAX(rowid), 0) FROM djmdCue)",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
@@ -153,6 +154,13 @@ fn mix(acc: u64, a: i64, b: i64) -> u64 {
 
 /// Builds the index from an open (read-only is fine) library.
 pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
+    load_with_cue_reader(db, None)
+}
+
+/// Startup may supply an independent read-only connection so cue reads overlap
+/// playlist, history and search metadata reads. Ordinary edit reloads keep one
+/// connection, preserving visibility of the writer's transaction.
+pub fn load_with_cue_reader(db: &Db, cue_reader: Option<Db>) -> rusqlite::Result<(Library, LoadStats)> {
     let conn = db.connection();
     let t0 = Instant::now();
     let mut lib = Library::default();
@@ -164,7 +172,6 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     let genres = load_lookup(conn, "djmdGenre", "Name", &mut lib.genres)?;
     let labels = load_lookup(conn, "djmdLabel", "Name", &mut lib.labels)?;
     let keys = load_lookup(conn, "djmdKey", "ScaleName", &mut lib.keys)?;
-    eprintln!("PH lookups {}", t0.elapsed().as_millis());
 
     let mut stmt = conn.prepare(
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,
@@ -244,22 +251,28 @@ pub fn load(db: &Db) -> rusqlite::Result<(Library, LoadStats)> {
     }
     lib.count = lib.ids.len();
     stats.tracks = lib.count;
-    eprintln!("PH content {}", t0.elapsed().as_millis());
-
-    load_cues(conn, &mut lib, &content_row)?;
-    eprintln!("PH cues {}", t0.elapsed().as_millis());
-    load_playlists(conn, &mut lib, &content_row, &mut stats)?;
-    eprintln!("PH playlists {}", t0.elapsed().as_millis());
-    load_histories(conn, &mut lib, &content_row, &mut stats)?;
-    eprintln!("PH histories {}", t0.elapsed().as_millis());
-    lib.set_tag_list(read_tag_list(conn, &content_row)?);
-    lib.set_my_tags(read_my_tags(conn)?);
+    std::thread::scope(|scope| -> rusqlite::Result<()> {
+        let cue_job = cue_reader.and_then(|reader| {
+            let content_row = &content_row;
+            let count = lib.len();
+            std::thread::Builder::new().name("startup-cues".into())
+                .spawn_scoped(scope, move || read_cues(reader.connection(), count, content_row)).ok()
+        });
+        if cue_job.is_none() { lib.set_cues(read_cues(conn, lib.len(), &content_row)?); }
+        load_playlists(conn, &mut lib, &content_row, &mut stats)?;
+        load_histories(conn, &mut lib, &content_row, &mut stats)?;
+        lib.set_tag_list(read_tag_list(conn, &content_row)?);
+        lib.set_my_tags(read_my_tags(conn)?);
+        load_search_extra(conn, &mut lib)?;
+        if let Some(job) = cue_job {
+            lib.set_cues(job.join().unwrap_or_else(|_| read_cues(conn, lib.len(), &content_row))?);
+        }
+        Ok(())
+    })?;
     stats.read_ms = t0.elapsed().as_millis();
 
     let t1 = Instant::now();
-    lib.build_ranks();
-    load_search_extra(conn, &mut lib)?;
-    lib.build_search();
+    lib.build_indexes();
     stats.index_ms = t1.elapsed().as_millis();
     stats.heap_bytes = lib.heap_bytes();
 
@@ -296,20 +309,23 @@ fn load_search_extra(conn: &Connection, lib: &mut Library) -> rusqlite::Result<(
 ///
 /// `ContentID` names 198,855 tracks against 38,681 live ones — it retains cues
 /// for content long deleted — so this joins rather than trusting the table.
-fn load_cues(
+fn read_cues(
     conn: &Connection,
-    lib: &mut Library,
+    tracks: usize,
     content_row: &HashMap<u64, Row>,
-) -> rusqlite::Result<()> {
-    let tracks = lib.len();
+) -> rusqlite::Result<Cues> {
     // Gathered per track first, because the table is not in track order and
     // the index wants each track's cues contiguous.
-    let tq = Instant::now();
     let mut per_track: Vec<Vec<Cue>> = vec![Vec::new(); tracks];
 
-    let mut stmt = conn.prepare(&format!(
-        "SELECT ContentID, {CUE_COLUMNS} FROM djmdCue WHERE rb_local_deleted = 0"
-    ))?;
+    // Drive the join from live content, using the existing cue ContentID index.
+    // A plain cue scan also decrypts cues for hundreds of thousands of deleted
+    // tracks. CROSS JOIN keeps SQLite from reversing this join order.
+    let mut stmt = conn.prepare(
+        "SELECT q.ContentID, q.ID, q.Kind, q.InMsec, q.OutMsec, q.ColorTableIndex
+         FROM djmdContent c CROSS JOIN djmdCue q ON q.ContentID = c.ID
+         WHERE c.rb_local_deleted = 0 AND q.rb_local_deleted = 0"
+    )?;
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let Some(content): Option<String> = r.get(0)? else { continue };
@@ -319,9 +335,7 @@ fn load_cues(
             list.push(read_cue(r, 1)?);
         }
     }
-    eprintln!("PH cues-read {}", tq.elapsed().as_millis());
-    lib.set_cues(Cues::from_per_track(per_track));
-    Ok(())
+    Ok(Cues::from_per_track(per_track))
 }
 
 /// The columns a cue is read from, after whatever names its track.
@@ -698,6 +712,30 @@ fn read_lists(
 mod refresh_tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn parallel_reads_match_serial_and_exclude_deleted_track_cues() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = Db::open(location.clone(), rbl_db::OpenMode::ReadWrite).unwrap();
+        let id = rbl_db::fixture::track_id(1);
+        db.connection().execute("INSERT INTO djmdCue (ID, ContentID, Kind, InMsec, rb_local_deleted, created_at, updated_at) VALUES ('123', ?1, 1, 500, 0, '2026-01-01', '2026-01-01')", [&id]).unwrap();
+        let reader = Db::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (serial, _) = load(&db).unwrap();
+        let (parallel, _) = load_with_cue_reader(&db, Some(reader)).unwrap();
+        assert_eq!(parallel.ids, serial.ids);
+        assert_eq!(parallel.ranks, serial.ranks);
+        assert_eq!(parallel.playlists().members, serial.playlists().members);
+        for row in 0..serial.len() {
+            assert_eq!(parallel.cues_of(row as u32), serial.cues_of(row as u32));
+            assert_eq!(parallel.search.get(row), serial.search.get(row));
+        }
+        let live_cues = serial.cues.read().parts().0.len();
+        assert!(live_cues > 0);
+        db.connection().execute("UPDATE djmdContent SET rb_local_deleted=1 WHERE ID=?1", [&id]).unwrap();
+        let (deleted, _) = load(&db).unwrap();
+        assert_eq!(deleted.cues.read().parts().0.len(), live_cues - 1);
+    }
 
     #[test]
     fn metadata_refresh_matches_full_load_including_search_sort_and_history() {

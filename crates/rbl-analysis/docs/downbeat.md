@@ -58,13 +58,10 @@ grid on the beat at all?".
    shifted by half a period.
 7. **Number.** The winner's time is the downbeat. Whichever beat is nearest
    it becomes 1 and the count runs on from there through every segment.
-8. **Per segment.** Any tempo segment of at least 64 beats is asked again
-   on its own beats and renumbered from its own downbeat. A DJ edit's two
-   halves are two pieces of music, and a bar count carried across a tempo
-   change that landed a beat off would misnumber the whole second half.
-   A bar-by-bar transition ([beat.md](beat.md), §6) needs no asking:
-   its cuts are downbeats by construction, so the count runs 1–4 through
-   it from the settled stretch before.
+8. **First tempo.** When a multi-tempo track's first segment has at least
+   32 beats, choose its bar position from its own music. Later tempos must
+   not outvote the opening section. The chosen 1–4 count then carries
+   through every later segment, including individual ramp intervals.
 
 ## Accuracy
 
@@ -79,3 +76,27 @@ change, so beat 1 is one beat early throughout.
 
 The novelty peaks at the four-bar scale that fall on downbeats are the
 **phrase starts** — see [phrase.md](phrase.md).
+
+
+## Final file-start adjustment
+
+After this stage, `analyse_with` calls `lib.rs::anchor_file_start`. A grid
+aligned near zero with audio at the file boundary and compatible downbeat
+selection is anchored to beat 1.1
+at exactly `0:00.00`. This can override fallback numbering at the first emitted beat; a distinct
+later musical downbeat is preserved. The
+conditions, ordering and regression tests are documented in
+[pipeline.md — File-start adjustment](pipeline.md#file-start-adjustment).
+
+When less than 20 ms of the opening beat was cut off, the adjustment adds
+only beat 1.1 at zero and preserves every later beat's timestamp and BPM.
+The shortened first interval is represented by a one-beat opening segment;
+[pipeline.md](pipeline.md#file-start-adjustment) documents the cutoff check.
+
+
+For a repeating pattern without meaningful four-bar spectral novelty,
+`grid_phase_from` retains its first-beat fallback instead of magnifying FFT
+alignment noise into a downbeat decision. The gate is a maximum four-bar
+novelty below 0.5 in the Euclidean distance of mean log-band energies.
+A first tempo segment of at least 32 beats can choose its own phase,
+so the later tempo or ramp does not outvote a shorter opening section.

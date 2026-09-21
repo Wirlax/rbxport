@@ -1,7 +1,8 @@
 //! Primitives shared across every rbxport crate.
 //!
-//! Nothing here touches the filesystem, the network, or Tauri.
+//! Shared types and durable filesystem publication; no network or Tauri.
 
+pub mod durable;
 pub mod ids;
 pub mod musickey;
 pub mod time;

@@ -27,10 +27,10 @@ export const OVERDRAW = 2;
 
 /**
  * Zoom levels, in bars across, that the +/- buttons and the wheel step
- * through. Down to half a bar: the detail waveform is 150 columns a second,
- * so even two beats at 128 BPM are a hundred and forty columns across.
+ * through. Rekordbox's closest view is half a bar. It is rendered from PCM
+ * here, with one additional quarter-bar inspection step beyond it.
  */
-export const ZOOM_STEPS = [0.5, 1, 2, 4, 8, 12, 16, 32, 64] as const;
+export const ZOOM_STEPS = [0.25, 0.5, 1, 2, 4, 8, 12, 16, 32, 64] as const;
 
 /**
  * Whether the grid draws every beat, or only the bar lines.
@@ -328,7 +328,7 @@ export interface BeatGrid {
   numbers: Uint8Array;
   /**
    * The tempo x100 at each beat. A grid may change tempo partway through —
-   * an edit from a CUT point, or a track that simply speeds up — so this is
+   * an edit from a selected beat, or a track that simply speeds up — so this is
    * per beat rather than one number for the track.
    */
   tempos: Uint16Array;
@@ -787,4 +787,46 @@ export function beatAtMs(grid: BeatGrid, ms: number): number {
   const at = lowerBound(times, ms);
   const exact = times[at] === ms;
   return Math.max(1, exact ? at + 1 : at);
+}
+
+export interface TempoAnnotation {
+  fromMs: number;
+  toMs: number;
+  fromBpmX100: number;
+  toBpmX100: number;
+}
+
+/** Presentation only: collapse successive short tempo runs into one ramp.
+ * Four equal-tempo beats establish a settled section. The actual grid is
+ * untouched, including the individually measured intervals inside a ramp.
+ */
+export function tempoAnnotations(grid: BeatGrid): TempoAnnotation[] {
+  const runs: { start: number; end: number; bpm: number }[] = [];
+  for (let i = 0; i < grid.times.length; i++) {
+    const bpm = grid.tempos[i] ?? 0;
+    if (bpm <= 0) continue;
+    const last = runs.at(-1);
+    if (last?.bpm === bpm) last.end = i + 1;
+    else runs.push({ start: i, end: i + 1, bpm });
+  }
+  const first = runs[0];
+  if (!first) return [];
+  const at = (i: number) => grid.times[i] ?? 0;
+  const out: TempoAnnotation[] = [{ fromMs: at(first.start), toMs: at(first.start), fromBpmX100: first.bpm, toBpmX100: first.bpm }];
+  for (let i = 1; i < runs.length; i++) {
+    const start = runs[i];
+    if (!start) continue;
+    let end = i;
+    while (end < runs.length - 1) {
+      const run = runs[end];
+      if (!run || run.end - run.start >= 4) break;
+      end++;
+    }
+    const finish = runs[end] ?? start;
+    out.push({ fromMs: at(start.start), toMs: at(finish.start),
+      fromBpmX100: end > i ? (runs[i - 1]?.bpm ?? start.bpm) : start.bpm,
+      toBpmX100: finish.bpm });
+    i = end;
+  }
+  return out;
 }

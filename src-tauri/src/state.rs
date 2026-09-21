@@ -26,8 +26,9 @@ pub struct AppState {
     pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
     pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
     inner: RwLock<Inner>,
-    /// Where manually requested backups and analysis recovery files go.
+    /// Stable local home for recovery journals and the destination setting.
     backup_dir: std::path::PathBuf,
+    backup_destination: RwLock<std::path::PathBuf>,
     /// A read-only handle to the database for point reads, opened on first
     /// use. Opening costs 50 ms on the reference library — the `SQLCipher`
     /// key derivation — and a point read under 1 ms, so the handle is kept
@@ -79,6 +80,11 @@ impl AppState {
     /// not chosen here: it arrives with the library, in [`Self::set_library`].
     pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
         let backup_dir = backup_dir.into();
+        let backup_destination = match std::fs::read(backup_dir.join("backup-destination.json")) {
+            Ok(bytes) => serde_json::from_slice::<std::path::PathBuf>(&bytes)
+                .ok().filter(|path| path.is_absolute()).unwrap_or_else(|| backup_dir.clone()),
+            Err(_) => backup_dir.clone(),
+        };
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
             analysis_write: parking_lot::Mutex::new(()),
@@ -86,13 +92,45 @@ impl AppState {
             backup_sizes: parking_lot::Mutex::new(Default::default()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
             backup_dir,
+            backup_destination: RwLock::new(backup_destination),
             reader: parking_lot::Mutex::new(None),
         }
     }
 
-    /// Where this session's backups go.
+    /// Stable local recovery directory, independent of the backup destination.
     pub fn backup_dir(&self) -> &std::path::Path {
         &self.backup_dir
+    }
+
+    pub fn backup_destination(&self) -> std::path::PathBuf {
+        self.backup_destination.read().clone()
+    }
+
+    /// Persist the destination before publishing it to the running app.
+    /// Recovery journals stay local even when snapshots go to a removable drive.
+    pub fn set_backup_destination(&self, directory: &std::path::Path) -> AppResult<String> {
+        let _gate = self.edit_gate.lock();
+        let progress = self.backup_progress.lock();
+        if progress.running {
+            return Err(AppError::internal("Wait for the current backup to finish before changing its folder."));
+        }
+        let directory = directory.canonicalize().map_err(|e| AppError::internal(format!("The backup folder could not be opened: {e}")))?;
+        if let Ok(location) = self.location() {
+            crate::backups::validate_destination(&directory, &location)?;
+        }
+        let check = || -> std::io::Result<()> {
+            let probe = tempfile::Builder::new().prefix(".rbxport-folder-check-").tempfile_in(&directory)?;
+            probe.as_file().sync_all()?;
+            probe.close()?;
+            crate::durable::sync_dir(&directory)
+        };
+        check().map_err(|e| AppError::internal(format!("The backup folder is not writable: {e}")))?;
+        crate::durable::create_dir_all(&self.backup_dir).map_err(|e| AppError::internal(e.to_string()))?;
+        let bytes = serde_json::to_vec(&directory).map_err(|e| AppError::internal(e.to_string()))?;
+        crate::durable::write(&self.backup_dir.join("backup-destination.json"), &bytes)
+            .map_err(|e| AppError::internal(format!("The backup folder setting could not be saved: {e}")))?;
+        *self.backup_destination.write() = directory.clone();
+        Ok(directory.to_string_lossy().into_owned())
     }
 
     /// Lets go of the read-only handle, for when the file underneath it is
@@ -121,6 +159,9 @@ impl AppState {
     ///
     /// Blocking — call from `spawn_blocking`, never from a command body.
     pub fn open_read_only(&self) -> Result<rbl_db::Library, rbl_db::DbError> {
+        if crate::backups::pending(self.backup_dir()) {
+            return Err(rbl_db::DbError::WriteRefused("A library restore is unfinished. Restart the app to recover it before reading.".into()));
+        }
         let location = self
             .location()
             .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
@@ -157,6 +198,13 @@ impl AppState {
         let _gate = self.edit_gate.lock();
         if crate::backups::pending(self.backup_dir()) {
             return Err(rbl_db::DbError::WriteRefused("A library restore is unfinished. Restart the app to recover it before editing.".into()));
+        }
+        // Grid/analysis edits hold this mutex while intentionally publishing
+        // their own journal. Otherwise recover before another edit can change
+        // the USN used to decide an interrupted operation's outcome.
+        if let Some(_files) = self.analysis_write.try_lock() {
+            crate::file_journal::recover(self.backup_dir(), &location)
+                .map_err(|e| rbl_db::DbError::WriteRefused(e.to_string()))?;
         }
         let gate_ms = started.elapsed().as_millis();
         let mut writer = rbl_db::write::Writer::open(location.clone(), self.backup_dir.clone())?;
@@ -560,6 +608,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 date_added: library.date_added.get(index).to_owned(),
                 release_date: library.release_date.get(index).to_owned(),
                 hot_cues: hot_cues_in_slot_order(library, row),
+                memory_cues: library.cues_of(row).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect(),
                 // Stable per track so the placeholder tint does not flicker on scroll.
                 has_artwork: !library.artwork_path.get(index).is_empty(),
                 artwork_hue: u16::try_from(
@@ -586,16 +635,17 @@ mod tests {
     }
 
     #[test]
-    fn a_row_carries_its_hot_cues_as_compact_tuples_and_no_memory_cues() {
+    fn a_row_carries_hot_badges_and_memory_positions_separately() {
         let library = library_from(&[TestTrack {
             id: 7,
             title: "Take Me Home",
             bpm_x100: 12_800,
-            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41)],
+            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41), cue(0, 1000, 0)],
             ..TestTrack::default()
         }]);
         let rows = rows_to_dto(&library, &[0], 0);
         let json = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(json["memoryCues"], serde_json::json!([46, 1000]));
         // In slot order, letters from `Kind`, the measured drawn colour where
         // there is one and `null` — not a guess — where there is not.
         assert_eq!(
@@ -623,6 +673,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(n, &k)| cue(k, 20_000 * u32::try_from(n).unwrap(), 21))
+                    .chain((0..10).map(|n| cue(0, n * 25_000, 0)))
                     .collect(),
                 ..TestTrack::default()
             })

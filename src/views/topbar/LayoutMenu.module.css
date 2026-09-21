@@ -40,7 +40,7 @@
   padding: 1px 0;
   border: 1px solid var(--c-menu-border);
   background: var(--c-menu);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 55%);
+  box-shadow: 0 6px 18px var(--c-shadow-panel);
 }
 
 .item {

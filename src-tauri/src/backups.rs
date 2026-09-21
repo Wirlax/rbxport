@@ -188,7 +188,8 @@ fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
-    if !(name.starts_with("library-") && (meta.is_dir() || (meta.is_file() && path.extension().is_some_and(|e| e == "zip")))
+    if !(name.starts_with("rbxport-backup-") && meta.is_file() && is_zip(&path)
+        || name.starts_with("library-") && (meta.is_dir() || (meta.is_file() && path.extension().is_some_and(|e| e == "zip")))
         || name.starts_with("master-")
             && path.extension().is_some_and(|e| e == "db")
             && meta.is_file())
@@ -212,18 +213,46 @@ fn manifest(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<Manife
     Ok(saved)
 }
 
+fn is_zip(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+}
+
+fn checked_archive(path: &Path) -> AppResult<PathBuf> {
+    let meta = fs::symlink_metadata(path).map_err(error)?;
+    if !meta.is_file() || meta.file_type().is_symlink() || !is_zip(path) {
+        return Err(error("Choose an RBXport backup ZIP file."));
+    }
+    path.canonicalize().map_err(error)
+}
+
+/// Inspect a user-selected archive before the UI asks to replace the library.
+/// Restoring validates it again, including every extracted entry and the DB.
+pub fn inspect_archive(state: &AppState, path: &Path) -> AppResult<BackupDto> {
+    let _gate = state.edit_gate.lock();
+    let path = checked_archive(path)?;
+    let saved = manifest(&path, &state.location()?)?;
+    Ok(BackupDto {
+        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        path: path.to_string_lossy().into_owned(),
+        bytes: fs::metadata(&path).map_err(error)?.len(),
+        created_at: saved.created_at,
+        includes_analysis: true,
+        includes_artwork: saved.includes_artwork,
+    })
+}
+
 pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
     let _gate = state.edit_gate.lock();
     let location = state.location()?;
     let mut result = Vec::new();
-    let entries = match fs::read_dir(state.backup_dir()) {
+    let entries = match fs::read_dir(state.backup_destination()) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(result),
         Err(e) => return Err(error(e)),
     };
     for entry in entries {
         let path = entry.map_err(error)?.path();
-        let Ok(path) = checked(state.backup_dir(), &path) else {
+        let Ok(path) = checked(&state.backup_destination(), &path) else {
             continue;
         };
         let (created_at, bytes, includes_analysis, includes_artwork) = if path.is_dir() || path.extension().is_some_and(|e| e == "zip") {
@@ -273,6 +302,16 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
 pub fn create(state: &AppState) -> AppResult<String> {
     create_with_progress(state, &mut |_, _, _, _| Ok(()))
 }
+
+pub fn validate_destination(directory: &Path, location: &rbl_db::LibraryLocation) -> AppResult<()> {
+    for source in [analysis(location), artwork(location)] {
+        if source.canonicalize().is_ok_and(|source| directory.starts_with(source)) {
+            return Err(error("Choose a backup folder outside the library's analysis and artwork folders."));
+        }
+    }
+    Ok(())
+}
+
 fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u64, &str) -> AppResult<()>) -> AppResult<String> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
@@ -285,12 +324,17 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     let tree = analysis(&location);
     let art = artwork(&location);
     let wal = sidecar(&location.master_db, "-wal");
-    let root = state.backup_dir();
+    let destination = state.backup_destination();
+    let root = destination.as_path();
     crate::durable::create_dir_all(root).map_err(error)?;
+    validate_destination(&root.canonicalize().map_err(error)?, &location)?;
     let created_at = millis();
     let id = uuid::Uuid::new_v4();
     let partial = root.join(format!(".partial-{id}"));
-    let target = root.join(format!("library-{created_at}-{id}.zip"));
+    let target = root.join(format!("rbxport-backup-{}.zip", rbl_core::time::local_backup_stamp()));
+    if target.try_exists().map_err(error)? {
+        return Err(error("A backup for this minute already exists. Try again in the next minute."));
+    }
     let archive = root.join(format!(".partial-{id}.zip"));
     let result = (|| {
         fs::create_dir(&partial).map_err(error)?;
@@ -339,11 +383,12 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
             };
             progress("copying", copied, total, &item)
         };
-        let mut bytes = copy_progress(&location.master_db, &partial.join("master.db"), &mut |bytes| copied_file(bytes, Some(&location.master_db)))?;
-        let wal = sidecar(&location.master_db, "-wal");
-        if wal.exists() {
-            bytes += copy_progress(&wal, &partial.join("master.db-wal"), &mut |bytes| copied_file(bytes, Some(&wal)))?;
-        }
+        let snapshot = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).map_err(error)?;
+        snapshot.connection().execute("VACUUM main INTO ?1", [partial.join("master.db").to_string_lossy().as_ref()]).map_err(error)?;
+        drop(snapshot);
+        let mut bytes = fs::metadata(partial.join("master.db")).map_err(error)?.len();
+        fs::File::open(partial.join("master.db")).map_err(error)?.sync_all().map_err(error)?;
+        copied_file(bytes, Some(&location.master_db))?;
         for (plan, directory) in [(plan, "analysis"), (art_plan, "artwork")] {
         if let Some(plan) = plan {
             let mut refused = None;
@@ -414,7 +459,8 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         if let Some(error) = refused { return Err(error); }
         packed.map_err(error)?;
         remove(&partial)?;
-        fs::rename(&archive, &target).map_err(error)?;
+        tempfile::TempPath::try_from_path(&archive).map_err(error)?
+            .persist_noclobber(&target).map_err(error)?;
         crate::durable::sync_dir(root).map_err(error)?;
         Ok(target.to_string_lossy().into_owned())
     })();
@@ -547,9 +593,10 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
     if state.link_running() {
         return Err(error("Turn off PRO DJ LINK before restoring the library."));
     }
-    let path = checked(state.backup_dir(), path)?;
-    let unpacked = if path.extension().is_some_and(|e| e == "zip") {
+    let path = if is_zip(path) { checked_archive(path)? } else { checked(&state.backup_destination(), path)? };
+    let unpacked = if is_zip(&path) {
         manifest(&path, &location)?;
+        crate::durable::create_dir_all(state.backup_dir()).map_err(error)?;
         Some(crate::backup_zip::extract(&path, state.backup_dir()).map_err(error)?)
     } else { None };
     let path = unpacked.as_ref().map_or(path, |value| value.0.clone());
@@ -657,7 +704,7 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
 
 pub fn delete(state: &AppState, path: &Path) -> AppResult<()> {
     let _gate = state.edit_gate.lock();
-    let path = checked(state.backup_dir(), path)?;
+    let path = checked(&state.backup_destination(), path)?;
     if path.is_dir() || path.extension().is_some_and(|e| e == "zip") {
         manifest(&path, &state.location()?)?;
     } else {
@@ -666,7 +713,7 @@ pub fn delete(state: &AppState, path: &Path) -> AppResult<()> {
         }
     }
     remove(&path)?;
-    crate::durable::sync_dir(state.backup_dir()).map_err(error)
+    crate::durable::sync_dir(&state.backup_destination()).map_err(error)
 }
 
 #[cfg(test)]
@@ -696,6 +743,109 @@ mod tests {
     }
 
     #[test]
+    fn filenames_use_local_24_hour_time_and_never_overwrite_the_same_minute() {
+        let (_dir, state, _) = fixture();
+        let before = rbl_core::time::local_backup_stamp();
+        let first = PathBuf::from(create(&state).unwrap());
+        let after = rbl_core::time::local_backup_stamp();
+        let name = first.file_name().unwrap().to_string_lossy();
+        assert!(name == format!("rbxport-backup-{before}.zip") || name == format!("rbxport-backup-{after}.zip"));
+        let bytes = fs::read(&first).unwrap();
+        // Reserve the current minute, including if the first copy crossed a boundary.
+        let reserved = state.backup_destination().join(format!("rbxport-backup-{after}.zip"));
+        if reserved != first { fs::copy(&first, &reserved).unwrap(); }
+        assert!(create(&state).is_err());
+        assert_eq!(fs::read(first).unwrap(), bytes);
+        assert_eq!(fs::read(reserved).unwrap(), bytes);
+    }
+
+    #[test]
+    fn moved_zip_restores_from_another_folder_even_after_being_renamed() {
+        let (dir, state, _location) = fixture();
+        let track = rbl_db::fixture::track_id(1);
+        state.write(|w| w.set_rating(&track, 4)).unwrap();
+        let original = PathBuf::from(create(&state).unwrap());
+        let bytes = fs::read(&original).unwrap();
+        let destination = dir.path().join("external drive");
+        fs::create_dir(&destination).unwrap();
+        let moved = destination.join(original.file_name().unwrap());
+        fs::rename(&original, &moved).unwrap();
+        assert!(!original.exists());
+        assert_eq!(fs::read(&moved).unwrap(), bytes);
+        assert!(list(&state).unwrap().is_empty());
+        let renamed = destination.join("My saved library.ZIP");
+        fs::rename(moved, &renamed).unwrap();
+        assert_eq!(inspect_archive(&state, &renamed).unwrap().name, "My saved library.ZIP");
+        state.write(|w| w.set_rating(&track, 1)).unwrap();
+        fs::remove_dir_all(state.backup_dir()).unwrap();
+        restore(&state, &renamed).unwrap();
+        assert_eq!(rating(&state), 4);
+        assert_eq!(fs::read(&renamed).unwrap(), bytes);
+        assert!(delete(&state, &renamed).is_err());
+        assert!(renamed.exists());
+    }
+
+    #[test]
+    fn invalid_external_zip_is_rejected_without_changing_the_library() {
+        let (dir, state, _location) = fixture();
+        let before = rating(&state);
+        let bad = dir.path().join("not a backup.zip");
+        fs::write(&bad, b"not a ZIP").unwrap();
+        assert!(inspect_archive(&state, &bad).is_err());
+        assert!(restore(&state, &bad).is_err());
+        assert_eq!(rating(&state), before);
+        let (_other_dir, other, _) = fixture();
+        let other_backup = create(&other).unwrap();
+        assert!(inspect_archive(&state, Path::new(&other_backup)).is_err());
+        assert!(restore(&state, Path::new(&other_backup)).is_err());
+        assert_eq!(rating(&state), before);
+    }
+
+    #[test]
+    fn default_destination_persists_and_only_new_backups_use_it() {
+        let (dir, state, location) = fixture();
+        let original = PathBuf::from(create(&state).unwrap());
+        let destination = dir.path().join("new backup folder");
+        fs::create_dir(&destination).unwrap();
+        let canonical = destination.canonicalize().unwrap();
+        state.set_backup_destination(&destination).unwrap();
+        assert_eq!(state.backup_destination(), canonical);
+        assert!(original.exists());
+        assert!(list(&state).unwrap().is_empty());
+        let created = PathBuf::from(create(&state).unwrap());
+        assert_eq!(created.parent(), Some(canonical.as_path()));
+        assert_eq!(list(&state).unwrap().len(), 1);
+        assert_ne!(state.backup_dir(), canonical);
+        let restarted = AppState::with_backups(state.backup_dir());
+        assert_eq!(restarted.backup_destination(), canonical);
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        restarted.set_library(library, false, db.schema().db_version, 0, location);
+        assert_eq!(list(&restarted).unwrap()[0].path, created.to_string_lossy());
+        restore(&restarted, &original).unwrap();
+        delete(&restarted, &created).unwrap();
+        assert!(original.exists());
+    }
+
+    #[test]
+    fn invalid_or_busy_destination_changes_keep_the_previous_setting() {
+        let (dir, state, location) = fixture();
+        let previous = state.backup_destination();
+        let file = dir.path().join("not a folder");
+        fs::write(&file, b"keep").unwrap();
+        assert!(state.set_backup_destination(&file).is_err());
+        assert!(state.set_backup_destination(&dir.path().join("missing")).is_err());
+        let recursive = analysis(&location).join("backups");
+        fs::create_dir_all(&recursive).unwrap();
+        assert!(state.set_backup_destination(&recursive).is_err());
+        assert_eq!(state.backup_destination(), previous);
+        state.backup_progress.lock().running = true;
+        assert!(state.set_backup_destination(dir.path()).is_err());
+        assert_eq!(state.backup_destination(), previous);
+        assert_eq!(AppState::with_backups(state.backup_dir()).backup_destination(), previous);
+    }
+
+    #[test]
     fn progress_reports_bytes_and_cancellation_discards_only_the_partial_copy() {
         let (_dir, state, location) = fixture();
         let file = analysis(&location).join("test/ANLZ0000.DAT");
@@ -717,6 +867,9 @@ mod tests {
         assert!(items.contains("Database · master.db"));
         assert!(items.contains("Analysis files · USBANLZ/test/ANLZ0000.DAT"));
         assert!(items.contains("Checking database · master.db"));
+        // Keep a prior snapshot while testing cancellation of a new one.
+        let previous = state.backup_destination().join("library-previous.zip");
+        fs::rename(&saved, &previous).unwrap();
         let before = rating(&state);
         let result = create_with_progress(&state, &mut |phase, copied, _, _| {
             if phase == "copying" && copied > 0 {
@@ -726,7 +879,7 @@ mod tests {
         assert_eq!(result.unwrap_err().kind, crate::error::ErrorKind::Cancelled);
         assert_eq!(rating(&state), before);
         assert_eq!(list(&state).unwrap().len(), 1);
-        assert_eq!(PathBuf::from(&list(&state).unwrap()[0].path), PathBuf::from(saved).canonicalize().unwrap());
+        assert_eq!(PathBuf::from(&list(&state).unwrap()[0].path), previous.canonicalize().unwrap());
         assert!(fs::read_dir(state.backup_dir()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
         assert_eq!(fs::metadata(file).unwrap().len(), 3 * 1024 * 1024);
     }

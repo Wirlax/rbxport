@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setBackend } from "@/ipc/client";
 import type { Backend, Device, DeviceSyncState, SyncDeviceReport, SyncProgress, TreeNode } from "@/ipc/types";
 import { SyncManager } from "./SyncManager";
+import { PreferencesProvider } from "@/store/usePreferences";
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -111,6 +113,23 @@ afterEach(() => {
 });
 
 describe("SyncManager", () => {
+  it("passes cleanup and the chosen compatibility format to sync", async () => {
+    const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
+      ...DEFAULT_PREFERENCES.usbExport, deleteUnlistedMusic: true,
+      maximumCompatibility: true, conversionFormat: "mp3" as const,
+    } };
+    act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
+      <SyncManager onClose={onClose} />
+    </PreferencesProvider>));
+    await settle();
+    click(box("Sets"));
+    click(box("USB A"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+    expect(syncDevices.mock.calls[0]?.slice(5)).toEqual([true, "mp3"]);
+  });
+
   it("lists the playlists and folders, not All Tracks or the heading", () => {
     const names = [...host.querySelectorAll('[aria-label="Playlists"] > [role="treeitem"]')].map((row) => row.textContent?.trim());
     expect(names).toEqual(["Sets", "Warm Up", "Main Set", "Closing"]);

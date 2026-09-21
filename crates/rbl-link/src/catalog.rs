@@ -32,6 +32,7 @@ use crate::blobs::{self, Analysis, ExtendedCue};
 pub trait Source: Send + Sync {
     /// The library as it is now.
     fn library(&self) -> Option<Arc<Library>>;
+    fn alphabetical_keys(&self) -> bool { false }
     /// Where analysis files and artwork live.
     fn share_root(&self) -> PathBuf;
     /// The fields the index does not hold, by `djmdContent.ID`.
@@ -148,7 +149,7 @@ impl IndexCatalog {
         }
     }
 
-    fn sort_column(sort: Sort, scope: &TrackScope) -> Option<SortColumn> {
+    fn sort_column(sort: Sort, scope: &TrackScope, alphabetical_keys: bool) -> Option<SortColumn> {
         Some(match sort {
             // A playlist or history keeps its own order; every other list
             // is alphabetical, which is what rekordbox sent for TRACK.
@@ -161,7 +162,7 @@ impl IndexCatalog {
             Sort::Album => SortColumn::Album,
             Sort::Bpm => SortColumn::Bpm,
             Sort::Rating => SortColumn::Rating,
-            Sort::Key => SortColumn::KeyCamelot,
+            Sort::Key => if alphabetical_keys { SortColumn::Key } else { SortColumn::KeyCamelot },
         })
     }
 
@@ -239,9 +240,9 @@ impl IndexCatalog {
         }
     }
 
-    fn tracks(library: &Library, scope: &TrackScope, sort: Sort) -> Vec<Row> {
+    fn tracks(library: &Library, scope: &TrackScope, sort: Sort, alphabetical_keys: bool) -> Vec<Row> {
         let mut rows = Self::scope_rows(library, scope);
-        if let Some(column) = Self::sort_column(sort, scope) {
+        if let Some(column) = Self::sort_column(sort, scope, alphabetical_keys) {
             let mut order: Vec<rbl_index::Row> = rows.iter().map(|&(row, _)| row).collect();
             library.sort_rows(&mut order, column, false);
             // Positions travel with their rows; the sort reorders the pairs.
@@ -397,6 +398,12 @@ fn date_prefix(year: u32, month: Option<u32>, day: Option<u32>) -> String {
 }
 
 impl Catalog for IndexCatalog {
+    fn key_ids(&self) -> Vec<u32> {
+        let mut ids: Vec<_> = (1..=24).collect();
+        if self.source.alphabetical_keys() { ids.sort_by(|a, b| rbl_index::key::cmp_names(keys::name(*a), keys::name(*b))); }
+        ids
+    }
+
     fn list(&self, query: &Query) -> Vec<Row> {
         let Some(library) = self.source.library() else {
             return Vec::new();
@@ -412,7 +419,7 @@ impl Catalog for IndexCatalog {
             Query::Days { year, month } => {
                 Self::date_parts(&library, &date_prefix(*year, Some(*month), None), 8..10, false)
             }
-            Query::Tracks { scope, sort } => Self::tracks(&library, scope, *sort),
+            Query::Tracks { scope, sort } => Self::tracks(&library, scope, *sort, self.source.alphabetical_keys()),
         }
     }
 
@@ -630,6 +637,23 @@ mod tests {
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Default })), [11, 12, 10]);
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Bpm })), [11, 10, 12]);
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Artist })), [11, 10, 12]);
+    }
+
+    #[test]
+    fn alphabetical_key_order_changes_display_order_not_ids() {
+        struct Alphabetical(Fixed);
+        impl Source for Alphabetical {
+            fn alphabetical_keys(&self) -> bool { true }
+            fn library(&self) -> Option<Arc<Library>> { self.0.library() }
+            fn share_root(&self) -> PathBuf { self.0.share_root() }
+            fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> { self.0.details(id) }
+        }
+        let c = IndexCatalog::new(Arc::new(Alphabetical(Fixed(Arc::new(library())))), Played::default());
+        assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Key })), [11,10,12]);
+        let keys = c.key_ids();
+        assert_eq!(keys.first().copied().map(keys::name), Some("A"));
+        assert_eq!(keys.iter().position(|id| *id == 1), Some(2));
+        assert_eq!(catalog().key_ids(), (1..=24).collect::<Vec<_>>());
     }
 
     #[test]

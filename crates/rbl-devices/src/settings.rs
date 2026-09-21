@@ -270,6 +270,10 @@ pub enum SettingsError {
 /// unreadable is simply absent, and the tabs say so.
 #[must_use]
 pub fn read(mount_point: &Path) -> DeviceSettings {
+    if let Err(e) = recover(mount_point) {
+        tracing::error!(error = %e, "device recovery failed; settings unavailable");
+        return DeviceSettings { dev: None, library: None, has_device_library: false, has_one_library: false };
+    }
     let root = export_root(mount_point);
     let dev = std::fs::read(root.join("DEVSETTING.DAT"))
         .ok()
@@ -297,15 +301,26 @@ pub fn read(mount_point: &Path) -> DeviceSettings {
 /// stick had none; `exportLibrary.db` is updated in place and only when the
 /// stick has one — the tabs cannot invent a library.
 pub fn write(mount_point: &Path, settings: &DeviceSettings) -> Result<(), SettingsError> {
+    recover(mount_point)?;
     let root = export_root(mount_point);
+    let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
+    let relative = root.strip_prefix(mount_point).map_err(std::io::Error::other)?;
+    let staged_root = publication.stage().join(relative);
+    rbl_core::durable::create_dir_all(staged_root.join("rekordbox"))?;
+    let mut files = Vec::new();
     if let Some(dev) = &settings.dev {
-        std::fs::create_dir_all(&root)?;
-        std::fs::write(root.join("DEVSETTING.DAT"), dev.encode())?;
+        rbl_core::durable::write(&staged_root.join("DEVSETTING.DAT"), &dev.encode())?;
+        files.push(relative.join("DEVSETTING.DAT"));
     }
     if let Some(library) = &settings.library {
         let path = root.join("rekordbox/exportLibrary.db");
         if path.is_file() {
-            library.write(&path)?;
+            let staged = staged_root.join("rekordbox/exportLibrary.db");
+            std::fs::copy(&path, &staged)?;
+            let wal = root.join("rekordbox/exportLibrary.db-wal");
+            if wal.exists() { std::fs::copy(wal, staged_root.join("rekordbox/exportLibrary.db-wal"))?; }
+            library.write(&staged)?;
+            files.extend([relative.join("rekordbox/exportLibrary.db-wal"), relative.join("rekordbox/exportLibrary.db-shm"), relative.join("rekordbox/exportLibrary.db")]);
         }
         // The colour comments live in both databases; rekordbox renames them
         // in `export.pdb` too, and a player reads its names from there.
@@ -318,12 +333,19 @@ pub fn write(mount_point: &Path, settings: &DeviceSettings) -> Result<(), Settin
                 .collect();
             if let Some(next) = rbl_pdb::build::replace_single_page_table(&bytes, 6, &rows) {
                 if next != bytes {
-                    std::fs::write(&pdb_path, next)?;
+                    rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &next)?;
+                    files.push(relative.join("rekordbox/export.pdb"));
                 }
             }
         }
     }
+    publication.commit(&files)?;
     Ok(())
+}
+
+/// Recover all device publication journals before exposing database files.
+pub fn recover(mount_point: &Path) -> std::io::Result<()> {
+    rbl_export::recover(mount_point)
 }
 
 #[cfg(test)]

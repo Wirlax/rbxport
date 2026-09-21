@@ -7,6 +7,7 @@ it("creates explicit snapshots, restores library edits, and deletes snapshots", 
   const original = await backend.playlistTree();
   expect(await backend.listBackups()).toEqual([]);
   const path = await backend.backUpLibrary();
+  expect(path).toMatch(/\/rbxport-backup-\d{8}-\d{4}\.zip$/);
   await backend.edits.createPlaylist("After backup", TREE_ROOT);
   const backups = await backend.listBackups();
   expect(backups).toHaveLength(1);

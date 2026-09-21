@@ -12,7 +12,8 @@ test("shows the library tree and a populated track table", async ({ page }) => {
   await expect(page.getByRole("treeitem", { name: /All Tracks/ })).toBeVisible();
   await expect(page.getByRole("treeitem", { name: /Melodic Vox/ })).toBeVisible();
   const rows = page.getByRole("row").filter({ has: page.getByRole("gridcell") });
-  expect(await rows.count()).toBeGreaterThan(5);
+  await expect.poll(() => rows.count()).toBeGreaterThan(5);
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByName("startup:first-rows-painted").length)).toBe(1);
 });
 
 test("virtualizes: only a window of rows is in the DOM", async ({ page }) => {
@@ -1352,9 +1353,11 @@ test("analysing a selection reports progress and can be stopped", async ({ page 
   await rows.nth(2).click();
   await rows.nth(9).click({ modifiers: ["Shift"] });
   await page.keyboard.press("Shift+Meta+A");
+  await page.getByRole("dialog", { name: "Analysis Setting" }).getByRole("button", { name: "OK", exact: true }).click();
 
   const status = page.getByRole("contentinfo");
-  await expect(status).toContainText(/Analyzing: \d+ of \d+/);
+  await expect(status).toContainText(/Analyzing 8 tracks\s*\(\d+%\)/);
+  await expect(status.getByRole("progressbar", { name: "Analysis progress" })).toBeVisible();
   await expect(status.getByRole("button", { name: "Stop" })).toBeVisible();
 
   await status.getByRole("button", { name: "Stop" }).click();
@@ -1369,6 +1372,7 @@ test("a track that cannot be analysed does not stop the run", async ({ page }) =
   await rows.nth(0).click();
   await rows.nth(14).click({ modifiers: ["Shift"] });
   await page.keyboard.press("Shift+Meta+A");
+  await page.getByRole("dialog", { name: "Analysis Setting" }).getByRole("button", { name: "OK", exact: true }).click();
 
   const status = page.getByRole("contentinfo");
   await expect(status).toContainText("failed", { timeout: 15_000 });
@@ -2031,6 +2035,45 @@ test("the wheel over a waveform zooms it", async ({ page }) => {
   await page.mouse.wheel(0, 120);
   await page.mouse.wheel(0, 120);
   await expect.poll(gaps).toBeGreaterThan(wide);
+});
+
+test("wheel crossing PCM returns to the same PWV7 canvas as ordinary zoom", async ({ page }) => {
+  const load = async () => {
+    await page.goto("/");
+    await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+    await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+    await expect(page.getByTestId("player-detail")).toBeVisible();
+  };
+  // A compact pixel digest lets this prove the rendered normal canvas is the
+  // same after a wheel passes through PCM, without a fragile screenshot.
+  const digest = () => page.getByTestId("player-detail").locator("canvas").evaluate((canvas: HTMLCanvasElement) => {
+    const data = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
+    if (!data?.length) return "";
+    let hash = 2_166_136_261;
+    for (let i = 0; i < data.length; i += 16) hash = Math.imul(hash ^ (data[i] ?? 0), 16_777_619);
+    return `${canvas.width}x${canvas.height}:${hash >>> 0}`;
+  });
+
+  await load();
+  // 12 → 8 → 4 → 2 → 1: a normal PWV7 one-bar view.
+  const inButton = page.getByRole("button", { name: "Zoom in", exact: true });
+  for (let i = 0; i < 4; i++) await inButton.click();
+  await expect.poll(digest).not.toBe("");
+  const expected = await digest();
+
+  await load();
+  const detail = page.getByTestId("player-detail");
+  // The fifth wheel-in reaches PCM at 1/2 bar; one wheel-out returns to the
+  // exact same 1-bar PWV7 state used above. Dispatch them together, as a
+  // rapid physical scroll can cross the boundary before React paints between
+  // native wheel events.
+  await detail.evaluate((element) => {
+    for (let i = 0; i < 5; i++) {
+      element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -120 }));
+    }
+    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 120 }));
+  });
+  await expect.poll(digest).toBe(expected);
 });
 
 test("the title bar carries the name in the middle of the window", async ({ page }) => {

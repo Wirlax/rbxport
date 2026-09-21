@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type BeatGrid,
+  tempoAnnotations,
   beatAtMs,
   beatLoopRange,
   BEATS_PER_BAR,
@@ -572,13 +573,14 @@ describe("zoomBy", () => {
   });
 
   it("stops at the ends rather than wrapping round to the other extreme", () => {
-    expect(zoomBy(0.5, -1)).toBe(0.5);
+    expect(zoomBy(0.25, -1)).toBe(0.25);
     expect(zoomBy(64, 1)).toBe(64);
   });
 
-  it("goes down to half a bar", () => {
+  it("reaches rekordbox's closest step and one PCM inspection step beyond it", () => {
     expect(zoomBy(2, -1)).toBe(1);
     expect(zoomBy(1, -1)).toBe(0.5);
+    expect(zoomBy(0.5, -1)).toBe(0.25);
   });
 
   it("snaps an unrecognised zoom back to the default", () => {
@@ -876,5 +878,30 @@ describe("tempoChangeAtMs", () => {
     expect(tempoChangeAtMs(grid, 1000)).toBe(15000);
     expect(tempoChangeAtMs(grid, 1001)).toBeNull();
     for (const ms of [500, 1010, 1400, 99999]) expect(tempoChangeAtMs(grid, ms)).toBeNull();
+  });
+});
+
+describe("tempoAnnotations", () => {
+  const gridOf = (tempos: number[]) => ({ times: Uint32Array.from(tempos, (_, i) => i * 500),
+    numbers: Uint8Array.from(tempos, (_, i) => i % 4 + 1), tempos: Uint16Array.from(tempos) });
+  it("groups a curved ramp between steady tempos without changing the grid", () => {
+    const grid = gridOf([12800, 12800, 12800, 12800, 12820, 12900, 13500, 15000, 16600, 17300, 17400, 17400, 17400, 17400]);
+    const before = grid.tempos.slice();
+    expect(tempoAnnotations(grid)).toEqual([
+      { fromMs: 0, toMs: 0, fromBpmX100: 12800, toBpmX100: 12800 },
+      { fromMs: 2000, toMs: 5000, fromBpmX100: 12800, toBpmX100: 17400 },
+    ]);
+    expect(grid.tempos).toEqual(before);
+  });
+  it("keeps an abrupt change at its exact timestamp", () => {
+    expect(tempoAnnotations(gridOf([12800, 12800, 17400, 17400]))).toEqual([
+      { fromMs: 0, toMs: 0, fromBpmX100: 12800, toBpmX100: 12800 },
+      { fromMs: 1000, toMs: 1000, fromBpmX100: 17400, toBpmX100: 17400 },
+    ]);
+  });
+  it("handles descending ramps and a ramp that reaches the end of the file", () => {
+    expect(tempoAnnotations(gridOf([17400, 17400, 17400, 17400, 16500, 15000, 12800]))[1])
+      .toEqual({ fromMs: 2000, toMs: 3000, fromBpmX100: 17400, toBpmX100: 12800 });
+    expect(tempoAnnotations(NO_BEATS)).toEqual([]);
   });
 });

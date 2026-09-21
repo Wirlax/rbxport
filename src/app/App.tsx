@@ -1,4 +1,6 @@
 import { useBackupProgress } from "@/store/useBackupProgress";
+import { reportStartupPaint } from "@/lib/startup";
+import { useEventCallback } from "@/store/useEventCallback";
 /**
  * Export-mode shell.
  *
@@ -8,23 +10,23 @@ import { useBackupProgress } from "@/store/useBackupProgress";
  */
 import type { TrackSearchField } from "@/lib/search";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type {
   Backend, DeckId, Device, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
 import { TreeView } from "@/views/tree/TreeView";
-import { TopBar } from "@/views/topbar/TopBar";
+import { ConnectedTopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
-import { detectPlatform, dispatch, menuAccelerator } from "@/lib/shortcuts";
+import { detectPlatform, dispatch, isTyping, menuAccelerator } from "@/lib/shortcuts";
+import { runEditHistory } from "@/lib/editHistory";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
 import { deviceId, deviceNodes, devicePath, renamedDevice } from "@/lib/devices";
-import { ReportBug } from "@/views/report/ReportBug";
 import { refusal, resolveMenu } from "@/lib/menu";
 import { nextSort, specForNode, type SortState } from "@/lib/viewSpec";
 import {
@@ -35,8 +37,7 @@ import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AppCost } from "@/views/topbar/AppCost";
 import { useLimiter } from "@/store/useLimiter";
 import { useUpdater } from "@/store/useUpdater";
-import { UpdateManager } from "@/views/update/UpdateManager";
-import { useMaster } from "@/store/useMaster";
+import { MasterOutputProvider, MasterOutputConnection, useMasterControls, useMasterDisplay } from "@/store/MasterOutput";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { FIELD_LABEL, InfoPanel } from "@/views/info/InfoPanel";
 import { SubBrowser } from "@/views/subbrowser/SubBrowser";
@@ -52,11 +53,11 @@ import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
 import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
-import { Preferences, type PreferencesTarget } from "@/views/settings/Preferences";
-import { SyncManager } from "@/views/sync/SyncManager";
-import { SmartPlaylistEditor } from "@/views/tree/SmartPlaylistEditor";
+import type { PreferencesTarget } from "@/views/settings/Preferences";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { useAnalysis } from "@/store/useAnalysis";
+import { AnalysisDialog } from "@/views/analysis/AnalysisDialog";
+import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
@@ -71,6 +72,18 @@ import { useTooltip } from "@/store/usePreferences";
 const ROW_FIELDS: ReadonlySet<TrackField> = new Set<TrackField>([
   "title", "artist", "album", "genre", "label",
 ]);
+
+const ReportBug = lazy(() => import("@/views/report/ReportBug").then(m => ({ default: m.ReportBug })));
+const UpdateManager = lazy(() => import("@/views/update/UpdateManager").then(m => ({ default: m.UpdateManager })));
+const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => ({ default: m.Preferences })));
+const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
+const SmartPlaylistEditor = lazy(() => import("@/views/tree/SmartPlaylistEditor").then(m => ({ default: m.SmartPlaylistEditor })));
+
+function ConnectedPreferences(props: Omit<React.ComponentProps<typeof Preferences>, "reduction" | "vu" | "peakLeft" | "peakRight">) {
+  const master = useMasterDisplay();
+  return <Preferences {...props} reduction={master.reduction} vu={master.vu}
+    peakLeft={master.peakLeft} peakRight={master.peakRight} />;
+}
 
 function useClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -90,6 +103,11 @@ function useClock(): string {
 }
 
 export function App() {
+  return <MasterOutputProvider><AppBody /></MasterOutputProvider>;
+}
+
+function AppBody() {
+  useEffect(() => { reportStartupPaint("shell-painted"); }, []);
   // Read once, synchronously, so the first render is already the layout the
   // window closed with rather than the default that then jumps.
   const [restored] = useState(loadSession);
@@ -331,6 +349,8 @@ export function App() {
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
+  const deleteUnlistedMusic = prefs.preferences.usbExport.deleteUnlistedMusic;
+  const compatibilityFormat = prefs.preferences.usbExport.maximumCompatibility ? prefs.preferences.usbExport.conversionFormat : undefined;
   /** How much of the window the deck takes, kept across restarts. */
   const [layout, setLayout] = useState<PlayerLayout>(restored.layout);
   /**
@@ -342,7 +362,7 @@ export function App() {
   const activeTrafficLight = trafficLight === "b" && deckCount(layout) < 2 ? "a" : trafficLight;
   const trafficDeck: DeckId = deckCount(layout) < 2 ? "a" : activeTrafficLight === "master" ? syncMaster : activeTrafficLight;
   const trafficKey = (trafficDeck === "b" ? playerTrackB : playerTrack)?.key ?? null;
-  const master = useMaster(prefs.preferences.view.vuMeter);
+  const master = useMasterControls();
   // Read at start so the remembered setting reaches the engine before the
   // first thing plays, not when Settings is next opened.
   const limiter = useLimiter();
@@ -384,7 +404,7 @@ export function App() {
     useCallback((id: string, result: AnalysisResult) => {
       setPendingEdits((edits) =>
         new Map(edits).set(id, {
-          analysed: 1,
+          analysed: result.analysed ?? 1,
           bpmX100: result.bpmX100,
           key: result.key,
           durationSec: result.durationSec,
@@ -394,6 +414,7 @@ export function App() {
     useCallback(() => {
       void getBackend().then((backend) => backend.reloadLibrary());
     }, []),
+    analysisPrefs,
   );
   // What is in flight out of the browser: a playlist takes the ids, a deck
   // takes the one row under the hand.
@@ -540,12 +561,12 @@ export function App() {
     void (async () => {
       const backend = await getBackend();
       try {
-        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined));
+        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined, stickDefaults.linkKeySort));
       } finally {
         setLinkBusy(false);
       }
     })();
-  }, [link?.on, linkInterface]);
+  }, [link?.on, linkInterface, stickDefaults.linkKeySort]);
 
   // The tempo-master controls: each returns LINK's fresh status.
   const setLinkMaster = useCallback((on: boolean) => {
@@ -1206,7 +1227,7 @@ export function App() {
       void (async () => {
         try {
           const backend = await getBackend();
-          const written = await backend.exportTracksToDevice([...ids], path, stickDefaults);
+          const written = await backend.exportTracksToDevice([...ids], path, stickDefaults, compatibilityFormat);
           report(exportSummary(name, written));
           setDevices(await backend.listDevices());
         } catch (e) {
@@ -1216,7 +1237,7 @@ export function App() {
         }
       })();
     },
-    [devices, report, refuse, stickDefaults],
+    [devices, report, refuse, stickDefaults, compatibilityFormat],
   );
 
   // Export Loop As WAV: where to, then the loop's stretch of the track.
@@ -1289,25 +1310,26 @@ export function App() {
   // Analysis writes the result to the library, so it is refused the way any
   // other write is while rekordbox holds the file or the library is protected.
   const ANALYSIS_REFUSED = "The library is read-only, so nothing can be analysed.";
-  /** Queues whatever is selected in the browser. */
-  const analyseSelection = useCallback(() => {
+  const [analysisSelection, setAnalysisSelection] = useState<readonly QueueItem[] | null>(null);
+  /** Capture the selection before opening the settings dialog. */
+  const analyseSelection = useEventCallback(() => {
     if (selectedTracks.length === 0) return;
     if (readOnly) {
       refuse(ANALYSIS_REFUSED);
       return;
     }
-    analysis.add(selectedTracks);
-  }, [analysis, selectedTracks, readOnly, refuse]);
-  /** Queues one track: the deck's own, from its menu. */
+    setAnalysisSelection(selectedTracks.map(({ id, title }) => ({ id, title })));
+  });
+  /** Configure one track: the deck's own, from its menu. */
   const analyseOne = useCallback(
     (id: string, title: string) => {
       if (readOnly) {
         refuse(ANALYSIS_REFUSED);
         return;
       }
-      analysis.add([{ id, title }]);
+      setAnalysisSelection([{ id, title }]);
     },
-    [analysis, readOnly, refuse],
+    [readOnly, refuse],
   );
 
   const importFromMenu = useCallback(async () => {
@@ -1378,6 +1400,10 @@ export function App() {
   // and the keyboard reaches it the same way on the platforms where the
   // webview keeps the accelerators from the native menu.
   const runMenu = useCallback((id: string) => {
+    if (id === "undo" || id === "redo") {
+      runEditHistory(id);
+      return;
+    }
     const outcome = resolveMenu(id, readOnly, advancedPrefs.protectLibrary);
     if (!outcome) return;
     if ("refused" in outcome) {
@@ -1449,6 +1475,8 @@ export function App() {
       // in the webview never reaches them (see `menuAccelerator`).
       const item = menuAccelerator(event, platform);
       if (item !== null) {
+        // Let the webview keep its own text history for keyboard commands.
+        if ((item === "undo" || item === "redo") && isTyping(event.target as HTMLElement | null)) return;
         event.preventDefault();
         runMenu(item);
         return;
@@ -1655,7 +1683,7 @@ export function App() {
       report(`Writing ${name} to ${selectedDevice.name}…`);
       try {
         const backend = await getBackend();
-        const written = await backend.exportPlaylist(playlistId, selectedDevice.path, stickDefaults);
+        const written = await backend.exportPlaylist(playlistId, selectedDevice.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
         if (written !== null) report(exportSummary(selectedDevice.name, written));
         setDevices(await backend.listDevices());
       } catch (e) {
@@ -1664,7 +1692,7 @@ export function App() {
         setSyncing(false);
       }
     },
-    [selectedDevice, tree, report, refuse, stickDefaults],
+    [selectedDevice, tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat],
   );
 
   const exportPlaylistFile = useCallback((node: TreeNode, format: "m3u8" | "txt") => {
@@ -1689,7 +1717,7 @@ export function App() {
       const backend = await getBackend();
       report(`Exporting ${node.name}…`);
       try {
-        const written = await backend.exportPlaylist(node.id, undefined, stickDefaults);
+        const written = await backend.exportPlaylist(node.id, undefined, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
         if (written === null) {
           setNote(null);
           return;
@@ -1699,7 +1727,7 @@ export function App() {
         refuse(e instanceof Error ? e.message : "That export could not be written.");
       }
     })();
-  }, [report, refuse, stickDefaults]);
+  }, [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat]);
 
   // The top of the current view, kept only to write the next start's opening
   // screen. The library itself still lives entirely in Rust.
@@ -1751,8 +1779,28 @@ export function App() {
     selectedCount > 1 ? `Selected: ${selectedCount} Tracks` : selectedCount === 1 ? "Selected: 1 Track" : "";
 
   const tip = useTooltip();
+  const openViewSettings = useCallback(() => openPreferences("view"), [openPreferences]);
+  const ejectA = useCallback(() => setPlayerTrack(null), []);
+  const ejectB = useCallback(() => setPlayerTrackB(null), []);
+  const masterA = useCallback(() => setSyncMaster("a"), [setSyncMaster]);
+  const masterB = useCallback(() => setSyncMaster("b"), [setSyncMaster]);
+  const exportDeckTrack = useCallback((device: string, id: string) => exportTrackTo(device, [id]), [exportTrackTo]);
+  const showInformation = useCallback((row: RowDto) => { setPlayerTrack(row); setInfoOpen(true); }, []);
+  const toggleFilter = useCallback(() => setFilterOpen(was => !was), []);
+  const filterBar = useMemo(() => <TrackFilter state={filterState} onChange={setFilterState}
+    values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
+  const subTree = useMemo(() => ({
+    dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
+    onExport: exportPlaylist, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
+    onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode, readOnly,
+  }), [draggedTracks, addDraggedTo, exportPlaylist, exportPlaylistFile, createPlaylistIn, createFolderIn, deleteNode, renameNode, readOnly]);
+  const subList = useMemo(() => ({
+    onDragTracks: setDraggedTracks, players: deckCount(layout), onLoadTrack: loadTrack,
+    onShowInFinder: revealTrack, onRate: rateTrack, onComment: commentTrack, pendingEdits, readOnly,
+  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly]);
   return (
     <PreferencesProvider value={prefs}>
+    <MasterOutputConnection mode={viewPrefs.vuMeter} />
     <div className={styles.window}>
       <div
         className={styles.titleBar}
@@ -1765,16 +1813,11 @@ export function App() {
         <AppCost className={styles.cost} />
         <span className={styles.appName}>rbxport</span>
       </div>
-      <TopBar
+      <ConnectedTopBar
         clock={clock}
-        onOpenSettings={() => openPreferences("view")}
+        onOpenSettings={openViewSettings}
         layout={layout}
         onLayoutChange={setLayout}
-        level={master.level}
-        onLevelChange={master.setLevel}
-        vu={master.vu}
-        peakLeft={master.peakLeft}
-        peakRight={master.peakRight}
       />
       {/* Full Browser draws no deck at all, and no gutter under one. */}
       {deckCount(layout) > 0 ? (
@@ -1812,10 +1855,10 @@ export function App() {
           {deckCount(layout) > 1 ? <MixerStrip /> : null}
           <Player
             track={playerTrack}
-            onEject={() => setPlayerTrack(null)}
+            onEject={ejectA}
             onError={setPlayerError}
             onAnalyse={analyseOne}
-            onExportTrack={(device, id) => exportTrackTo(device, [id])}
+            onExportTrack={exportDeckTrack}
             devices={menuDevices}
             onExportLoop={exportLoop}
             simple={!isFullDeck(layout)}
@@ -1830,7 +1873,7 @@ export function App() {
             publishSync={publishSync.a}
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
             isMaster={syncMaster === "a"}
-            onMaster={() => setSyncMaster("a")}
+            onMaster={masterA}
             synced={synced.a && syncMaster !== "a"}
             onSyncToggle={deckCount(layout) > 1 ? toggleSync.a : undefined}
             leaderBpmX100={syncMaster === "a" ? null : leaderBpmX100}
@@ -1841,9 +1884,9 @@ export function App() {
             <Player
               deck="b"
               track={playerTrackB}
-              onEject={() => setPlayerTrackB(null)}
+              onEject={ejectB}
               onAnalyse={analyseOne}
-              onExportTrack={(device, id) => exportTrackTo(device, [id])}
+              onExportTrack={exportDeckTrack}
               devices={menuDevices}
               onExportLoop={exportLoop}
               onError={setPlayerError}
@@ -1859,7 +1902,7 @@ export function App() {
               publishSync={publishSync.b}
               peerSync={peerSync.b}
               isMaster={syncMaster === "b"}
-              onMaster={() => setSyncMaster("b")}
+              onMaster={masterB}
               synced={synced.b && syncMaster !== "b"}
               onSyncToggle={toggleSync.b}
               leaderBpmX100={syncMaster === "b" ? null : leaderBpmX100}
@@ -1939,10 +1982,7 @@ export function App() {
           onSelectionChange={setSelectedCount}
           onSelectedTracks={setSelectedTracks}
           onAnalyse={analyseSelection}
-          onShowInformation={(row) => {
-            setPlayerTrack(row);
-            setInfoOpen(true);
-          }}
+          onShowInformation={showInformation}
           onShowInFinder={revealTrack}
           onRemoveFromPlaylist={removeFromPlaylist}
           onRemoveFromHistory={removeFromHistory}
@@ -1991,15 +2031,8 @@ export function App() {
           seed={seed}
           onFirstRows={onFirstRows}
           filterOpen={filterOpen}
-          onToggleFilter={() => setFilterOpen((was) => !was)}
-          filterBar={
-            <TrackFilter
-              state={filterState}
-              onChange={setFilterState}
-              values={filterValues}
-              masterBpmX100={masterBpmX100}
-            />
-          }
+          onToggleFilter={toggleFilter}
+          filterBar={filterBar}
         />
         )}
         {subOpen ? (
@@ -2013,27 +2046,8 @@ export function App() {
             // Its tree and list take part in everything the main pair does:
             // a drag from either list lands on either tree, and its rows
             // load decks and take edits the same way.
-            tree={{
-              dragging: draggedTracks !== null,
-              onDropTracks: addDraggedTo,
-              onExport: exportPlaylist,
-              onExportFile: exportPlaylistFile,
-              onCreatePlaylist: createPlaylistIn,
-              onCreateFolder: createFolderIn,
-              onDeleteNode: deleteNode,
-              onRenameNode: renameNode,
-              readOnly: readOnly,
-            }}
-            list={{
-              onDragTracks: setDraggedTracks,
-              players: deckCount(layout),
-              onLoadTrack: loadTrack,
-              onShowInFinder: revealTrack,
-              onRate: rateTrack,
-              onComment: commentTrack,
-              pendingEdits,
-              readOnly: readOnly,
-            }}
+            tree={subTree}
+            list={subList}
           />
         ) : null}
         {infoOpen ? (
@@ -2056,6 +2070,7 @@ export function App() {
           onToggleSub={() => setSubOpen((open) => !open)}
         />
       </div>
+      <Suspense fallback={null}>
       {updater.open ? (
         <UpdateManager
           state={updater.state}
@@ -2065,15 +2080,20 @@ export function App() {
           onClose={updater.dismiss}
         />
       ) : null}
+      {analysisSelection !== null ? (
+        <AnalysisDialog count={analysisSelection.length} initialMode={analysisPrefs.mode}
+          onCancel={() => setAnalysisSelection(null)}
+          onConfirm={settings => {
+            if (readOnly) { refuse(ANALYSIS_REFUSED); return; }
+            analysis.add(analysisSelection, settings);
+            setAnalysisSelection(null);
+          }} />
+      ) : null}
       {settingsOpen !== null ? (
-        <Preferences
+        <ConnectedPreferences
           summary={summary}
           limiter={limiter.limiter}
           onLimiterChange={limiter.set}
-          reduction={master.reduction}
-          vu={master.vu}
-          peakLeft={master.peakLeft}
-          peakRight={master.peakRight}
           initialPane={settingsOpen}
           onResetColumns={cols.reset}
           onResetLayout={() => {
@@ -2098,6 +2118,7 @@ export function App() {
         />
       ) : null}
 
+      </Suspense>
       {/* The LINK strip: present from the moment a player or mixer is heard,
           and the whole LINK interface from then on. It draws nothing at all
           before that, so the row it sits in collapses. */}
@@ -2120,13 +2141,14 @@ export function App() {
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}
+        analysisProgress={analysis.running ? {
+          completed: analysis.state.done + analysis.state.failed.length,
+          total: analysis.total,
+        } : undefined}
         activity={
-          analysis.running
-            ? `Analyzing: ${analysis.state.done + analysis.state.failed.length + 1} of ${analysis.total}` +
-              (analysis.state.running[0] ? ` — ${analysis.state.running[0].title}` : "")
-            : (note !== null && !note.failed
+          note !== null && !note.failed
                 ? note.text
-                : (summary ? "" : "Loading the library…"))
+                : (summary ? "" : "Loading the library…")
         }
         // Everything that went wrong, in one place and in red: the deck's
         // refusals, a library that would not open, and a write the library

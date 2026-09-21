@@ -398,6 +398,65 @@ pub async fn track_waveform(
     .map(tauri::ipc::Response::new)
 }
 
+/// A short, true stereo PCM waveform window. The response is decimated to
+/// per-channel min/max pairs, which preserves attacks at display resolution
+/// the way a DAW waveform view does without creating another analysis file.
+#[tauri::command]
+pub async fn track_pcm_waveform(
+    state: State<'_, Arc<AppState>>,
+    track_id: String,
+    from_ms: f64,
+    to_ms: f64,
+    columns: u32,
+) -> AppResult<tauri::ipc::Response> {
+    let library = state.library()?;
+    // Eight bytes per point stays below Tauri's 64 KB IPC response cap while
+    // still leaving thousands of peak buckets in the closest view, even after
+    // its two-second guard on both sides.
+    let columns = columns.clamp(1, 7_500) as usize;
+    let from_ms = from_ms.max(0.0);
+    let to_ms = to_ms.max(from_ms);
+    blocking("track_pcm_waveform", move || {
+        let Some(path) = library.audio_path_of(&track_id).map(std::path::PathBuf::from) else {
+            return Ok(Vec::new());
+        };
+        if !path.exists() || to_ms <= from_ms {
+            return Ok(Vec::new());
+        }
+        // The deck's streamer gives us the same frame-accurate seek path that
+        // playback uses, without sharing or disturbing the live deck decoder.
+        const RATE: u32 = 44_100;
+        let mut stream = rbl_deck::decode::Streamer::open(&path, RATE)
+            .map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        let first = (from_ms * f64::from(RATE) / 1000.0).round().max(0.0) as u64;
+        let frames = ((to_ms - from_ms) * f64::from(RATE) / 1000.0).ceil().max(1.0) as usize;
+        stream.seek(first).map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        let mut pcm = vec![0.0_f32; frames * 2];
+        let read = stream.fill(&mut pcm)
+            .map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        let mut out = Vec::with_capacity(columns * 8);
+        for column in 0..columns {
+            let start = column * frames / columns;
+            let end = ((column + 1) * frames / columns).max(start + 1).min(read);
+            let mut left = (f32::INFINITY, f32::NEG_INFINITY);
+            let mut right = (f32::INFINITY, f32::NEG_INFINITY);
+            for frame in start..end {
+                let at = frame * 2;
+                left.0 = left.0.min(pcm[at]);
+                left.1 = left.1.max(pcm[at]);
+                right.0 = right.0.min(pcm[at + 1]);
+                right.1 = right.1.max(pcm[at + 1]);
+            }
+            if !left.0.is_finite() { left = (0.0, 0.0); }
+            if !right.0.is_finite() { right = (0.0, 0.0); }
+            for sample in [left.0, left.1, right.0, right.1] {
+                out.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+            }
+        }
+        Ok(out)
+    }).await.map(tauri::ipc::Response::new)
+}
+
 /// The requested span of a waveform tag, clamped to what is there.
 ///
 /// Entries rather than bytes, so a caller never has to know a tag's stride,
@@ -540,6 +599,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     interface: Option<String>,
+    alphabetical_keys: Option<bool>,
 ) -> AppResult<LinkStatusDto> {
     if let Some(status) = state.link_status() {
         tracing::debug!("LINK asked to start while running; the running session stands");
@@ -554,7 +614,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
     let emitter = app.clone();
     let library_emitter = app.clone();
     let started = blocking("start_link_export", move || {
-        Ok(crate::link::Session::start(&owner, interface.as_deref(), move |status| {
+        Ok(crate::link::Session::start(&owner, interface.as_deref(), alphabetical_keys.unwrap_or(false), move |status| {
             let _ = tauri::Emitter::emit(&emitter, "link:status", status);
         }, Arc::new(move |generation| {
             let _ = tauri::Emitter::emit(&library_emitter, "library:changed", generation);
@@ -654,6 +714,8 @@ pub async fn export_playlist<R: tauri::Runtime>(
     // What a stick with no settings of its own is given; see the DJ System
     // pane. A stick that has settings keeps them.
     defaults: Option<crate::device_settings::StickDefaultsDto>,
+    delete_unlisted_music: Option<bool>,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
@@ -672,8 +734,8 @@ pub async fn export_playlist<R: tauri::Runtime>(
             );
         };
         let destination = std::path::Path::new(&destination);
-        let selection = selection.for_stick(&state, &library, &share, destination)?;
-        write_export(destination, &selection, defaults.as_ref(), &mut on_progress)
+        let selection = selection.for_stick(&state, &library, &share, destination, delete_unlisted_music.unwrap_or(false))?;
+        write_export(destination, &selection, defaults.as_ref(), compatibility_format, &mut on_progress)
     })
     .await?;
 
@@ -704,6 +766,8 @@ pub async fn sync_devices<R: tauri::Runtime>(
     // stick, and read back when it is next plugged in.
     automatic: Option<bool>,
     eject_after_sync: Option<bool>,
+    delete_unlisted_music: Option<bool>,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
 ) -> AppResult<Vec<SyncDeviceReportDto>> {
     let library = state.library()?;
     let share = state.share_root();
@@ -723,8 +787,8 @@ pub async fn sync_devices<R: tauri::Runtime>(
             progress("writing");
             let stick = std::path::Path::new(&destination);
             let written = selection
-                .for_stick(&state, &library, &share, stick)
-                .and_then(|selection| write_export(stick, &selection, defaults.as_ref(), &mut |_| {}));
+                .for_stick(&state, &library, &share, stick, delete_unlisted_music.unwrap_or(false))
+                .and_then(|selection| write_export(stick, &selection, defaults.as_ref(), compatibility_format, &mut |_| {}));
             reports.push(match written {
                 Ok(report) => {
                     let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
@@ -764,6 +828,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     tracks: Vec<String>,
     destination: String,
     defaults: Option<crate::device_settings::StickDefaultsDto>,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
 ) -> AppResult<ExportReportDto> {
     let library = state.library()?;
     let share = state.share_root();
@@ -776,7 +841,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
         let record = rbl_export::Manifest::load(stick);
         let (playlists, mut loose, automatic) = match record {
             Some(m) => {
-                let ids: Vec<String> = m.playlists.iter().map(|p| p.library_id.to_string()).collect();
+                let ids: Vec<String> = m.playlists.iter().filter(|p| !p.folder).map(|p| p.library_id.to_string()).collect();
                 (ids, m.loose, rbl_export::sync_record::read(stick).is_some_and(|r| r.automatic))
             }
             None => (Vec::new(), Vec::new(), false),
@@ -787,7 +852,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
             }
         }
         let selection = ExportSelection::from_playlists_and_tracks(&state, &library, &share, &playlists, &loose, automatic)?;
-        write_export(stick, &selection, defaults.as_ref(), &mut |_| {})
+        write_export(stick, &selection, defaults.as_ref(), compatibility_format, &mut |_| {})
     })
     .await?;
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
@@ -824,10 +889,12 @@ pub async fn device_sync_state(state: State<'_, Arc<AppState>>, path: String) ->
         // one does not have; only a record from this library is a selection.
         let ours = record.as_ref().filter(|r| db_id != 0 && r.db_id == db_id);
         let mut selected: Vec<SyncPlaylistDto> = rbl_export::Manifest::load(mount)
+            .filter(|m| m.db_id == db_id && db_id != 0)
             .map(|manifest| {
                 manifest
                     .playlists
                     .into_iter()
+                    .filter(|p| !p.folder)
                     .map(|playlist| SyncPlaylistDto {
                         library_id: playlist.library_id.to_string(),
                         name: playlist.name,
@@ -924,6 +991,8 @@ impl ExportSelection {
         loose: &[u64],
         automatic: bool,
     ) -> AppResult<Self> {
+        let _editing = state.edit_gate.lock();
+        let _analysis = state.analysis_write.lock();
         // Named first and read after: `source_rows` takes the playlists
         // itself, so the guard is let go before it is asked.
         let mut named: Vec<(u64, String, rbl_index::TrackSource)> = Vec::with_capacity(playlist_ids.len());
@@ -990,32 +1059,48 @@ impl ExportSelection {
         for ((id, name, _), rows) in named.into_iter().zip(rows_of) {
             let mut track_indices = Vec::with_capacity(rows.len());
             for row in rows {
-                let at = *position.entry(row).or_insert_with(|| {
+                let at = if let Some(at)=position.get(&row) { *at } else {
                     let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
                     let extra = extras.get(&content).cloned().unwrap_or_default();
-                    tracks.push(source_track(library, share, row, &extra));
-                    tracks.len() - 1
-                });
+                    tracks.push(source_track(library, share, row, &extra)?);
+                    let at=tracks.len()-1; position.insert(row,at); at
+                };
                 track_indices.push(at);
             }
-            source_playlists.push(rbl_export::SourcePlaylist { id, name, track_indices });
+            source_playlists.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id, name, track_indices });
         }
         for row in loose_rows {
-            position.entry(row).or_insert_with(|| {
+            if let std::collections::hash_map::Entry::Vacant(entry) = position.entry(row) {
                 let content = library.ids.get(row as usize).copied().unwrap_or(0).to_string();
                 let extra = extras.get(&content).cloned().unwrap_or_default();
-                tracks.push(source_track(library, share, row, &extra));
-                tracks.len() - 1
-            });
+                tracks.push(source_track(library, share, row, &extra)?);
+                entry.insert(tracks.len() - 1);
+            }
         }
-        if tracks.is_empty() {
-            return Err(AppError::new(ErrorKind::NotFound, "That playlist has no tracks to export."));
+        // Include ancestors as actual folder rows in both USB databases.
+        let tree_view = library.playlists();
+        let mut ancestors = std::collections::BTreeSet::new();
+        for p in &mut source_playlists {
+            p.parent_id = sync.tree.iter().find(|n| n.id == p.id).map_or(0, |n| n.parent);
+            let mut parent = p.parent_id;
+            while parent != 0 && ancestors.insert(parent) {
+                parent = sync.tree.iter().find(|n| n.id == parent).map_or(0, |n| n.parent);
+            }
         }
+        let mut folders = Vec::new();
+        for id in ancestors {
+            let Some(index) = tree_view.index_of(id) else { return Err(AppError::internal("Missing playlist ancestor")); };
+            folders.push(rbl_export::SourcePlaylist { device_id: 0, device_only: false, id, name: tree_view.name(index).to_owned(), parent_id: sync.tree.iter().find(|n| n.id == id).map_or(0, |n| n.parent), folder: true, track_indices: Vec::new() });
+        }
+        folders.append(&mut source_playlists);
+        source_playlists = folders;
         Ok(Self { tracks, playlists: source_playlists, my_tags, sync })
     }
 
     /// This selection with the loose tracks a stick's record names added,
-    /// so a sync keeps what Export Track put there. The selection itself
+    /// so a sync keeps what Export Track put there unless cleanup is enabled.
+    /// Cleanup uses the playlist selection alone; the exporter removes only
+    /// stale manifest-owned files after publishing the new databases. The selection itself
     /// when the record names none it does not already hold.
     pub(crate) fn for_stick<'a>(
         &'a self,
@@ -1023,14 +1108,19 @@ impl ExportSelection {
         library: &rbl_index::Library,
         share: &std::path::Path,
         destination: &std::path::Path,
+        delete_unlisted_music: bool,
     ) -> AppResult<std::borrow::Cow<'a, Self>> {
-        let recorded = rbl_export::Manifest::load(destination).map(|m| m.loose).unwrap_or_default();
+        if delete_unlisted_music {
+            return Ok(std::borrow::Cow::Borrowed(self));
+        }
+        rbl_export::recover(destination).map_err(|e| AppError::internal(e.to_string()))?;
+        let recorded = rbl_export::Manifest::load(destination).filter(|m| m.db_id == self.sync.db_id).map(|m| m.loose).unwrap_or_default();
         let held: std::collections::HashSet<u64> = self.tracks.iter().map(|t| t.id).collect();
         let missing: Vec<u64> = recorded.into_iter().filter(|id| !held.contains(id)).collect();
         if missing.is_empty() {
             return Ok(std::borrow::Cow::Borrowed(self));
         }
-        let playlist_ids: Vec<String> = self.playlists.iter().map(|p| p.id.to_string()).collect();
+        let playlist_ids: Vec<String> = self.playlists.iter().filter(|p| !p.folder).map(|p| p.id.to_string()).collect();
         let loose: Vec<u64> = self
             .tracks
             .iter()
@@ -1057,14 +1147,14 @@ fn source_track(
     share: &std::path::Path,
     row: u32,
     extra: &rbl_db::export_info::TrackExtras,
-) -> rbl_export::SourceTrack {
+) -> AppResult<rbl_export::SourceTrack> {
     let i = row as usize;
     // The library's own image, share-relative like the analysis.
     let artwork = Some(library.artwork_path.get(i))
         .filter(|p| !p.is_empty())
         .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
-    rbl_export::SourceTrack {
-        // The content id is how a second export to the same stick
+    Ok(rbl_export::SourceTrack {
+        device: None,        // The content id is how a second export to the same stick
         // recognises a track it has already written.
         id: library.ids.get(i).copied().unwrap_or(0),
         source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),
@@ -1087,8 +1177,8 @@ fn source_track(
         sample_rate: library.sample_rate.get(i).copied().unwrap_or(0),
         file_size: library.file_size.get(i).copied().unwrap_or(0),
         year: library.year.get(i).copied().unwrap_or(0),
-        analysis: read_analysis(share, library.analysis_path.get(i)),
-    }
+        analysis: read_analysis(share, library.analysis_path.get(i))?,
+    })
 }
 
 /// Writes a selection to one destination and reads it back.
@@ -1098,6 +1188,7 @@ pub(crate) fn write_export(
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
 ) -> AppResult<ExportReportDto> {
     if !destination.is_dir() {
@@ -1106,18 +1197,21 @@ pub(crate) fn write_export(
             "That device is no longer connected. It may have been unplugged or renamed.",
         ));
     }
+    if rbl_db::is_rekordbox_running() {
+        return Err(AppError::internal("Quit rekordbox before syncing this USB so only one application writes its libraries."));
+    }
+    let export_root = rbl_export::export_root(destination);
     let settings_root = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("rbxport/usb-settings");
     let imported_settings: Vec<_> = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"].into_iter()
-        .filter(|name| !destination.join("PIONEER").join(name).exists())
+        .filter(|name| !export_root.join(name).exists())
         .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();
     let library_defaults = defaults.map(crate::device_settings::library_defaults);
-    let report = rbl_export::export_full(
+    let report = rbl_export::export_with_options(
         destination,
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
-        library_defaults.as_ref(),
-        Some(&selection.sync),
+        rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
         progress,
     )
     .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
@@ -1126,12 +1220,15 @@ pub(crate) fn write_export(
     }
 
     for (name, bytes) in imported_settings {
-        crate::durable::write(&destination.join("PIONEER").join(name), &bytes).map_err(|e| AppError::internal(e.to_string()))?;
+        crate::durable::write(&export_root.join(name), &bytes).map_err(|e| AppError::internal(e.to_string()))?;
     }
     // Re-read what was written with the independent parser: an export that
     // cannot be read back is not an export.
     let check = rbl_export::verify(destination)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+    if !check.is_ok() || check.tracks != report.tracks {
+        return Err(AppError::internal(format!("USB verification failed: missing audio {:?}; {}", check.missing_audio, check.errors.join("; "))));
+    }
 
     Ok(ExportReportDto {
         tracks: u32::try_from(report.tracks).unwrap_or(0),
@@ -1141,7 +1238,7 @@ pub(crate) fn write_export(
         reused: u32::try_from(report.reused).unwrap_or(0),
         removed: u32::try_from(report.removed).unwrap_or(0),
         skipped: report.skipped,
-        verified: check.parsed && check.tracks == report.tracks,
+        verified: check.is_ok() && check.tracks == report.tracks,
     })
 }
 
@@ -1200,9 +1297,9 @@ fn source_audio(folder_path: &str, alternates: &[String]) -> std::path::PathBuf 
 
 /// Reads a track's analysis files, so the export re-emits rather than
 /// re-analysing.
-fn read_analysis(share: &std::path::Path, relative: &str) -> Vec<(String, Vec<u8>)> {
+fn read_analysis(share: &std::path::Path, relative: &str) -> AppResult<Vec<(String, Vec<u8>)>> {
     if relative.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let base = share.join(relative.trim_start_matches(['/', '\\']));
     let mut out = Vec::new();
@@ -1210,11 +1307,16 @@ fn read_analysis(share: &std::path::Path, relative: &str) -> Vec<(String, Vec<u8
     // analysed by an older version has no .2EX, and none is written then.
     for extension in ["DAT", "EXT", "2EX"] {
         let path = base.with_extension(extension);
-        if let Ok(bytes) = std::fs::read(&path) {
-            out.push((extension.to_owned(), bytes));
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                rbl_anlz::parse(&bytes).map_err(|e|AppError::internal(format!("Invalid analysis {}: {e}",path.display())))?;
+                out.push((extension.to_owned(), bytes));
+            }
+            Err(e) if e.kind()==std::io::ErrorKind::NotFound && extension!="DAT" => {},
+            Err(e) => return Err(AppError::internal(format!("Cannot read analysis {}: {e}",path.display()))),
         }
     }
-    out
+    Ok(out)
 }
 
 /// A track's whole beat grid, as raw bytes.
@@ -2511,7 +2613,7 @@ pub async fn open_backup_directory<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
 ) -> AppResult<()> {
-    let path = state.backup_dir().to_path_buf();
+    let path = state.backup_destination();
     blocking("open_backup_directory", move || {
         crate::durable::create_dir_all(&path).map_err(|e| {
             AppError::internal("The backup folder could not be created.").with_detail(e.to_string())
@@ -2525,7 +2627,7 @@ pub async fn open_backup_directory<R: tauri::Runtime>(
 /// The configured destination, whether or not any backups exist yet.
 #[tauri::command]
 pub fn backup_directory(state: State<'_, Arc<AppState>>) -> String {
-    state.backup_dir().to_string_lossy().into_owned()
+    state.backup_destination().to_string_lossy().into_owned()
 }
 
 #[tauri::command]
@@ -2560,6 +2662,18 @@ pub async fn back_up_library(state: State<'_, Arc<AppState>>) -> AppResult<Strin
 pub async fn delete_backup(state: State<'_, Arc<AppState>>, path: String) -> AppResult<()> {
     let state = Arc::clone(&state);
     blocking("delete_backup", move || crate::backups::delete(&state, std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+pub async fn inspect_backup(state: State<'_, Arc<AppState>>, path: String) -> AppResult<BackupDto> {
+    let state = Arc::clone(&state);
+    blocking("inspect_backup", move || crate::backups::inspect_archive(&state, std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+pub async fn set_backup_directory(state: State<'_, Arc<AppState>>, directory: String) -> AppResult<String> {
+    let state = Arc::clone(&state);
+    blocking("set_backup_directory", move || state.set_backup_destination(std::path::Path::new(&directory))).await
 }
 
 #[tauri::command]

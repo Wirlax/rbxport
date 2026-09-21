@@ -207,7 +207,8 @@ impl StickSettings {
         .map_err(|source| crate::Error::Open { path: path.display().to_string(), source })?;
         unlock(&conn, &key::passphrase()?)?;
 
-        let tx = conn.unchecked_transaction()?;
+        crate::durable_writes(&conn)?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("UPDATE property SET deviceName = ?1", params![self.device_name])?;
         // rekordbox numbers the visible rows 1.. in their order and gives a
         // hidden row 0 [OBS 7.2.11, BPM taken off the sort list]; the same
@@ -234,14 +235,6 @@ impl StickSettings {
         }
         tx.commit()?;
 
-        // A stick rekordbox left in WAL mode keeps its `-wal` file; fold the
-        // write into the main file so a reader that ignores the WAL sees it.
-        let mode: String = conn
-            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
-            .unwrap_or_default();
-        if mode.eq_ignore_ascii_case("wal") {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
-        }
         Ok(())
     }
 }

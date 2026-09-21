@@ -45,13 +45,17 @@ pub const BANDS: usize = BAND_EDGES.len() - 1;
 /// the drop.
 const SCALES: [usize; 4] = [8, 16, 32, 64];
 
+/// Minimum four-bar change in the Euclidean distance of mean log-band
+/// energies. Below this, FFT alignment noise must not decide bar position.
+const MIN_STRUCTURE_NOVELTY: f64 = 0.5;
+
 /// Half beats in a bar.
 const POSITIONS: usize = 8;
 
 /// Beats a tempo segment needs before its bar position is decided from its
-/// own music rather than carried over: sixteen bars, enough for a phrase
-/// boundary or two to land in it.
-pub const MIN_BEATS_FOR_OWN_PHASE: usize = 64;
+/// own music rather than carried over: eight bars, enough for a four-bar
+/// comparison on both sides. Shorter stretches carry the chosen count.
+pub const MIN_BEATS_FOR_OWN_PHASE: usize = 32;
 
 /// Where the grid sits in the bar.
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +98,13 @@ pub fn grid_phase_from(frames: &[[f64; BANDS]], sample_rate: u32, beat_secs: &[f
     }
     let profiles = beat_profiles_from(frames, sample_rate, &halves);
     if profiles.len() < POSITIONS * 2 {
+        return unshifted;
+    }
+    // Identical repeated beats have no bar-position evidence. FFT frame
+    // boundaries still create small spectral fluctuations; normalizing
+    // those to unit weight otherwise invents a later downbeat. Require
+    // an actual change over four bars before overriding the first beat.
+    if novelty_peaks(&profiles, 32).iter().all(|&(_, value)| value < MIN_STRUCTURE_NOVELTY) {
         return unshifted;
     }
     let scores = position_scores(&profiles, POSITIONS, &SCALES);

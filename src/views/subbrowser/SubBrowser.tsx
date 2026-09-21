@@ -27,7 +27,7 @@
  */
 import type { TrackSearchField } from "@/lib/search";
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { SortColumn, TreeNode, ViewSpec } from "@/ipc/types";
 import { usePreferences } from "@/store/usePreferences";
@@ -77,9 +77,8 @@ export interface SubBrowserProps {
  * Read from the panel's own element rather than a ref handed down from the
  * shell: a child's layout effect runs before the shell's ref is attached, so
  * on a run that opens with the panel already showing that ref is still empty
- * at the moment it is read. Measured after every render, since the panels
- * beside it come and go with the shell's renders and none of them resizes
- * this one; setting the same number again is free.
+ * at the moment it is read. Observe sibling sizes and additions/removals so
+ * a memoized panel still responds when the shell opens or resizes a pane.
  */
 function useSharedWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(0);
@@ -97,14 +96,28 @@ function useSharedWidth(ref: React.RefObject<HTMLElement | null>): number {
   }, [ref]);
   // Before the first paint, so the panel opens at its clamped width rather
   // than at the floor and then jumping.
-  useLayoutEffect(measure);
+  useLayoutEffect(measure, [measure]);
   useLayoutEffect(() => {
     const parent = ref.current?.parentElement;
     if (!parent || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(parent);
+    const observe = () => {
+      observer.disconnect();
+      observer.observe(parent);
+      const el = ref.current;
+      for (const sibling of parent.children) {
+        if (sibling !== el && sibling !== el?.previousElementSibling) observer.observe(sibling);
+      }
+      measure();
+    };
+    // Opening Info or resizing the tree changes the available space even
+    // when this memoized component's props and parent's width stay equal.
+    const children = new MutationObserver(observe);
+    children.observe(parent, { childList: true });
+    observe();
     return () => {
       observer.disconnect();
+      children.disconnect();
     };
   }, [ref, measure]);
   return width;
@@ -142,7 +155,7 @@ function useSplitterDrag(width: number, sign: 1 | -1, onChange: (width: number) 
   return { onPointerDown, onPointerMove, onPointerUp };
 }
 
-export function SubBrowser({
+export const SubBrowser = memo(function SubBrowser({
   nodes, libraryGeneration, width, treeWidth, onWidthChange, onTreeWidthChange, tree, list,
 }: SubBrowserProps) {
   const self = useRef<HTMLElement>(null);
@@ -236,4 +249,4 @@ export function SubBrowser({
       />
     </section>
   );
-}
+});

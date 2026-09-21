@@ -106,6 +106,14 @@ impl FileJournal {
 
     pub fn rollback(&self) -> AppResult<()> { self.install(false, false)?; self.remove() }
 
+    /// A failed database call can have committed before a later error. Resolve
+    /// from the persisted row rather than blindly restoring the old files.
+    pub fn reconcile(self, location: &rbl_db::LibraryLocation) -> AppResult<()> {
+        let root = self.dir.parent().and_then(Path::parent).ok_or_else(|| error("invalid journal path"))?;
+        recover(root, location)
+    }
+
+
     pub fn commit(mut self) -> AppResult<()> {
         self.manifest.committed = true;
         self.persist()?;
@@ -182,6 +190,20 @@ mod tests {
         let mut writer = rbl_db::write::Writer::open(location.clone(), &backup).unwrap();
         writer.set_bpm_x100(&track, 12345).unwrap(); drop(writer); drop(journal);
         recover(&backup, &location).unwrap();
+        assert_eq!(std::fs::read(dat).unwrap(), b"new");
+    }
+    #[test]
+    fn a_reported_error_after_database_commit_keeps_the_committed_files() {
+        let (root, location, backup, track) = fixture();
+        let dat = root.path().join("DAT");
+        std::fs::write(&dat, b"old").unwrap();
+        let journal = FileJournal::prepare(&backup, &location, &track, 12345, None, true,
+            &[(dat.clone(), b"new".to_vec())]).unwrap();
+        journal.publish().unwrap();
+        let mut writer = rbl_db::write::Writer::open(location.clone(), &backup).unwrap();
+        writer.set_bpm_x100(&track, 12345).unwrap();
+        drop(writer);
+        journal.reconcile(&location).unwrap();
         assert_eq!(std::fs::read(dat).unwrap(), b"new");
     }
     #[test]

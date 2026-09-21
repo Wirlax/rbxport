@@ -6,6 +6,7 @@
 //! against the real one.
 
 mod windowfit;
+mod startup;
 pub mod analysis;
 pub mod commands;
 mod usb_import;
@@ -72,6 +73,11 @@ fn spawn_library_load(app: tauri::AppHandle) {
                 return;
             }
         }
+        let cache_path = cache_path(&app);
+        let snapshot = cache_path.clone().and_then(|path| {
+            std::thread::Builder::new().name("startup-snapshot".into())
+                .spawn(move || rbl_index::cache::prepare(&path)).ok()
+        });
         match rbl_db::Library::open_installed_read_only() {
             Ok(db) => {
                 if let Err(e) = file_journal::recover(app.state::<Arc<state::AppState>>().backup_dir(), db.location()) {
@@ -82,7 +88,6 @@ fn spawn_library_load(app: tauri::AppHandle) {
                 let db_version = db.schema().db_version;
                 let location = db.location().clone();
                 let master_db = db.location().master_db.clone();
-                let cache_path = cache_path(&app);
                 // Reading 38,681 rows out of SQLCipher is 543 ms of the 680 ms
                 // a start costs, and none of it gets faster — the work is the
                 // decryption. A snapshot of the built columns turns the same
@@ -90,12 +95,13 @@ fn spawn_library_load(app: tauri::AppHandle) {
                 // Content rather than file times: rekordbox rewrites the WAL
                 // without changing a row, and keying on that refused the
                 // snapshot on every start it was running for.
-                let content = rbl_index::content_version(&db).unwrap_or(0);
+                let content = rbl_index::content_version(&db).ok();
                 let fingerprint = cache_path.as_ref().and_then(|_| {
-                    rbl_index::cache::Fingerprint::of(&master_db, schema_key(db_version), content)
+                    rbl_index::cache::Fingerprint::of(&master_db, schema_key(db_version), content?)
                 });
-                if let (Some(path), Some(fp)) = (cache_path.as_ref(), fingerprint) {
-                    if let Some(library) = rbl_index::cache::load(path, fp) {
+                let prepared = snapshot.and_then(|job| job.join().ok()).flatten();
+                if let Some(fp) = fingerprint {
+                    if let Some(library) = prepared.and_then(|snapshot| snapshot.validated(fp)) {
                         let load_ms =
                             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::info!(tracks = library.len(), load_ms, "library from cache");
@@ -107,7 +113,10 @@ fn spawn_library_load(app: tauri::AppHandle) {
                         return;
                     }
                 }
-                match rbl_index::load(&db) {
+                // A second read-only handle allows cues to overlap metadata.
+                // Failure falls back to the single-connection loader.
+                let cue_reader = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).ok();
+                match rbl_index::load_with_cue_reader(&db, cue_reader) {
                     Ok((library, stats)) => {
                         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                         tracing::info!(
@@ -317,6 +326,7 @@ pub fn browser_args() -> Option<String> {
 
 #[allow(clippy::too_many_lines, reason = "the command list is one line per command, and that is the whole function")]
 pub fn run() {
+    startup::begin();
     logging::install();
 
     let mut context = tauri::generate_context!();
@@ -408,12 +418,15 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            startup::startup_milestone,
+            menu::set_history_menu,
             commands::library_summary,
             commands::playlist_tree,
             commands::open_view,
             commands::fetch_rows,
             commands::view_ids_in_range,
             commands::track_waveform,
+            commands::track_pcm_waveform,
             analysis::analyse_track,
             analysis::edit_phrase,
             commands::reload_library,
@@ -523,6 +536,8 @@ pub fn run() {
             commands::back_up_library,
             commands::restore_backup,
             commands::delete_backup,
+            commands::inspect_backup,
+            commands::set_backup_directory,
             commands::open_url,
             commands::reset_play_count,
             commands::record_play,

@@ -12,6 +12,8 @@
     reason = "sample counts and durations convert between usize and f64 throughout decoding"
 )]
 
+pub mod compatibility;
+
 use std::path::Path;
 
 use symphonia::core::audio::SampleBuffer;

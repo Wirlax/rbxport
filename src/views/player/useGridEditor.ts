@@ -1,214 +1,133 @@
-/**
- * The GRID EDIT cluster: what each button does to the loaded track's grid.
- *
- * Every button is one of `rbl_anlz::grid`'s edits sent through the backend,
- * which rewrites the analysis file and says so; `useTrackGrid` refetches and
- * the beats on the waveform, the BPM field and the undo/redo buttons follow
- * from that. Nothing is shown ahead of the write.
- *
- * What the buttons are, in rekordbox's own terms where the Export key map
- * names them (`Shift Beatgrid left/right`, `Shift Beatgrid to the center`)
- * and by what the manual says the rest do:
- *
- * - `mark` (the red bar): the beat nearest the playhead becomes beat 1.
- * - `TAP`: tap along; the tempo is the mean of the last taps and the grid
- *   is laid out again with a beat where the first tap landed. Committed
- *   once the tapping stops, so a run of taps is one edit and one undo.
- * - `shift`: the grid a millisecond earlier or later.
- * - `stretch`: the tempo 0.01 BPM slower (widen) or faster (narrow), the
- *   first beat held.
- * - `double` / `halve`: the tempo, keeping the downbeat.
- * - `alignAll` (`|↓|`): the grid moved so the beat nearest the playhead
- *   lands on it — `Shift Beatgrid to the center`, the playhead being the
- *   centre of the detail waveform.
- * - `alignHere` (`||↓`): the same, but only from the playhead on; the beats
- *   before it stay [ASSUME: rekordbox's two snap buttons were read off the
- *   capture as a whole-grid one and a from-here one].
- * - `cut` (the scissors): sets the point from which the other edits apply,
- *   so a tempo change part-way through a DJ edit can be gridded without
- *   moving the beats before it [ASSUME: rekordbox 6's "adjust from this
- *   position on" is what the scissors stand for]. Pressing it again clears
- *   the point. It is the deck's, not the file's: a grid records tempo per
- *   beat, not where it was cut.
- * - `lock`: no edit is written while it is on; see `src-tauri/src/grid.rs`
- *   for where the lock lives.
- */
+/** Beat-grid controls recovered from rekordbox's BeatGridAdjustment/TapButton. */
 import { useCallback, useEffect, useRef, useState } from "react";
-
 import type { DeckId, GridEdit, GridEditOptions, GridState } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
-import { SHIFT_MS, STRETCH_X100, TAP_GAP_MS, tapTempo, withTap } from "@/lib/gridEdit";
+import { SHIFT_MS, HELD_SHIFT_MS, tapTempo, tapTimeout, withTap } from "@/lib/gridEdit";
 
 export interface GridEditorDeck {
-  /** The loaded track's id, or `null` when the deck is empty. */
   trackId: string | null;
   deck: DeckId;
-  /** From `useTrackGrid`: `null` while the track has no grid. */
   state: GridState | null;
   setState: (state: GridState) => void;
-  /** The playhead, in milliseconds, read at the moment a button goes down. */
   positionMs: () => number;
-  /** rekordbox holds the database, so nothing here can write. */
   readOnly: boolean;
+  durationMs?: number;
+  isDynamicFrom?: (fromMs: number | null) => boolean;
+  confirmDynamic?: () => boolean | Promise<boolean>;
   onError?: ((message: string | null) => void) | undefined;
 }
-
 export interface GridEditorActions {
-  /** The panel's state as `useTrackGrid` holds it, for the buttons to read. */
   state: GridState | null;
-  /** A track with a grid is loaded: the lock and undo/redo mean something. */
   hasGrid: boolean;
-  /** And it can be written: not read-only, not locked. */
   canEdit: boolean;
-  /** Where the from-here edits start, in milliseconds, or `null` for the whole grid. */
-  cutMs: number | null;
-  toggleCut: () => void;
-  /** The tempo the taps so far describe, shown in the BPM field while tapping. */
+  fromMs: number | null;
   tapBpmX100: number | null;
   tap: () => void;
   mark: () => void;
-  shift: (direction: -1 | 1) => void;
-  stretch: (direction: -1 | 1) => void;
+  shift: (direction: -1 | 1, held?: boolean) => void;
+  stretch: (direction: -1 | 1, held?: boolean) => void;
   double: () => void;
   halve: () => void;
-  alignAll: () => void;
-  alignHere: () => void;
+  adjustAll: () => void;
+  adjustFrom: () => void;
+  align: () => void;
+  setBpm: (value: string) => void;
   undo: () => void;
   redo: () => void;
   toggleLock: () => void;
 }
-
-function describe(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return fallback;
+function describe(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string" && error.message.trim()) return error.message;
+  return "The beat grid could not be saved.";
 }
-
 export function useGridEditor(deck: GridEditorDeck): GridEditorActions {
-  const { trackId, deck: deckId, state, setState, positionMs, readOnly, onError } = deck;
+  const { trackId, deck: deckId, state, setState, positionMs, readOnly, onError, isDynamicFrom, confirmDynamic } = deck;
   const hasGrid = trackId !== null && state !== null && state.beats > 0;
   const canEdit = hasGrid && !readOnly && !state.locked;
-  const [cutMs, setCutMs] = useState<number | null>(null);
+  const [fromMs, setFromMs] = useState<number | null>(null);
   const [taps, setTaps] = useState<number[]>([]);
-  /** Where the first tap of the run landed in the track. */
+  const tapsRef = useRef<number[]>([]);
   const tapAnchor = useRef(0);
+  const tapRun = useRef(0);
+  const session = useRef(crypto.randomUUID());
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // One write at a time: a held key repeats thirty times a second, and each
-  // repeat used to be another edit before the first came back.
-  const inFlight = useRef(false);
-
-  // A cut and a run of taps belong to the track they were made on.
-  useEffect(() => {
-    setCutMs(null);
-    setTaps([]);
+  const queue = useRef(Promise.resolve());
+  const currentTrack = useRef(trackId);
+  currentTrack.current = trackId;
+  const cancelTaps = useCallback(() => {
     if (tapTimer.current) clearTimeout(tapTimer.current);
     tapTimer.current = null;
-  }, [trackId]);
+    tapsRef.current = [];
+    setTaps([]);
+  }, []);
+  useEffect(() => { setFromMs(null); cancelTaps(); return () => { if (tapTimer.current) clearTimeout(tapTimer.current); }; }, [trackId, cancelTaps]);
+  useEffect(() => { if (readOnly || state?.locked) cancelTaps(); }, [readOnly, state?.locked, cancelTaps]);
 
-  const run = useCallback(
-    (action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<GridState>) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      void (async () => {
-        try {
-          const backend = await getBackend();
-          setState(await action(backend.edits));
-          onError?.(null);
-        } catch (error) {
-          onError?.(describe(error, "The beat grid could not be saved."));
-        } finally {
-          inFlight.current = false;
-        }
-      })();
-    },
-    [setState, onError],
-  );
-
-  const edit = useCallback(
-    (change: GridEdit, fromMs: number | null) => {
-      if (!canEdit || trackId === null) return;
-      const options: GridEditOptions = { deck: deckId };
-      if (fromMs !== null) options.fromMs = fromMs;
-      run((edits) => edits.gridEdit(trackId, change, options));
-    },
-    [canEdit, trackId, deckId, run],
-  );
-
-  const mark = useCallback(() => edit({ kind: "downbeat", timeMs: Math.round(positionMs()) }, cutMs), [edit, positionMs, cutMs]);
-  const shift = useCallback((direction: -1 | 1) => edit({ kind: "nudge", ms: SHIFT_MS * direction }, cutMs), [edit, cutMs]);
-  const stretch = useCallback(
-    (direction: -1 | 1) => edit({ kind: "stretch", byX100: STRETCH_X100 * direction }, cutMs),
-    [edit, cutMs],
-  );
-  const double = useCallback(() => edit({ kind: "double" }, cutMs), [edit, cutMs]);
-  const halve = useCallback(() => edit({ kind: "halve" }, cutMs), [edit, cutMs]);
-  const alignAll = useCallback(() => edit({ kind: "align", timeMs: Math.round(positionMs()) }, cutMs), [edit, positionMs, cutMs]);
-  const alignHere = useCallback(() => {
-    const at = Math.round(positionMs());
-    edit({ kind: "align", timeMs: at }, at);
+  const run = useCallback((action: (edits: Awaited<ReturnType<typeof getBackend>>["edits"]) => Promise<GridState>, after?: () => void) => {
+    queue.current = queue.current.then(async () => {
+      if (currentTrack.current !== trackId) return;
+      try {
+        const backend = await getBackend();
+        const next = await action(backend.edits);
+        if (currentTrack.current !== trackId) return;
+        setState(next);
+        after?.();
+        onError?.(null);
+      } catch (error) { if (currentTrack.current === trackId) onError?.(describe(error)); }
+    });
+  }, [trackId, setState, onError]);
+  const edit = useCallback((change: GridEdit, boundary = fromMs, transaction?: string, after?: () => void) => {
+    if (!canEdit || trackId === null) return;
+    const options: GridEditOptions = { deck: deckId };
+    if (deck.durationMs !== undefined) options.durationMs = deck.durationMs;
+    if (boundary !== null) options.fromMs = boundary;
+    if (transaction) options.transaction = transaction;
+    run(async edits => {
+      if ((change.kind === "stretch" || change.kind === "tempo") && isDynamicFrom?.(boundary)) {
+        const allowed = await (confirmDynamic?.() ?? window.confirm("This section has tempo changes. Replace them with a constant tempo?"));
+        if (!allowed) return state;
+        options.allowDynamic = true;
+      }
+      return edits.gridEdit(trackId, change, options);
+    }, after);
+  }, [canEdit, trackId, deckId, fromMs, run, isDynamicFrom, confirmDynamic, state, deck.durationMs]);
+  const mark = useCallback(() => { if (fromMs === null) edit({ kind: "downbeat", timeMs: Math.round(positionMs()) }); }, [edit, fromMs, positionMs]);
+  const shift = useCallback((direction: -1 | 1, held = false) => {
+    if (fromMs === null) edit({ kind: "nudge", ms: direction * (held ? HELD_SHIFT_MS : SHIFT_MS) });
+  }, [edit, fromMs]);
+  const stretch = useCallback((direction: -1 | 1, held = false) => {
+    edit({ kind: "stretch", byMs: -direction * (held ? HELD_SHIFT_MS : SHIFT_MS), timeMs: Math.round(positionMs()) });
   }, [edit, positionMs]);
-
-  const tap = useCallback(() => {
+  const double = useCallback(() => edit({ kind: "double" }), [edit]);
+  const halve = useCallback(() => edit({ kind: "halve" }), [edit]);
+  const adjustAll = useCallback(() => { if (canEdit) { cancelTaps(); setFromMs(null); } }, [canEdit, cancelTaps]);
+  const adjustFrom = useCallback(() => {
     if (!canEdit) return;
-    const now = performance.now();
-    const next = withTap(taps, now);
-    if (next.length === 1) tapAnchor.current = Math.round(positionMs());
+    cancelTaps();
+    const at = Math.round(positionMs());
+    edit({ kind: "align", timeMs: at }, at, undefined, () => setFromMs(at));
+  }, [canEdit, cancelTaps, positionMs, edit]);
+  const align = useCallback(() => { if (fromMs === null) edit({ kind: "align", timeMs: Math.round(positionMs()) }); }, [edit, fromMs, positionMs]);
+  const setBpm = useCallback((value: string) => {
+    const bpm = Number(value);
+    if (!value.trim() || !Number.isFinite(bpm) || bpm < 40 || bpm > 499) { onError?.("Enter a BPM from 40 to 499."); return; }
+    edit({ kind: "tempo", bpmX100: Math.round(bpm * 100), anchorMs: fromMs ?? 0 });
+  }, [edit, fromMs, onError]);
+  const tap = useCallback(() => {
+    if (!canEdit || fromMs !== null) return;
+    const next = withTap(tapsRef.current, performance.now());
+    if (next.length === 1) { tapAnchor.current = Math.round(positionMs()); tapRun.current++; }
+    tapsRef.current = next;
     setTaps(next);
     if (tapTimer.current) clearTimeout(tapTimer.current);
-    // Committed when the tapping stops: the gap that ends a run of taps
-    // is the one that starts a new one.
-    tapTimer.current = setTimeout(() => {
-      tapTimer.current = null;
-      setTaps([]);
-      const bpmX100 = tapTempo(next);
-      if (bpmX100 !== null) edit({ kind: "tempo", bpmX100, anchorMs: tapAnchor.current }, cutMs);
-    }, TAP_GAP_MS);
-  }, [canEdit, taps, positionMs, edit, cutMs]);
-  useEffect(
-    () => () => {
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-    },
-    [],
-  );
-
-  const undo = useCallback(() => {
-    if (!hasGrid || readOnly || trackId === null) return;
-    run((edits) => edits.gridUndo(trackId, deckId));
-  }, [hasGrid, readOnly, trackId, deckId, run]);
-  const redo = useCallback(() => {
-    if (!hasGrid || readOnly || trackId === null) return;
-    run((edits) => edits.gridRedo(trackId, deckId));
-  }, [hasGrid, readOnly, trackId, deckId, run]);
+    if (next.length) tapTimer.current = setTimeout(cancelTaps, tapTimeout(next));
+    const bpmX100 = tapTempo(next);
+    if (bpmX100 !== null) edit({ kind: "tap", bpm: 60_000 * (next.length - 1) / (next[next.length - 1]! - next[0]!), anchorMs: tapAnchor.current }, null, `${session.current}:${deckId}:${trackId}:${tapRun.current}`);
+  }, [canEdit, fromMs, positionMs, cancelTaps, edit, deckId, trackId]);
+  const undo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridUndo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
+  const redo = useCallback(() => { if (hasGrid && !readOnly && trackId !== null) { cancelTaps(); run(edits => edits.gridRedo(trackId, deckId)); } }, [hasGrid, readOnly, trackId, deckId, run, cancelTaps]);
   const toggleLock = useCallback(() => {
-    if (!hasGrid || trackId === null || state === null) return;
-    run((edits) => edits.gridLock(trackId, !state.locked));
-  }, [hasGrid, trackId, state, run]);
-
-  const toggleCut = useCallback(() => {
-    if (!hasGrid) return;
-    setCutMs((current) => (current === null ? Math.round(positionMs()) : null));
-  }, [hasGrid, positionMs]);
-
-  return {
-    state,
-    hasGrid,
-    canEdit,
-    cutMs,
-    toggleCut,
-    tapBpmX100: taps.length >= 2 ? tapTempo(taps) : null,
-    tap,
-    mark,
-    shift,
-    stretch,
-    double,
-    halve,
-    alignAll,
-    alignHere,
-    undo,
-    redo,
-    toggleLock,
-  };
+    if (hasGrid && !readOnly && trackId !== null && state !== null) { cancelTaps(); run(edits => edits.gridLock(trackId, !state.locked)); }
+  }, [hasGrid, readOnly, trackId, state, cancelTaps, run]);
+  return { state, hasGrid, canEdit, fromMs, tapBpmX100: tapTempo(taps), tap, mark, shift, stretch, double, halve, adjustAll, adjustFrom, align, setBpm, undo, redo, toggleLock };
 }

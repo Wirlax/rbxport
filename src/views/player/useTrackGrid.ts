@@ -4,7 +4,7 @@
  * The whole grid, once per track, as raw bytes — see `Backend.trackBeats`
  * for why not a window at a time — and fetched again whenever the backend
  * says the track's grid changed: an edit from the GRID panel on this deck
- * or the other, an undo, or a full reload of the library. The panel's own
+ * or the other, an undo, re-analysis, or a full reload of the library. The panel's own
  * state (tempo, undo, redo, lock) rides along, from the same events, so the
  * beats the waveform draws and the BPM the field prints never disagree.
  *
@@ -38,9 +38,12 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
     const id = track.id;
     let live = true;
     let stopGrid: (() => void) | undefined;
+    let stopAnalysis: (() => void) | undefined;
     let stopLibrary: (() => void) | undefined;
+    let request = 0;
 
     const fetch = async () => {
+      const current = ++request;
       const backend = await getBackend();
       const [bytes, found] = await Promise.all([
         backend.trackBeats(id),
@@ -49,7 +52,7 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
         backend.gridState(id).catch(() => null),
       ]);
       // The track may have changed while this was in flight.
-      if (!live) return;
+      if (!live || current !== request) return;
       setGrid(parseBeatGrid(bytes));
       setState(found);
     };
@@ -62,6 +65,9 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
       stopGrid = backend.onGridChanged((changed) => {
         if (changed === id) void fetch();
       });
+      stopAnalysis = backend.onAnalysisChanged((changed) => {
+        if (changed === id) void fetch();
+      });
       stopLibrary = backend.onLibraryChanged(() => {
         void fetch();
       });
@@ -71,6 +77,7 @@ export function useTrackGrid(track: RowDto | null): TrackGrid {
     return () => {
       live = false;
       stopGrid?.();
+      stopAnalysis?.();
       stopLibrary?.();
     };
   }, [track]);

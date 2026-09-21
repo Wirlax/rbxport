@@ -267,7 +267,7 @@ fn the_attack_map_places_a_click_to_the_millisecond() {
 }
 
 #[test]
-fn a_gradual_tempo_change_is_gridded_bar_by_bar() {
+fn a_gradual_tempo_change_preserves_each_walked_beat() {
     // 32 bars at 128, then the period shrinks by 0.3 % per beat for 64
     // beats (to ~155), then 32 bars settled at that tempo.
     let mut clicks: Vec<f64> = Vec::new();
@@ -305,12 +305,12 @@ fn a_gradual_tempo_change_is_gridded_bar_by_bar() {
     let last = segments[segments.len() - 1];
     assert!((first.bpm() - 128.0).abs() < 0.05, "first {}", first.bpm());
     assert!((last.bpm() - 60.0 / settled).abs() < 0.5, "last {} vs {}", last.bpm(), 60.0 / settled);
-    // The walked bars in between rise monotonically, four beats each.
+    // Keep each measured beat rather than averaging four intervals into a bar.
     let walked = &segments[1..segments.len() - 1];
     assert!(walked.len() >= 8, "walked {} bars", walked.len());
     for pair in walked.windows(2) {
-        assert!(pair[1].bpm() >= pair[0].bpm() - 0.5, "bars fall back: {} then {}", pair[0].bpm(), pair[1].bpm());
-        assert_eq!(pair[0].beats(), 4);
+        assert!(pair[1].bpm() >= pair[0].bpm() - 1.0, "beats fall back beyond timing quantization: {} then {}", pair[0].bpm(), pair[1].bpm());
+        assert_eq!(pair[0].beats(), 1);
     }
     // Every click is on a beat of the final grid.
     for &c in &clicks {
@@ -665,4 +665,103 @@ fn the_full_band_is_what_the_plain_call_still_does() {
     let plain = onset_envelope(&mixed, rate);
     let explicit = onset_envelope_band(&mixed, rate, Band::FULL);
     assert_eq!(plain.values, explicit.values, "adding a band must not move the default");
+}
+
+/// The user's two-minute WAV, reproduced as PCM16 samples without an external fixture.
+fn two_minute_ticks(first_sample: usize) -> Vec<f32> {
+    let mut samples = vec![0.0; 48_000 * 120];
+    for start in (first_sample..samples.len()).step_by(22_500) {
+        for j in 0..240.min(samples.len() - start) {
+            let value = 24_000.0 * (-(j as f64) / 45.0).exp()
+                * (2.0 * std::f64::consts::PI * 4_000.0 * j as f64 / 48_000.0).sin();
+            samples[start + j] = value.round() as i16 as f32 / 32_768.0;
+        }
+    }
+    samples
+}
+
+#[test]
+fn rbxport_two_minute_ticks_start_with_beat_one_at_exactly_zero() {
+    let result = rbl_analysis::analyse_with(&two_minute_ticks(0), 48_000, rbl_analysis::AnalysisPreset::Rbxport.options());
+    let grid = result.tempo;
+    assert!((grid.bpm - 128.0).abs() < 0.01, "{grid:?}");
+    assert_eq!(grid.first_beat_secs, 0.0);
+    assert_eq!(grid.segments[0].start_secs(), 0.0);
+    assert_eq!(grid.beats.len(), 256);
+    for (i, beat) in grid.beats.iter().enumerate() {
+        assert_eq!(beat.time_ms, (i as f64 * 468.75).round() as u32);
+        assert_eq!(beat.beat_number, (i % 4 + 1) as u16);
+    }
+}
+
+#[test]
+fn file_start_gate_preserves_silence_and_later_attacks() {
+    // An entire missing opening beat, a nearby later onset, and a grid
+    // nowhere near zero must all keep their first beat after zero.
+    for first_sample in [22_500, 480, 6_000] {
+        let result = rbl_analysis::analyse_with(
+            &two_minute_ticks(first_sample), 48_000, rbl_analysis::AnalysisPreset::Rbxport.options(),
+        );
+        assert!(result.tempo.first_beat_secs > 0.0, "offset {first_sample}");
+        assert!(result.tempo.beats[0].time_ms > 0, "offset {first_sample}");
+    }
+}
+
+#[test]
+fn file_start_gate_handles_a_low_frequency_beat() {
+    let mut samples = vec![0.0; 48_000 * 30];
+    for start in (0..samples.len()).step_by(22_500) {
+        for j in 0..4_800.min(samples.len() - start) {
+            samples[start + j] = (0.8 * (-(j as f64) / 900.0).exp()
+                * (2.0 * std::f64::consts::PI * 80.0 * j as f64 / 48_000.0).sin()) as f32;
+        }
+    }
+    let result = rbl_analysis::analyse_with(&samples, 48_000, rbl_analysis::AnalysisPreset::Rbxport.options());
+    assert!((result.tempo.bpm - 128.0).abs() < 0.01);
+    assert_eq!(result.tempo.first_beat_secs, 0.0);
+    assert_eq!(result.tempo.beats[0].time_ms, 0);
+    assert_eq!(result.tempo.beats[0].beat_number, 1);
+}
+
+#[test]
+fn a_trimmed_opening_beat_is_shorter_without_moving_later_beats() {
+    // A longer percussion tail remains audible when the start is cut.
+    // The waveform is not the original 5 ms test tick.
+    let mut audio = vec![0.0_f32; 48_000 * 120];
+    for start in (0..audio.len()).step_by(22_500) {
+        for j in 0..4_800.min(audio.len() - start) {
+            audio[start + j] = (0.8 * (-(j as f64) / 1_500.0).exp()
+                * (2.0 * std::f64::consts::PI * 80.0 * j as f64 / 48_000.0).sin()) as f32;
+        }
+    }
+    // Include a zero crossing and the last sample strictly below 20 ms.
+    for trimmed_samples in [48, 240, 300, 480, 720, 912, 959, 960, 1008, 1440] {
+        let trimmed_ms = trimmed_samples as f64 / 48.0;
+        let samples = &audio[trimmed_samples..];
+        let options = rbl_analysis::AnalysisPreset::Rbxport.options();
+        let onsets = onset_envelope(samples, 48_000);
+        let kicks = rbl_analysis::onset::onset_envelope_band(samples, 48_000, rbl_analysis::onset::Band::LOW);
+        let attacks = rbl_analysis::attack::AttackMap::new(samples, 48_000, options.attacks);
+        let fitted = rbl_analysis::tempo::detect_tempo_with(&onsets, Some(&kicks), Some(&attacks), options.tempo);
+        let result = rbl_analysis::analyse_with(samples, 48_000, options).tempo;
+        if trimmed_samples >= 960 {
+            assert!(result.beats[0].time_ms > 0, "trim {trimmed_ms} ms must not qualify");
+            assert_eq!(result.beats.len(), fitted.beats.len());
+            for (after, before) in result.beats.iter().zip(&fitted.beats) {
+                assert_eq!(after.time_ms, before.time_ms);
+                assert_eq!(after.tempo_x100, before.tempo_x100);
+            }
+            continue;
+        }
+        assert_eq!(result.beats[0].time_ms, 0, "trim {trimmed_ms} ms");
+        assert_eq!(result.beats[0].beat_number, 1);
+        assert_eq!(result.first_beat_secs, 0.0);
+        assert_eq!(result.beats.len(), fitted.beats.len() + 1);
+        for (after, before) in result.beats[1..].iter().zip(&fitted.beats) {
+            assert_eq!(after.time_ms, before.time_ms, "trim {trimmed_ms} ms moved a later beat");
+            assert_eq!(after.tempo_x100, before.tempo_x100);
+        }
+        assert!(f64::from(result.beats[1].time_ms) < 60_000.0 / result.bpm);
+        assert_eq!(beats_of(&result.segments, 0), result.beats);
+    }
 }

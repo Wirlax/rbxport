@@ -158,7 +158,7 @@ impl LinkSession {
             Menu::Root => window(root_menu()),
             Menu::SortOptions => window(sort_menu()),
             Menu::Keys => window(
-                (1..=24)
+                self.catalog.key_ids().into_iter()
                     .map(|id| Item::named(id, keys::name(id), item_type::KEY))
                     .collect(),
             ),

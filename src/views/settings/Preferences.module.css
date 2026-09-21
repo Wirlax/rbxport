@@ -7,7 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 55%);
+  background: var(--c-modal-scrim);
 }
 
 /* rekordbox opens a window; this is that window drawn inside ours, title
@@ -614,12 +614,7 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
   margin-top: auto;
   margin-bottom: 12px;
   align-self: center;
-  border-color: var(--c-raised);
-  background: transparent;
-}
-.reportBug:hover:not(:disabled) {
-  border-color: var(--c-raised);
-  background: var(--c-raised);
+  font-size: var(--f-size-sm);
 }
 
 
@@ -640,13 +635,13 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .linkStatus[data-connected="true"]::before { background: var(--c-accent); }
 .linkHelp { margin: 8px 0 12px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
 .linkSummary .linkHelp { margin-bottom: 0; overflow-wrap: anywhere; }
-.linkError { color: var(--c-error); font-size: var(--f-size-sm); line-height: 1.5; }
+.linkError,
 .linkWarning {
   margin: 12px 0;
   padding: 10px 12px;
-  border-left: 2px solid var(--c-label-yellow);
-  background: var(--c-raised);
-  color: var(--c-label-yellow);
+  border: 0;
+  background: var(--c-error);
+  color: var(--c-on-error);
   font-size: var(--f-size-sm);
   line-height: 1.5;
 }
@@ -674,8 +669,8 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .networkInterfaces td:first-child { min-width: 104px; }
 .networkInterfaces td:last-child { white-space: nowrap; }
 .linkRecommendation { display: block; margin-top: 4px; font-size: var(--f-size-xs); color: var(--c-text-dim); }
-.linkWarning strong { display: block; color: var(--c-label-yellow); }
-.linkWarning p { margin: 4px 0 0; color: var(--c-text); }
+.linkWarning strong { display: block; color: inherit; }
+.linkWarning p { margin: 4px 0 0; color: inherit; }
 .linkStatus[data-state="waiting"]::before,
 .linkStatus[data-state="joining"]::before { background: var(--c-label-yellow); }
 .linkStatus[data-state="down"]::before { background: var(--c-error); }
@@ -729,3 +724,7 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .aboutUpdates > p:last-child { margin-bottom: 0; }
 
 .paneGroupHeading { margin: 16px 8px 8px; padding-top: 12px; border-top: 1px solid var(--c-raised); color: var(--c-text-dim); font-size: var(--f-size-sm); font-weight: 600; }
+
+.linkKeySort { border: 0; padding: 0; margin: 24px 0; }
+.linkKeySort legend { font-weight: 700; margin-bottom: 10px; }
+.linkKeySort label { display: flex; align-items: center; gap: 8px; padding: 6px 0; }

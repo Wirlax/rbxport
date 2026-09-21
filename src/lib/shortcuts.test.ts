@@ -97,6 +97,13 @@ describe("dispatch", () => {
 });
 
 describe("menuAccelerator", () => {
+  it("routes Windows history keys, leaving macOS to the native menu", () => {
+    expect(menuAccelerator({ key: "z", ctrlKey: true }, WIN)).toBe("undo");
+    expect(menuAccelerator({ key: "Z", ctrlKey: true, shiftKey: true }, WIN)).toBe("redo");
+    expect(menuAccelerator({ key: "y", ctrlKey: true }, WIN)).toBe("redo");
+    expect(menuAccelerator({ key: "z", metaKey: true }, MAC)).toBeNull();
+    expect(menuAccelerator({ key: "Z", metaKey: true, shiftKey: true }, MAC)).toBeNull();
+  });
   it("names the menu item a Windows accelerator stands for", () => {
     expect(menuAccelerator({ key: ",", ctrlKey: true }, WIN)).toBe("settings");
     expect(menuAccelerator({ key: "o", ctrlKey: true }, WIN)).toBe("import");

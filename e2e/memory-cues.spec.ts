@@ -165,3 +165,24 @@ test("the MEMORY list is ten boxes whether the track has cues or none", async ({
   await expect(boxes).toHaveCount(10);
   await expect(list.locator("[data-blank]")).toHaveCount(10);
 });
+
+test("memory cues draw red triangles in the overview and playlist preview", async ({page}) => {
+  await load(page, "?writable=1");
+  const head = page.getByTestId("player-overview").locator('[data-band="overview"][data-cue=""] i').first();
+  await expect(head).toBeVisible();
+  await expect(head).toHaveCSS("width", "13px");
+  await expect(head).toHaveCSS("height", "10px");
+  await expect(head).toHaveCSS("clip-path", "polygon(0px 0px, 100% 0px, 50% 100%)");
+  const canvas = page.locator('[role="gridcell"][data-col="preview"]').nth(3).locator("canvas");
+  await expect.poll(() => canvas.evaluate((c: HTMLCanvasElement) => {
+    const context = c.getContext("2d");
+    const pixel = context?.getImageData(Math.round(c.width * 0.02), 1, 1, 1).data;
+    return pixel ? Array.from(pixel).slice(0, 3) : [];
+  })).toEqual([234, 51, 35]);
+  await memoryRows(page).first().click();
+  await expect(head).toHaveCount(0);
+  await expect.poll(() => canvas.evaluate((c: HTMLCanvasElement) => {
+    const pixel = c.getContext("2d")?.getImageData(Math.round(c.width * 0.02), 1, 1, 1).data;
+    return pixel ? Array.from(pixel).slice(0, 3) : [];
+  })).not.toEqual([234, 51, 35]);
+});

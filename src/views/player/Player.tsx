@@ -14,6 +14,8 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { TimeReadouts } from "./TimeReadouts";
+import { useEventCallback } from "@/store/useEventCallback";
 
 import type { Cue, DeckId, Phrase, RowDto } from "@/ipc/types";
 import { getBackend } from "@/ipc/client";
@@ -56,7 +58,7 @@ import {
   type PadMode,
   beatLoopRange,
   tempoAtMs,
-  tempoChangeAtMs,
+  tempoAnnotations,
   type BeatGrid as TrackBeatGrid,
 } from "@/lib/player";
 import { type DeckLoop, usePlayback } from "@/store/usePlayback";
@@ -82,6 +84,7 @@ import { useTrackCues } from "./useTrackCues";
 import { useTrackDetails } from "./useTrackDetails";
 import { useTrackGrid } from "./useTrackGrid";
 import { useGridEditor } from "./useGridEditor";
+import { listenEditHistory } from "@/lib/editHistory";
 import { useHoldRepeat } from "./useHoldRepeat";
 import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
@@ -353,28 +356,44 @@ export const CueMarkers = memo(function CueMarkers({
   );
 });
 
-/** Overview labels use the grid's tempo boundaries, independent of cues. */
+/** A transition spans the actual ramp, clipped to the visible waveform. */
+const TempoMarkers = memo(function TempoMarkers({ grid, totalMs, window, overview = false }: {
+  grid: TrackBeatGrid;
+  totalMs: number;
+  window: { from: number; to: number };
+  overview?: boolean;
+}) {
+  const showBpmChanges = usePreferences().view.showBpmChanges;
+  const annotations = useMemo(() => showBpmChanges ? tempoAnnotations(grid) : [], [grid, showBpmChanges]);
+  if (totalMs <= 0 || !showBpmChanges) return null;
+  const from = window.from * totalMs;
+  const to = window.to * totalMs;
+  const span = Math.max(to - from, 1);
+  return <>{annotations.map((mark) => {
+    if (mark.toMs < from || mark.fromMs > to) return null;
+    const ramp = mark.toMs > mark.fromMs;
+    const left = (Math.max(from, mark.fromMs) - from) / span * 100;
+    if (!ramp) return <span key={mark.fromMs}
+      className={`${styles.cueTempo} ${overview ? styles.overviewTempo : styles.detailTempo}`}
+      style={{ left: `${left}%` }} data-testid={overview ? "overview-tempo" : "cue-tempo"} aria-hidden
+    >{formatBpm(mark.toBpmX100)}{overview ? "" : " BPM"}</span>;
+    return <span key={mark.fromMs} className={`${styles.tempoRamp} ${overview ? styles.overviewRamp : ""}`}
+      style={{ left: `${left}%`, width: `${(Math.min(to, mark.toMs) - Math.max(from, mark.fromMs)) / span * 100}%` }}
+      data-testid="tempo-ramp" title={`${formatBpm(mark.fromBpmX100)} → ${formatBpm(mark.toBpmX100)} BPM`}
+      aria-hidden>
+      <span>{formatBpm(mark.fromBpmX100)}{overview ? "" : " BPM"}</span>
+      <span className={styles.tempoRampArrow} />
+      <span>{formatBpm(mark.toBpmX100)}{overview ? "" : " BPM"}</span>
+    </span>;
+  })}</>;
+});
+
+/** Overview and detail share the same grouped tempo annotations. */
 export const OverviewTempoMarkers = memo(function OverviewTempoMarkers({ grid, totalMs }: {
   grid: TrackBeatGrid;
   totalMs: number;
 }) {
-  if (totalMs <= 0) return null;
-  const labels = [];
-  for (let i = 0; i < grid.times.length; i++) {
-    const tempo = grid.tempos[i] ?? 0;
-    const time = grid.times[i] ?? 0;
-    if (tempo <= 0 || (i > 0 && tempo === grid.tempos[i - 1]) || time > totalMs) continue;
-    labels.push(
-      <span
-        key={time}
-        className={`${styles.cueTempo} ${styles.overviewTempo}`}
-        style={{ left: `${time / totalMs * 100}%` }}
-        data-testid="overview-tempo"
-        aria-hidden
-      >{formatBpm(tempo)}</span>,
-    );
-  }
-  return <>{labels}</>;
+  return <TempoMarkers grid={grid} totalMs={totalMs} window={{ from: 0, to: 1 }} overview />;
 });
 
 /** The detail beat grid, with heavier downbeats and labels at tempo changes. */
@@ -393,8 +412,7 @@ const BeatGrid = memo(function BeatGrid({
   return (
     <>
       {beats.map((beat) => {
-        const changedTempo = tempoChangeAtMs(grid, beat.timeMs);
-        if (!everyBeat && !beat.downbeat && changedTempo === null) return null;
+        if (!everyBeat && !beat.downbeat) return null;
         const at = beat.timeMs / totalMs;
         if (at < window.from || at > window.to) return null;
         return (
@@ -404,37 +422,36 @@ const BeatGrid = memo(function BeatGrid({
             style={{ left: `${((at - window.from) / span) * 100}%` }}
             aria-hidden
           >
-            {changedTempo !== null ? (
-              <span className={styles.cueTempo} data-testid="cue-tempo">{formatBpm(changedTempo)} BPM</span>
-            ) : null}
+
           </span>
         );
       })}
+      <TempoMarkers grid={grid} totalMs={totalMs} window={window} />
     </>
   );
 });
 
 /**
- * The CUT point over the detail waveform: the beat from which the GRID
+ * The edit boundary over the detail waveform: the beat from which the GRID
  * panel's edits apply while one is set. Drawn like a beat line, in the
  * downbeat's red, so it reads as part of the grid rather than a cue.
  */
-const CutMark = memo(function CutMark({
-  cutMs, totalMs, window,
+const GridEditBoundary = memo(function GridEditBoundary({
+  fromMs, totalMs, window,
 }: {
-  cutMs: number;
+  fromMs: number;
   totalMs: number;
   window: { from: number; to: number };
 }) {
-  const at = cutMs / totalMs;
+  const at = fromMs / totalMs;
   if (at < window.from || at > window.to) return null;
   const span = Math.max(window.to - window.from, 1e-6);
   return (
     <span
       className={styles.cutMark}
       style={{ left: `${((at - window.from) / span) * 100}%` }}
-      title="CUT: grid edits apply from here on"
-      data-testid="grid-cut"
+      title="Grid edits apply from here on"
+      data-testid="grid-edit-start"
     />
   );
 });
@@ -544,15 +561,15 @@ const GRID_EDITS: readonly (readonly { id: string; label: string }[])[] = [
     { id: "halve", label: "Halve the tempo" },
   ],
   [
-    { id: "snap-start", label: "Snap the grid to the start" },
-    { id: "snap-here", label: "Snap the grid here" },
+    { id: "snap-start", label: "Adjust all beats" },
+    { id: "snap-here", label: "Adjust beats from here" },
   ],
   [
     { id: "undo", label: "Undo the last grid edit" },
     { id: "redo", label: "Redo the last grid edit" },
   ],
   [
-    { id: "cut-grid", label: "Cut the grid here" },
+    { id: "cut-grid", label: "Toggle metronome" },
     { id: "metronome", label: "Metronome" },
     { id: "lock", label: "Lock the grid" },
   ],
@@ -593,11 +610,23 @@ interface GridButton {
  * rest fire once. Every editing button says why it is off — no grid, the
  * library read-only, or the lock — so a greyed button is never a mystery.
  */
+function GridBpmField({ value, disabled, onCommit, tapping }: { value: string; tapping: boolean; disabled: boolean; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return <input className={styles.bpmField} data-testid="grid-bpm" data-tapping={tapping || undefined} aria-label="Grid BPM" inputMode="decimal"
+    disabled={disabled} value={draft ?? value} onFocus={() => setDraft(value)} onChange={event => setDraft(event.target.value)}
+    onBlur={() => { if (draft !== null && draft !== value) onCommit(draft); setDraft(null); }}
+    onKeyDown={event => {
+      event.stopPropagation();
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") { setDraft(null); }
+    }} />;
+}
+
 function gridButton(
   id: string,
   editor: ReturnType<typeof useGridEditor>,
   hold: ReturnType<typeof useHoldRepeat>,
-  deck: { metronome: boolean; metronomeLevel: string; metronomeBusy: boolean; toggleMetronome: () => void; idle: boolean; readOnly: boolean },
+  deck: { metronome: boolean; metronomeLevel: string; metronomeBusy: boolean; toggleMetronome: () => void; cycleMetronomeVolume: () => void; idle: boolean; readOnly: boolean },
 ): GridButton {
   const reason = !editor.hasGrid
     ? "This track has no beat grid to edit"
@@ -606,37 +635,37 @@ function gridButton(
       : "";
   const locked = editor.hasGrid && (editor.state?.locked ?? false);
   const once = (action: () => void, title: string): GridButton => ({
-    disabled: !editor.canEdit,
+    disabled: !editor.canEdit || (editor.fromMs !== null && ["mark", "tap", "shift-back", "shift-forward"].includes(id)),
     pressed: undefined,
     title: editor.canEdit ? title : locked ? "The beat grid is locked" : reason || title,
     handlers: { onClick: action },
   });
-  const held = (action: () => void, title: string): GridButton => ({
+  const held = (action: (held?: boolean) => void, title: string): GridButton => ({
     ...once(action, title),
     handlers: hold(action),
   });
-  const withCut = (title: string) => (editor.cutMs !== null ? `${title}, from the CUT point on` : title);
+  const withCut = (title: string) => (editor.fromMs !== null ? `${title}, from the selected beat on` : title);
   switch (id) {
     case "mark":
       return once(editor.mark, withCut("Make the beat nearest the playhead beat 1"));
     case "tap":
-      return once(editor.tap, withCut("Tap the tempo; the grid follows the taps once they stop"));
+      return once(editor.tap, withCut("Tap the tempo; updates begin with the second tap"));
     case "shift-back":
-      return held(() => editor.shift(-1), withCut("Shift the grid 1 ms earlier"));
+      return held((repeat) => editor.shift(-1, repeat), withCut("Shift the grid 1 ms earlier"));
     case "shift-forward":
-      return held(() => editor.shift(1), withCut("Shift the grid 1 ms later"));
+      return held((repeat) => editor.shift(1, repeat), withCut("Shift the grid 1 ms later"));
     case "widen":
-      return held(() => editor.stretch(-1), withCut("Widen the beats: 0.01 BPM slower, the first beat held"));
+      return held((repeat) => editor.stretch(-1, repeat), withCut("Widen the beats: move the target beat 1 ms later, the first beat held"));
     case "narrow":
-      return held(() => editor.stretch(1), withCut("Narrow the beats: 0.01 BPM faster, the first beat held"));
+      return held((repeat) => editor.stretch(1, repeat), withCut("Narrow the beats: move the target beat 1 ms earlier, the first beat held"));
     case "double":
       return once(editor.double, withCut("Double the tempo"));
     case "halve":
       return once(editor.halve, withCut("Halve the tempo"));
     case "snap-start":
-      return once(editor.alignAll, withCut("Move the grid so the nearest beat lands on the playhead"));
+      return { ...once(editor.adjustAll, "Adjust all beats"), pressed: editor.fromMs === null };
     case "snap-here":
-      return once(editor.alignHere, "Move the grid from the playhead on so a beat lands on it; earlier beats stay");
+      return { ...once(editor.adjustFrom, "Adjust beats from here"), pressed: editor.fromMs !== null };
     case "undo":
       return {
         disabled: !(editor.state?.canUndo ?? false) || deck.readOnly,
@@ -653,25 +682,21 @@ function gridButton(
       };
     case "cut-grid":
       return {
-        disabled: !editor.canEdit,
-        pressed: editor.cutMs !== null,
-        title: editor.cutMs !== null
-          ? "Clear the CUT point: edits apply to the whole grid again"
-          : editor.canEdit
-            ? "CUT here: edits apply from the playhead on, so a tempo change can be gridded without moving what came before"
-            : locked ? "The beat grid is locked" : reason,
-        handlers: { onClick: editor.toggleCut },
+        disabled: deck.idle || deck.metronomeBusy || !editor.hasGrid,
+        pressed: deck.metronome,
+        title: "Toggle metronome",
+        handlers: { onClick: deck.toggleMetronome },
       };
     case "metronome":
       return {
         disabled: deck.idle || deck.metronomeBusy,
         pressed: deck.metronome,
-        title: `Metronome: ${deck.metronomeLevel}. Click to cycle Low → Medium → High → Off.`,
-        handlers: { onClick: deck.toggleMetronome },
+        title: `Metronome volume: ${deck.metronomeLevel}. Click to cycle Low → Medium → High.`,
+        handlers: { onClick: deck.cycleMetronomeVolume },
       };
     case "lock":
       return {
-        disabled: !editor.hasGrid,
+        disabled: !editor.hasGrid || deck.readOnly,
         pressed: locked,
         title: locked ? "Unlock the beat grid for editing" : "Lock the beat grid so nothing here changes it",
         handlers: { onClick: editor.toggleLock },
@@ -707,11 +732,16 @@ export const Player = memo(function Player({
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
   leaderBpmX100 = null, onPlayingBpm, readOnly = false,
 }: PlayerProps) {
-  const playback = usePlayback(track?.id ?? null, deck);
+  const playback = usePlayback(track?.id ?? null, deck, false);
   // The waveforms follow their containers, which change with the window and
   // with the tree splitter — a fixed-width canvas stretched by CSS is blurry
   // on a wide window and wasted resolution on a narrow one.
-  const [overviewRef, overview] = useElementSize<HTMLDivElement>();
+  const [measureOverview, overview] = useElementSize<HTMLDivElement>();
+  const overviewElement = useRef<HTMLDivElement | null>(null);
+  const overviewRef = useCallback((element: HTMLDivElement | null) => {
+    overviewElement.current = element;
+    return measureOverview(element);
+  }, [measureOverview]);
   const [detailRef, detail] = useElementSize<HTMLDivElement>();
   // Written to by the frame loop below rather than rendered: see the effect.
   const overviewHead = useRef<HTMLSpanElement>(null);
@@ -728,7 +758,17 @@ export const Player = memo(function Player({
   // changes tempo partway through has to read as the tempo where the edits
   // would land, not as the one it started at. The state's tempo is the first
   // beat's, which is all there is before the grid arrives.
-  const gridBpmX100 = tempoAtMs(grid, playback.position * 1000) || bpmX100;
+  const [gridBpmX100, setGridBpmX100] = useState(bpmX100);
+  const { positionRef, subscribe, positionNow } = playback;
+  useEffect(() => {
+    let previous: number | undefined;
+    const update = (seconds: number) => {
+      const next = tempoAtMs(grid, seconds * 1000) || bpmX100;
+      if (next !== previous) { previous = next; setGridBpmX100(next); }
+    };
+    update(positionRef.current);
+    return subscribe(update);
+  }, [grid, bpmX100, positionRef, subscribe]);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [ownBars, setOwnBars] = useState<number>(DETAIL_BARS);
   // Linked or its own, and the setter follows whichever it is: a controlled
@@ -767,14 +807,15 @@ export const Player = memo(function Player({
    */
   const [quantize, setQuantize] = useState(true);
   const { preferences, update: updatePreferences } = usePreferencesContext();
+  const [metronomeMenu, setMetronomeMenu] = useState<{x: number; y: number} | null>(null);
   const [metronome, setMetronome] = useState(false);
   const [metronomeBusy, setMetronomeBusy] = useState(false);
   const metronomePending = useRef(false);
-  const metronomeLevel = !metronome ? "Off" : preferences.audio.metronomeVolume === "small" ? "Low" : preferences.audio.metronomeVolume === "middle" ? "Medium" : "High";
+  const metronomeLevel = preferences.audio.metronomeVolume === "small" ? "Low" : preferences.audio.metronomeVolume === "middle" ? "Medium" : "High";
   const toggleMetronome = useCallback(() => {
     if (metronomePending.current) return;
-    const volume = !metronome ? "small" : preferences.audio.metronomeVolume === "small" ? "middle" : "large";
-    const on = !metronome || preferences.audio.metronomeVolume !== "large";
+    const volume = preferences.audio.metronomeVolume;
+    const on = !metronome;
     metronomePending.current = true;
     setMetronomeBusy(true);
     void getBackend().then(async (backend) => {
@@ -785,6 +826,13 @@ export const Player = memo(function Player({
     }).catch((e: unknown) => onError?.(e instanceof Error ? e.message : "The metronome could not be changed."))
       .finally(() => { metronomePending.current = false; setMetronomeBusy(false); });
   }, [metronome, preferences.audio.metronomeVolume, preferences.audio.metronomeSound, updatePreferences, deck, onError]);
+  const cycleMetronomeVolume = useCallback(() => {
+    const volume = preferences.audio.metronomeVolume === "small" ? "middle" : preferences.audio.metronomeVolume === "middle" ? "large" : "small";
+    void getBackend().then(async backend => {
+      await backend.setMetronome(preferences.audio.metronomeSound, volume);
+      updatePreferences("audio", { metronomeVolume: volume });
+    }).catch(() => onError?.("The metronome volume could not be changed."));
+  }, [preferences.audio.metronomeVolume, preferences.audio.metronomeSound, updatePreferences, onError]);
   const { view: viewPrefs, advanced: advancedPrefs } = preferences;
   // The ≡ menu at the foot of the deck.
   const [deckMenuAt, setDeckMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -911,7 +959,6 @@ export const Player = memo(function Player({
 
   // The tempo, for the bar count the frame loop prints.
   const bpm = bpmX100 / 100;
-  const { positionRef, subscribe } = playback;
   // The memory cues' positions, for the count-down modes of the beat count.
   const memorySeconds = useMemo(
     () => cues.filter((cue) => cue.memory).map((cue) => cue.positionMs / 1000),
@@ -922,13 +969,14 @@ export const Player = memo(function Player({
   /*
    * The playhead, written straight to its elements every frame.
    *
-   * Not React state: `position` feeds this whole subtree, so ticking it faster
-   * only re-renders the player faster — the head still steps, it just steps
-   * more often. A transform through a ref moves it on the compositor without
-   * laying anything out, and the state below stays at ten a second for the
-   * readouts and the waveform.
+   * A transform through a ref moves it on the compositor without laying
+   * anything out. Time labels subscribe separately to displayed tenths;
+   * the deck only updates its canvas anchor when the buffered slice runs out.
    */
   useEffect(() => {
+    const x = (headPercent() / 100) * detail.width;
+    if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
+    if (barsLabel.current) barsLabel.current.style.transform = `translateX(${x}px)`;
     const apply = (seconds: number) => {
       const at = total > 0 ? Math.min(seconds / total, 1) : 0;
       if (overviewHead.current) {
@@ -944,18 +992,19 @@ export const Player = memo(function Player({
         scroller.current.style.transform = `translateX(${dx}px)`;
       }
       if (needsRedraw(at, drawn.current, span)) setAnchor(at);
-      const x = (headPercent() / 100) * detail.width;
-      if (detailHead.current) detailHead.current.style.transform = `translateX(${x}px)`;
       if (barsLabel.current) {
-        barsLabel.current.style.transform = `translateX(${x}px)`;
-        barsLabel.current.textContent = beatCountText(seconds, bpm, beatCount, memorySeconds, grid);
+        const text = beatCountText(seconds, bpm, beatCount, memorySeconds, grid);
+        if (barsLabel.current.textContent !== text) barsLabel.current.textContent = text;
       }
+      const progress = overviewElement.current;
+      const position = String(Math.round(seconds));
+      if (progress && progress.getAttribute("aria-valuenow") !== position) progress.setAttribute("aria-valuenow", position);
     };
     // At once as well as on every frame: a paused player schedules no frames,
     // and the head would otherwise sit where the last track left it.
     apply(positionRef.current);
     return subscribe(apply);
-  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe, beatCount, memorySeconds, grid]);
+  }, [total, bpm, span, overview.width, detail.width, positionRef, subscribe, beatCount, memorySeconds, grid, overviewRef, simple, dual]);
 
   /*
    * The layer's new anchor, taken only once it is on screen.
@@ -1065,11 +1114,28 @@ export const Player = memo(function Player({
   });
   // The GRID EDIT cluster. The playhead it reads is the extrapolated one:
   // a beat is a few frames, and the frame loop's copy can be a frame behind.
-  const positionMs = useCallback(() => playback.positionNow() * 1000, [playback]);
+  const positionMs = useCallback(() => positionNow() * 1000, [positionNow]);
+  const isDynamicFrom = useCallback((from: number | null) => {
+    const startTime = from === null ? 0 : nearestBeatMs(grid, from);
+    const start = Math.max(0, grid.times.findIndex(time => time >= startTime));
+    return grid.tempos.slice(start).some(tempo => tempo !== grid.tempos[start]);
+  }, [grid]);
   const gridEditor = useGridEditor({
     trackId: playback.idle ? null : track?.id ?? null,
     deck, state: gridState, setState: setGridState, positionMs, readOnly, onError,
+    durationMs: Math.round(total * 1000),
+    isDynamicFrom,
   });
+  const { state: historyState, undo: undoGrid, redo: redoGrid } = gridEditor;
+  useEffect(() => {
+    if (!armed || readOnly) return;
+    return listenEditHistory((action) => {
+      if (action === "undo" && historyState?.canUndo) undoGrid();
+      if (action === "redo" && historyState?.canRedo) redoGrid();
+    },
+    historyState?.canUndo ? historyState.undoLabel ?? "Beat Grid Edit" : null,
+    historyState?.canRedo ? historyState.redoLabel ?? "Beat Grid Edit" : null);
+  }, [armed, readOnly, historyState, undoGrid, redoGrid]);
   const hold = useHoldRepeat();
 
   // Loops. AU sets a beat loop of the chosen length from the head, snapped
@@ -1263,8 +1329,6 @@ export const Player = memo(function Player({
 
   // A beat's length, for phrases whose time the grid did not resolve.
   const beatMs = bpmX100 > 0 ? 6_000_000 / bpmX100 : 0;
-  const remaining = splitTime(Math.max(total - playback.position, 0));
-  const elapsed = splitTime(playback.position);
 
   useEffect(() => {
     publishZoom?.(zoom);
@@ -1341,8 +1405,7 @@ export const Player = memo(function Player({
    * been clicked, which is what turns the playhead red.
    */
   const keyOverrides = preferences.keyboard.overrides;
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
+  const onDeckKey = useEventCallback((event: KeyboardEvent) => {
       const hit = dispatchBinding(event, platform, event.target as HTMLElement | null, keyOverrides);
       if (hit?.action === undefined) return;
       // Player A's keys are Player A's and Player B's, with shift, Player
@@ -1469,7 +1532,7 @@ export const Player = memo(function Player({
           break;
         case "shiftGridToCenter":
           event.preventDefault();
-          if (!event.repeat) gridEditor.alignAll();
+          if (!event.repeat) gridEditor.align();
           break;
         default: {
           const beats = beatLoopLength(action);
@@ -1497,7 +1560,13 @@ export const Player = memo(function Player({
           break;
         }
       }
-    };
+  });
+  const onDeckKeyUp = useEventCallback((event: KeyboardEvent) => {
+    const hit = matchBinding(event, platform, keyOverrides);
+    if (hit?.action === "cue" && hit.deck === deck) dropCue();
+  });
+  const onDeckBlur = useEventCallback(() => dropCue());
+  useEffect(() => {
     /**
      * Letting go of CUE.
      *
@@ -1507,23 +1576,17 @@ export const Player = memo(function Player({
      * reasoning covers the window losing focus altogether — a preview that
      * outlives the key would play on with nothing able to stop it.
      */
-    const onKeyUp = (event: KeyboardEvent) => {
-      const hit = matchBinding(event, platform, keyOverrides);
-      if (hit?.action === "cue" && hit.deck === deck) dropCue();
-    };
-    const onBlur = () => dropCue();
 
     // `globalThis`, because `window` here is the slice of the track on screen.
-    globalThis.addEventListener("keydown", onKey);
-    globalThis.addEventListener("keyup", onKeyUp);
-    globalThis.addEventListener("blur", onBlur);
+    globalThis.addEventListener("keydown", onDeckKey);
+    globalThis.addEventListener("keyup", onDeckKeyUp);
+    globalThis.addEventListener("blur", onDeckBlur);
     return () => {
-      globalThis.removeEventListener("keydown", onKey);
-      globalThis.removeEventListener("keyup", onKeyUp);
-      globalThis.removeEventListener("blur", onBlur);
+      globalThis.removeEventListener("keydown", onDeckKey);
+      globalThis.removeEventListener("keyup", onDeckKeyUp);
+      globalThis.removeEventListener("blur", onDeckBlur);
     };
-  }, [deck, jump, platform, playback, onLoadSelected, selectedTrackId, holdCue, dropCue, memory, hot, togglePlay, keyOverrides, markLoopIn, markLoopOut, reloopOrExit, loopOfBeats, beatSync, resetTempo,
-    preferences.audio.metronomeSound, updatePreferences, gridEditor]);
+  }, [onDeckKey, onDeckKeyUp, onDeckBlur]);
 
   const takesDrop = dragging && Boolean(onDropTrack);
 
@@ -1556,7 +1619,7 @@ export const Player = memo(function Player({
         playing={playback.playing}
         idle={playback.idle}
         onToggle={togglePlay}
-        position={playback.position}
+        positionSource={playback}
         total={total}
         cues={cues}
         grid={grid}
@@ -1761,7 +1824,7 @@ export const Player = memo(function Player({
               aria-label="Position"
               aria-valuemin={0}
               aria-valuemax={Math.round(total)}
-              aria-valuenow={Math.round(playback.position)}
+              aria-valuenow={Math.round(playback.positionRef.current)}
             >
               {track && track.analysed ? (
                 <WaveformDetail
@@ -1817,8 +1880,8 @@ export const Player = memo(function Player({
         {dual ? (
           <DualHead
             track={track}
-            remaining={remaining}
-            elapsed={elapsed}
+            positionSource={playback}
+            total={total}
             sleeve={sleeve}
             keyControl={<KeyShift musicalKey={track ? formatKey(track.key, viewPrefs.keyDisplay) : ""}
               shift={playback.keyShift} disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />}
@@ -1836,14 +1899,7 @@ export const Player = memo(function Player({
           {track ? (
             <>
               <span className={styles.artist}>{track.artist}</span>
-              <span className={styles.remaining} data-testid="player-time">
-                -{remaining.main}
-                <i className={styles.tenths}>.{remaining.tenths}</i>
-              </span>
-              <span className={styles.elapsed}>
-                {elapsed.main}
-                <i className={styles.tenths}>.{elapsed.tenths}</i>
-              </span>
+              <TimeReadouts source={playback} total={total} classes={styles} />
               <div className={styles.keyControl}>
                 <KeyShift musicalKey={formatKey(track.key, viewPrefs.keyDisplay)} shift={playback.keyShift}
                   disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />
@@ -1909,6 +1965,7 @@ export const Player = memo(function Player({
             left. */}
         {dual ? (
           <DualControls
+            gridEditor={gridEditor}
             readOnly={readOnly}
             memory={memory}
             quantize={quantize}
@@ -1929,6 +1986,7 @@ export const Player = memo(function Player({
             ref={detailRef}
             className={styles.detail}
             data-testid="player-detail"
+            data-pcm={bars <= 0.5 || undefined}
             onWheel={wheelZoom}
             onPointerDown={startDrag}
             onPointerMove={dragDetail}
@@ -1938,12 +1996,27 @@ export const Player = memo(function Player({
             <div ref={scroller} className={styles.scroller}>
               {track && track.analysed ? (
                 <WaveformDetail
+                  // PCM and PWV7 have incompatible binary layouts. This is
+                  // the detail waveform the wheel zooms, so make its format
+                  // boundary a full unmount/remount; no canvas or async state
+                  // can then cross from one byte layout into the other.
+                  key={bars <= 0.5 ? "pcm" : "pwv7"}
                   trackId={track.id}
                   progress={anchor}
                   span={span * OVERDRAW}
                   width={detail.width * OVERDRAW}
                   height={detail.height}
                   detail
+                  pcmWindow={bars <= 0.5 ? {
+                    // The canvas draws the same 2× viewport as PWV7, but the
+                    // decoder carries a two-second guard either side. That is
+                    // enough source audio around the playhead without writing
+                    // a permanent peak file.
+                    fromMs: Math.max(0, window.from * total * 1000 - 2000),
+                    toMs: Math.min(total * 1000, window.to * total * 1000 + 2000),
+                    drawFromMs: window.from * total * 1000,
+                    drawToMs: window.to * total * 1000,
+                  } : undefined}
                   // In the 2 PLAYER layout the two details are halves that
                   // meet at the line between the decks: deck A's rises from
                   // it and deck B's, whose canvas is flipped, hangs from it
@@ -1959,9 +2032,9 @@ export const Player = memo(function Player({
                 window={window}
                 everyBeat={showsEveryBeat(bars)}
               />
-              {/* The CUT point, while one is set: where the grid edits start. */}
-              {gridEditor.cutMs !== null && total > 0 ? (
-                <CutMark cutMs={gridEditor.cutMs} totalMs={total * 1000} window={window} />
+              {/* The edit boundary, while one is set: where the grid edits start. */}
+              {gridEditor.fromMs !== null && total > 0 ? (
+                <GridEditBoundary fromMs={gridEditor.fromMs} totalMs={total * 1000} window={window} />
               ) : null}
               <CueMarkers cues={cues} totalMs={total * 1000} band="detail" window={window} loop={playback.loop} />
             </div>
@@ -2014,17 +2087,11 @@ export const Player = memo(function Player({
                       {at === 1 ? (
                         // The tempo the grid has under the playhead — or,
                         // while tapping, the tempo the taps so far describe.
-                        <span
-                          className={styles.bpmField}
-                          data-testid="grid-bpm"
-                          data-tapping={gridEditor.tapBpmX100 !== null || undefined}
-                        >
-                          {formatBpm(gridEditor.tapBpmX100 ?? gridBpmX100)}
-                        </span>
+                        <GridBpmField tapping={gridEditor.tapBpmX100 !== null} value={formatBpm(gridEditor.tapBpmX100 ?? gridBpmX100)} disabled={!gridEditor.canEdit} onCommit={gridEditor.setBpm} />
                       ) : null}
                       {group.map((edit) => {
                         const button = gridButton(edit.id, gridEditor, hold, {
-                          metronome, metronomeLevel, metronomeBusy, toggleMetronome, idle: playback.idle, readOnly,
+                          metronome, metronomeLevel, metronomeBusy, toggleMetronome, cycleMetronomeVolume, idle: playback.idle, readOnly,
                         });
                         // The padlock closes when the grid is locked.
                         const Icon = edit.id === "lock" && button.pressed ? GridLockIcon : EDIT_ICONS[edit.id];
@@ -2033,11 +2100,12 @@ export const Player = memo(function Player({
                             key={edit.id}
                             type="button"
                             className={styles.editButton}
-                            aria-label={edit.id === "metronome" ? `Metronome: ${metronomeLevel}` : edit.label}
+                            aria-label={edit.id === "metronome" ? `Metronome volume: ${metronomeLevel}` : edit.label}
                             data-metronome={edit.id === "metronome" ? metronomeLevel : undefined}
                             disabled={button.disabled}
                             aria-pressed={button.pressed}
                             title={tip(button.title)}
+                            onContextMenu={edit.id === "cut-grid" ? event => { event.preventDefault(); setMetronomeMenu({x: event.clientX, y: event.clientY}); } : undefined}
                             {...button.handlers}
                           >
                             {Icon ? <Icon className={styles.editIcon} /> : "TAP"}
@@ -2257,6 +2325,16 @@ export const Player = memo(function Player({
           </button>
         </div>
         )}
+        {metronomeMenu ? <ContextMenu x={metronomeMenu.x} y={metronomeMenu.y} label="Metronome sound"
+          context={{inPlaylist: false, hasFile: true, readOnly: false}}
+          rows={([1,2,3] as const).map(sound => ({label: `Sound ${sound}`, action: String(sound), checked: preferences.audio.metronomeSound === sound}))}
+          onClose={() => setMetronomeMenu(null)} onChoose={choice => {
+            const sound = Number(choice) as 1 | 2 | 3;
+            void getBackend().then(async backend => {
+              await backend.setMetronome(sound, preferences.audio.metronomeVolume);
+              updatePreferences("audio", {metronomeSound: sound});
+            }).catch(() => onError?.("The metronome sound could not be changed."));
+          }} /> : null}
         {deckMenuAt ? (
           <ContextMenu
             x={deckMenuAt.x}

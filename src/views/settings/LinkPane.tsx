@@ -93,7 +93,7 @@ export function LinkPane() {
     void (async () => {
       try {
         const backend = await getBackend();
-        const next = link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined);
+        const next = link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined, preferences.djSystem.linkKeySort);
         revision.current += 1;
         setLink(next);
         setStatusError(null);
@@ -134,6 +134,14 @@ export function LinkPane() {
         )}
       </div>
       {problem ? <p className={styles.linkError} role="alert">{problem}</p> : null}
+      <fieldset className={styles.linkKeySort} disabled={!canChoose}>
+        <legend>Key sorting</legend>
+        <label><input type="radio" name="link-key-sort" checked={preferences.djSystem.linkKeySort === "alphabetical"}
+          onChange={() => update("djSystem", {linkKeySort: "alphabetical"})} /> Alphabetically — A, Ab, B, …</label>
+        <label><input type="radio" name="link-key-sort" checked={(preferences.djSystem.linkKeySort ?? "musical") === "musical"}
+          onChange={() => update("djSystem", {linkKeySort: "musical"})} /> Musically — Abm, B, Ebm, F#, Bbm, …</label>
+        <p className={styles.linkHelp}>Applies to the key menu and tracks sorted by key on connected players. Disconnect to change.</p>
+      </fieldset>
       <fieldset className={styles.networkInterfaces} disabled={busy || link === null || link.on}>
         <legend>Network interface</legend>
         <p className={styles.linkHelp}>{link?.on ? "Disconnect to change the network interface." : "Choose the network your players are connected to. Wired Ethernet is recommended."}</p>

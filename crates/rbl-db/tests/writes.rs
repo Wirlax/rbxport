@@ -1691,7 +1691,10 @@ fn a_bpm_typed_over_retimes_the_grid_and_sets_the_column() {
     f.writer.set_field(&track_id(0), TrackField::Bpm, "128.5").unwrap();
     let bpm: i64 = f.one("SELECT BPM FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
     assert_eq!(bpm, 12_850);
-    let rewritten = rbl_anlz::Anlz::read(&dat).unwrap();
+    let next: String = f.one("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", &[&track_id(0)]);
+    assert_ne!(next, relative);
+    assert_eq!(rbl_anlz::Anlz::read(&dat).unwrap().beat_grid().unwrap(), beats);
+    let rewritten = rbl_anlz::Anlz::read(&rbl_anlz::resolve(&location.share_root, &next)).unwrap();
     let grid = rewritten.beat_grid().unwrap();
     assert_eq!(grid.len(), 8);
     assert_eq!(grid[0].time_ms, 250, "the first beat stays where it was");
@@ -1947,4 +1950,152 @@ fn usb_history_is_repeat_safe_and_appends_new_plays() {
     assert_eq!(f.writer.import_usb_history("USB session", uuid, &[track.clone(), track.clone()]).unwrap(), 0);
     assert_eq!(f.writer.import_usb_history("USB session", uuid, &[track.clone(), track.clone(), track]).unwrap(), 1);
     assert_eq!(f.count("SELECT COUNT(*) FROM djmdSongHistory WHERE rb_local_deleted=0 AND HistoryID IN (SELECT ID FROM djmdHistory WHERE UUID='00000000-0000-4000-8000-000000000001')"), 3);
+}
+
+#[test]
+fn relocation_rolls_back_both_columns_when_the_counter_write_fails() {
+    let mut f = fixture();
+    let before: (String, String) = f.conn().query_row("SELECT FolderPath, FileNameL FROM djmdContent WHERE ID=?1", [track_id(0)], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    let path = f._dir.path().join("moved.wav");
+    std::fs::write(&path, b"audio").unwrap();
+    f.conn().execute_batch("CREATE TRIGGER fail_counter BEFORE UPDATE ON agentRegistry BEGIN SELECT RAISE(ABORT, 'injected failure'); END").unwrap();
+    assert!(f.writer.relocate(&track_id(0), &path).is_err());
+    let after: (String, String) = f.conn().query_row("SELECT FolderPath, FileNameL FROM djmdContent WHERE ID=?1", [track_id(0)], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn reload_tags_rolls_back_earlier_fields_and_new_lookup_rows() {
+    use lofty::{config::WriteOptions, prelude::{ItemKey, TagExt}, tag::{Tag, TagType}};
+    let mut f = fixture();
+    let path = f._dir.path().join("tags.wav");
+    write_wav(&path, 1);
+    let id = f.writer.import_file(&path).unwrap();
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id='localUpdateCount'", &[]);
+    let mut tags = Tag::new(TagType::RiffInfo);
+    tags.insert_text(ItemKey::TrackTitle, "Changed".into());
+    tags.insert_text(ItemKey::TrackArtist, "New rollback artist".into());
+    tags.save_to_path(&path, WriteOptions::default()).unwrap();
+    f.conn().execute_batch("CREATE TRIGGER fail_artist BEFORE UPDATE OF ArtistID ON djmdContent BEGIN SELECT RAISE(ABORT, 'injected failure'); END").unwrap();
+    assert!(f.writer.reload_tags(&id).is_err());
+    assert_eq!(f.one::<String>("SELECT Title FROM djmdContent WHERE ID=?1", &[&id]), "tags");
+    assert_eq!(f.count("SELECT COUNT(*) FROM djmdArtist WHERE Name='New rollback artist'"), 0);
+    assert_eq!(f.one::<i64>("SELECT int_1 FROM agentRegistry WHERE registry_id='localUpdateCount'", &[]), counter);
+}
+
+#[test]
+fn bpm_failure_keeps_the_old_grid_and_database_reference() {
+    let mut f = fixture();
+    let location = f.writer.library().location().clone();
+    let relative = "/PIONEER/USBANLZ/test/ANLZ0000.DAT";
+    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+    let mut builder = rbl_anlz::AnlzBuilder::new();
+    builder.beat_grid(&[rbl_anlz::Beat { beat_number: 1, tempo_x100: 12000, time_ms: 0 }]);
+    let before = builder.finish();
+    std::fs::write(&dat, &before).unwrap();
+    fixture::set_analysis_path(&location, 0, relative).unwrap();
+    let bpm: i64 = f.one("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track_id(0)]);
+    f.conn().execute_batch("CREATE TRIGGER fail_bpm BEFORE UPDATE OF BPM ON djmdContent BEGIN SELECT RAISE(ABORT, 'injected failure'); END").unwrap();
+    assert!(f.writer.set_bpm(&track_id(0), "130").is_err());
+    assert_eq!(std::fs::read(dat).unwrap(), before);
+    assert_eq!(f.one::<String>("SELECT AnalysisDataPath FROM djmdContent WHERE ID=?1", &[&track_id(0)]), relative);
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&track_id(0)]), bpm);
+}
+
+#[test]
+fn writable_connections_require_durable_commits() {
+    let f = fixture();
+    assert_eq!(f.one::<i64>("PRAGMA synchronous", &[]), 3);
+    assert_eq!(f.one::<i64>("PRAGMA fullfsync", &[]), 1);
+    assert_eq!(f.one::<i64>("PRAGMA read_uncommitted", &[]), 0);
+}
+
+// Spawned by abrupt_process_exit_recovers_without_partial_rows. exit() skips
+// Rust Drop, including Transaction's rollback and Connection's clean close.
+#[test]
+fn crash_writer_child() {
+    let Some(root) = std::env::var_os("RBL_CRASH_TEST_ROOT") else { return; };
+    let root = std::path::PathBuf::from(root);
+    let location = rbl_db::LibraryLocation { master_db: root.join("master.db"), share_root: root.join("share"), passphrase: fixture::FIXTURE_PASSPHRASE.into(), is_real_install: false };
+    let mut db = Library::open(location, OpenMode::ReadWrite).unwrap();
+    db.connection().pragma_update(None, "cache_size", 1).unwrap();
+    let tx = db.connection_mut().transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+    tx.execute("UPDATE djmdContent SET Rating=5, rb_local_usn=99999 WHERE ID=?1", [track_id(0)]).unwrap();
+    tx.execute("UPDATE djmdContent SET Commnt=printf('%16384s', 'crash test')", []).unwrap();
+    if std::env::var_os("RBL_CRASH_TEST_COMMIT").is_some() {
+        tx.execute("UPDATE agentRegistry SET int_1=99999 WHERE registry_id='localUpdateCount'", []).unwrap();
+        tx.commit().unwrap();
+    }
+    std::process::exit(91);
+}
+
+#[test]
+fn abrupt_process_exit_recovers_without_partial_rows() {
+    for mode in ["DELETE", "WAL"] {
+        for commit in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let location = fixture::build(dir.path(), Shape::default()).unwrap();
+            let db = Library::open(location.clone(), OpenMode::ReadWrite).unwrap();
+            db.connection().pragma_update(None, "journal_mode", mode).unwrap();
+            let before: i64 = db.connection().query_row("SELECT Rating FROM djmdContent WHERE ID=?1", [track_id(0)], |r| r.get(0)).unwrap();
+            drop(db);
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "crash_writer_child", "--nocapture"]).env("RBL_CRASH_TEST_ROOT", dir.path());
+            child.env_remove("RBL_CRASH_TEST_COMMIT");
+            if commit { child.env("RBL_CRASH_TEST_COMMIT", "1"); }
+            assert_eq!(child.output().unwrap().status.code(), Some(91));
+            let db = Library::open(location, OpenMode::ReadOnly).unwrap();
+            let rating: i64 = db.connection().query_row("SELECT Rating FROM djmdContent WHERE ID=?1", [track_id(0)], |r| r.get(0)).unwrap();
+            let counter: i64 = db.connection().query_row("SELECT int_1 FROM agentRegistry WHERE registry_id='localUpdateCount'", [], |r| r.get(0)).unwrap();
+            let integrity: String = db.connection().query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+            assert_eq!(rating, if commit { 5 } else { before });
+            assert_eq!(counter, if commit { 99999 } else { Shape::default().start_usn });
+            assert_eq!(integrity, "ok");
+        }
+    }
+}
+
+#[test]
+fn backup_is_standalone_and_includes_committed_wal_pages() {
+    let mut f = fixture();
+    f.conn().execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;").unwrap();
+    f.conn().execute("UPDATE djmdContent SET Rating=5 WHERE ID=?1", [track_id(0)]).unwrap();
+    let backup = f.writer.back_up_now().unwrap();
+    assert!(!std::path::PathBuf::from(format!("{}-wal", backup.display())).exists());
+    let mut location = f.writer.library().location().clone();
+    location.master_db = backup;
+    let db = Library::open(location, OpenMode::ReadOnly).unwrap();
+    let rating: i64 = db.connection().query_row("SELECT Rating FROM djmdContent WHERE ID=?1", [track_id(0)], |r| r.get(0)).unwrap();
+    assert_eq!(rating, 5);
+    assert_eq!(db.connection().query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
+}
+
+#[test]
+fn invalid_backup_preserves_live_database_and_wal() {
+    let f = fixture();
+    f.conn().execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;").unwrap();
+    f.conn().execute("UPDATE djmdContent SET Rating=4 WHERE ID=?1", [track_id(0)]).unwrap();
+    let backup = f._dir.path().join("master-corrupt.db");
+    std::fs::write(&backup, b"not a database").unwrap();
+    let location = f.writer.library().location();
+    let wal = std::path::PathBuf::from(format!("{}-wal", location.master_db.display()));
+    let before = std::fs::read(&wal).unwrap();
+    assert!(rbl_db::write::restore_backup(location, &backup).is_err());
+    assert_eq!(std::fs::read(wal).unwrap(), before);
+    assert_eq!(f.one::<i64>("SELECT Rating FROM djmdContent WHERE ID=?1", &[&track_id(0)]), 4);
+}
+
+#[test]
+fn grid_lock_preserves_other_flags_and_grid_revision_uses_reference_character() {
+    let mut f = fixture();
+    let id = track_id(1);
+    f.conn().execute("UPDATE djmdContent SET Analysed=53, AnalysisUpdated='9' WHERE ID=?1", [&id]).unwrap();
+    f.writer.set_analysis_lock(&id,true).unwrap();
+    assert_eq!(f.one::<i64>("SELECT Analysed FROM djmdContent WHERE ID=?1", &[&id]),181);
+    f.writer.set_analysis_lock(&id,false).unwrap();
+    assert_eq!(f.one::<i64>("SELECT Analysed FROM djmdContent WHERE ID=?1", &[&id]),53);
+    f.writer.save_grid_revision(&id,12800).unwrap();
+    assert_eq!(f.one::<String>("SELECT AnalysisUpdated FROM djmdContent WHERE ID=?1", &[&id]),":");
+    assert_eq!(f.one::<i64>("SELECT BPM FROM djmdContent WHERE ID=?1", &[&id]),12800);
 }

@@ -77,6 +77,11 @@ test("the built app runs under the policy the shell ships", async ({ page }) => 
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
   await expect(page.getByTestId("player-detail").locator("canvas")).toBeVisible();
 
+  // Secondary UI is split into on-demand JS/CSS. Exercise those imports
+  // against the production bundle and policy, not just Vite's dev server.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Preferences", exact: true })).toBeVisible();
+
   violations.push(
     ...(await page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? [])),
   );

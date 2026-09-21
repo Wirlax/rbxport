@@ -130,8 +130,11 @@ impl AttackMap {
         // just before it starts.
         let floor = f64::from(self.rms[start - 1]);
         let top = (start..=hi).map(|i| f64::from(self.rms[i])).fold(floor, f64::max);
-        let sample = (start - 1) * self.step;
-        Some(Attack { secs: sample as f64 / f64::from(self.sample_rate), height: top - floor })
+        // The attack begins inside the bin before the rise, not at that
+        // bin's left edge. Its midpoint avoids a systematic half-bin early
+        // bias that otherwise carries into every fitted beat.
+        let sample = (start - 1) as f64 * self.step as f64 + self.step as f64 / 2.0;
+        Some(Attack { secs: sample / f64::from(self.sample_rate), height: top - floor })
     }
 }
 

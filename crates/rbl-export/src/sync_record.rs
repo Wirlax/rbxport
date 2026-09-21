@@ -70,6 +70,11 @@ pub const FILES: [&str; 2] = ["PIONEER/rekordbox/playlists3.sync", "PIONEER/reko
 /// its first-ticked time across syncs, as rekordbox's does.
 #[must_use]
 pub fn render(source: &SyncSource, ticked: &[u64], synced_at_ms: u64, kept: &BTreeMap<u64, u64>) -> Vec<u8> {
+    let device_ids = ticked.iter().enumerate().map(|(i,id)| (*id, u32::try_from(i+1).unwrap_or(0))).collect();
+    render_with_ids(source, ticked, synced_at_ms, kept, &device_ids)
+}
+
+pub fn render_with_ids(source: &SyncSource, ticked: &[u64], synced_at_ms: u64, kept: &BTreeMap<u64,u64>, device_ids: &BTreeMap<u64,u32>) -> Vec<u8> {
     let by_id: BTreeMap<u64, &SyncNode> = source.tree.iter().map(|node| (node.id, node)).collect();
     // The ticked playlists that the tree knows, and every folder above them.
     let mut folders: BTreeSet<u64> = BTreeSet::new();
@@ -126,7 +131,7 @@ pub fn render(source: &SyncSource, ticked: &[u64], synced_at_ms: u64, kept: &BTr
             node.id,
             node.parent,
             node.attribute,
-            u8::from(!folder),
+            device_ids.get(&node.id).copied().unwrap_or(0),
             if folder { 0 } else { kept.get(&node.id).copied().unwrap_or(synced_at_ms) },
             if folder { 2 } else { 1 },
         );
@@ -138,6 +143,7 @@ pub fn render(source: &SyncSource, ticked: &[u64], synced_at_ms: u64, kept: &BTr
 /// What a record on a stick says, read back.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncRecord {
+    pub device_ids: BTreeMap<u64, u32>,
     /// `DBID` of the library that synced the stick.
     pub db_id: u64,
     /// `AutomaticSync`.
@@ -153,8 +159,8 @@ pub struct SyncRecord {
 /// rekordbox's. `None` when there is none or it is not one.
 #[must_use]
 pub fn read(mount: &Path) -> Option<SyncRecord> {
-    let bytes = std::fs::read(mount.join(FILES[0])).ok()?;
-    parse(&bytes)
+    let root = crate::export_root(mount).join("rekordbox");
+    ["playlists3.sync", "playlists3Plus.sync"].into_iter().find_map(|name| std::fs::read(root.join(name)).ok().and_then(|b| parse(&b)))
 }
 
 /// Parses a record's bytes. The file is small and regular enough that
@@ -168,9 +174,13 @@ pub fn parse(bytes: &[u8]) -> Option<SyncRecord> {
     let db_id = attribute(header, "DBID")?.parse().ok()?;
     let automatic = attribute(header, "AutomaticSync") == Some("1");
     let mut ticked = Vec::new();
+    let mut device_ids = BTreeMap::new();
     let mut timestamps = BTreeMap::new();
     for node in text.split("<NODE ").skip(1) {
         let node = &node[..node.find('>').unwrap_or(node.len())];
+        if let (Some(id), Some(device)) = (attribute(node, "Id").and_then(|s| u64::from_str_radix(s,16).ok()), attribute(node, "Dev_ID").and_then(|s| s.parse::<u32>().ok())) {
+            if id != 0 && device != 0 { device_ids.insert(id, device); }
+        }
         if attribute(node, "Attribute") == Some("1") || attribute(node, "CheckType") != Some("1") {
             continue;
         }
@@ -181,7 +191,7 @@ pub fn parse(bytes: &[u8]) -> Option<SyncRecord> {
             }
         }
     }
-    Some(SyncRecord { db_id, automatic, ticked, timestamps })
+    Some(SyncRecord { device_ids, db_id, automatic, ticked, timestamps })
 }
 
 /// The value of `name="…"` in one tag, if there.
@@ -205,15 +215,15 @@ fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 /// Writes both files under `destination`, keeping the times the previous
 /// record there gave the playlists that are still ticked.
 pub fn write(destination: &Path, source: &SyncSource, ticked: &[u64], synced_at_ms: u64) -> std::io::Result<()> {
+    let publication = rbl_core::durable::Publication::new(destination, ".rbxport-publication")?;
     let kept = read(destination).map(|r| r.timestamps).unwrap_or_default();
     let bytes = render(source, ticked, synced_at_ms, &kept);
     for file in FILES {
-        let path = destination.join(file);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, &bytes)?;
+        let path = publication.stage().join(file);
+        if let Some(parent) = path.parent() { rbl_core::durable::create_dir_all(parent)?; }
+        rbl_core::durable::write(&path, &bytes)?;
     }
+    publication.commit(&FILES.map(std::path::PathBuf::from))?;
     Ok(())
 }
 

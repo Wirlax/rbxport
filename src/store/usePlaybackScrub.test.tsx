@@ -102,14 +102,19 @@ function stubBackend(): Backend {
 }
 
 /** Mounts the hook and hands the test what it returned. */
+let renderPosition = true;
+let renders = 0;
 function Probe() {
-  deck = usePlayback("track-1", "a");
+  renders++;
+  deck = usePlayback("track-1", "a", renderPosition);
   return null;
 }
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   sent = [];
+  renderPosition = true;
+  renders = 0;
   frames = [];
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
     frames.push(() => cb(performance.now()));
@@ -150,6 +155,27 @@ function runFrames(count = 1) {
 function deliver(tick: Tick) {
   act(() => ticked(tick));
 }
+
+it("can isolate position ticks while still publishing paused seeks to subscribers", async () => {
+  renderPosition = false;
+  await act(async () => { root.render(<Probe />); await done(); });
+  deliver(tickAt(2, 1));
+  deliver(tickAt(3, 1));
+  const before = renders;
+  const snapshot = deck;
+  deliver(tickAt(4, 1));
+  deliver(tickAt(5, 1));
+  expect(renders).toBe(before);
+  expect(deck).toBe(snapshot);
+  const listener = vi.fn();
+  const unsubscribe = deck.subscribe(listener);
+  deliver(tickAt(12.5, 2, false));
+  expect(deck.positionRef.current).toBe(12.5);
+  expect(listener).toHaveBeenCalledWith(12.5);
+  deliver(tickAt(15, 2, false));
+  expect(listener).toHaveBeenCalledWith(15);
+  unsubscribe();
+});
 
 /** Lets the commands a drag fires off actually reach the stub deck. */
 async function settle() {

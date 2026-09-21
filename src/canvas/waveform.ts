@@ -7,6 +7,8 @@
  */
 
 /** A rendered preview, cached as a bitmap so scrolling is a `drawImage`. */
+import theme from "../../design/tokens/theme.json";
+
 export interface RenderedWaveform {
   bitmap: ImageBitmap | HTMLCanvasElement;
   width: number;
@@ -62,13 +64,18 @@ export function waveformKindOf(palette: WavePalette, detail: boolean):
  * or so — a high band that outreaches the mid is rare. The `--c-wave-*`
  * tokens carry the same values, and the test guards against drift.
  */
-const LOW = [0x00, 0x55, 0xe1] as const; // --c-wave-low #0055E1
-const MID = [0xff, 0xa6, 0x00] as const; // --c-wave-mid #FFA600
-const HIGH = [0xff, 0xff, 0xff] as const; // --c-wave-high #FFFFFF
-const LOW_MID = [0xb4, 0x69, 0x0a] as const; // --c-wave-low-mid #B4690A
-const LOW_HIGH = [0xd2, 0xdc, 0xfa] as const; // --c-wave-low-high #D2DCFA
-const MID_HIGH = [0xff, 0xf0, 0xd7] as const; // --c-wave-mid-high #FFF0D7
-const ALL = [0xf5, 0xeb, 0xd7] as const; // --c-wave-all #F5EBD7
+function rgbTuple(hex: string): readonly [number, number, number] {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+const LOW = rgbTuple(theme.color.waveLow.value);
+const MID = rgbTuple(theme.color.waveMid.value);
+const HIGH = rgbTuple(theme.color.waveHigh.value);
+const LOW_MID = rgbTuple(theme.color.waveLowMid.value);
+const LOW_HIGH = rgbTuple(theme.color.waveLowHigh.value);
+const MID_HIGH = rgbTuple(theme.color.waveMidHigh.value);
+const ALL = rgbTuple(theme.color.waveAll.value);
 
 /** The bit each band sets in a combination. */
 export const BAND_LOW = 1;
@@ -227,6 +234,15 @@ export function drawBands(
       [mid, stops[1], STACK_SCALE[1]],
       [high, stops[2], STACK_SCALE[2]],
     ] as const;
+
+    // A silent part of the actual file is still a meaningful zero-amplitude
+    // signal. Draw its reference line here, inside the data span only; the
+    // caller has already clipped that span at the file's start and end.
+    if (low === 0 && mid === 0 && high === 0) {
+      ctx.fillStyle = bandColour(BAND_LOW | BAND_HIGH);
+      ctx.fillRect(x, half ? floor : centre, 1, 1);
+      continue;
+    }
 
     if (half === "overlaid") {
       // From the baseline, reaching the whole band at full scale as the
@@ -392,7 +408,13 @@ export function drawColumns(
       const column = read(data, i * stride);
       if (!peak || column.height > peak.height) peak = column;
     }
-    if (!peak || peak.height <= 0) continue;
+    if (!peak || peak.height <= 0) {
+      // See the equivalent three-band path above: silence is a visible,
+      // horizontal zero-amplitude line, not a hole in the file.
+      ctx.fillStyle = bandColour(BAND_LOW | BAND_HIGH);
+      ctx.fillRect(x, half ? floor : centre, 1, 1);
+      continue;
+    }
     ctx.fillStyle = peak.colour;
     if (half) {
       const tall = Math.max(1, Math.min(peak.height, 1) * usable);
@@ -422,6 +444,124 @@ export function drawWave(
     drawBands(ctx, data, width, height, detail ? "detail" : "overview", half, inset);
   } else {
     drawColumns(ctx, data, width, height, palette, detail, half, inset);
+  }
+}
+
+/** Draw a DAW-style stereo PCM peak envelope (left/right min/max i16 pairs). */
+export function drawPcmWave(
+  ctx: CanvasRenderingContext2D,
+  data: Uint8Array,
+  width: number,
+  height: number,
+  palette: WavePalette,
+  visible: { from: number; to: number } = { from: 0, to: 1 },
+): void {
+  ctx.clearRect(0, 0, width, height);
+  const lanes = [height * 0.25 + 0.5, height * 0.75 + 0.5] as const;
+  const from = visible.from;
+  const to = Math.max(from + 1e-6, visible.to);
+  // Silence has a visible zero-amplitude line in each stereo lane, rather
+  // than disappearing into the background. Do not clamp its endpoints: at a
+  // file edge, the canvas deliberately has empty overhang beyond the source.
+  const colour = pcmColour(palette);
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
+  ctx.globalAlpha = 0.65;
+  for (let x = 0; x < width; x++) {
+    const fraction = from + (to - from) * x / width;
+    if (fraction >= 0 && fraction <= 1) {
+      ctx.fillRect(x, lanes[0], 1, 1);
+      ctx.fillRect(x, lanes[1], 1, 1);
+    }
+  }
+  const columns = Math.floor(data.length / 8);
+  if (columns === 0 || width <= 0 || height <= 0) return;
+  const values = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const first = Math.max(0, Math.floor(from * columns));
+  const last = Math.min(columns, Math.ceil(to * columns));
+  // Ableton-style waveform views scale the visible envelope, rather than
+  // leaving a mastered-but-sub-full-scale track as a tiny trace.
+  let peak = 0;
+  for (let column = first; column < last; column++) {
+    for (let part = 0; part < 4; part++) {
+      peak = Math.max(peak, Math.abs(values.getInt16(column * 8 + part * 2, true)));
+    }
+  }
+  const scale = Math.max(1, height / 4 - 2) / Math.max(peak, 1);
+  const sampleAt = (fraction: number, lane: number, edge: number): number => {
+    const at = Math.max(0, Math.min(fraction * (columns - 1), columns - 1));
+    const column = Math.floor(at);
+    const next = Math.min(column + 1, columns - 1);
+    const blend = at - column;
+    const a = values.getInt16(column * 8 + lane * 4 + edge * 2, true);
+    const b = values.getInt16(next * 8 + lane * 4 + edge * 2, true);
+    return a + (b - a) * blend;
+  };
+  for (let lane = 0; lane < 2; lane++) {
+    // Fill between the negative and positive peak edges, which gives the
+    // close inspection view a solid waveform body without hiding its shape.
+    let started = false;
+    ctx.globalAlpha = 0.26;
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    for (let x = 0; x < width; x++) {
+      const fraction = from + (to - from) * x / width;
+      if (fraction < 0 || fraction > 1) continue;
+      const y = (lanes[lane] ?? height / 2) - sampleAt(fraction, lane, 1) * scale;
+      if (started) ctx.lineTo(x + 0.5, y);
+      else ctx.moveTo(x + 0.5, y);
+      started = true;
+    }
+    for (let x = width - 1; x >= 0; x--) {
+      const fraction = from + (to - from) * x / width;
+      if (fraction < 0 || fraction > 1) continue;
+      ctx.lineTo(x + 0.5, (lanes[lane] ?? height / 2) - sampleAt(fraction, lane, 0) * scale);
+    }
+    if (started) {
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = colour;
+    for (let edge = 0; edge < 2; edge++) {
+      let joined = false;
+      ctx.beginPath();
+      for (let x = 0; x < width; x++) {
+        const fraction = from + (to - from) * x / width;
+        if (fraction < 0 || fraction > 1) {
+          joined = false;
+          continue;
+        }
+        // Linear interpolation prevents staircase-shaped traces when a
+        // decimation point spans more than one device pixel.
+        const sample = sampleAt(fraction, lane, edge);
+        const y = (lanes[lane] ?? height / 2) - sample * scale;
+        if (joined) ctx.lineTo(x + 0.5, y);
+        else ctx.moveTo(x + 0.5, y);
+        joined = true;
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * PCM has no frequency bands of its own, so it uses one representative hue
+ * for each normal waveform palette rather than pretending the samples contain
+ * PWV7 spectrum data. These deliberately are not the dim grid colours:
+ * `--c-beat` is #4C4C4C. Each is light/saturated enough to remain separable
+ * from both that grid and the white downbeat line on the black detail band.
+ */
+function pcmColour(palette: WavePalette): string {
+  switch (palette) {
+    // Blue's familiar low-band hue, raised so it does not merge into #4C4C4C.
+    case "blue": return theme.color.pcmBlue.value;
+    // 3Band's amber middle band: distinct from its white high-band/downbeat.
+    case "3band": return theme.color.pcm3Band.value;
+    // A vivid magenta is the neutral representative of the varying RGB view.
+    case "rgb": return theme.color.pcmRgb.value;
   }
 }
 
@@ -491,13 +631,12 @@ export function drawPreview(
 export type PreviewCue = readonly [letter: string, positionMs: number, colour: string | null];
 
 /**
- * The row badge, from `src/styles/tokens.css`. The canvas cannot read a CSS
- * variable, so these are duplicated here and a test holds them to the tokens.
+ * Canvas measurements and colours come from the same theme source as CSS.
  */
 const PREVIEW_BADGE = 7; // --s-preview-cue-badge
 const PREVIEW_BADGE_FONT = 6; // --f-size-preview-cue
-const CUE_HOT = "#77E866"; // --c-cue-hot: the fallback for an unmeasured index
-const CUE_HOT_TEXT = "#000000"; // --c-cue-hot-text
+const CUE_HOT = theme.color.cueHot.value;
+const CUE_HOT_TEXT = theme.color.cueHotText.value;
 const UI_FONT = 'Arial, "Helvetica Neue", Helvetica, sans-serif'; // --f-ui
 
 /**
@@ -535,6 +674,26 @@ export function drawPreviewCues(
     ctx.fillRect(x, 0, size, size);
     ctx.fillStyle = CUE_HOT_TEXT;
     ctx.fillText(letter, x + size / 2, size / 2);
+  }
+}
+
+/** Memory cues use centered red downward triangles, below hot-cue badges. */
+export function drawPreviewMemoryCues(
+  ctx: CanvasRenderingContext2D, positions: readonly number[], durationMs: number, width: number, dpr: number,
+): void {
+  if (durationMs <= 0 || width <= 0 || positions.length === 0) return;
+  const half = 3 * dpr;
+  const height = 4 * dpr;
+  ctx.fillStyle = theme.color.cueHead.value;
+  for (const position of positions) {
+    if (position < 0 || position > durationMs || !Number.isFinite(position)) continue;
+    const x = Math.round(position / durationMs * width);
+    ctx.beginPath();
+    ctx.moveTo(x - half, 0);
+    ctx.lineTo(x + half, 0);
+    ctx.lineTo(x, height);
+    ctx.closePath();
+    ctx.fill();
   }
 }
 

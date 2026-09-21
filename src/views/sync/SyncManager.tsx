@@ -108,6 +108,8 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   // gets, as it is on every export from the shell.
   const preferences = usePreferences();
   const stickDefaults = preferences.djSystem;
+  const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
+  const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
 
   const nodes = useMemo(() => playlistNodes(tree), [tree]);
   const playlists = useMemo(() => nodes.filter(node => node.kind === "playlist"), [nodes]);
@@ -225,7 +227,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     });
   }, [nodes, byId]);
 
-  const canSync = selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
+  const canSync = tickedDevices.size > 0 && !busy && !loadingDevices;
 
   const sync = useCallback(() => {
     if (!canSync) return;
@@ -243,7 +245,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
           if (progress.state === "ejecting") setStatus([`Ejecting ${nameOf(progress.path)}…`]);
         });
-        const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync);
+        const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat);
         setStatus(reports.map((r) => {
           const summary = r.report ? exportSummary(nameOf(r.path), r.report) : `${nameOf(r.path)}: ${r.error ?? "The sync failed."}`;
           return summary + (r.ejected ? " Safely ejected." : r.ejectError ? ` Not ejected: ${r.ejectError}` : "");
@@ -259,7 +261,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, refreshDevices, readDevice, onSynced]);
+  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced]);
 
   const importCues = () => {
     if (busy || tickedDevices.size === 0) return;

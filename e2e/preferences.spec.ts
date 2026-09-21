@@ -446,3 +446,30 @@ test("Analysis describes the selected mode", async ({ page }) => {
   await expect(dialog.getByText("Aligns beats to kick drums", { exact: false })).toBeVisible();
   await expect(dialog.getByText("Normal mode with a 70–180 BPM range", { exact: false })).toHaveCount(0);
 });
+
+test("Show BPM changes controls waveform annotations and persists", async ({page}) => {
+  await open(page, "?writable=1");
+  await load(page);
+  const overview = page.getByTestId("player-overview");
+  const bounds = await overview.boundingBox();
+  if (!bounds) throw new Error("Missing overview");
+  await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await player(page).getByRole("tab", {name:"GRID", exact:true}).click();
+  await player(page).getByRole("button", {name:"Adjust beats from here", exact:true}).click();
+  await player(page).getByRole("button", {name:"Double the tempo", exact:true}).click();
+  await expect(page.getByTestId("overview-tempo")).not.toHaveCount(0);
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", {name:"Layout", exact:true}).click();
+  const toggle = dialog.getByRole("checkbox", {name:"Show BPM changes", exact:true});
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(page.getByTestId("overview-tempo")).toHaveCount(0);
+  await expect(page.getByTestId("cue-tempo")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.getByTestId("overview-tempo")).not.toHaveCount(0);
+  await toggle.click();
+  await page.reload();
+  const reopened = await prefs(page);
+  await reopened.getByRole("tab", {name:"Layout", exact:true}).click();
+  await expect(reopened.getByRole("checkbox", {name:"Show BPM changes", exact:true})).not.toBeChecked();
+});

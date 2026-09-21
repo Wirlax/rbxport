@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, ramp, segments,
+  BAND_HIGH, BAND_LOW, BAND_MID, bandColour, bandStops, drawBands, drawColumns, drawPreviewCues, drawPreviewMemoryCues, ramp, segments,
   strideOf, waveformKindOf,
 } from "./waveform";
 
@@ -182,10 +182,10 @@ describe("the three-band waveform", () => {
     }
   });
 
-  it("draws nothing for a silent column, and survives an empty tag", () => {
+  it("draws a zero-amplitude line for a silent column, and survives an empty tag", () => {
     const silent = recorder();
     drawBands(silent.ctx, new Uint8Array([0, 0, 0]), 1, 100);
-    expect(silent.fills).toHaveLength(0);
+    expect(silent.fills).toEqual([{ style: bandColour(BAND_LOW | BAND_HIGH), x: 0, y: 50, w: 1, h: 1 }]);
 
     const empty = recorder();
     expect(() => drawBands(empty.ctx, new Uint8Array(), 10, 10)).not.toThrow();
@@ -242,7 +242,7 @@ describe("the three-band waveform", () => {
   it("keeps magnified attacks sharp and on time while smoothing their decay", () => {
     const { ctx, fills } = recorder();
     drawBands(ctx, new Uint8Array([0, 0, 0, 127, 0, 0, 0, 0, 0]), 12, 100, "detail");
-    const heightAt = (x: number) => fills.find((fill) => fill.x === x)?.h ?? 0;
+    const heightAt = (x: number) => Math.max(0, ...fills.filter((fill) => fill.x === x && fill.h > 1).map((fill) => fill.h));
     expect(heightAt(0)).toBe(0);
     expect(heightAt(2)).toBe(0);
     expect(heightAt(3)).toBe(0);
@@ -274,8 +274,8 @@ describe("the three-band waveform", () => {
     // The first bins of Love is Gonna Save Us: a quiet low-band onset must
     // not be interpolated backwards just because it is below the jump threshold.
     drawBands(ctx, new Uint8Array([0, 0, 0, 11, 79, 103]), 8, 254, "detail");
-    expect(fills.some((fill) => fill.x < 4)).toBe(false);
-    expect(fills.some((fill) => fill.x === 4)).toBe(true);
+    expect(fills.some((fill) => fill.x < 4 && fill.h > 1)).toBe(false);
+    expect(fills.some((fill) => fill.x === 4 && fill.h > 1)).toBe(true);
   });
 
   it("smooths small rises in every band without flattening their peaks and dips", () => {
@@ -430,5 +430,23 @@ describe("the BLUE and RGB palettes", () => {
     const { ctx: b, fills: centred } = recorder();
     drawColumns(b, new Uint8Array([0x10]), 1, 100, "blue", false);
     expect(centred[0]!.y + centred[0]!.h / 2).toBeCloseTo(50, 5);
+  });
+});
+
+
+describe("preview memory cues", () => {
+  it("centres red downward triangles at saved times and skips invalid positions", () => {
+    const points: number[][] = [];
+    let fills = 0;
+    const ctx = {
+      fillStyle: "", beginPath() {}, closePath() {},
+      moveTo(x: number, y: number) { points.push([x,y]); },
+      lineTo(x: number, y: number) { points.push([x,y]); },
+      fill() { fills++; },
+    };
+    drawPreviewMemoryCues(ctx as unknown as CanvasRenderingContext2D, [250, -1, 1001, NaN], 1000, 200, 2);
+    expect(ctx.fillStyle).toBe("#EA3323");
+    expect(points).toEqual([[44,0],[56,0],[50,8]]);
+    expect(fills).toBe(1);
   });
 });

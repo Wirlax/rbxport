@@ -7,7 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 55%);
+  background: var(--c-modal-scrim);
 }
 
 /* rekordbox opens a dialog; this is that dialog drawn inside our window. */

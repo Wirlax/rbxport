@@ -23,6 +23,10 @@ pub const MANIFEST_VERSION: u32 = 1;
 /// The state of one export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
+    pub db_id: u64,
+    #[serde(default)]
+    pub baseline: Option<crate::snapshot::Snapshot>,
     pub version: u32,
     /// When this export ran, in the library's timestamp format.
     pub written: String,
@@ -34,8 +38,8 @@ pub struct Manifest {
     #[serde(default)]
     pub playlists: Vec<ManifestPlaylist>,
     /// `djmdContent.ID` of the tracks on the stick in no playlist: put
-    /// there on their own by Export Track, and kept there by every sync
-    /// after. Absent in older records.
+    /// there on their own by Export Track, and kept by later syncs unless
+    /// the user enables music cleanup. Absent in older records.
     #[serde(default)]
     pub loose: Vec<u64>,
 }
@@ -43,6 +47,12 @@ pub struct Manifest {
 /// One playlist as it was asked for.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestPlaylist {
+    #[serde(default)]
+    pub device_only: bool,
+    #[serde(default)]
+    pub export_id: u32,
+    #[serde(default)]
+    pub folder: bool,
     /// `djmdPlaylist.ID`, or 0 when the playlist did not come from the library.
     pub library_id: u64,
     pub name: String,
@@ -51,6 +61,8 @@ pub struct ManifestPlaylist {
 /// One track as it was left on the stick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestTrack {
+    #[serde(default)]
+    pub audio_hash: u64,
     /// The id a player sees. Kept stable across syncs so a deck's own caches,
     /// and any playlist that names it, still point at the same track.
     pub export_id: u32,
@@ -72,6 +84,11 @@ pub struct ManifestTrack {
     /// when the track has none. Absent from older manifests.
     #[serde(default)]
     pub artwork: String,
+    /// Conversion profile; empty for original bytes. Old manifests default to original.
+    #[serde(default)]
+    pub conversion: String,
+    #[serde(default)]
+    pub conversion_source_hash: u64,
 }
 
 impl ManifestTrack {
@@ -94,7 +111,7 @@ pub fn track_key(library_id: u64, source: &str) -> String {
 
 impl Manifest {
     pub fn path(destination: &Path) -> PathBuf {
-        destination.join(MANIFEST_PATH)
+        crate::export_root(destination).join("rbxport/manifest.json")
     }
 
     /// Reads the record a previous export left, if there is a usable one.
@@ -112,15 +129,16 @@ impl Manifest {
     /// Written to a temporary name and renamed, so a stick pulled mid-write
     /// leaves either the old record or the new one, never half of either.
     pub fn save(&self, destination: &Path) -> std::io::Result<()> {
-        let path = Self::path(destination);
+        self.save_at(destination, crate::export_root_name(destination).map_err(std::io::Error::other)?)
+    }
+    pub fn save_at(&self, destination: &Path, root_name: &str) -> std::io::Result<()> {
+        let path = destination.join(root_name).join("rbxport/manifest.json");
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            rbl_core::durable::create_dir_all(parent)?;
         }
         let bytes = serde_json::to_vec_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let temporary = path.with_extension("json.part");
-        std::fs::write(&temporary, &bytes)?;
-        std::fs::rename(&temporary, &path)?;
+        rbl_core::durable::write(&path, &bytes)?;
         Ok(())
     }
 }
@@ -170,9 +188,11 @@ mod tests {
     fn a_saved_record_reads_back() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = Manifest {
+            db_id: 0, baseline: None,
             version: MANIFEST_VERSION,
             written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
             tracks: vec![ManifestTrack {
+                audio_hash: 0,
                 export_id: 7,
                 library_id: 42,
                 source: "/music/one.mp3".to_owned(),
@@ -182,8 +202,10 @@ mod tests {
                 modified: 99,
                 analysis: 5,
                 artwork: String::new(),
+                conversion: String::new(),
+                conversion_source_hash: 0,
             }],
-            playlists: vec![ManifestPlaylist { library_id: 9, name: "Set".to_owned() }],
+            playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],
             loose: vec![42],
         };
         manifest.save(dir.path()).unwrap();

@@ -398,7 +398,7 @@ impl Worker {
             return;
         }
         let at = self.clock.position();
-        self.scrubber = Some(Scrubber::new(at));
+        self.scrubber = Some(Scrubber::new(at, self.device_rate));
         // A new drag times its reports from scratch; the gap since the last
         // one is however long ago the previous drag was, which is not a speed.
         self.last_report = None;

@@ -15,8 +15,8 @@
 //!
 //! `PWAV` is 400 columns and `PWV2` 100; `PWV4` and `PWV6` are 1,200; the
 //! scrolling `PWV3`, `PWV5` and `PWV7` are 150 a second [OBS]. A coarser
-//! waveform is the loudest column of each bucket of the fine one, which is
-//! what keeps a kick visible in the overview.
+//! peak preview uses the loudest column of each bucket. `PWV6` uses an
+//! independent energy envelope when supplied to [`author_with_overview`].
 //!
 //! Every height drawn comes from the three bands, never from the column's
 //! raw sample peak — that is `PWV4`'s first byte and nothing else. The
@@ -75,7 +75,8 @@ pub fn resample(columns: &[BandColumn], n: usize) -> Vec<BandColumn> {
     out
 }
 
-/// Full scale for a band in the `PWV6` overview, out of the 127 the field holds.
+/// Legacy peak-derived `PWV6` scale, used only when no independent overview
+/// is supplied. The production analyser supplies its own energy envelope.
 ///
 /// A band here is the peak of the filtered signal over the column, which on
 /// a loud master sits near the top of its range almost everywhere. Written
@@ -260,6 +261,17 @@ const AUTHORED: [&[u8; 4]; 10] =
 /// reference library is empty [OBS].
 #[must_use]
 pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing: Existing<'_>) -> AnalysisFiles {
+    author_with_overview(audio_path, beats, columns, None, existing)
+}
+
+/// Authors analysis with an independently measured PWV6 energy envelope.
+/// Values are already seven-bit; this avoids peak reduction and a second gain.
+/// Callers with only detail columns can pass `None` for the legacy approximation.
+#[must_use]
+pub fn author_with_overview(
+    audio_path: &str, beats: &[Beat], columns: &[BandColumn],
+    overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, existing: Existing<'_>,
+) -> AnalysisFiles {
     let dat = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
@@ -287,7 +299,8 @@ pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing
     let two_ex = {
         let mut builder = AnlzBuilder::new();
         builder.path(audio_path);
-        builder.waveform_scroll(b"PWV6", 3, &pwv6(columns));
+        let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
+        builder.waveform_scroll(b"PWV6", 3, &preview);
         builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
         carry_or(&mut builder, existing.two_ex, |_| {});
         builder.finish()
@@ -341,6 +354,20 @@ mod tests {
                 BandColumn { low: v, mid: v / 2, high: v / 4, peak: v }
             })
             .collect()
+    }
+
+    #[test]
+    fn independent_overview_is_encoded_without_peak_gain() {
+        let columns = ramp(1500);
+        let mut overview = [[0; 3]; OVERVIEW_COLUMNS];
+        overview[600] = [59, 42, 70];
+        let files = author_with_overview("/track.wav", &[], &columns, Some(&overview), Existing::default());
+        let parsed = crate::parse(&files.two_ex).unwrap();
+        let preview = parsed.sections.iter().find(|s| s.tag == FourCc::new(b"PWV6")).unwrap();
+        assert_eq!(&preview.payload[1800..1803], &[59, 42, 70]);
+        assert!(preview.payload[..1800].iter().all(|&v| v == 0));
+        let detail = parsed.sections.iter().find(|s| s.tag == FourCc::new(b"PWV7")).unwrap();
+        assert_eq!(detail.payload, pwv7(&columns));
     }
 
     #[test]

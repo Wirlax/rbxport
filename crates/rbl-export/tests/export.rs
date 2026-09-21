@@ -150,9 +150,10 @@ fn a_large_export_keeps_every_track_and_playlist_entry() {
 }
 
 #[test]
-fn an_empty_export_is_refused_rather_than_writing_a_broken_stick() {
+fn an_empty_export_writes_two_valid_empty_libraries() {
     let dest = tempfile::tempdir().unwrap();
-    assert!(export(dest.path(), &[], &[]).is_err());
+    export(dest.path(), &[], &[]).unwrap();
+    assert!(verify(dest.path()).unwrap().is_ok());
 }
 
 #[test]
@@ -377,7 +378,7 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
         SourceMyTag { id: 11, seq: 1, name: "Peak".into(), attribute: 0, parent: 1 },
         SourceMyTag { id: 12, seq: 2, name: "Warm-up".into(), attribute: 0, parent: 1 },
     ];
-    let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
+    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
     let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |p| seen.push((p.done, p.total))).unwrap();
@@ -438,7 +439,7 @@ fn artwork_without_the_library_sizes_is_copied_as_it_is_and_folders_hold_twenty(
         t.artwork = Some(image);
         tracks.push(t);
     }
-    let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: (0..21).collect() }];
+    let playlists = vec![SourcePlaylist { id: 0, name: "Set".into(), track_indices: (0..21).collect(), ..Default::default() }];
     let report = export_full(dest.path(), &tracks, &playlists, &[], None, None, &mut |_| {}).unwrap();
     assert_eq!(report.artwork_files, 84);
     // 1–19 in the first folder, 20 and 21 in the second, as rekordbox lays
@@ -450,4 +451,118 @@ fn artwork_without_the_library_sizes_is_copied_as_it_is_and_folders_hold_twenty(
         std::fs::read(dest.path().join("PIONEER/Artwork/00002/a21.jpg")).unwrap(),
         std::fs::read(src.path().join("cover21.jpg")).unwrap()
     );
+}
+
+#[test]
+fn failed_export_staging_preserves_previous_databases_and_audio() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut tracks = vec![track(src.path(), 1, "First", "Artist"), track(src.path(), 2, "Second", "Artist")];
+    let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 1, name: "Set".into(), track_indices: vec![0, 1] }];
+    export(dest.path(), &tracks, &playlists).unwrap();
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    let audio = dest.path().join(manifest.tracks[0].audio.trim_start_matches('/'));
+    let old_audio = std::fs::read(&audio).unwrap();
+    let database = dest.path().join("PIONEER/rekordbox/export.pdb");
+    let old_db = std::fs::read(&database).unwrap();
+    // The first track stages a replacement; reading the second must fail.
+    std::fs::write(&tracks[0].source_path, vec![9; 4096]).unwrap();
+    tracks[1].source_path = src.path().to_path_buf();
+    assert!(export(dest.path(), &tracks, &playlists).is_err());
+    assert_eq!(std::fs::read(&audio).unwrap(), old_audio);
+    assert_eq!(std::fs::read(&database).unwrap(), old_db);
+    assert!(!dest.path().join(".rbxport-publication").exists());
+    assert!(verify(dest.path()).unwrap().is_ok());
+}
+
+#[test]
+fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
+    use rbl_export::{CompatibilityFormat, ExportOptions, export_with_options};
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let source = src.path().join("source.flac");
+    let original = include_bytes!("../../rbl-audio/tests/fixtures/stereo-96k.flac");
+    std::fs::write(&source, original).unwrap();
+    let beats = vec![rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 75 }];
+    let mut builder = rbl_anlz::AnlzBuilder::new();
+    builder.path("/original.flac").beat_grid(&beats);
+    let tracks = vec![SourceTrack {
+        id: 71, source_path: source.clone(), title: "Conversion".into(), artist: "Test".into(),
+        sample_rate: 96000, file_size: original.len() as u64,
+        analysis: vec![("DAT".into(), builder.finish())], ..Default::default()
+    }];
+    let playlists = vec![SourcePlaylist { id: 1, name: "Set".into(), track_indices: vec![0], ..Default::default() }];
+    let mut previous_audio = None;
+    let mut export_id = None;
+    for (compatibility, ext, bitrate) in [
+        (Some(CompatibilityFormat::Wav), "wav", 1411),
+        (Some(CompatibilityFormat::Mp3), "mp3", 320),
+        (None, "flac", 0),
+    ] {
+        let report = export_with_options(dest.path(), &tracks, &playlists, &[],
+            ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+        assert_eq!(report.tracks, 1);
+        assert_eq!(report.reused, 0);
+        let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+        let entry = &manifest.tracks[0];
+        assert_eq!(*export_id.get_or_insert(entry.export_id), entry.export_id);
+        let audio = dest.path().join(entry.audio.trim_start_matches('/'));
+        assert_eq!(audio.extension().unwrap(), ext);
+        assert!(audio.is_file());
+        if let Some(old) = previous_audio.replace(audio.clone()) { assert!(!old.exists()); }
+        let anlz = rbl_anlz::Anlz::read(&dest.path().join(entry.anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT")).unwrap();
+        assert_eq!(anlz.beat_grid().unwrap(), beats);
+        if compatibility.is_some() { assert_eq!(anlz.path().as_deref(), Some(entry.audio.as_str())); }
+        let pdb_bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+        let pdb = rbl_pdb::Pdb::parse(&pdb_bytes).unwrap();
+        let rows = pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap());
+        assert_eq!(rows[0].file_path, entry.audio);
+        assert_eq!(rows[0].sample_rate, if compatibility.is_some() { 44100 } else { 96000 });
+        assert_eq!(rows[0].bitrate, bitrate);
+        assert_eq!(u64::from(rows[0].file_size), std::fs::metadata(&audio).unwrap().len());
+        assert!(verify(dest.path()).unwrap().is_ok());
+        let again = export_with_options(dest.path(), &tracks, &playlists, &[],
+            ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+        assert_eq!((again.reused, again.bytes_copied, again.analysis_files), (1, 0, 0));
+        if compatibility.is_some() {
+            let valid = std::fs::read(&audio).unwrap();
+            let mut changed = valid.clone();
+            *changed.last_mut().unwrap() ^= 1;
+            std::fs::write(&audio, changed).unwrap();
+            let repaired = export_with_options(dest.path(), &tracks, &playlists, &[],
+                ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+            assert_eq!(repaired.reused, 0, "edited USB audio must not be reused");
+            assert_eq!(std::fs::read(&audio).unwrap(), valid);
+        }
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+    }
+    // Failed conversion cannot publish a partial replacement of an existing export.
+    let db = dest.path().join("PIONEER/rekordbox/export.pdb");
+    let before = std::fs::read(&db).unwrap();
+    std::fs::write(&source, b"broken flac").unwrap();
+    assert!(export_with_options(dest.path(), &tracks, &playlists, &[],
+        ExportOptions { compatibility: Some(CompatibilityFormat::Wav), ..Default::default() }, &mut |_| {}).is_err());
+    assert_eq!(std::fs::read(db).unwrap(), before);
+    assert!(previous_audio.unwrap().is_file());
+}
+
+#[test]
+fn compatibility_does_not_reencode_already_compatible_audio() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let source = src.path().join("compatible.wav");
+    rbl_audio::compatibility::convert(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rbl-audio/tests/fixtures/stereo-96k.flac"),
+        &source, rbl_audio::compatibility::Format::Wav,
+    ).unwrap();
+    let original = std::fs::read(&source).unwrap();
+    let tracks = vec![SourceTrack { source_path: source, title: "Compatible".into(), ..Default::default() }];
+    rbl_export::export_with_options(dest.path(), &tracks, &[], &[],
+        rbl_export::ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), ..Default::default() },
+        &mut |_| {},
+    ).unwrap();
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    assert!(manifest.tracks[0].conversion.is_empty());
+    assert!(manifest.tracks[0].audio.ends_with(".wav"));
+    assert_eq!(std::fs::read(dest.path().join(manifest.tracks[0].audio.trim_start_matches('/'))).unwrap(), original);
 }

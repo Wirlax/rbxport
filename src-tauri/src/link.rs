@@ -158,9 +158,10 @@ pub fn interfaces() -> Vec<InterfaceDto> {
 
 /// The app's library, as the link reads it. Weak so the state does not own
 /// a session that owns the state.
-struct StateSource(Weak<AppState>, Arc<dyn Fn(u32) + Send + Sync>);
+struct StateSource(Weak<AppState>, Arc<dyn Fn(u32) + Send + Sync>, bool);
 
 impl Source for StateSource {
+    fn alphabetical_keys(&self) -> bool { self.2 }
     fn edit(&self, edit: &rbl_link::Edit) -> bool {
         let Some(state) = self.0.upgrade() else { return false; };
         if let rbl_link::Edit::GridOffset { track, offset_ms } = edit {
@@ -241,7 +242,7 @@ impl Session {
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
-    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, report: F, library_changed: Arc<dyn Fn(u32) + Send + Sync>) -> Result<Self, String>
+    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, alphabetical_keys: bool, report: F, library_changed: Arc<dyn Fn(u32) + Send + Sync>) -> Result<Self, String>
     where
         F: Fn(LinkStatusDto) + Send + 'static,
     {
@@ -271,7 +272,7 @@ impl Session {
         })?;
         tracing::info!(interface = %chosen.name, address = %chosen.address, "LINK running on an interface");
 
-        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state), library_changed));
+        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state), library_changed, alphabetical_keys));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -481,7 +482,7 @@ mod grid_offset_tests {
         let received = notifications.clone();
         let source = StateSource(Arc::downgrade(&state), Arc::new(move |generation| {
             received.lock().unwrap().push(generation);
-        }));
+        }), false);
         let id = rbl_db::fixture::track_id(1);
         let track = id.parse().unwrap();
         let row = original.row_of(&id).unwrap();

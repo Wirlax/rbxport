@@ -11,7 +11,7 @@
  * between is that anchor plus the time since it arrived. Sixty ticks a second
  * would be IPC churn and the interface would still have to interpolate.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { AppErrorDto, Backend, DeckId, Tick } from "@/ipc/types";
@@ -166,14 +166,19 @@ export function reasonFrom(error: unknown): string {
   return FALLBACK;
 }
 
-export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK): Playback {
+export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK, renderPosition = true): Playback {
   const [playing, setPlaying] = useState(false);
   const [tempo, setTempoState] = useState(1);
   const [masterTempo, setMasterTempoState] = useState(false);
   const [keyShift, setKeyShiftState] = useState(0);
   const [shiftsKey, setShiftsKey] = useState(true);
   const [loop, setLoopState] = useState<DeckLoop | null>(null);
-  const [position, setPosition] = useState(0);
+  const [position, setPositionState] = useState(0);
+  // The deck opts out: its small time readout subscribes to the frame clock.
+  // Other callers retain the tick-driven position API.
+  const setPosition = useCallback((seconds: number) => {
+    if (renderPosition) setPositionState(seconds);
+  }, [renderPosition]);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -286,12 +291,12 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       setPosition(at);
       // A load or a seek moves the playhead deliberately; anything else is
       // drift, and is eased in rather than jumped.
-      if (deck.generation !== shownGeneration.current) {
+      if (!deck.playing || deck.generation !== shownGeneration.current) {
         shownGeneration.current = deck.generation;
         emit(at);
       }
     },
-    [emit, DECK],
+    [emit, DECK, setPosition],
   );
 
   // The deck reports itself loaded, or says why it could not be.
@@ -383,7 +388,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         }
       }
     })();
-  }, [trackId, emit, DECK]);
+  }, [trackId, emit, DECK, setPosition]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
@@ -477,7 +482,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         }
       })();
     },
-    [idle, emit, DECK],
+    [idle, emit, DECK, setPosition],
   );
 
   /**
@@ -546,7 +551,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         })();
       });
     },
-    [idle, emit, DECK],
+    [idle, emit, DECK, setPosition],
   );
 
   /** Lets go. The playhead stays where the drag left it. */
@@ -690,10 +695,12 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
   const setLoopActive = useCallback((on: boolean) => loopCall((b) => b.deckLoopActive(DECK, on)), [loopCall, DECK]);
   const clearLoop = useCallback(() => loopCall((b) => b.deckClearLoop(DECK)), [loopCall, DECK]);
 
-  return {
+  return useMemo(() => ({
     playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
     loop, setLoop, setLoopActive, clearLoop,
-  };
+  }), [playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
+    scrubBegin, scrubTo, scrubEnd, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
+    setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, setLoop, setLoopActive, clearLoop]);
 }

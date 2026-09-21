@@ -6,21 +6,15 @@
 //! columns are written to disk once and read back whole, which turns the same
 //! start into a sequential read of a few tens of megabytes.
 //!
-//! # What is not stored
-//!
-//! The rank arrays and the search arena, both of which are derived. Rebuilding
-//! them costs about 70 ms and removes any chance of the file disagreeing with
-//! itself — a wrong rank array would silently mis-sort the library, which is
-//! far worse than a slower start.
+//! Format 9 includes sort ranks and the search arena. A checksum over the
+//! complete payload rejects accidental corruption; rank permutations and
+//! column lengths are checked before the derived indexes can be used.
 //!
 //! # Staleness
 //!
-//! The snapshot is keyed to the exact bytes it came from: the length and
-//! modification time of `master.db` and its write-ahead log, plus the schema
-//! version and this format's own version. If any of those differ the snapshot
-//! is ignored and the library is read normally. That is deliberately blunt —
-//! rekordbox touches the WAL constantly while it runs, so the cache simply
-//! misses then, which is correct rather than clever.
+//! The snapshot is keyed to database identity, content version, schema and
+//! format. File stamps are diagnostic only: checkpointing a WAL need not
+//! invalidate the content. Prepared snapshots stay private until validated.
 //!
 //! # Trust
 //!
@@ -47,8 +41,9 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// read from the snapshot opened empty. 7 added which database the snapshot
 /// was built from: formats 1 to 6 keyed on the change counter alone, so a
 /// different `master.db` with the same counter — a test fixture rebuilt
-/// under another folder — was served the old one's file paths.
-pub const FORMAT: u32 = 8;
+/// under another folder — was served the old one's file paths. 9 adds file
+/// metadata, derived indexes and a checksum; earlier caches rebuild once.
+pub const FORMAT: u32 = 9;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -280,6 +275,15 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
     }
     w.u32s(index);
     drop(table);
+    // Format 9 stores derived columns so a warm launch does not sort the
+    // collection again. The checksum covers both source and derived data.
+    w.u32s(&library.bitrate);
+    w.u32s(&library.sample_rate);
+    w.u64s(&library.file_size);
+    w.u64(library.ranks.len() as u64);
+    for rank in &library.ranks { w.u32s(rank); }
+    w.strings(&library.search);
+    w.u32(crc32fast::hash(&w.0));
     w.0
 }
 
@@ -362,6 +366,10 @@ impl<'a> Reader<'a> {
 #[must_use]
 #[allow(clippy::too_many_lines, reason = "mirrors `encode` column for column")]
 pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
+    let end = data.len().checked_sub(4)?;
+    let checksum = u32::from_le_bytes(data.get(end..)?.try_into().ok()?);
+    if crc32fast::hash(data.get(..end)?) != checksum { return None; }
+    let data = data.get(..end)?;
     let mut r = Reader { data, at: 0 };
     if r.take(4)? != MAGIC {
         return None;
@@ -380,7 +388,7 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     // rewrites the WAL without changing a single row, and refusing the
     // snapshot for that made it useless whenever rekordbox was open. What must
     // match is the database, the content counter, the schema, and the format.
-    if found.format != want.format
+    if found.format != FORMAT || found.format != want.format
         || found.db_version != want.db_version
         || found.content != want.content
         || found.database != want.database
@@ -487,14 +495,58 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     }
     lib.set_tag_list(tag_list);
     lib.set_my_tags(my_tags);
-    // Derived, and cheap: rebuilding removes any chance of a stored rank array
-    // disagreeing with the columns it claims to order.
-    lib.build_ranks();
-    lib.build_search();
+    lib.bitrate = r.u32s()?;
+    lib.sample_rate = r.u32s()?;
+    lib.file_size = r.u64s()?;
+    if r.u64()? != crate::SortColumn::ALL.len() as u64 { return None; }
+    for _ in crate::SortColumn::ALL {
+        let rank = r.u32s()?;
+        if rank.len() != count { return None; }
+        let mut seen = vec![false; count];
+        for &position in &rank {
+            let slot = seen.get_mut(position as usize)?;
+            if *slot { return None; }
+            *slot = true;
+        }
+        lib.ranks.push(rank);
+    }
+    lib.search = r.strings()?;
+    if lib.search.len() != count || lib.bitrate.len() != count
+        || lib.sample_rate.len() != count || lib.file_size.len() != count
+        || r.at != data.len() { return None; }
     Some(lib)
 }
 
-/// Writes a snapshot beside the library, atomically.
+/// A decoded snapshot is private until the live database validates its key.
+pub struct Prepared {
+    fingerprint: Fingerprint,
+    library: Library,
+}
+
+impl Prepared {
+    pub fn validated(self, want: Fingerprint) -> Option<Library> {
+        let found = self.fingerprint;
+        (found.format == want.format && found.db_version == want.db_version
+            && found.content == want.content && found.database == want.database)
+            .then_some(self.library)
+    }
+}
+
+/// Read and decode concurrently with opening/checking the encrypted database.
+/// Callers must validate the returned snapshot before publishing it.
+pub fn prepare(path: &Path) -> Option<Prepared> {
+    let data = std::fs::read(path).ok()?;
+    let mut r = Reader { data: &data, at: 0 };
+    if r.take(4)? != MAGIC { return None; }
+    let fingerprint = Fingerprint {
+        format: r.u32()?, db_len: r.u64()?, db_modified_ns: r.i64()?,
+        wal_len: r.u64()?, wal_modified_ns: r.i64()?, db_version: r.u32()?,
+        content: r.u64()?, database: r.u64()?,
+    };
+    Some(Prepared { fingerprint, library: decode(&data, fingerprint)? })
+}
+
+/// Writes a snapshot to the caller's cache directory, atomically.
 ///
 /// A half-written file that happened to carry a matching fingerprint would be
 /// read as a library, so the bytes land under a temporary name and are renamed
@@ -503,9 +555,7 @@ pub fn save(path: &Path, library: &Library, fingerprint: Fingerprint) -> std::io
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let temporary = path.with_extension("part");
-    std::fs::write(&temporary, encode(library, fingerprint))?;
-    std::fs::rename(&temporary, path)
+    rbl_core::durable::write(path, &encode(library, fingerprint))
 }
 
 /// Reads a snapshot, if there is a matching one.

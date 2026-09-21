@@ -47,7 +47,13 @@ The grid metric is the strict one: a tempo right to 0.05 BPM can still
 drift a beat off by the end of the track, and a tempo change has to be
 placed at the right beat for the numbering after it to match.
 
-## Results
+## Recorded results before transient emphasis
+
+These playlist measurements and miss descriptions predate the transition
+fallback that boosts transient rises by 4× with a 20 ms release. They
+have not been remeasured for that change. The synthetic regression
+coverage is documented in
+[grid-fixtures.md](grid-fixtures.md#transitions-without-kicks).
 
 | metric | passes |
 |---|---|
@@ -82,8 +88,8 @@ it.
 **One DJ edit, gridded by hand.** `Go Back [136-174]`: 136 BPM until bar
 61, rising until bar 82.2, then 174. The hand grid holds 136 through the
 rise, nudged half a beat somewhere in it, and switches at bar 82.25. The
-rise begins in a breakdown with no kick to track, so the walk cannot
-follow it: ours holds 136 straight and cuts where the kick states 174 —
+rise begins in a breakdown with no kick to track. In the recorded run the
+walker did not follow it: the grid held 136 straight and cut where the kick stated 174 —
 2 ms from the hand grid, numbered as it numbers — and matches 89 % of its
 beats, all but the nudged bars of the rise. Its beat 1 on the 136 section
 is one beat before rekordbox's, which is the downbeat miss: the novelty

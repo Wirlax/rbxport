@@ -20,6 +20,8 @@ pub struct WaveformColumn {
 pub struct Waveform {
     pub columns: Vec<WaveformColumn>,
     pub columns_per_sec: f64,
+    /// Independently measured PWV6 overview, already in its seven-bit range.
+    pub overview: Vec<[u8; 3]>,
 }
 
 /// One-pole filters, enough to separate three bands cheaply and stably.
@@ -151,10 +153,96 @@ fn rgb_of(c: WaveformColumn) -> (u8, u8, u8) {
     (c.mid.max(c.high), amber_green.max(c.high), c.low.max(c.high))
 }
 
+/// A second-order Butterworth section, used to keep bass out of the upper
+/// overview bands. Unlike the detail peaks, overview bands measure energy.
+struct OverviewFilter {
+    b: [f64; 3],
+    a: [f64; 2],
+    z: [f64; 2],
+}
+
+impl OverviewFilter {
+    fn new(rate: u32, cutoff: f64, highpass: bool) -> Self {
+        let w = 2.0 * std::f64::consts::PI * cutoff.min(f64::from(rate) * 0.45) / f64::from(rate);
+        let c = w.cos();
+        let alpha = w.sin() / std::f64::consts::SQRT_2;
+        let a0 = 1.0 + alpha;
+        let b = if highpass { [f64::midpoint(1.0, c), -(1.0 + c), f64::midpoint(1.0, c)] }
+            else { [(1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0] };
+        Self { b: b.map(|v| v / a0), a: [-2.0 * c / a0, (1.0 - alpha) / a0], z: [0.0; 2] }
+    }
+
+    fn process(&mut self, x: f64) -> f64 {
+        let y = self.b[0] * x + self.z[0];
+        self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
+        self.z[1] = self.b[2] * x - self.a[1] * y;
+        y
+    }
+}
+
+/// Independent 1,200-column, seven-bit PWV6 energy envelope. Measured against
+/// nine rekordbox references: low-band RMS with gentle compression, rectified
+/// mids/highs, and per-band track normalization. This is an approximation of
+/// rekordbox's analysis, not a claim to reproduce its proprietary algorithm.
+fn overview(samples: &[f32], rate: u32) -> Vec<[u8; 3]> {
+    let mut raw = vec![[0.0_f64; 3]; COLOUR_PREVIEW_COLUMNS];
+    let mut counts = vec![0_usize; COLOUR_PREVIEW_COLUMNS];
+    let mut mid_filters = [OverviewFilter::new(rate, 200.0, true), OverviewFilter::new(rate, 2000.0, false)];
+    let mut high_hp = OverviewFilter::new(rate, 2000.0, true);
+    let low_coeff = (-2.0 * std::f64::consts::PI * 200.0 / f64::from(rate)).exp();
+    let mut low = 0.0;
+    let hop = (rate as usize / 150).max(1);
+    let mut energy = 0.0;
+    let mut level = 0.0;
+    let mut frames = 0_usize;
+    for (i, &sample) in samples.iter().enumerate() {
+        let x = f64::from(sample);
+        low = x * (1.0 - low_coeff) + low * low_coeff;
+        let mid = mid_filters[0].process(x);
+        let mid = mid_filters[1].process(mid);
+        let high = high_hp.process(x);
+        // Match floor-divided bucket boundaries, including very short audio.
+        let bucket = (((i + 1) * COLOUR_PREVIEW_COLUMNS - 1) / samples.len()).min(COLOUR_PREVIEW_COLUMNS - 1);
+        raw[bucket][0] += low * low;
+        raw[bucket][1] += mid.abs();
+        raw[bucket][2] += high.abs();
+        counts[bucket] += 1;
+        energy += x * x;
+        if (i + 1) % hop == 0 || i + 1 == samples.len() {
+            let count = i % hop + 1;
+            level += (energy / count as f64).sqrt();
+            frames += 1;
+            energy = 0.0;
+        }
+    }
+    let target = level / frames.max(1) as f64 * 92.0;
+    let mut means = [0.0; 3];
+    for (values, &count) in raw.iter_mut().zip(&counts) {
+        let n = count.max(1) as f64;
+        values[0] = (values[0] / n).powf(0.45);
+        values[1] /= n;
+        values[2] /= n;
+        for band in 0..3 { means[band] += values[band] / COLOUR_PREVIEW_COLUMNS as f64; }
+    }
+    // A two-bucket trailing average matches the reference envelope's release
+    // and half-bucket alignment without blurring section boundaries widely.
+    let mut previous = raw[0];
+    for values in &mut raw {
+        let current = *values;
+        for band in 0..3 { values[band] = f64::midpoint(current[band], previous[band]); }
+        previous = current;
+    }
+    raw.into_iter().map(|values| std::array::from_fn(|band| {
+        if means[band] < 1e-6 { 0 } else {
+            (values[band] * target / means[band]).round().clamp(0.0, 127.0) as u8
+        }
+    })).collect()
+}
+
 /// Computes the waveform.
 pub fn compute(samples: &[f32], sample_rate: u32) -> Waveform {
     if samples.is_empty() || sample_rate == 0 {
-        return Waveform { columns: Vec::new(), columns_per_sec: COLUMNS_PER_SEC };
+        return Waveform { columns: Vec::new(), columns_per_sec: COLUMNS_PER_SEC, overview: vec![[0; 3]; COLOUR_PREVIEW_COLUMNS] };
     }
     let per_column = (f64::from(sample_rate) / COLUMNS_PER_SEC).max(1.0) as usize;
     let column_count = samples.len().div_ceil(per_column);
@@ -179,7 +267,7 @@ pub fn compute(samples: &[f32], sample_rate: u32) -> Waveform {
         });
     }
 
-    Waveform { columns, columns_per_sec: COLUMNS_PER_SEC }
+    Waveform { columns, columns_per_sec: COLUMNS_PER_SEC, overview: overview(samples, sample_rate) }
 }
 
 #[cfg(test)]
@@ -191,7 +279,35 @@ mod pack_tests {
         Waveform {
             columns: columns.iter().map(|&(low, mid, high, peak)| WaveformColumn { low, mid, high, peak }).collect(),
             columns_per_sec: COLUMNS_PER_SEC,
+            overview: Vec::new(),
         }
+    }
+
+    #[test]
+    fn overview_handles_silence_short_audio_and_impulses() {
+        for samples in [vec![], vec![0.0; 2400], vec![1.0]] {
+            let w = compute(&samples, 44100);
+            assert_eq!(w.overview.len(), 1200);
+            assert!(w.overview.iter().flatten().all(|&v| v <= 127));
+            if samples.iter().all(|&v| v == 0.0) {
+                assert!(w.overview.iter().flatten().all(|&v| v == 0));
+            }
+        }
+        let rate = 12000;
+        let steady: Vec<f32> = (0..rate * 4).map(|i| {
+            let t = i as f32 / rate as f32;
+            0.15 * (2.0 * std::f32::consts::PI * 80.0 * t).sin()
+                + 0.1 * (2.0 * std::f32::consts::PI * 800.0 * t).sin()
+                + 0.05 * (2.0 * std::f32::consts::PI * 4000.0 * t).sin()
+        }).collect();
+        let baseline = compute(&steady, rate);
+        let mut transient = steady;
+        transient[24000] = 1.0;
+        let with_peak = compute(&transient, rate);
+        let error: usize = baseline.overview.iter().flatten().zip(with_peak.overview.iter().flatten())
+            .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
+        assert!(error < 360, "an isolated peak must not lift the whole overview: {error}");
+        assert!(with_peak.columns.iter().any(|c| c.peak == 255), "detail keeps the peak");
     }
 
     #[test]

@@ -239,9 +239,43 @@ impl Library {
     }
 
     pub(crate) fn rebuild_ranks(&mut self, columns: &[SortColumn]) {
-        let n = self.count;
         self.ranks.resize_with(SortColumn::ALL.len(), Vec::new);
         for &column in columns {
+            self.ranks[column.rank_slot()] = self.column_rank(column);
+        }
+    }
+
+    /// At most four CPU workers, including the caller. Small libraries avoid
+    /// thread startup entirely. Search and independent sort columns overlap.
+    pub(crate) fn build_indexes(&mut self) {
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).clamp(1, 4));
+        if self.count < 4096 || workers < 2 {
+            self.build_ranks();
+            self.build_search();
+            return;
+        }
+        let library = &*self;
+        let (ranks, search) = std::thread::scope(|scope| {
+            let chunk = SortColumn::ALL.len().div_ceil(workers - 1);
+            let jobs: Vec<_> = SortColumn::ALL.chunks(chunk).map(|columns| {
+                (columns, std::thread::Builder::new().name("startup-index".into()).spawn_scoped(scope,
+                    move || columns.iter().map(|&c| (c.rank_slot(), library.column_rank(c))).collect::<Vec<_>>()))
+            }).collect();
+            let search = library.search_column();
+            let mut ranks = vec![Vec::new(); SortColumn::ALL.len()];
+            for (columns, job) in jobs {
+                let result = job.ok().and_then(|job| job.join().ok())
+                    .unwrap_or_else(|| columns.iter().map(|&c| (c.rank_slot(), library.column_rank(c))).collect());
+                for (slot, rank) in result { ranks[slot] = rank; }
+            }
+            (ranks, search)
+        });
+        self.ranks = ranks;
+        self.search = search;
+    }
+
+    fn column_rank(&self, column: SortColumn) -> Vec<u32> {
+            let n = self.count;
             let mut order: Vec<Row> = (0..u32::try_from(n).unwrap_or(u32::MAX)).collect();
             // Ties break on row order so a sort is reproducible.
             match column {
@@ -272,8 +306,7 @@ impl Library {
                 }
             }
 
-            self.ranks[column.rank_slot()] = rank;
-        }
+            rank
     }
 
     /// Free function: it reads only its arguments, not `self`.
@@ -283,11 +316,15 @@ impl Library {
 
     /// Builds the folded search haystack. Called once at load.
     pub(crate) fn build_search(&mut self) {
+        self.search = self.search_column();
+    }
+
+    fn search_column(&self) -> crate::strings::StrColumn {
         let mut search = crate::strings::StrColumn::with_capacity(self.count, self.count * 64);
         for row in 0..self.count {
             search.push(&self.search_text(row));
         }
-        self.search = search;
+        search
     }
 
     pub(crate) fn search_text(&self, row: usize) -> String {
@@ -303,5 +340,27 @@ impl Library {
         ];
         // Tabs delimit fields; embedded tabs are whitespace inside a value.
         values.iter().map(|value| fold(&value.replace('\t', " "))).collect::<Vec<_>>().join("\t")
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use crate::testing::{library_from, TestTrack};
+
+    #[test]
+    fn parallel_indexes_match_serial_indexes_including_ties() {
+        let tracks: Vec<_> = (0..5000).map(|i| TestTrack {
+            id: i, title: if i % 2 == 0 { "Écho" } else { "echo" },
+            artist: if i % 3 == 0 { "A" } else { "B" },
+            key: if i % 5 == 0 { "F#" } else { "F" },
+            bpm_x100: 12000 + u32::try_from(i % 11).unwrap_or(0),
+            ..TestTrack::default()
+        }).collect();
+        let mut lib = library_from(&tracks);
+        let ranks = lib.ranks.clone();
+        let search = lib.search.clone();
+        lib.build_indexes();
+        assert_eq!(lib.ranks, ranks);
+        for row in 0..tracks.len() { assert_eq!(lib.search.get(row), search.get(row)); }
     }
 }

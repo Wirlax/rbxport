@@ -1,9 +1,9 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { PreferencesWindow } from "./views/settings/PreferencesWindow";
-import { ReportWindow } from "./views/report/ReportBug";
-import { SyncWindow } from "./views/sync/SyncWindow";
+const PreferencesWindow = lazy(() => import("./views/settings/PreferencesWindow").then(m => ({ default: m.PreferencesWindow })));
+const ReportWindow = lazy(() => import("./views/report/ReportBug").then(m => ({ default: m.ReportWindow })));
+const SyncWindow = lazy(() => import("./views/sync/SyncWindow").then(m => ({ default: m.SyncWindow })));
 import "./styles/base.css";
 
 // Suppress the webview's Reload/Inspect menu in every app window. Leave
@@ -21,6 +21,8 @@ const sync = window.location.hash.startsWith("#sync");
 
 createRoot(el).render(
   <StrictMode>
+    <Suspense fallback={null}>
     {window.location.hash.startsWith("#report") ? <ReportWindow /> : preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
+    </Suspense>
   </StrictMode>,
 );

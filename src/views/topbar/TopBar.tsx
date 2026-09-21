@@ -21,6 +21,14 @@ import { VolumeKnob } from "./VolumeKnob";
 import type { PlayerLayout } from "@/lib/layout";
 import { LayoutMenu } from "./LayoutMenu";
 import styles from "./TopBar.module.css";
+import { memo } from "react";
+import { useMasterDisplay } from "@/store/MasterOutput";
+
+export const ConnectedTopBar = memo(function ConnectedTopBar(props: Omit<TopBarProps, "level" | "onLevelChange" | "vu" | "peakLeft" | "peakRight">) {
+  const master = useMasterDisplay();
+  return <TopBar {...props} level={master.level} onLevelChange={master.setLevel}
+    vu={master.vu} peakLeft={master.peakLeft} peakRight={master.peakRight} />;
+});
 
 export interface TopBarProps {
   clock: string;

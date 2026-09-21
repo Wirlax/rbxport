@@ -300,3 +300,17 @@ fn the_stick_settings_read_back_as_the_reference_and_update_in_place() {
     let carried = StickSettings::read(&rebuilt).expect("read rebuilt");
     assert_eq!(carried, again);
 }
+
+#[test]
+fn unfinished_builder_never_publishes_a_partial_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("exportLibrary.db");
+    let mut builder = Builder::create(&path).unwrap();
+    builder.intern(LookupTable::Artist, "Uncommitted").unwrap();
+    assert!(!path.exists());
+    drop(builder);
+    assert!(!path.exists());
+    let builder = Builder::create(&path).unwrap();
+    builder.finish("Device", "2026-09-21", 1).unwrap();
+    assert!(ExportLibrary::open_read_only(&path).is_ok());
+}

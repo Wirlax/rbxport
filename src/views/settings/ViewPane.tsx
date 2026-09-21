@@ -110,6 +110,14 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
             onChange={(playlistCounts) => set({ playlistCounts })}
           />
           <Separator />
+          <Sub>Waveform</Sub>
+          <Checkbox
+            label="Show BPM changes"
+            nested
+            checked={view.showBpmChanges}
+            onChange={(showBpmChanges) => set({ showBpmChanges })}
+          />
+          <Separator />
           <Sub>Phrases</Sub>
           <Checkbox
             label="Phrase (Full Waveform)"

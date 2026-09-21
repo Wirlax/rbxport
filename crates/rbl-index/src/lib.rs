@@ -27,7 +27,7 @@ mod view;
 pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
-pub use load::{content_version, load, reload_cues_of, reload_playlists, reload_tag_list, reload_histories, reload_metadata, LoadStats};
+pub use load::{content_version, load, load_with_cue_reader, reload_cues_of, reload_playlists, reload_tag_list, reload_histories, reload_metadata, LoadStats};
 pub use smart::SmartRule;
 pub use xml_export::export_xml;
 pub use view::{SearchField, RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};

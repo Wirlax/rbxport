@@ -69,7 +69,8 @@ For each beat of the first grid:
 - band-pass the audio to 900–9000 Hz (done once for the whole track);
 - take the RMS in 1 ms steps, 15 ms either side of the beat;
 - the spike is the strong rise nearest the beat — at least half as steep
-  as the steepest in the window; the attack is the step where it starts.
+  as the steepest in the window; the attack is placed at the midpoint of
+  the bin before the rise, avoiding a systematic half-millisecond early bias.
 
 Nearest rather than steepest: the steepest rise in the window lets a grid
 drift, because once a beat's prediction slips late the window reaches a
@@ -97,11 +98,15 @@ zero, as rekordbox does — and forward to the end.
 ## 5. Does the tempo change?
 
 The tempo is measured again in 16-second windows over the whole track, by
-autocorrelation of each window alone, folded onto the track's octave. A
+autocorrelation of each window alone, with a parabola refining the peak
+between lag bins. Octave folding stays inside the requested BPM range
+(70–180 in the app), so 128 measured against 174 cannot turn into 256. A
 window where the track's tempo still fits at 60 % of the best peak has not
-changed. A second tempo is believed when at least three windows agree on
-it, it differs by more than 2 %, and it is not a ratio a rhythm makes on
-its own (3⁄2, 2⁄3, 4⁄3, 3⁄4). Runs of fewer than three settled windows are
+changed. A second tempo is believed when at least three windows agree
+within 1% of that candidate, it differs by more than 2%, and it is not
+within 1% of a ratio a rhythm makes on its own (3⁄2, 2⁄3, 4⁄3, 3⁄4).
+The former 3% rhythm exclusion incorrectly swallowed 128→174. Tight
+clustering also stops drifting rhythmic aliases from becoming a new tempo. Runs of fewer than three settled windows are
 absorbed into their neighbours. The stretches where each tempo is
 *settled* — consecutive windows at one tempo — are the anchors for step 6.
 
@@ -113,14 +118,38 @@ Both are gridded from the last settled window at the old tempo forward.
 
 **A gradual change** is walked beat by beat: each next beat is looked for
 where the last period puts it, the period allowed to drift up to 5 % a
-beat, and a cut is placed every four beats — each bar gets its own tempo,
-its own length divided into four — until a bar comes out at the new
-settled tempo. Then steps 1–4 run on the settled stretch after it. A rise
-or fall that is not linear is followed all the same. Each beat carries the
-tempo of its bar, which rekordbox's grid format allows, and the beat count
-carries on 1–4 across every cut, as rekordbox writes it.
+beat. Every measured interval becomes its own segment; averaging four
+intervals into a bar would move its interior markers off a curved ramp.
+The walk finishes after four consecutive intervals agree with the final
+period within 1% and land within 2 ms of its fitted phase. The settled
+fit supplies the phase afterwards, avoiding propagation of a single
+attack's quantization error. Each beat carries its interval BPM, and the
+beat count carries on 1–4 across every cut.
 
-**A jump, or a change with no kick to follow, is one cut.** In a DJ edit
+When a transition has no kick to follow and the click detector cannot
+place a hit, the walker exaggerates full-band transient rises by 4×,
+with an exponential 20 ms release. This gives quiet percussion a chance
+to carry the beat through the change. Only actual peaks above the hit
+floor count; a held sound or release tail cannot supply another beat.
+The emphasis selects the hit, while the original envelope supplies its
+timestamp. Clear kick attacks retain their finer timing.
+
+The tuning is in `tempo.rs::TransitionTransients`:
+
+| Setting | Value | Meaning |
+|---|---|---|
+| `TRANSIENT_GAIN` | 4 | Multiplier on each positive full-band flux rise |
+| `TRANSIENT_RELEASE_SECS` | 0.020 s | Exponential release time constant, measured at the envelope rate |
+| `KICK_PRESENT` | 0.15 | A kick-band peak at or above this keeps the ordinary timing path |
+| `HIT_FLOOR` | 0.02 | Minimum emphasised local maximum accepted as a fallback hit |
+
+The shaper reads the transition plus one second of context on each side.
+`walk_report` uses the same fallback as the production transition walker.
+The separate same-tempo gap walker in §8 keeps its existing envelope and
+thresholds. [grid-fixtures.md](grid-fixtures.md#transitions-without-kicks)
+lists the quiet-transition, release, silence and timing regressions.
+
+**A jump, or a change with no reliable transients to follow, is one cut.** In a DJ edit
 the next track comes in under the last one's breakdown bars before it
 drops — an impact on a downbeat, an arp in eighths, claps on two and four,
 a snare roll into the drop, its own kick at half level — and a hand grid
@@ -144,15 +173,18 @@ click, with the click: the beat before a drop is a pickup, a kick roll
 into a drop is thumps without clicks. Where no run qualifies — the new
 tempo's stretch is a breakdown with no kick of its own — the cut goes
 where the onsets stop following the old grid and start following the
-new, the earliest such beat.
+new, using the same transient emphasis where the kick is absent. The
+earliest supported beat wins a tie, so silence before a hit cannot move
+the cut earlier. This processing is confined to transitions; whole-track
+tempo estimation and settled-grid fitting use the original envelopes.
 
 A new segment starts with the beat it was cut on. An old-tempo beat within
 half a period before the cut is the same hit as the new tempo's first
 beat and is dropped.
 
-[multibpm.md](multibpm.md) scores this against hand grids: seven of ten
-changes are within 3 ms, and the three that are not are where the hand
-grid switches at the impact that ends a section, with the new tempo's
+[multibpm.md](multibpm.md) records a baseline from before transient emphasis:
+seven of ten changes were within 3 ms, and the three misses were where the hand
+grid switched at the impact that ends a section, with the new tempo's
 kick arriving twenty seconds later.
 
 ## 7. A whole number
@@ -161,7 +193,7 @@ A steady tempo within 0.1 BPM of a whole number is that whole number: the
 line is fixed at that period and re-phased through the same kicks, so it
 turns about their centre. Dance music is produced at whole tempos, every
 reference track is at one, and the fit lands within 0.04 of it on all of
-them. The bars of a walked change keep their measured tempo.
+them. The beats of a walked change keep their measured interval tempo.
 
 ## 8. Gaps
 
@@ -213,7 +245,7 @@ and cuts at 147.029 s, where the hand grid re-phases.
 
 - `bpm` — the tempo the track starts at, which is what a library shows.
 - `segments` — one per tempo: where it starts and ends, the period, and
-  any beat's time. A bar-by-bar transition is a run of one-bar segments;
+  any beat's time. A walked transition is a run of one-beat segments;
   a walked ramp a run of one-beat segments.
 - `beats` — every beat's time in ms, its tempo ×100, and its number in the
   bar. Numbering here is 1–4 from the first beat; [downbeat.md](downbeat.md)

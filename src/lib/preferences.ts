@@ -73,6 +73,8 @@ export function browseScale(step: number): number {
 export type VuMeterMode = "normal" | "fabulous";
 
 export interface ViewPreferences {
+  /** Show BPM-change labels and ramps on player waveforms. */
+  showBpmChanges: boolean;
   vuMeter: VuMeterMode;
   /** Media Player › Display Tempo slider. */
   tempoSlider: boolean;
@@ -169,6 +171,7 @@ export interface DjSystemPreferences {
    * `Ethernet 2`), or null to take the one the players are reached through.
    */
   linkInterface: string | null;
+  linkKeySort: "alphabetical" | "musical";
 }
 
 export const UPDATE_FREQUENCIES = ["start", "daily", "weekly"] as const;
@@ -205,7 +208,7 @@ export interface Preferences {
   djSystem: DjSystemPreferences;
   advanced: AdvancedPreferences;
   keyboard: KeyboardPreferences;
-  usbExport: { importSettings: boolean; importHistory: boolean };
+  usbExport: { importSettings: boolean; importHistory: boolean; deleteUnlistedMusic: boolean; maximumCompatibility: boolean; conversionFormat: "wav" | "mp3" };
 }
 
 export type PreferencePane = keyof Preferences;
@@ -217,6 +220,7 @@ export type PreferencePane = keyof Preferences;
  */
 export const DEFAULT_PREFERENCES: Preferences = {
   view: {
+    showBpmChanges: true,
     vuMeter: "normal",
     tempoSlider: false,
     tooltips: false,
@@ -262,8 +266,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
     subColumn: null,
     createDatabaseFolders: true,
     linkInterface: null,
+    linkKeySort: "musical",
   },
-  usbExport: { importSettings: false, importHistory: true },
+  usbExport: { importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" },
   advanced: {
     relocateFolders: [],
     protectLibrary: false,
@@ -370,8 +375,9 @@ export function sanitisePreferences(value: unknown): Preferences {
   const usb = part<Preferences["usbExport"]>(raw.usbExport);
   const d = DEFAULT_PREFERENCES;
   return {
-    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true) },
+    usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: usb.conversionFormat === "mp3" ? "mp3" : "wav" },
     view: {
+      showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),
       vuMeter: oneOf(view.vuMeter, ["normal", "fabulous"] as const, d.view.vuMeter),
       tempoSlider: bool(view.tempoSlider, d.view.tempoSlider),
       tooltips: bool(view.tooltips, d.view.tooltips),
@@ -416,6 +422,7 @@ export function sanitisePreferences(value: unknown): Preferences {
         ? dj.subColumn
         : null,
       createDatabaseFolders: bool(dj.createDatabaseFolders, d.djSystem.createDatabaseFolders),
+      linkKeySort: oneOf(dj.linkKeySort, ["alphabetical", "musical"] as const, d.djSystem.linkKeySort),
       linkInterface: typeof dj.linkInterface === "string" && dj.linkInterface !== "" ? dj.linkInterface : null,
     },
     advanced: {

@@ -10,6 +10,14 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
+  it("preserves the BPM-change visibility preference and enables it for older settings", () => {
+    expect(sanitisePreferences({view: {showBpmChanges: false}}).view.showBpmChanges).toBe(false);
+    expect(sanitisePreferences({view: {}}).view.showBpmChanges).toBe(true);
+  });
+  it("keeps the LINK key-sort choice and defaults invalid or older settings to musical", () => {
+    expect(sanitisePreferences({djSystem: {linkKeySort: "alphabetical"}}).djSystem.linkKeySort).toBe("alphabetical");
+    expect(sanitisePreferences({djSystem: {linkKeySort: "invalid"}}).djSystem.linkKeySort).toBe("musical");
+  });
   it("gives the defaults for nothing, garbage, and a wrong shape", () => {
     expect(sanitisePreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
     expect(sanitisePreferences("view")).toEqual(DEFAULT_PREFERENCES);
@@ -105,6 +113,21 @@ describe("the sliders and the quantize value", () => {
 });
 
  it("defaults USB imports to history only and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true });
-  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false });
+  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" });
+  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" });
+});
+
+it("requires an explicit boolean to enable USB music cleanup", () => {
+  expect(sanitisePreferences({ usbExport: { deleteUnlistedMusic: true } }).usbExport.deleteUnlistedMusic).toBe(true);
+  expect(sanitisePreferences({ usbExport: { deleteUnlistedMusic: "true" } }).usbExport.deleteUnlistedMusic).toBe(false);
+});
+
+it("defaults compatibility conversion to off and WAV, and preserves MP3 selection", () => {
+  const defaults = sanitisePreferences({}).usbExport;
+  expect(defaults.maximumCompatibility).toBe(false);
+  expect(defaults.conversionFormat).toBe("wav");
+  expect(sanitisePreferences({ usbExport: { maximumCompatibility: true, conversionFormat: "mp3" } }).usbExport)
+    .toMatchObject({ maximumCompatibility: true, conversionFormat: "mp3" });
+  expect(sanitisePreferences({ usbExport: { maximumCompatibility: "yes", conversionFormat: "flac" } }).usbExport)
+    .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav" });
 });

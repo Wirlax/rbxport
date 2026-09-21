@@ -23,20 +23,23 @@ and measurements live in [golden-gate.md](golden-gate.md) and
   rhythm at its rate.
 - **A steady tempo is a whole number of BPM.** Dance music is produced at
   whole tempos; a fitted line within a tenth of a whole number is snapped
-  to it and re-phased through the same kicks. The bars of a gradual change
+  to it and re-phased through the same kicks. The beats of a gradual change
   keep the tempo they were measured at.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
   across the join, as rekordbox writes it — whatever the new music does
   on that beat. Beat 1 is decided on the first tempo's own music, and the
   count runs on from there; an old-tempo beat within half a period of the
   new tempo's first beat is the same hit, and the new tempo keeps it.
-- **A grid is set where the kick drums state the tempo reliably.** Through
-  a stretch where they do not — a breakdown, a new tempo that is only
-  hinted at by percussion: a single impact on a phrase's downbeat, an arp
-  in eighths, claps on two and four, a snare roll into the drop, the kick
-  itself at half level — the grid holds the tempo it had and switches
-  where the new tempo is settled and the kicks are reliable again, at full
-  level and with the rest of the mix.
+- **Reliable kicks are the preferred timing reference.** A half-level
+  incoming kick, isolated impact, arp, clap or snare roll does not establish
+  a settled tempo by itself. If a transition cannot be walked, prefer a
+  cut where the new kick pattern is reliable, at full level with the mix.
+- **When a transition has no usable kick or click, emphasise the remaining
+  transients.** Boost positive full-band flux rises by 4× with a 20 ms
+  exponential release. Follow actual peaks above the hit floor, retaining
+  their original timestamps; silence and release tails cannot supply beats.
+  If no reliable kick run places a cut, use the transient support for the
+  old and new grids, with ties going to the earliest supported new beat.
 - **Where the music comes back at the same tempo on another phase, the
   grid cuts there.** A line through both halves of such a track is on one
   of them or on neither. Each half is put on its own kicks, and the cut
@@ -49,12 +52,12 @@ and measurements live in [golden-gate.md](golden-gate.md) and
   last supported beat, each becoming a beat of its own length, up to the
   cut. Where the music comes back on the grid it left, the ramp is a
   breakdown and the grid holds.
-- **A gradual tempo change between two settled tempos is gridded bar by
-  bar.** The beats are walked from the last settled bar at the old tempo,
-  the period drifting with the kick, and a cut goes at every fourth beat
-  with each bar carrying its own tempo, so a rise or fall — linear or not,
-  up or down — is followed a bar at a time until the tempo is settled
-  again.
+- **A gradual tempo change between two settled tempos preserves each
+  measured beat.** Walk from the last settled window at the old tempo,
+  following kicks or the transient fallback, with up to 5% period drift
+  per beat. Each interval has its own tempo, including on curved ramps.
+  Resume the steady fit after four consecutive intervals agree with its
+  period within 1% and its phase within 2 ms.
 
 ## Downbeat
 

@@ -282,7 +282,7 @@
   color: var(--c-context-menu-text);
   font-size: var(--f-size-xs);
   line-height: 1.4;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+  box-shadow: 0 4px 12px var(--c-shadow-side);
 }
 
 /* The tempo-master clock at the strip's left, beside the LINK button: a

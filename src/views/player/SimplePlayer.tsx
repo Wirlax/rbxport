@@ -20,7 +20,8 @@ import type { Cue, DeckId, RowDto } from "@/ipc/types";
 import { Artwork } from "@/components/Artwork";
 import { EjectIcon, RecordIcon } from "@/components/icons";
 import { formatBpm } from "@/lib/format";
-import { splitTime, type BeatGrid } from "@/lib/player";
+import type { BeatGrid } from "@/lib/player";
+import { TimeReadouts, type PositionSource } from "./TimeReadouts";
 import { CueMarkers, OverviewTempoMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
 import styles from "./SimplePlayer.module.css";
@@ -40,8 +41,8 @@ export interface SimplePlayerProps {
   playing: boolean;
   idle: boolean;
   onToggle: () => void;
-  /** Seconds elapsed, at the tick rate: what the readouts print. */
-  position: number;
+  /** Shared frame clock; only the readouts subscribe to displayed tenths. */
+  positionSource: PositionSource;
   /** Seconds in the track, or 0 while nothing is loaded. */
   total: number;
   cues: readonly Cue[];
@@ -63,12 +64,10 @@ export interface SimplePlayerProps {
 
 export const SimplePlayer = memo(function SimplePlayer({
   track, deck, shell, armed, droppable, onDragOver, onDrop,
-  playing, idle, onToggle, position, total, cues, grid, cuePoint,
+  playing, idle, onToggle, positionSource, total, cues, grid, cuePoint,
   overviewRef, overview, overviewHead, scrubFill, onScrubStart, onScrubMove, onScrubEnd,
   onEject, onLoadSelected,
 }: SimplePlayerProps) {
-  const remaining = splitTime(Math.max(total - position, 0));
-  const elapsed = splitTime(position);
 
   const tip = useTooltip();
   const { keyDisplay } = usePreferences().view;
@@ -129,14 +128,7 @@ export const SimplePlayer = memo(function SimplePlayer({
             <>
               <span className={styles.artist} data-testid="simple-player-artist">{track.artist}</span>
               <span className={styles.times}>
-                <span className={styles.remaining} data-testid="simple-player-time">
-                  -{remaining.main}
-                  <i className={styles.tenths}>.{remaining.tenths}</i>
-                </span>
-                <span className={styles.elapsed}>
-                  {elapsed.main}
-                  <i className={styles.tenths}>.{elapsed.tenths}</i>
-                </span>
+                <TimeReadouts source={positionSource} total={total} classes={styles} testId="simple-player-time" />
               </span>
               <span className={styles.key} data-testid="simple-player-key">{formatKey(track.key, keyDisplay)}</span>
               <span className={styles.bpm} data-testid="simple-player-bpm">{formatBpm(track.bpmX100)}</span>
@@ -163,7 +155,7 @@ export const SimplePlayer = memo(function SimplePlayer({
             aria-label="Position"
             aria-valuemin={0}
             aria-valuemax={Math.round(total)}
-            aria-valuenow={Math.round(position)}
+            aria-valuenow={Math.round(positionSource.positionRef.current)}
           >
             {track && track.analysed ? (
               <WaveformDetail

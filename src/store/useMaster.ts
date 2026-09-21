@@ -7,7 +7,7 @@
  * home on the next tick — what the callback actually applied, not what it was
  * asked for.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { VuMeterMode } from "@/lib/preferences";
@@ -220,5 +220,5 @@ export function useMaster(mode: VuMeterMode = "normal"): Master {
     })();
   }, []);
 
-  return { ...state, setLevel };
+  return useMemo(() => ({ ...state, setLevel }), [state, setLevel]);
 }

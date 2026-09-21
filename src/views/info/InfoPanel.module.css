@@ -1,6 +1,6 @@
 /* Geometry and colour come from design/tokens; nothing here is a literal.
    Every token named info* was measured from the three captures of
-   rekordbox's Information Window — see design/tokens/tokens.json. */
+   rekordbox's Information Window — see design/tokens/theme.json. */
 .panel {
   display: grid;
   grid-template-rows: auto 1fr;
