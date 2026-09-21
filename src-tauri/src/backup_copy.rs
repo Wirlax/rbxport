@@ -28,6 +28,113 @@ pub fn copy_file(source: &Path, target: &Path, progress: &mut Progress<'_>) -> i
     buffered_copy(source, target, progress)
 }
 
+/// Copy independent analysis files with bounded I/O concurrency. The caller's
+/// callback stays on this thread; all workers finish before an error returns,
+/// so the caller can safely remove the incomplete snapshot.
+pub fn copy_tree(source: &Path, target: &Path, progress: &mut Progress<'_>) -> io::Result<u64> {
+    let workers = std::thread::available_parallelism()
+        .map_or(2, usize::from)
+        .min(4);
+    copy_tree_with_workers(source, target, progress, workers)
+}
+
+fn copy_tree_with_workers(
+    source: &Path,
+    target: &Path,
+    progress: &mut Progress<'_>,
+    workers: usize,
+) -> io::Result<u64> {
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
+    };
+    let mut pending = vec![(source.to_path_buf(), target.to_path_buf())];
+    let mut directories = Vec::new();
+    let mut files = Vec::new();
+    while let Some((source, target)) = pending.pop() {
+        progress(0)?;
+        let meta = fs::symlink_metadata(&source)?;
+        if meta.file_type().is_symlink() || (!meta.is_dir() && !meta.is_file()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Unsupported file in backup",
+            ));
+        }
+        if meta.is_dir() {
+            fs::create_dir_all(&target)?;
+            for entry in fs::read_dir(&source)? {
+                let entry = entry?;
+                pending.push((entry.path(), target.join(entry.file_name())));
+            }
+            directories.push(target);
+        } else {
+            files.push((source, target));
+        }
+    }
+    let next = AtomicUsize::new(0);
+    let stopped = AtomicBool::new(false);
+    let mut bytes = 0;
+    let mut failure = None;
+    std::thread::scope(|scope| {
+        // Bound queued updates as well as workers, even for tiny cloned files.
+        let (sender, receiver) = mpsc::sync_channel::<io::Result<u64>>(32);
+        for _ in 0..workers.max(1).min(files.len()) {
+            let sender = sender.clone();
+            let files = &files;
+            let next = &next;
+            let stopped = &stopped;
+            scope.spawn(move || {
+                while !stopped.load(Ordering::Acquire) {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((source, target)) = files.get(index) else {
+                        break;
+                    };
+                    let result = copy_file(source, target, &mut |bytes| {
+                        if stopped.load(Ordering::Acquire) {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "Backup stopped",
+                            ));
+                        }
+                        sender
+                            .send(Ok(bytes))
+                            .map_err(|_| io::Error::other("Backup progress disconnected"))
+                    });
+                    if let Err(error) = result {
+                        let _ = sender.send(Err(error));
+                        stopped.store(true, Ordering::Release);
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        for update in receiver {
+            if failure.is_some() {
+                continue;
+            }
+            let result = update.and_then(|delta| {
+                bytes += delta;
+                progress(delta)
+            });
+            if let Err(error) = result {
+                failure = Some(error);
+                stopped.store(true, Ordering::Release);
+            }
+        }
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    // Children must be durable before their parent. Never publish a snapshot
+    // until every worker and every directory flush has finished.
+    for directory in directories.iter().rev() {
+        progress(0)?;
+        crate::durable::sync_dir(directory)?;
+    }
+    Ok(bytes)
+}
+
 #[cfg(any(not(windows), test))]
 fn buffered_copy(source: &Path, target: &Path, progress: &mut Progress<'_>) -> io::Result<u64> {
     use io::{Read, Write};
@@ -209,6 +316,102 @@ mod windows {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn tree_fixture(root: &Path, count: usize) -> std::path::PathBuf {
+        let source = root.join("source");
+        fs::create_dir_all(source.join("empty/nested")).unwrap();
+        for i in 0..count {
+            let directory = source.join(format!("{i:04}"));
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("analysis.dat"),
+                vec![(i % 256) as u8; 64 * 1024],
+            )
+            .unwrap();
+        }
+        source
+    }
+
+    #[test]
+    fn parallel_tree_preserves_files_empty_directories_and_exact_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tree_fixture(dir.path(), 24);
+        let target = dir.path().join("backup");
+        let mut reported = 0;
+        let bytes = copy_tree_with_workers(
+            &source,
+            &target,
+            &mut |delta| {
+                reported += delta;
+                Ok(())
+            },
+            4,
+        )
+        .unwrap();
+        assert_eq!(bytes, 24 * 64 * 1024);
+        assert_eq!(reported, bytes);
+        assert!(target.join("empty/nested").is_dir());
+        for i in 0..24 {
+            let relative = format!("{i:04}/analysis.dat");
+            assert_eq!(
+                fs::read(source.join(&relative)).unwrap(),
+                fs::read(target.join(&relative)).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn cancelled_parallel_copy_joins_workers_before_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tree_fixture(dir.path(), 64);
+        let target = dir.path().join("backup");
+        let error = copy_tree_with_workers(
+            &source,
+            &target,
+            &mut |bytes| {
+                if bytes > 0 {
+                    Err(io::Error::new(io::ErrorKind::Interrupted, "User cancelled"))
+                } else {
+                    Ok(())
+                }
+            },
+            4,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(error.to_string(), "User cancelled");
+        fs::remove_dir_all(&target).unwrap();
+        assert!(!target.exists());
+        assert_eq!(
+            fs::read(source.join("0063/analysis.dat")).unwrap(),
+            vec![63; 64 * 1024]
+        );
+    }
+
+    #[test]
+    fn parallel_copy_keeps_existing_files_on_worker_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tree_fixture(dir.path(), 8);
+        let target = dir.path().join("backup");
+        fs::create_dir_all(target.join("0003")).unwrap();
+        fs::write(target.join("0003/analysis.dat"), b"keep").unwrap();
+        assert!(copy_tree_with_workers(&source, &target, &mut |_| Ok(()), 4).is_err());
+        assert_eq!(fs::read(target.join("0003/analysis.dat")).unwrap(), b"keep");
+    }
+
+    #[test]
+    #[ignore = "manual copy throughput measurement"]
+    fn compare_serial_and_parallel_tree_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tree_fixture(dir.path(), 512);
+        for workers in [1, 4, 4, 1] {
+            let target = dir.path().join("backup");
+            let started = std::time::Instant::now();
+            copy_tree_with_workers(&source, &target, &mut |_| Ok(()), workers).unwrap();
+            println!("{workers} workers: {:?}", started.elapsed());
+            fs::remove_dir_all(target).unwrap();
+        }
+    }
 
     #[test]
     fn native_copy_is_independent_and_reports_the_file_size() {

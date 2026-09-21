@@ -286,7 +286,15 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         }
         let tree = analysis(&location);
         if tree.exists() {
-            bytes += copy_progress(&tree, &partial.join("analysis"), &mut copied_file)?;
+            let mut refused = None;
+            let copied = crate::backup_copy::copy_tree(&tree, &partial.join("analysis"), &mut |bytes| {
+                copied_file(bytes).map_err(|e| {
+                    refused = Some(e);
+                    std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+                })
+            });
+            if let Some(error) = refused { return Err(error); }
+            bytes += copied.map_err(error)?;
         } else {
             fs::create_dir(partial.join("analysis")).map_err(error)?;
         }
