@@ -436,3 +436,16 @@ test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ 
   await page.reload();
   await expect(panel).toHaveCount(0);
 });
+
+
+test("Analysis describes the selected mode", async ({ page }) => {
+  await open(page);
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Analysis", exact: true }).click();
+  const mode = dialog.getByRole("combobox", { name: "Analysis mode", exact: true });
+  await mode.selectOption("rekordbox");
+  await expect(dialog.getByText("Normal mode with a 70–180 BPM range", { exact: false })).toBeVisible();
+  await mode.selectOption("rbxport");
+  await expect(dialog.getByText("Aligns beats to kick drums", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("Normal mode with a 70–180 BPM range", { exact: false })).toHaveCount(0);
+});

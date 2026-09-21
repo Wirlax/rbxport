@@ -1260,11 +1260,10 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
   await dialog.getByRole("tab", { name: "Analysis" }).click();
 
   const section = dialog.getByRole("region", { name: "Track Analysis" });
-  // On by default, as rekordbox ships; the switch is its "Disable".
-  const disable = section.getByRole("switch", { name: "Disable" });
-  await expect(disable).not.toBeChecked();
-  await disable.click();
-  await expect(disable).toBeChecked();
+  const automatic = section.getByRole("switch", { name: "Automatic analysis" });
+  await expect(automatic).toBeChecked();
+  await automatic.click();
+  await expect(automatic).not.toBeChecked();
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
