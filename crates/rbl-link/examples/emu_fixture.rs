@@ -26,13 +26,14 @@ struct Tone {
     title: &'static str,
     hz: f32,
     bpm: f32,
+    key: &'static str,
 }
 
 /// In title order, which is the order the deck's TRACK list shows them.
 const TONES: [Tone; 3] = [
-    Tone { title: "01 Link Tone 220Hz", hz: 220.0, bpm: 124.0 },
-    Tone { title: "02 Link Tone 440Hz", hz: 440.0, bpm: 128.0 },
-    Tone { title: "03 Link Tone 880Hz", hz: 880.0, bpm: 132.0 },
+    Tone { title: "01 Link Tone 220Hz", hz: 220.0, bpm: 124.0, key: "Am" },
+    Tone { title: "02 Link Tone 440Hz", hz: 440.0, bpm: 128.0, key: "Abm" },
+    Tone { title: "03 Link Tone 880Hz", hz: 880.0, bpm: 132.0, key: "B" },
 ];
 const SECONDS: u32 = 30;
 const RATE: u32 = 44_100;
@@ -52,6 +53,19 @@ fn main() {
     let shape = Shape { tracks: TONES.len(), playlists: 1, tracks_per_playlist: TONES.len(), ..Shape::default() };
     let location = fixture::build(out, shape).expect("build the fixture");
 
+    // Nonalphabetical keys and distinct artists exercise the actual sort and
+    // nested BACK controls, not just an anonymous three-row flat list.
+    let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadWrite).expect("open fixture metadata");
+    for (i, tone) in TONES.iter().enumerate() {
+        let id = (i + 1).to_string();
+        let artist = format!("Link Artist {}", i + 1);
+        let album = format!("Link Album {}", i + 1);
+        db.connection().execute("INSERT INTO djmdKey (ID, ScaleName, created_at, updated_at) VALUES (?1, ?2, '2026-09-20', '2026-09-20')", (&id, tone.key)).unwrap();
+        db.connection().execute("INSERT INTO djmdArtist (ID, Name, created_at, updated_at) VALUES (?1, ?2, '2026-09-20', '2026-09-20')", (&id, &artist)).unwrap();
+        db.connection().execute("INSERT INTO djmdAlbum (ID, Name, AlbumArtistID, created_at, updated_at) VALUES (?1, ?2, ?1, '2026-09-20', '2026-09-20')", (&id, &album)).unwrap();
+        db.connection().execute("UPDATE djmdContent SET KeyID = ?1, ArtistID = ?1, AlbumID = ?1 WHERE ID = ?2", (&id, fixture::track_id(i))).unwrap();
+    }
+    drop(db);
     let mut tracks = Vec::new();
     for (i, tone) in TONES.iter().enumerate() {
         let wav = audio_dir.join(format!("{}.wav", tone.title));
@@ -90,6 +104,8 @@ fn main() {
         tracks.push(serde_json::json!({
             "id": fixture::track_id(i),
             "title": tone.title,
+            "key": tone.key,
+            "artist": format!("Link Artist {}", i + 1),
             "hz": tone.hz,
             "seconds": SECONDS,
             "bpmX100": bpm_x100,

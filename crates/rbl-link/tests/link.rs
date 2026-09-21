@@ -187,11 +187,8 @@ fn a_second_player_only_sees_its_own_list() {
 /// The connection alphatheta-connect opens to rekordbox, minus the port
 /// query it hard-codes to 12523.
 ///
-/// Its own `connect_to_device` expects the introduction to be answered with
-/// `4000` (what a CDJ answers); rekordbox 7.2.11 answered a CDJ-3000 with
-/// `0000 [0x11, 0x14]` (captured 2026-09-12), and that is what this server
-/// sends. Whether rekordbox answers a one-argument introduction differently
-/// is `[UNKNOWN]`, so the handshake is done here, expecting the capture.
+/// A one-argument introduction selects the legacy reply and twelve-field
+/// rows, as measured against rekordbox 7.2.11 on 2026-09-20.
 async fn client_connection(served: &Served) -> (Connection, LookupDescriptor) {
     let mut socket = tokio::net::TcpStream::connect(served.link.database_address()).await.unwrap();
     socket.write_all(&Field::UInt32(1).to_bytes()).await.unwrap();
@@ -199,9 +196,9 @@ async fn client_connection(served: &Served) -> (Connection, LookupDescriptor) {
     assert_eq!(hello.as_number(), Some(1));
     let intro = Message::with_transaction(0xffff_fffe, control_request::INTRODUCE, vec![Field::UInt32(3)]);
     socket.write_all(&intro.to_bytes()).await.unwrap();
-    let reply = Message::from_stream(&mut socket, control_request::INTRODUCE).await.unwrap();
-    assert_eq!(reply.message_type, control_request::INTRODUCE);
-    assert_eq!(reply.args.first().and_then(Field::as_number), Some(0x11), "answered as device 17");
+    let reply = Message::from_stream(&mut socket, 0x4000).await.unwrap();
+    assert_eq!(reply.message_type, 0x4000);
+    assert_eq!(reply.args.get(1).and_then(Field::as_number), Some(0x11), "answered as device 17");
 
     let rekordbox = Device::new("rekordbox", 0x11, ClientDeviceType::Rekordbox, [0; 6], std::net::Ipv4Addr::LOCALHOST);
     let host = Device::new("CDJ-3000", 3, ClientDeviceType::Cdj, [0; 6], std::net::Ipv4Addr::LOCALHOST);
@@ -221,10 +218,8 @@ async fn alphatheta_connects_client_reads_metadata_and_analysis_from_us() {
     let (conn, d) = client_connection(&served).await;
 
     let track = queries::get_metadata(&conn, &d, served.track).await.unwrap();
-    // The client takes the title from a `0004` (title-only) row; rekordbox
-    // 7.2.11 sent the CDJ-3000 a `2304` (title and comment) row there, and
-    // so does this server. Every other field comes through.
-    assert_eq!(track.title, "", "no title-only row, as in the capture");
+    assert!(!track.title.is_empty(), "legacy clients must receive the title");
+    assert_eq!(track.id, served.track);
     assert_eq!(track.duration, 290.0);
     assert!((track.tempo - 128.0).abs() < 0.01, "{}", track.tempo);
     assert_eq!(track.comment, "");

@@ -21,6 +21,7 @@ use crate::error::{AppError, AppResult, ErrorKind};
 const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
+    pub(crate) edit_gate: parking_lot::ReentrantMutex<()>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
     inner: RwLock<Inner>,
     /// Where manually requested backups and analysis recovery files go.
@@ -76,6 +77,7 @@ impl AppState {
     /// not chosen here: it arrives with the library, in [`Self::set_library`].
     pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
         Self {
+            edit_gate: parking_lot::ReentrantMutex::new(()),
             analysis_write: parking_lot::Mutex::new(()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
             backup_dir: backup_dir.into(),
@@ -126,12 +128,32 @@ impl AppState {
         &self,
         edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
     ) -> Result<T, rbl_db::DbError> {
+        self.write_then(edit, |_, result| Ok(result))
+    }
+
+    /// Keep the encrypted connection and edit gate through the refresh, so
+    /// a small edit neither pays for another key derivation nor races a writer.
+    pub fn write_then<T, U>(
+        &self,
+        edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>,
+        refresh: impl FnOnce(&rbl_db::Library, T) -> Result<U, rbl_db::DbError>,
+    ) -> Result<U, rbl_db::DbError> {
+        let started = std::time::Instant::now();
         let location = self
             .location()
             .map_err(|e| rbl_db::DbError::NotInstalled(e.message))?;
-        let mut writer = rbl_db::write::Writer::open(location, self.backup_dir.clone())?;
+        let _gate = self.edit_gate.lock();
+        let gate_ms = started.elapsed().as_millis();
+        let mut writer = rbl_db::write::Writer::open(location.clone(), self.backup_dir.clone())?;
         writer.disable_automatic_backups();
-        edit(&mut writer)
+        let open_ms = started.elapsed().as_millis();
+        let result = edit(&mut writer);
+        let edit_ms = started.elapsed().as_millis();
+        let result = result.and_then(|value| refresh(writer.library(), value));
+        tracing::debug!(gate_ms, open_ms = open_ms - gate_ms,
+            edit_ms = edit_ms - open_ms, refresh_ms = started.elapsed().as_millis() - edit_ms,
+            "library write phases");
+        result
     }
 
     /// Runs one read against the database, opening the handle if needed.
@@ -200,12 +222,24 @@ impl AppState {
         inner.folders.clear();
         inner.view_order.clear();
         inner.generation = inner.generation.wrapping_add(1).max(1);
-        // A reload follows every write, including a new analysis: the
-        // players must not be served what was parsed before it.
-        if let Some(session) = inner.link.as_ref() {
-            session.analysis_changed();
-        }
         inner.generation
+    }
+
+    /// Publish metadata without changing row identities or analysis files.
+    /// Call under the edit gate, using the connection that committed the edit.
+    pub fn refresh_metadata(&self, db: &rbl_db::Library, ids: &[String], histories: bool) -> Result<u32, rbl_db::DbError> {
+        let mut inner = self.inner.write();
+        let current = inner.library.as_ref().ok_or_else(|| rbl_db::DbError::Open("No library loaded".into()))?;
+        // Build privately so a failed read never publishes a partial update.
+        let mut next = (**current).clone();
+        rbl_index::reload_metadata(db, &mut next, ids)?;
+        if histories { next.set_histories(rbl_index::reload_histories(db, &next)?); }
+        inner.library = Some(Arc::new(next));
+        inner.views.clear();
+        inner.folders.clear();
+        inner.view_order.clear();
+        inner.generation = inner.generation.wrapping_add(1).max(1);
+        Ok(inner.generation)
     }
 
     /// Starts or replaces the LINK session. Returns the previous one, if
@@ -582,5 +616,59 @@ mod tests {
         let rows: Vec<u32> = (0..64).collect();
         let bytes = serde_json::to_vec(&rows_to_dto(&library, &rows, 0)).unwrap();
         assert!(bytes.len() < 64 * 1024, "{} bytes", bytes.len());
+    }
+}
+
+#[cfg(test)]
+mod edit_refresh_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use crate::commands::{refresh_after_edit, Touched};
+
+    #[test]
+    fn small_edits_refresh_and_persist() {
+        let subscriber = tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).without_time().with_test_writer().finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location.clone());
+        let track = rbl_db::fixture::track_id(1);
+        let original = state.library().unwrap();
+        let row = original.row_of(&track).unwrap() as usize;
+        let before = original.play_count[row];
+        state.write_then(|w| w.record_play(&track), |db, _| {
+            refresh_after_edit(&state, db, Touched::Histories(vec![track.clone()]))
+        }).unwrap();
+        assert_eq!(state.library().unwrap().play_count[row], before + 1);
+        assert_eq!(original.play_count[row], before, "existing readers keep a consistent snapshot");
+        let history = {
+            let lib = state.library().unwrap();
+            let histories = lib.histories();
+            let index = histories.members.iter().rposition(|members| members.contains(&(row as u32))).unwrap();
+            histories.ids[index].to_string()
+        };
+        state.write_then(|w| w.remove_from_history(&history, &[track.clone()]), |db, _| {
+            refresh_after_edit(&state, db, Touched::Histories(Vec::new()))
+        }).unwrap();
+        let current = state.library().unwrap();
+        let histories = current.histories();
+        let index = histories.ids.iter().position(|id| id.to_string() == history).unwrap();
+        assert!(!histories.members[index].contains(&(row as u32)));
+        drop(histories);
+        state.write_then(|w| w.set_field(&track, rbl_db::write::TrackField::PlayCount, "0"), |db, _| {
+            refresh_after_edit(&state, db, Touched::Metadata(vec![track.clone()]))
+        }).unwrap();
+        assert_eq!(state.library().unwrap().play_count[row], 0);
+        let reopened = state.open_read_only().unwrap();
+        let (persisted, _) = rbl_index::load(&reopened).unwrap();
+        assert_eq!(persisted.play_count[row], 0);
+        let generation = state.summary().3;
+        assert!(state.write_then(|w| w.set_rating(&track, 6), |db, _| {
+            refresh_after_edit(&state, db, Touched::Metadata(vec![track.clone()]))
+        }).is_err());
+        assert_eq!(state.summary().3, generation);
     }
 }

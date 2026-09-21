@@ -118,7 +118,7 @@ fn browse(session: &mut Box<dyn Session>, kind: u16, args: &[u32]) -> (u32, Vec<
     assert_eq!(header[0].kind, rbl_dbserver::kind::MENU_HEADER);
     assert_eq!(header[0].arguments[0], Argument::Number(u32::from(kind)));
     let Argument::Number(count) = header[0].arguments[1] else { panic!() };
-    let rendered = session.handle(&numbers(rbl_dbserver::kind::RENDER, 0x101, &[CTX, 0, count, 0, count, 0xc, 1, 0]));
+    let rendered = session.handle(&numbers(rbl_dbserver::kind::RENDER, 0x101, &[args[0], 0, count, 0, count, 0xc, 1, 0]));
     assert_eq!(rendered[0], Message::new(0x101, rbl_dbserver::kind::RENDER_HEADER, vec![Argument::Number(1), Argument::Number(0)]));
     assert_eq!(rendered.last().unwrap().kind, rbl_dbserver::kind::MENU_FOOTER);
     (count, rendered[1..rendered.len() - 1].to_vec())
@@ -365,7 +365,8 @@ fn the_setup_reply_and_the_unknown_requests_answer_as_rekordbox_does() {
     assert_eq!(reply[0].encode(), hex("11872349ae11fffffffe1000000f021400000002060611000000111100000014"));
     let after = s.handle(&numbers(0x3007, 0x17e, &[0x0108_0301, 0]));
     assert_eq!(after[0].encode(), hex("11872349ae110000017e1040000f021400000002060611000030071100000000"));
-    let loaded = s.handle(&numbers(kind::LOADED, 0x18d, &[CTX, TRACK, 0, 1]));
+    browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    let loaded = s.handle(&numbers(kind::ITEM_POSITION, 0x18d, &[CTX, TRACK, 0, 1]));
     assert_eq!(loaded[0].encode(), hex("11872349ae110000018d1040000f021400000002060611000031001100000000"));
     let matching = s.handle(&numbers(0x1017, 0x3cf, &[0x0102_0301, 0, TRACK]));
     assert_eq!(args(&matching[0]), "0x1017, 0x0");
@@ -395,6 +396,8 @@ fn tracks_are_sorted_the_way_the_player_asked() {
     assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Key { key: 3, distance: 2 }, sort: Sort::Key }));
     s.handle(&Message::new(3, kind::SEARCH, vec![Argument::Number(CTX), Argument::Number(0), Argument::Number(8), Argument::String("ACID".into()), Argument::Number(0)]));
     assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Search("ACID".into()), sort: Sort::Default }));
+    s.handle(&Message::new(4, kind::SEARCH_TRACK, vec![Argument::Number(CTX), Argument::Number(0), Argument::Number(8), Argument::String("ABC".into())]));
+    assert_eq!(spy.0.lock().unwrap().clone(), Some(Query::Tracks { scope: TrackScope::Search("ABC".into()), sort: Sort::Default }));
 }
 
 #[test]
@@ -434,4 +437,141 @@ fn the_extended_cue_reply_counts_its_entries_not_a_header_word() {
     s.handle(&setup_request(1));
     let reply = s.handle(&numbers(kind::EXTENDED_CUES, 0x1c0, &[0x0108_0301, TRACK, 0]));
     assert_eq!(args(&reply[0]), "0x2b04, 0x0, 0x30, blob[48], 0x3");
+}
+
+#[test]
+fn item_position_restores_categories_and_does_not_mark_tracks_played() {
+    let mut s = session();
+    browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0, 1]);
+    let response = s.handle(&numbers(kind::ITEM_POSITION, 4, &[CTX, 0xffb7_d23b, 0, 1]));
+    assert_eq!(response[0].arguments[1], Argument::Number(1));
+    let absent = s.handle(&numbers(kind::ITEM_POSITION, 5, &[CTX, 123, 0, 1]));
+    assert_eq!(absent[0].arguments[1], Argument::Number(u32::MAX));
+    let page = s.handle(&numbers(kind::RENDER, 6, &[CTX, 1, 1]));
+    assert_eq!(page[1].arguments[1], Argument::Number(0xffb7_d23b));
+}
+
+#[test]
+fn background_metadata_does_not_replace_the_browser_menu() {
+    let mut s = session();
+    browse(&mut s, kind::PLAYLIST_MENU, &[CTX, 0, 0, 1]);
+    s.handle(&numbers(kind::METADATA, 2, &[0x0102_0301, TRACK]));
+    let page = s.handle(&numbers(kind::RENDER, 3, &[CTX, 1, 1]));
+    assert_eq!(page[1].arguments[1], Argument::Number(0xffb7_d23b));
+    let info = s.handle(&numbers(kind::RENDER, 4, &[0x0102_0301, 0, 16]));
+    assert_eq!(info.len(), 18);
+}
+
+#[test]
+fn legacy_client_negotiates_and_gets_a_title_in_twelve_field_rows() {
+    let mut s = session();
+    let reply = s.handle(&numbers(kind::SETUP, 0xffff_fffe, &[5]));
+    assert_eq!(reply[0].encode(), hex("11872349ae11fffffffe1040000f021400000002060611000000001100000011"));
+    let (_, rows) = browse(&mut s, kind::METADATA, &[CTX, TRACK]);
+    assert!(rows.iter().all(|row| row.arguments.len() == 12));
+    assert_eq!(rows[0].arguments[6], Argument::Number(4));
+    assert_eq!(rows[0].arguments[3], Argument::String(the_track().title));
+}
+
+#[test]
+fn filter_properties_use_the_expected_reply_and_do_not_clobber_browsing() {
+    let mut s = session();
+    browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    let reply = s.handle(&numbers(0x3107, 3, &[0x0108_0301]));
+    assert_eq!(reply[0].kind, 0x4004);
+    assert_eq!(reply[0].arguments[1], Argument::Number(0));
+    assert_eq!(reply[0].arguments[4], Argument::Number(4));
+    let page = s.handle(&numbers(kind::RENDER, 4, &[CTX, 0, 1]));
+    assert_eq!(page[1].arguments[1], Argument::Number(TRACK));
+    // Select a BPM range excluding the fixture, then toggle filtering.
+    let mut bytes = vec![1, 6, 2, 0];
+    bytes.extend_from_slice(&12000_u32.to_le_bytes());
+    bytes.extend_from_slice(&13000_u32.to_le_bytes());
+    let update = Message::new(5, 0x3207, vec![Argument::Number(CTX), Argument::Number(6), Argument::Number(0), Argument::Number(12), Argument::Blob(bytes)]);
+    assert_eq!(s.handle(&update)[0].arguments[1], Argument::Number(0));
+    s.handle(&numbers(0x3007, 6, &[CTX, 1]));
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
+    s.handle(&numbers(0x3007, 7, &[CTX, 0]));
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 1);
+}
+
+#[test]
+fn read_only_catalog_refuses_tag_and_rating_edits() {
+    let mut s = session();
+    for (kind, args) in [(0x3002, vec![CTX, TRACK, 1]), (0x3202, vec![CTX]), (0x2107, vec![CTX, TRACK, 5])] {
+        assert_eq!(s.handle(&numbers(kind, 1, &args))[0].arguments[1], Argument::Number(1));
+    }
+}
+
+#[test]
+fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() {
+    use rbl_dbserver::catalog::Edit;
+    #[derive(Default)]
+    struct Editable(std::sync::Mutex<(Vec<u32>, u32, i16)>);
+    impl Catalog for Editable {
+        fn list(&self, q: &Query) -> Vec<Row> {
+            if matches!(q, Query::Tracks { scope: TrackScope::TagList, .. }) {
+                return self.0.lock().unwrap().0.iter().enumerate().map(|(i, &id)| Row::Track { id, position: i as u32 + 1 }).collect();
+            }
+            Small(false).list(q)
+        }
+        fn track_row(&self, id: u32) -> Option<TrackRow> { Small(false).track_row(id) }
+        fn track(&self, id: u32) -> Option<TrackDetails> {
+            Small(false).track(id).map(|mut track| { track.rating = self.0.lock().unwrap().1; track })
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn tagged(&self, id: u32) -> bool { self.0.lock().unwrap().0.contains(&id) }
+        fn grid_offset(&self, _: u32) -> i16 { self.0.lock().unwrap().2 }
+        fn edit(&self, edit: &Edit) -> bool {
+            let mut state = self.0.lock().unwrap();
+            match *edit {
+                Edit::Tag { track, add: true } => { if !state.0.contains(&track) { state.0.push(track); } }
+                Edit::Tag { track, add: false } => state.0.retain(|&id| id != track),
+                Edit::GridOffset { offset_ms, .. } => state.2 = offset_ms,
+                Edit::ClearTags => state.0.clear(),
+                Edit::Rating { stars, .. } => state.1 = u32::from(stars),
+            }
+            true
+        }
+    }
+    let handler = CatalogHandler::new(Arc::new(Editable::default()));
+    let mut one = handler.open();
+    let mut two = handler.open();
+    let added = one.handle(&numbers(0x3002, 1, &[CTX, TRACK, 1]));
+    assert_eq!(added[0].arguments[1], Argument::Number(0));
+    let (count, rows) = browse(&mut two, 0x100f, &[CTX, 0]);
+    assert_eq!(count, 1);
+    assert_eq!(rows[0].arguments[7], Argument::Number(0x0100_0001));
+    let (_, metadata) = browse(&mut two, kind::METADATA, &[0x0102_0301, TRACK]);
+    assert_eq!(metadata[0].arguments[7], Argument::Number(1), "loaded-track metadata must report tag membership too");
+    one.handle(&numbers(0x3002, 2, &[CTX, TRACK, 1]));
+    assert_eq!(browse(&mut two, 0x100f, &[CTX, 0]).0, 1);
+    one.handle(&numbers(0x2107, 3, &[CTX, TRACK, 4]));
+    let (_, rows) = browse(&mut two, kind::METADATA, &[CTX, TRACK]);
+    let rating = rows.iter().find(|row| row.arguments[6] == Argument::Number(10)).unwrap();
+    assert_eq!(rating.arguments[1], Argument::Number(4));
+    assert_eq!(one.handle(&numbers(0x2107, 4, &[CTX, TRACK, 6]))[0].arguments[1], Argument::Number(1));
+    let saved = one.handle(&numbers(kind::SAVE_GRID_OFFSET, 5, &[CTX, TRACK, 0xffff_fe2d]));
+    assert_eq!(saved[0].arguments[1], Argument::Number(0));
+    let read = two.handle(&numbers(kind::GRID_OFFSET, 6, &[CTX, TRACK]));
+    assert_eq!(read[0].arguments[1], Argument::Number(0xfe2d));
+    one.handle(&numbers(0x3002, 7, &[CTX, TRACK, 0]));
+    assert_eq!(browse(&mut two, 0x100f, &[CTX, 0]).0, 0);
+    let (_, metadata) = browse(&mut two, kind::METADATA, &[0x0102_0301, TRACK]);
+    assert_eq!(metadata[0].arguments[7], Argument::Number(0));
+}
+
+#[test]
+fn grid_offset_writes_do_not_claim_success_without_persistence() {
+    let mut s = session();
+    browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    assert_eq!(s.handle(&numbers(kind::SAVE_GRID_OFFSET, 8, &[CTX, TRACK, 234]))[0].arguments,
+        vec![Argument::Number(0x2605), Argument::Number(1)]);
+    assert_eq!(s.handle(&numbers(kind::GRID_OFFSET, 9, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x2804), Argument::Number(0)]);
+    // An edit acknowledgement must not replace the browser's pending menu.
+    let rendered = s.handle(&numbers(kind::RENDER, 10, &[CTX, 0, 1]));
+    assert_eq!(rendered[1].arguments[1], Argument::Number(TRACK));
 }

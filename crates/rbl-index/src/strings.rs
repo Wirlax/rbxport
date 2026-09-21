@@ -39,6 +39,16 @@ impl StrColumn {
         self.spans.is_empty()
     }
 
+    /// Replace rows in one pass so repeated edits do not leave dead strings
+    /// growing in the packed arena.
+    pub(crate) fn replace_rows(&mut self, values: &std::collections::HashMap<usize, String>) {
+        let mut next = Self::with_capacity(self.len(), self.bytes.len());
+        for row in 0..self.len() {
+            next.push(values.get(&row).map_or_else(|| self.get(row), String::as_str));
+        }
+        *self = next;
+    }
+
     /// Bytes held, for the memory budget.
     pub fn heap_bytes(&self) -> usize {
         self.bytes.capacity() + self.spans.capacity() * std::mem::size_of::<(u32, u32)>()

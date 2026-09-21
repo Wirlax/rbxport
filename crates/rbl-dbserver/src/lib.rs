@@ -15,6 +15,7 @@
 //! Nothing here opens a socket; it is a codec, so it is testable exhaustively.
 
 pub mod catalog;
+pub mod filter;
 pub mod item;
 pub mod keys;
 pub mod net;
@@ -339,6 +340,8 @@ pub mod kind {
     pub const KEY_TRACKS: u16 = 0x1214;
     /// Search by text.
     pub const SEARCH: u16 = 0x1300;
+    /// CDJ-3000 live keyboard search, with the same arguments as SEARCH.
+    pub const SEARCH_TRACK: u16 = 0x1500;
     /// The sort options a track list offers.
     pub const SORT_MENU: u16 = 0x1400;
     /// DATE ADDED: the years.
@@ -360,6 +363,8 @@ pub mod kind {
     pub const TRACK_INFO: u16 = 0x2102;
     /// The beat grid.
     pub const BEAT_GRID: u16 = 0x2204;
+    pub const SAVE_GRID_OFFSET: u16 = 0x2605;
+    pub const GRID_OFFSET: u16 = 0x2804;
     /// The track a player delivers to KUVO, as the firmware names it
     /// (`CMD_GET_DELIVERY_INFO`): a 13-row menu much like [`METADATA`],
     /// asked for after every load from a rekordbox source, once the user
@@ -384,8 +389,16 @@ pub mod kind {
     /// "Waiting…" for eighteen seconds, retries twice, and gives the source
     /// up. Answered with [`USER_INFO_REPLY`].
     pub const USER_INFO: u16 = 0x3006;
-    /// The player tells us which of our tracks it has loaded.
-    pub const LOADED: u16 = 0x3100;
+    /// The zero-based offset of an item in the current menu.
+    pub const ITEM_POSITION: u16 = 0x3100;
+    pub const TAG_LIST: u16 = 0x100f;
+    pub const CHANGE_TAG: u16 = 0x3002;
+    pub const CLEAR_TAGS: u16 = 0x3202;
+    pub const CHANGE_RATING: u16 = 0x2107;
+    pub const FILTER_SWITCH: u16 = 0x3007;
+    pub const FILTER_GET: u16 = 0x3107;
+    pub const FILTER_SET: u16 = 0x3207;
+    pub const FILTER_REPLY: u16 = 0x4004;
     /// "Here is how many items your query matched."
     pub const MENU_HEADER: u16 = 0x4000;
     /// Opens a rendered menu: `[1, offset]`.
@@ -441,13 +454,23 @@ pub mod kind {
             WAVEFORM_PREVIEW => "waveform preview".to_owned(),
             TRACK_INFO => "track info".to_owned(),
             BEAT_GRID => "beat grid".to_owned(),
+            SAVE_GRID_OFFSET => "save grid offset".to_owned(),
+            GRID_OFFSET => "grid offset".to_owned(),
             CUES => "cues".to_owned(),
             WAVEFORM_DETAIL => "waveform detail".to_owned(),
             EXTENDED_CUES => "extended cues".to_owned(),
             ANLZ_TAG => "anlz tag (EXT)".to_owned(),
             ANLZ_TAG_2EX => "anlz tag (2EX)".to_owned(),
             RENDER => "render".to_owned(),
-            LOADED => "loaded".to_owned(),
+            ITEM_POSITION => "item position".to_owned(),
+            TAG_LIST => "tag list".to_owned(),
+            CHANGE_TAG => "change tag".to_owned(),
+            CLEAR_TAGS => "clear tags".to_owned(),
+            CHANGE_RATING => "change rating".to_owned(),
+            FILTER_SWITCH => "filter switch".to_owned(),
+            FILTER_GET => "filter properties".to_owned(),
+            FILTER_SET => "set filter properties".to_owned(),
+            SEARCH_TRACK => "search track".to_owned(),
             MENU_HEADER => "menu header".to_owned(),
             RENDER_HEADER => "render header".to_owned(),
             ARTWORK_REPLY => "artwork reply".to_owned(),

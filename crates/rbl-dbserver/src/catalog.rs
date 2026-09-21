@@ -36,6 +36,7 @@ impl Sort {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TrackScope {
     All,
+    TagList,
     /// An artist's tracks, on one album or (`None`) all of them.
     Artist { artist: u32, album: Option<u32> },
     Album(u32),
@@ -147,12 +148,34 @@ pub trait Catalog: Send + Sync {
     /// A track's analysis blob, in the layout the reply carries.
     fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>>;
 
-    /// A player loaded (`Some`) or unloaded (`None`) one of our tracks.
-    fn loaded(&self, _player: u8, _track: Option<u32>) {}
+    /// Signed millisecond correction, separate from the original beat times.
+    fn grid_offset(&self, _track: u32) -> i16 { 0 }
+
+    /// Apply a player edit. Read-only catalogs refuse it explicitly.
+    fn edit(&self, _edit: &Edit) -> bool { false }
+
+    fn tagged(&self, _track: u32) -> bool { false }
+
+    fn filter_rows(&self, rows: &mut Vec<Row>, filter: &crate::filter::TrackFilter) {
+        if !filter.enabled { return; }
+        rows.retain(|row| match row {
+            Row::Track { id, .. } => self.track(*id).is_some_and(|t| filter.matches(t.row.bpm_x100, t.row.key, t.rating, t.colour)),
+            _ => true,
+        });
+    }
 
     /// Whether a player has loaded this track since the session began: the
     /// rows a player greys as played.
     fn played(&self, _track: u32) -> bool {
         false
     }
+}
+
+/// Library edits made from a player, acknowledged only after they succeed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Edit {
+    Tag { track: u32, add: bool },
+    ClearTags,
+    Rating { track: u32, stars: u8 },
+    GridOffset { track: u32, offset_ms: i16 },
 }

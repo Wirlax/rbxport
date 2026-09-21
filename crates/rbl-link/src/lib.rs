@@ -36,6 +36,7 @@ use rbl_index::Library;
 pub use beacon::{LinkState, Player};
 pub use watch::Watcher;
 pub use catalog::{IndexCatalog, Played, Source};
+pub use rbl_dbserver::catalog::Edit;
 pub use rbl_prolink::DeviceType;
 
 /// The ports rekordbox uses, which a player expects.

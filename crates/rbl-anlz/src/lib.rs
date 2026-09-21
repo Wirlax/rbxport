@@ -388,6 +388,20 @@ impl Anlz {
         self.sections.iter().find_map(Section::as_beat_grid)
     }
 
+    /// Signed millisecond correction at PQTZ +0x12. rekordbox's
+    /// `MstSaveQtzOffset` rewrites this field without moving the beat records.
+    pub fn grid_offset(&self) -> Option<i16> {
+        let bytes = self.section(b"PQTZ")?.header.get(6..8)?;
+        Some(i16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    pub fn with_grid_offset(&self, offset_ms: i16) -> Option<Vec<u8>> {
+        let mut next = self.clone();
+        let section = next.sections.iter_mut().find(|s| s.tag == FourCc::new(b"PQTZ"))?;
+        section.header.get_mut(6..8)?.copy_from_slice(&offset_ms.to_be_bytes());
+        Some(next.to_bytes())
+    }
+
     /// Every extended cue entry in the file, across every `PCO2` section.
     pub fn cue_entries(&self) -> Vec<CueEntry> {
         self.sections.iter().filter_map(Section::as_cue_entries).flatten().collect()
@@ -481,4 +495,24 @@ pub fn resolve(share_root: &Path, analysis_data_path: &str) -> PathBuf {
 /// The `.EXT` / `.2EX` sibling of a `.DAT` path.
 pub fn sibling(dat: &Path, extension: &str) -> PathBuf {
     dat.with_extension(extension)
+}
+
+#[cfg(test)]
+mod grid_offset_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    #[test]
+    fn offset_edits_preserve_every_other_byte_and_the_original_beats() {
+        let beats = vec![Beat { beat_number: 1, tempo_x100: 12800, time_ms: 1000 }];
+        let original = Anlz { header_extra: vec![0; 16], sections: vec![write::beat_grid_section(&beats)] };
+        let before = original.to_bytes();
+        for offset in [234, -467, i16::MIN, i16::MAX, 0] {
+            let changed = original.with_grid_offset(offset).unwrap();
+            let parsed = parse(&changed).unwrap();
+            assert_eq!(parsed.grid_offset(), Some(offset));
+            assert_eq!(parsed.beat_grid(), Some(beats.clone()));
+            assert_eq!(parsed.with_grid_offset(0).unwrap(), before);
+        }
+        assert!(Anlz::default().with_grid_offset(1).is_none());
+    }
 }

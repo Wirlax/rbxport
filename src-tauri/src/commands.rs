@@ -413,7 +413,7 @@ fn window_of(data: &[u8], stride: usize, from: Option<u32>, len: Option<u32>) ->
 // ---------------------------------------------------------------- editing
 
 /// What an edit changed, and therefore how much has to be re-read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Touched {
     /// Only the playlist tree. Re-reading it costs 24 ms against 233 ms for
     /// the whole library, and it is by far the most common kind of edit.
@@ -422,13 +422,13 @@ pub(crate) enum Touched {
     Tracks,
     /// Only the Tag List.
     TagList,
+    /// Existing tracks: rating, colour, comment, or play count.
+    Metadata(Vec<String>),
+    /// History membership, optionally with play counts to refresh.
+    Histories(Vec<String>),
 }
 
-/// Opens the library for writing, runs one action, and reloads the index.
-///
-/// The writer is opened per action rather than held (see
-/// [`AppState::write`]); opening is cheap next to the user's own
-/// thinking time between edits.
+/// Commits an edit and refreshes the affected index on the same connection.
 pub(crate) async fn edit<R: tauri::Runtime, F>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -440,45 +440,37 @@ where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
 {
     let state = Arc::clone(&state);
-    let writing = Arc::clone(&state);
-    let changed = blocking(name, move || writing.write(action).map_err(write_error)).await;
-    changed?;
+    let generation = blocking(name, move || {
+        state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(generation)
+}
+
+/// Shared by desktop and CDJ edits; the writer holds the edit gate until
+/// both persistence and the new index are visible.
+pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched: Touched) -> Result<u32, rbl_db::DbError> {
     match touched {
-        Touched::Playlists => reload_playlists(app, state).await,
-        Touched::Tracks => reload(app, state).await,
-        Touched::TagList => reload_tag_list(app, state).await,
+        Touched::Metadata(ids) => state.refresh_metadata(db, &ids, false),
+        Touched::Histories(ids) if !ids.is_empty() => state.refresh_metadata(db, &ids, true),
+        Touched::Tracks => {
+            let started = std::time::Instant::now();
+            let (library, _) = rbl_index::load(db)?;
+            let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            state.set_library(library, rbl_db::is_rekordbox_running(), db.schema().db_version, load_ms, db.location().clone());
+            Ok(state.summary().3)
+        }
+        touched => {
+            let library = state.library().map_err(|e| rbl_db::DbError::Open(e.to_string()))?;
+            match touched {
+                Touched::TagList => library.set_tag_list(rbl_index::reload_tag_list(db, &library)?),
+                Touched::Playlists => library.set_playlists(rbl_index::reload_playlists(db, &library)?),
+                Touched::Histories(_) => library.set_histories(rbl_index::reload_histories(db, &library)?),
+                _ => unreachable!("track changes handled above"),
+            }
+            Ok(state.invalidate_views())
+        }
     }
-}
-
-/// Re-reads the Tag List only.
-async fn reload_tag_list<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
-    let generation = blocking("reload_tag_list", move || {
-        let db = state.open_read_only().map_err(write_error)?;
-        let library = state.library()?;
-        let rows = rbl_index::reload_tag_list(&db, &library)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-        library.set_tag_list(rows);
-        Ok(state.invalidate_views())
-    })
-    .await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(generation)
-}
-
-/// Re-reads the playlist tree only, leaving the track columns in place.
-async fn reload_playlists<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
-    let generation = blocking("reload_playlists", move || {
-        let db = state.open_read_only().map_err(write_error)?;
-        let library = state.library()?;
-        let playlists = rbl_index::reload_playlists(&db, &library)
-            .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-        library.set_playlists(playlists);
-        // The tree changed, so every open view over a playlist is stale.
-        Ok(state.invalidate_views())
-    })
-    .await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(generation)
 }
 
 /// Maps a database refusal onto the error kind the frontend distinguishes.
@@ -503,6 +495,7 @@ pub async fn reload_library<R: tauri::Runtime>(
 /// Re-reads the library and returns the new generation.
 pub(crate) async fn reload<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Arc<AppState>) -> AppResult<u32> {
     let generation = blocking("reload", move || {
+        let _gate = state.edit_gate.lock();
         let db = state.open_read_only().map_err(write_error)?;
         let db_version = db.schema().db_version;
         let location = db.location().clone();
@@ -559,10 +552,13 @@ pub async fn start_link_export<R: tauri::Runtime>(
     tracing::info!(interface = interface.as_deref().unwrap_or("auto"), "LINK starting");
     let owner = Arc::clone(&state);
     let emitter = app.clone();
+    let library_emitter = app.clone();
     let started = blocking("start_link_export", move || {
         Ok(crate::link::Session::start(&owner, interface.as_deref(), move |status| {
             let _ = tauri::Emitter::emit(&emitter, "link:status", status);
-        }))
+        }, Arc::new(move |generation| {
+            let _ = tauri::Emitter::emit(&library_emitter, "library:changed", generation);
+        })))
     })
     .await?;
     match started {
@@ -2534,7 +2530,7 @@ pub async fn record_play<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
 ) -> AppResult<u32> {
-    edit(app, state, "record_play", Touched::Tracks, move |w| w.record_play(&track).map(|_| ())).await
+    edit(app, state, "record_play", Touched::Histories(vec![track.clone()]), move |w| w.record_play(&track).map(|_| ())).await
 }
 
 /// Remove from History: the tracks' plays leave the session.
@@ -2545,7 +2541,7 @@ pub async fn remove_from_history<R: tauri::Runtime>(
     history: String,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_history", Touched::Tracks, move |w| {
+    edit(app, state, "remove_from_history", Touched::Histories(Vec::new()), move |w| {
         w.remove_from_history(&history, &tracks).map(|_| ())
     })
     .await
@@ -2571,7 +2567,7 @@ pub async fn reset_play_count<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "reset_play_count", Touched::Tracks, move |w| {
+    edit(app, state, "reset_play_count", Touched::Metadata(tracks.clone()), move |w| {
         for track in &tracks {
             w.set_field(track, rbl_db::write::TrackField::PlayCount, "0")?;
         }
@@ -2614,7 +2610,7 @@ pub async fn set_track_rating<R: tauri::Runtime>(
     track: String,
     stars: u8,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_rating", Touched::Tracks, move |w| w.set_rating(&track, stars).map(|_| ())).await
+    edit(app, state, "set_track_rating", Touched::Metadata(vec![track.clone()]), move |w| w.set_rating(&track, stars).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -2624,7 +2620,7 @@ pub async fn set_track_comment<R: tauri::Runtime>(
     track: String,
     comment: String,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_comment", Touched::Tracks, move |w| w.set_comment(&track, &comment).map(|_| ()))
+    edit(app, state, "set_track_comment", Touched::Metadata(vec![track.clone()]), move |w| w.set_comment(&track, &comment).map(|_| ()))
         .await
 }
 
@@ -2635,7 +2631,7 @@ pub async fn set_track_color<R: tauri::Runtime>(
     track: String,
     color: Option<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "set_track_color", Touched::Tracks, move |w| {
+    edit(app, state, "set_track_color", Touched::Metadata(vec![track.clone()]), move |w| {
         w.set_color(&track, color.as_deref()).map(|_| ())
     })
     .await

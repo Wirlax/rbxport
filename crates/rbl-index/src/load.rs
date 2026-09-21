@@ -426,6 +426,46 @@ pub fn reload_tag_list(db: &Db, library: &Library) -> rusqlite::Result<Vec<Row>>
     read_tag_list(db.connection(), &content_row)
 }
 
+/// Re-read history membership without scanning tracks or cues.
+pub fn reload_histories(db: &Db, library: &Library) -> rusqlite::Result<Playlists> {
+    let rows = library.ids.iter().enumerate()
+        .map(|(row, &id)| (id, Row::try_from(row).unwrap_or(Row::MAX))).collect();
+    read_lists(db.connection(), &rows, HISTORY_TABLES).map(|(lists, _)| lists)
+}
+
+/// Refresh the editable metadata of existing tracks. Row identities, cues,
+/// paths, and all unaffected sort/search indexes stay in place.
+pub fn reload_metadata(db: &Db, library: &mut Library, ids: &[String]) -> rusqlite::Result<()> {
+    let mut statement = db.connection().prepare_cached(
+        "SELECT Rating, ColorID, DJPlayCount, Commnt FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0",
+    )?;
+    let mut updates = Vec::with_capacity(ids.len());
+    for id in ids {
+        let row = library.row_of(id).ok_or(rusqlite::Error::QueryReturnedNoRows)? as usize;
+        let fields = statement.query_row([id], |r| Ok((
+            clamp_u8(num(r, 0)?, 5), clamp_u8(num(r, 1)?, u8::MAX), clamp_u16(num(r, 2)?),
+            r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        )))?;
+        updates.push((row, fields));
+    }
+    let mut rating_changed = false;
+    let mut comments = HashMap::new();
+    for (row, (rating, color, plays, comment)) in updates {
+        rating_changed |= library.rating[row] != rating;
+        library.rating[row] = rating;
+        library.color[row] = color;
+        library.play_count[row] = plays;
+        if library.comment.get(row) != comment { comments.insert(row, comment); }
+    }
+    if rating_changed { library.rebuild_ranks(&[crate::SortColumn::Rating]); }
+    if !comments.is_empty() {
+        library.comment.replace_rows(&comments);
+        let search = comments.keys().map(|&row| (row, library.search_text(row))).collect();
+        library.search.replace_rows(&search);
+    }
+    Ok(())
+}
+
 /// Re-reads only the playlist tree, reusing the track columns already indexed.
 ///
 /// A playlist edit changes nothing about the tracks, and re-reading everything
@@ -652,4 +692,51 @@ fn read_lists(
     }
 
     Ok((playlists, memberships))
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn metadata_refresh_matches_full_load_including_search_sort_and_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let mut writer = rbl_db::write::Writer::open(location, dir.path().join("backups")).unwrap();
+        writer.disable_automatic_backups();
+        let (original, _) = load(writer.library()).unwrap();
+        let mut incremental = original.clone();
+        let ids = [rbl_db::fixture::track_id(1), rbl_db::fixture::track_id(2)];
+        for id in &ids {
+            writer.set_rating(id, 5).unwrap();
+            writer.set_comment(id, "Café\tnew searchable phrase").unwrap();
+            writer.set_color(id, Some("3")).unwrap();
+            writer.record_play(id).unwrap();
+        }
+        reload_metadata(writer.library(), &mut incremental, &ids).unwrap();
+        incremental.set_histories(reload_histories(writer.library(), &incremental).unwrap());
+        let (full, _) = load(writer.library()).unwrap();
+        assert_eq!(incremental.rating, full.rating);
+        assert_eq!(incremental.color, full.color);
+        assert_eq!(incremental.play_count, full.play_count);
+        assert_eq!(incremental.ranks, full.ranks);
+        assert_eq!(incremental.histories().members, full.histories().members);
+        for row in 0..full.len() {
+            assert_eq!(incremental.comment.get(row), full.comment.get(row));
+            assert_eq!(incremental.search.get(row), full.search.get(row));
+            assert_eq!(incremental.cues_of(row as Row), original.cues_of(row as Row));
+        }
+        let row = incremental.row_of(&ids[0]).unwrap() as usize;
+        assert_ne!(original.comment.get(row), incremental.comment.get(row));
+        // Repeated replacements must discard old search terms and arena data.
+        for _ in 0..3 {
+            writer.set_comment(&ids[0], "replacement").unwrap();
+            reload_metadata(writer.library(), &mut incremental, &ids).unwrap();
+            assert!(!incremental.search.get(row).contains("searchable"));
+        }
+        let before = incremental.rating.clone();
+        assert!(reload_metadata(writer.library(), &mut incremental, &[ids[0].clone(), "missing".into()]).is_err());
+        assert_eq!(incremental.rating, before);
+    }
 }

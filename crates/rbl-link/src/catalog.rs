@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
-use rbl_dbserver::catalog::{Analysis as Wanted, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{Analysis as Wanted, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
 use rbl_index::{key::camelot_rank, Library, SortColumn, TrackSource, ViewSpec, NO_ID};
@@ -36,6 +36,7 @@ pub trait Source: Send + Sync {
     fn share_root(&self) -> PathBuf;
     /// The fields the index does not hold, by `djmdContent.ID`.
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails>;
+    fn edit(&self, _edit: &Edit) -> bool { false }
 }
 
 /// Artwork larger than this is not sent: the protocol carries it whole in
@@ -152,7 +153,7 @@ impl IndexCatalog {
             // A playlist or history keeps its own order; every other list
             // is alphabetical, which is what rekordbox sent for TRACK.
             Sort::Default => match scope {
-                TrackScope::Playlist(_) | TrackScope::History(_) => return None,
+                TrackScope::Playlist(_) | TrackScope::History(_) | TrackScope::TagList => return None,
                 _ => SortColumn::Title,
             },
             Sort::Alphabet => SortColumn::Title,
@@ -160,7 +161,7 @@ impl IndexCatalog {
             Sort::Album => SortColumn::Album,
             Sort::Bpm => SortColumn::Bpm,
             Sort::Rating => SortColumn::Rating,
-            Sort::Key => SortColumn::Key,
+            Sort::Key => SortColumn::KeyCamelot,
         })
     }
 
@@ -170,6 +171,7 @@ impl IndexCatalog {
         let all = || (0..u32::try_from(library.len()).unwrap_or(u32::MAX)).map(|row| (row, 0));
         match scope {
             TrackScope::All => all().collect(),
+            TrackScope::TagList => library.tag_list().into_iter().enumerate().map(|(i, row)| (row, u32::try_from(i + 1).unwrap_or(u32::MAX))).collect(),
             TrackScope::Artist { artist, album } => {
                 let artist = artist.wrapping_sub(1);
                 let album = album.map(|a| a.wrapping_sub(1));
@@ -509,11 +511,35 @@ impl Catalog for IndexCatalog {
         }
     }
 
-    fn loaded(&self, player: u8, item: Option<u32>) {
-        // `3100` names whatever the player just entered — an artist, a year,
-        // a track — so it is not what tells us a track is on a deck; the
-        // player's status packets do that (see `beacon`).
-        tracing::debug!(player, item, "player entered an item");
+    fn grid_offset(&self, track: u32) -> i16 {
+        let offset = || {
+            let library = self.source.library()?;
+            let parsed = self.parsed(&library, Self::row_of(&library, track)?)?;
+            parsed.dat.as_ref()?.grid_offset()
+        };
+        offset().unwrap_or(0)
+    }
+
+    fn edit(&self, edit: &Edit) -> bool {
+        let success = self.source.edit(edit);
+        if success && matches!(edit, Edit::GridOffset { .. }) { self.forget_analysis(); }
+        success
+    }
+
+    fn tagged(&self, track: u32) -> bool {
+        self.source.library().is_some_and(|lib| Self::row_of(&lib, track).is_some_and(|row| lib.tag_list().contains(&row)))
+    }
+
+    fn filter_rows(&self, rows: &mut Vec<Row>, filter: &rbl_dbserver::filter::TrackFilter) {
+        if !filter.enabled { return; }
+        let Some(lib) = self.source.library() else { rows.clear(); return; };
+        rows.retain(|row| match row {
+            Row::Track { id, .. } => Self::row_of(&lib, *id).is_some_and(|row| {
+                let at = row as usize;
+                filter.matches(lib.bpm_x100[at], Self::key_id(&lib, row), u32::from(lib.rating[at]), u32::from(lib.color[at]))
+            }),
+            _ => true,
+        });
     }
 
     fn played(&self, track: u32) -> bool {
@@ -604,6 +630,21 @@ mod tests {
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Default })), [11, 12, 10]);
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Bpm })), [11, 10, 12]);
         assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Artist })), [11, 10, 12]);
+    }
+
+    #[test]
+    fn key_sort_uses_the_wheel_and_preserves_playlist_positions() {
+        let c = catalog();
+        assert_eq!(ids(&c.list(&Query::Tracks { scope: TrackScope::All, sort: Sort::Key })), [11, 12, 10]);
+        let mut lib = library();
+        let playlist = add_playlist(&mut lib, "Keys", &[0, 2, 1]);
+        let playlist = u32::try_from(lib.playlists().ids[playlist]).unwrap();
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
+        assert_eq!(c.list(&Query::Tracks { scope: TrackScope::Playlist(playlist), sort: Sort::Key }), vec![
+            Row::Track { id: 11, position: 3 },
+            Row::Track { id: 12, position: 2 },
+            Row::Track { id: 10, position: 1 },
+        ]);
     }
 
     #[test]

@@ -54,7 +54,7 @@ pub fn render(header_extra: &[u8], sections: &[Section]) -> Vec<u8> {
 pub fn beat_grid_section(beats: &[Beat]) -> Section {
     let mut header = Vec::with_capacity(12);
     header.extend_from_slice(&be32(0));
-    // Constant observed in every real file.
+    // The low 16 bits are the signed grid offset, initially zero.
     header.extend_from_slice(&be32(0x0008_0000));
     header.extend_from_slice(&be32(u32::try_from(beats.len()).unwrap_or(0)));
 

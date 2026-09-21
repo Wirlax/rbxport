@@ -235,9 +235,13 @@ impl Library {
 
     /// Builds the per-column rank arrays. Called once at load.
     pub(crate) fn build_ranks(&mut self) {
+        self.rebuild_ranks(&SortColumn::ALL);
+    }
+
+    pub(crate) fn rebuild_ranks(&mut self, columns: &[SortColumn]) {
         let n = self.count;
-        let mut ranks = Vec::with_capacity(SortColumn::ALL.len());
-        for column in SortColumn::ALL {
+        self.ranks.resize_with(SortColumn::ALL.len(), Vec::new);
+        for &column in columns {
             let mut order: Vec<Row> = (0..u32::try_from(n).unwrap_or(u32::MAX)).collect();
             // Ties break on row order so a sort is reproducible.
             match column {
@@ -268,9 +272,8 @@ impl Library {
                 }
             }
 
-            ranks.push(rank);
+            self.ranks[column.rank_slot()] = rank;
         }
-        self.ranks = ranks;
     }
 
     /// Free function: it reads only its arguments, not `self`.
@@ -282,20 +285,23 @@ impl Library {
     pub(crate) fn build_search(&mut self) {
         let mut search = crate::strings::StrColumn::with_capacity(self.count, self.count * 64);
         for row in 0..self.count {
-            let year = self.year.get(row).filter(|&&n| n != 0).map_or_else(String::new, u16::to_string);
-            let bpm = self.bpm_x100.get(row).filter(|&&n| n != 0).map_or_else(String::new, |n| format!("{}.{:02}", n / 100, n % 100));
-            let values = [
-                self.title.get(row), self.artists.name(self.artist.get(row).copied().unwrap_or(crate::NO_ID)),
-                self.albums.name(self.album.get(row).copied().unwrap_or(crate::NO_ID)),
-                self.genres.name(self.genre.get(row).copied().unwrap_or(crate::NO_ID)), &year, &bpm,
-                self.search_extra[0].get(row), self.search_extra[1].get(row), self.search_extra[2].get(row),
-                self.labels.name(self.label.get(row).copied().unwrap_or(crate::NO_ID)), self.comment.get(row),
-                self.search_extra[3].get(row), self.search_extra[4].get(row),
-            ];
-            // Tabs delimit fields; embedded tabs are whitespace inside a value.
-            let hay = values.iter().map(|value| fold(&value.replace('\t', " "))).collect::<Vec<_>>().join("\t");
-            search.push(&hay);
+            search.push(&self.search_text(row));
         }
         self.search = search;
+    }
+
+    pub(crate) fn search_text(&self, row: usize) -> String {
+        let year = self.year.get(row).filter(|&&n| n != 0).map_or_else(String::new, u16::to_string);
+        let bpm = self.bpm_x100.get(row).filter(|&&n| n != 0).map_or_else(String::new, |n| format!("{}.{:02}", n / 100, n % 100));
+        let values = [
+            self.title.get(row), self.artists.name(self.artist.get(row).copied().unwrap_or(crate::NO_ID)),
+            self.albums.name(self.album.get(row).copied().unwrap_or(crate::NO_ID)),
+            self.genres.name(self.genre.get(row).copied().unwrap_or(crate::NO_ID)), &year, &bpm,
+            self.search_extra[0].get(row), self.search_extra[1].get(row), self.search_extra[2].get(row),
+            self.labels.name(self.label.get(row).copied().unwrap_or(crate::NO_ID)), self.comment.get(row),
+            self.search_extra[3].get(row), self.search_extra[4].get(row),
+        ];
+        // Tabs delimit fields; embedded tabs are whitespace inside a value.
+        values.iter().map(|value| fold(&value.replace('\t', " "))).collect::<Vec<_>>().join("\t")
     }
 }

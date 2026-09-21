@@ -158,9 +158,35 @@ pub fn interfaces() -> Vec<InterfaceDto> {
 
 /// The app's library, as the link reads it. Weak so the state does not own
 /// a session that owns the state.
-struct StateSource(Weak<AppState>);
+struct StateSource(Weak<AppState>, Arc<dyn Fn(u32) + Send + Sync>);
 
 impl Source for StateSource {
+    fn edit(&self, edit: &rbl_link::Edit) -> bool {
+        let Some(state) = self.0.upgrade() else { return false; };
+        if let rbl_link::Edit::GridOffset { track, offset_ms } = edit {
+            return match save_grid_offset(&state, &track.to_string(), *offset_ms) {
+                Ok(()) => true,
+                Err(error) => { tracing::warn!(%error, ?edit, "player grid edit refused"); false }
+            };
+        }
+        let touched = match edit {
+            rbl_link::Edit::Tag { .. } | rbl_link::Edit::ClearTags => crate::commands::Touched::TagList,
+            rbl_link::Edit::Rating { track, .. } => crate::commands::Touched::Metadata(vec![track.to_string()]),
+            rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+        };
+        let result = state.write_then(|writer| match edit {
+            rbl_link::Edit::Tag { track, add: true } => writer.tag_list_add(&[track.to_string()]),
+            rbl_link::Edit::Tag { track, add: false } => writer.tag_list_remove(&[track.to_string()]),
+            rbl_link::Edit::ClearTags => writer.tag_list_clear(),
+            rbl_link::Edit::Rating { track, stars } => writer.set_rating(&track.to_string(), *stars),
+            rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+        }, |db, _| crate::commands::refresh_after_edit(&state, db, touched));
+        match result {
+            Ok(generation) => { (self.1)(generation); true }
+            Err(error) => { tracing::warn!(%error, ?edit, "player library edit or refresh failed"); false }
+        }
+    }
+
     fn library(&self) -> Option<Arc<rbl_index::Library>> {
         self.0.upgrade()?.library().ok()
     }
@@ -173,6 +199,32 @@ impl Source for StateSource {
         let state = self.0.upgrade()?;
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
     }
+}
+
+/// Keep the correction in the analysis header, as rekordbox does. The beat
+/// records remain the common baseline used by every player on the network.
+fn save_grid_offset(state: &AppState, track: &str, offset_ms: i16) -> crate::error::AppResult<()> {
+    use crate::error::{AppError, ErrorKind};
+    let _edit_guard = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let location = state.location()?;
+    if let Some(reason) = rbl_db::write_refusal_reason(location.is_real_install,
+        std::env::var_os("RB_LITE_TEST").is_some(), rbl_db::is_rekordbox_running()) {
+        return Err(AppError::new(ErrorKind::ReadOnly, reason));
+    }
+    crate::file_journal::recover(state.backup_dir(), &location)?;
+    let library = state.library()?;
+    let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "Track not found"))?;
+    let relative = library.analysis_path.get(row as usize);
+    if relative.is_empty() { return Err(AppError::new(ErrorKind::NotFound, "Track has no analysis")); }
+    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    let analysis = rbl_anlz::Anlz::read(&dat).map_err(|e| AppError::internal(e.to_string()))?;
+    let bytes = analysis.with_grid_offset(offset_ms)
+        .ok_or_else(|| AppError::new(ErrorKind::Malformed, "Track has no complete beat-grid header"))?;
+    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, track,
+        library.bpm_x100[row as usize], None, false, &[(dat, bytes)])?;
+    if let Err(e) = journal.publish() { journal.rollback()?; return Err(e); }
+    journal.commit()
 }
 
 /// A running LINK session: the export, and the thread that reports it.
@@ -189,7 +241,7 @@ impl Session {
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
-    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, report: F) -> Result<Self, String>
+    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, report: F, library_changed: Arc<dyn Fn(u32) + Send + Sync>) -> Result<Self, String>
     where
         F: Fn(LinkStatusDto) + Send + 'static,
     {
@@ -219,7 +271,7 @@ impl Session {
         })?;
         tracing::info!(interface = %chosen.name, address = %chosen.address, "LINK running on an interface");
 
-        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state)));
+        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state), library_changed));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -408,4 +460,85 @@ pub fn refusal() -> Option<String> {
         return Some("rekordbox is running and holds the link ports. Quit it to turn LINK on.".to_owned());
     }
     None
+}
+
+#[cfg(test)]
+mod grid_offset_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    #[test]
+    fn player_tag_edits_persist_and_refresh_without_replacing_the_track_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let original = state.library().unwrap();
+        let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = notifications.clone();
+        let source = StateSource(Arc::downgrade(&state), Arc::new(move |generation| {
+            received.lock().unwrap().push(generation);
+        }));
+        let id = rbl_db::fixture::track_id(1);
+        let track = id.parse().unwrap();
+        let row = original.row_of(&id).unwrap();
+        for (edit, present) in [
+            (rbl_link::Edit::ClearTags, false),
+            (rbl_link::Edit::Tag { track, add: true }, true),
+            (rbl_link::Edit::Tag { track, add: false }, false),
+            (rbl_link::Edit::Tag { track, add: true }, true),
+            (rbl_link::Edit::ClearTags, false),
+        ] {
+            let generation = state.summary().3;
+            assert!(source.edit(&edit));
+            assert!(Arc::ptr_eq(&original, &state.library().unwrap()));
+            assert_eq!(original.tag_list().contains(&row), present);
+            let reopened = state.open_read_only().unwrap();
+            assert_eq!(rbl_index::reload_tag_list(&reopened, &original).unwrap(), original.tag_list());
+            assert_ne!(state.summary().3, generation);
+            assert_eq!(notifications.lock().unwrap().last(), Some(&state.summary().3));
+        }
+        assert_eq!(notifications.lock().unwrap().len(), 5);
+        let old_rating = original.rating[row as usize];
+        let stars = (old_rating + 1) % 6;
+        assert!(source.edit(&rbl_link::Edit::Rating { track, stars }));
+        let updated = state.library().unwrap();
+        assert_eq!(updated.rating[row as usize], stars);
+        assert_eq!(updated.ids, original.ids, "cached analysis row identities stay valid");
+        assert_eq!(original.rating[row as usize], old_rating, "old readers keep their snapshot");
+        let db = state.open_read_only().unwrap();
+        let (persisted, _) = rbl_index::load(&db).unwrap();
+        assert_eq!(persisted.rating, updated.rating);
+        assert_eq!(notifications.lock().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn player_grid_correction_survives_reopening_without_rewriting_beats() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let relative = "/PIONEER/USBANLZ/test/ANLZ0000.DAT";
+        rbl_db::fixture::set_analysis_path(&location, 1, relative).unwrap();
+        let dat = rbl_anlz::resolve(&location.share_root, relative);
+        std::fs::create_dir_all(dat.parent().unwrap()).unwrap();
+        let beats = vec![rbl_anlz::Beat { beat_number: 1, tempo_x100: 12800, time_ms: 500 }];
+        let mut builder = rbl_anlz::AnlzBuilder::new();
+        builder.path("/test.wav").beat_grid(&beats);
+        let original = builder.finish();
+        std::fs::write(&dat, &original).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        let track = rbl_db::fixture::track_id(1);
+        for offset in [234, -467, 0] {
+            save_grid_offset(&state, &track, offset).unwrap();
+            let reopened = rbl_anlz::Anlz::read(&dat).unwrap();
+            assert_eq!(reopened.grid_offset(), Some(offset));
+            assert_eq!(reopened.beat_grid(), Some(beats.clone()));
+        }
+        assert_eq!(std::fs::read(&dat).unwrap(), original);
+        assert!(save_grid_offset(&state, "999999", 234).is_err());
+    }
 }

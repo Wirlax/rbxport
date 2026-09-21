@@ -27,7 +27,7 @@ mod view;
 pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
-pub use load::{content_version, load, reload_cues_of, reload_playlists, reload_tag_list, LoadStats};
+pub use load::{content_version, load, reload_cues_of, reload_playlists, reload_tag_list, reload_histories, reload_metadata, LoadStats};
 pub use smart::SmartRule;
 pub use xml_export::export_xml;
 pub use view::{SearchField, RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};
@@ -138,6 +138,55 @@ pub struct Library {
     pub(crate) my_tags: Vec<TagCategory>,
 }
 
+// Copy-on-write snapshots keep readers on a consistent set of track columns.
+impl Clone for Library {
+    fn clone(&self) -> Self {
+        Self {
+            count: self.count,
+            ids: self.ids.clone(),
+            title: self.title.clone(),
+            title_folded: self.title_folded.clone(),
+            comment: self.comment.clone(),
+            search_extra: self.search_extra.clone(),
+            folder_path: self.folder_path.clone(),
+            file_name: self.file_name.clone(),
+            analysis_path: self.analysis_path.clone(),
+            artwork_path: self.artwork_path.clone(),
+            date_added: self.date_added.clone(),
+            release_date: self.release_date.clone(),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
+            genre: self.genre.clone(),
+            label: self.label.clone(),
+            key: self.key.clone(),
+            bpm_x100: self.bpm_x100.clone(),
+            length_sec: self.length_sec.clone(),
+            rating: self.rating.clone(),
+            color: self.color.clone(),
+            play_count: self.play_count.clone(),
+            analysed: self.analysed.clone(),
+            bitrate: self.bitrate.clone(),
+            sample_rate: self.sample_rate.clone(),
+            file_size: self.file_size.clone(),
+            year: self.year.clone(),
+            artists: self.artists.clone(),
+            albums: self.albums.clone(),
+            genres: self.genres.clone(),
+            labels: self.labels.clone(),
+            keys: self.keys.clone(),
+            playlists: RwLock::new(self.playlists.read().clone()),
+            histories: RwLock::new(self.histories.read().clone()),
+            tag_list: RwLock::new(self.tag_list.read().clone()),
+            by_id: self.by_id.clone(),
+            by_path: self.by_path.clone(),
+            cues: RwLock::new(self.cues.read().clone()),
+            ranks: self.ranks.clone(),
+            search: self.search.clone(),
+            my_tags: self.my_tags.clone(),
+        }
+    }
+}
+
 /// One cue point.
 ///
 /// `Kind` 0 is a memory cue; 1, 2, 3 and 5 are hot cues A to D, 6 to 9 are E
@@ -164,7 +213,7 @@ pub struct Cue {
 }
 
 /// Every cue, grouped by track and ordered by position within each.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Cues {
     cues: Vec<Cue>,
     /// Where each track's cues start in `cues`; one longer than the track

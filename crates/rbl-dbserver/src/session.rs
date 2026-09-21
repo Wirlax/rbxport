@@ -5,10 +5,11 @@
 //! it was last asked for. Every layout here is the one rekordbox 7.2.11
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
-use crate::catalog::{Analysis, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
+use crate::catalog::{Analysis, Catalog, Edit, Query, Row, Sort, TrackDetails, TrackScope};
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
 use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
@@ -91,16 +92,18 @@ impl Menu {
 
 pub struct LinkSession {
     catalog: Arc<dyn Catalog>,
-    menu: Menu,
+    menus: HashMap<u8, Menu>,
     /// The player's device number, from its setup message.
     player: u8,
+    extended: bool,
+    filter: crate::filter::TrackFilter,
     /// Our own, in the setup reply.
     device: u8,
 }
 
 impl LinkSession {
     pub fn new(catalog: Arc<dyn Catalog>) -> Self {
-        Self { catalog, menu: Menu::Empty, player: 0, device: DEVICE }
+        Self { catalog, menus: HashMap::new(), player: 0, extended: true, filter: crate::filter::TrackFilter::default(), device: DEVICE }
     }
 
     /// The session answering as `device` rather than 17.
@@ -127,12 +130,13 @@ impl LinkSession {
     /// Answers a menu request: remember the menu, reply with its size.
     fn menu(&mut self, message: &Message, menu: Menu) -> Vec<Message> {
         let count = menu.len();
-        self.menu = menu;
+        self.menus.insert(Self::menu_location(message), menu);
         vec![menu_header(message.transaction, u32::from(message.kind), count)]
     }
 
     fn library(&mut self, message: &Message, query: Query) -> Vec<Message> {
-        let rows = self.catalog.list(&query);
+        let mut rows = self.catalog.list(&query);
+        self.catalog.filter_rows(&mut rows, &self.filter);
         self.menu(message, Menu::Library { query, rows })
     }
 
@@ -141,12 +145,16 @@ impl LinkSession {
         self.library(message, Query::Tracks { scope, sort })
     }
 
+    fn menu_location(message: &Message) -> u8 {
+        Self::number(message, 0).to_be_bytes()[1]
+    }
+
     /// The items for a window of the current menu.
-    fn items(&self, offset: u32, limit: u32) -> Vec<Item> {
+    fn items(&self, location: u8, offset: u32, limit: u32) -> Vec<Item> {
         let offset = offset as usize;
         let limit = limit as usize;
         let window = |all: Vec<Item>| all.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
-        match &self.menu {
+        match self.menus.get(&location).unwrap_or(&Menu::Empty) {
             Menu::Root => window(root_menu()),
             Menu::SortOptions => window(sort_menu()),
             Menu::Keys => window(
@@ -173,7 +181,7 @@ impl LinkSession {
                 .take(limit)
                 .filter_map(|row| self.item(query, row))
                 .collect(),
-            Menu::Metadata(details) => window(metadata_rows(details, self.catalog.played(details.row.id))),
+            Menu::Metadata(details) => window(metadata_rows(details, self.catalog.played(details.row.id), self.catalog.tagged(details.row.id))),
             Menu::TrackInfo(details) => window(track_info_rows(details)),
             Menu::DeliveryInfo(details) => window(delivery_rows(details)),
             Menu::Empty => Vec::new(),
@@ -204,14 +212,14 @@ impl LinkSession {
             (Query::Tracks { scope, .. }, Row::Track { id, position }) => {
                 let track = self.catalog.track_row(*id)?;
                 let listed = match scope {
-                    TrackScope::Artist { .. } | TrackScope::Album(_) | TrackScope::Playlist(_) => track_flags::LISTED,
+                    TrackScope::Artist { .. } | TrackScope::Album(_) | TrackScope::Playlist(_) | TrackScope::TagList => track_flags::LISTED,
                     _ => 0,
                 };
                 // A history's rows are all played; elsewhere only the tracks
                 // a player has loaded this session are, or every row of a
                 // playlist greys.
                 let played = matches!(scope, TrackScope::History(_)) || self.catalog.played(*id);
-                let flags = listed | if played { track_flags::PLAYED } else { 0 };
+                let flags = listed | if played { track_flags::PLAYED } else { 0 } | u32::from(self.catalog.tagged(*id));
                 Item::track(&track, flags, *position)
             }
             (_, Row::Track { .. }) => return None,
@@ -289,6 +297,7 @@ impl LinkSession {
                 self.tracks(message, TrackScope::Album(album))
             }
             kind::TRACK_MENU => self.tracks(message, TrackScope::All),
+            kind::TAG_LIST => self.tracks(message, TrackScope::TagList),
             kind::KEY_TRACKS => {
                 let key = Self::number(message, 2);
                 let distance = Self::number(message, 3).min(2);
@@ -335,7 +344,7 @@ impl LinkSession {
                 let day = (day != 0xffff_ffff).then_some(day);
                 self.tracks(message, TrackScope::DateAdded { year, month, day })
             }
-            kind::SEARCH => {
+            kind::SEARCH | kind::SEARCH_TRACK => {
                 let text = Self::text(message, 3);
                 self.tracks(message, TrackScope::Search(text))
             }
@@ -371,7 +380,7 @@ impl LinkSession {
             }
             kind::BEAT_GRID => {
                 let track = Self::number(message, 1);
-                self.analysis(message, track, &Analysis::BeatGrid, kind::BEAT_GRID_REPLY, Some(0))
+                self.analysis(message, track, &Analysis::BeatGrid, kind::BEAT_GRID_REPLY, Some(u32::from(u16::from_ne_bytes(self.catalog.grid_offset(track).to_ne_bytes()))))
             }
             kind::CUES => {
                 let track = Self::number(message, 1);
@@ -407,9 +416,47 @@ impl Session for LinkSession {
         match message.kind {
             kind::SETUP => {
                 self.player = u8::try_from(Self::number(message, 0)).unwrap_or(0);
-                vec![setup_reply(tx, self.device)]
+                self.extended = message.arguments.len() > 1;
+                if self.extended {
+                    vec![setup_reply(tx, self.device)]
+                } else {
+                    vec![menu_header(tx, 0, u32::from(self.device))]
+                }
             }
             kind::TEARDOWN => Vec::new(),
+            kind::GRID_OFFSET => vec![menu_header(tx, u32::from(message.kind), u32::from(u16::from_ne_bytes(self.catalog.grid_offset(Self::number(message, 1)).to_ne_bytes())))],
+            kind::SAVE_GRID_OFFSET => {
+                let raw = Self::number(message, 2).to_be_bytes();
+                let success = self.catalog.edit(&Edit::GridOffset {
+                    track: Self::number(message, 1), offset_ms: i16::from_be_bytes([raw[2], raw[3]]),
+                });
+                vec![menu_header(tx, u32::from(message.kind), u32::from(!success))]
+            }
+            kind::FILTER_SWITCH => {
+                self.filter.enabled = Self::number(message, 1) != 0;
+                vec![menu_header(tx, u32::from(message.kind), 0)]
+            }
+            kind::FILTER_GET => Self::blob(message, kind::FILTER_REPLY, Some(self.filter.encode()), Some(4)),
+            kind::FILTER_SET => {
+                let valid = match message.arguments.get(4) {
+                    Some(Argument::Blob(bytes)) if bytes.len() == Self::number(message, 3) as usize => self.filter.update(Self::number(message, 1), bytes),
+                    _ => false,
+                };
+                vec![menu_header(tx, u32::from(message.kind), u32::from(!valid))]
+            }
+            kind::CHANGE_TAG | kind::CLEAR_TAGS | kind::CHANGE_RATING => {
+                let track = Self::number(message, 1);
+                let value = Self::number(message, 2);
+                let edit = match message.kind {
+                    kind::CHANGE_TAG if value <= 1 => Some(Edit::Tag { track, add: value == 1 }),
+                    kind::CLEAR_TAGS => Some(Edit::ClearTags),
+                    kind::CHANGE_RATING if value <= 5 => Some(Edit::Rating { track, stars: u8::try_from(value).unwrap_or(0) }),
+                    _ => None,
+                };
+                let success = edit.is_some_and(|edit| self.catalog.edit(&edit));
+                vec![menu_header(tx, u32::from(message.kind), u32::from(!success))]
+            }
+
             kind::RENDER => {
                 let offset = Self::number(message, 1);
                 let limit = Self::number(message, 2);
@@ -418,14 +465,31 @@ impl Session for LinkSession {
                     kind::RENDER_HEADER,
                     vec![Argument::Number(1), Argument::Number(offset)],
                 )];
-                out.extend(self.items(offset, limit).iter().map(|item| item.message(tx)));
-                out.push(menu_footer(tx));
+                out.extend(self.items(Self::menu_location(message), offset, limit).iter().map(|item| {
+                    let mut row = item.clone();
+                    if !self.extended && row.item_type == item_type::TRACK {
+                        row.item_type = item_type::TITLE;
+                        row.text2.clear();
+                    }
+                    let mut reply = row.message(tx);
+                    if !self.extended {
+                        reply.arguments.truncate(12);
+                    }
+                    reply
+                }));
+                out.push(if self.extended { menu_footer(tx) } else { Message::new(tx, kind::MENU_FOOTER, vec![]) });
                 out
             }
-            kind::LOADED => {
-                let track = Self::number(message, 1);
-                self.catalog.loaded(self.player, (track != 0xffff_ffff).then_some(track));
-                vec![menu_header(tx, u32::from(kind::LOADED), 0)]
+            kind::ITEM_POSITION => {
+                let id = Self::number(message, 1);
+                let location = Self::menu_location(message);
+                let position = match self.menus.get(&location) {
+                    Some(Menu::Library { rows, .. }) => rows.iter().position(|row| match row {
+                        Row::Named { id: item, .. } | Row::List { id: item, .. } | Row::Track { id: item, .. } | Row::Date(item) => *item == id,
+                    }),
+                    _ => self.items(location, 0, u32::MAX).iter().position(|item| item.id == id),
+                }.and_then(|n| u32::try_from(n).ok()).unwrap_or(u32::MAX);
+                vec![menu_header(tx, u32::from(kind::ITEM_POSITION), position)]
             }
             kind::ARTWORK
             | kind::WAVEFORM_PREVIEW
@@ -462,10 +526,10 @@ fn extended_cue_count(blob: &[u8]) -> u32 {
 }
 
 /// The sixteen rows of a metadata reply, one per column, in rekordbox's order.
-fn metadata_rows(t: &TrackDetails, played: bool) -> Vec<Item> {
+fn metadata_rows(t: &TrackDetails, played: bool, tagged: bool) -> Vec<Item> {
     let key_id = t.row.key;
     vec![
-        Item::track(&t.row, if played { track_flags::PLAYED } else { 0 }, 0),
+        Item::track(&t.row, (if played { track_flags::PLAYED } else { 0 }) | u32::from(tagged), 0),
         Item::line(1, t.artist_id, &t.artist, item_type::ARTIST),
         Item::line(1, t.album_id, &t.album, item_type::ALBUM),
         Item::line(0, t.duration_s, "", item_type::DURATION),
