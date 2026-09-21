@@ -4,14 +4,14 @@ use crate::{
     error::{AppError, AppResult},
     state::AppState,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{self, Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSizes {
     pub updated_at: u64,
@@ -33,10 +33,11 @@ impl BackupSizes {
     }
 }
 
-/// Owned by AppState, so all Preferences windows share one lazy scan per launch.
+/// Shared in memory across windows and persisted across application restarts.
 #[derive(Default)]
 pub struct SizeCache {
     value: Option<AppResult<BackupSizes>>,
+    library: Option<(PathBuf, PathBuf)>,
 }
 impl SizeCache {
     fn get(
@@ -59,10 +60,72 @@ impl SizeCache {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct SavedSizes {
+    version: u32,
+    database: PathBuf,
+    analysis: PathBuf,
+    sizes: BackupSizes,
+}
+
+impl SizeCache {
+    fn persisted(
+        &mut self,
+        path: &Path,
+        database: &Path,
+        analysis: &Path,
+        refresh: bool,
+        scan: impl FnOnce() -> AppResult<BackupSizes>,
+    ) -> AppResult<BackupSizes> {
+        let identity = (database.to_path_buf(), analysis.to_path_buf());
+        if self.library.as_ref() != Some(&identity) {
+            self.value = None;
+            self.library = Some(identity);
+        }
+        if self.value.is_none() {
+            if let Some(saved) = fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<SavedSizes>(&bytes).ok())
+            {
+                if saved.version == 1 && saved.database == database && saved.analysis == analysis {
+                    self.value = Some(Ok(saved.sizes));
+                }
+            }
+        }
+        self.get(refresh, || {
+            let sizes = scan()?;
+            let saved = SavedSizes {
+                version: 1,
+                database: database.into(),
+                analysis: analysis.into(),
+                sizes: sizes.clone(),
+            };
+            let persist = || -> Result<(), Box<dyn std::error::Error>> {
+                if let Some(parent) = path.parent() {
+                    crate::durable::create_dir_all(parent)?;
+                }
+                crate::durable::write(path, &serde_json::to_vec(&saved)?)?;
+                Ok(())
+            };
+            if let Err(error) = persist() {
+                tracing::warn!(%error, "Could not persist backup size estimate");
+            }
+            Ok(sizes)
+        })
+    }
+}
+
 pub fn cached(state: &AppState, refresh: bool) -> AppResult<BackupSizes> {
-    // Hold only the scan cache lock. A second window joins the in-flight read
-    // without blocking playback, editing, backups, or their progress queries.
-    state.backup_sizes.lock().get(refresh, || measure(state))
+    let location = state.location()?;
+    // Loading the saved reading requires one small JSON read, no library scan.
+    // Only Refresh requests a new reading; its original timestamp stays visible.
+    state.backup_sizes.lock().persisted(
+        &state.backup_dir().join(".size-cache.json"),
+        &location.master_db,
+        &location.share_root.join("PIONEER/USBANLZ"),
+        refresh,
+        || measure(state),
+    )
 }
 
 fn measure(state: &AppState) -> AppResult<BackupSizes> {
@@ -183,6 +246,110 @@ fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_reading_survives_restart_and_only_refresh_rescans() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sizes.json");
+        let db = dir.path().join("master.db");
+        let analysis = dir.path().join("analysis");
+        let mut first = SizeCache::default();
+        first
+            .persisted(&path, &db, &analysis, false, || {
+                Ok(BackupSizes {
+                    updated_at: 42,
+                    database: 100,
+                    waveforms: 200,
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+        let mut restarted = SizeCache::default();
+        let saved = restarted
+            .persisted(&path, &db, &analysis, false, || {
+                panic!("must not scan after restart")
+            })
+            .unwrap();
+        assert_eq!(
+            (saved.updated_at, saved.database, saved.waveforms),
+            (42, 100, 200)
+        );
+        restarted
+            .persisted(&path, &db, &analysis, true, || {
+                Ok(BackupSizes {
+                    updated_at: 99,
+                    database: 300,
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+        let saved = SizeCache::default()
+            .persisted(&path, &db, &analysis, false, || {
+                panic!("refresh should persist")
+            })
+            .unwrap();
+        assert_eq!((saved.updated_at, saved.database), (99, 300));
+    }
+
+    #[test]
+    fn failed_refresh_keeps_the_persisted_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sizes.json");
+        let db = dir.path().join("master.db");
+        let analysis = dir.path().join("analysis");
+        let mut cache = SizeCache::default();
+        cache
+            .persisted(&path, &db, &analysis, false, || {
+                Ok(BackupSizes {
+                    updated_at: 42,
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+        assert!(cache
+            .persisted(&path, &db, &analysis, true, || Err(AppError::internal(
+                "offline"
+            )))
+            .is_err());
+        assert_eq!(
+            SizeCache::default()
+                .persisted(&path, &db, &analysis, false, || panic!(
+                    "keep saved reading"
+                ))
+                .unwrap()
+                .updated_at,
+            42
+        );
+    }
+
+    #[test]
+    fn corrupt_cache_and_different_library_require_a_new_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sizes.json");
+        let db = dir.path().join("master.db");
+        let analysis = dir.path().join("analysis");
+        fs::write(&path, b"broken json").unwrap();
+        let mut cache = SizeCache::default();
+        cache
+            .persisted(&path, &db, &analysis, false, || {
+                Ok(BackupSizes {
+                    updated_at: 1,
+                    ..Default::default()
+                })
+            })
+            .unwrap();
+        let other = dir.path().join("other.db");
+        assert_eq!(
+            cache
+                .persisted(&path, &other, &analysis, false, || Ok(BackupSizes {
+                    updated_at: 2,
+                    ..Default::default()
+                }))
+                .unwrap()
+                .updated_at,
+            2
+        );
+    }
+
     #[test]
     fn scans_once_per_session_until_explicit_refresh() {
         let scans = std::cell::Cell::new(0);
