@@ -28,6 +28,8 @@ export interface Anchor {
    * change when it does.
    */
   rate: number;
+  /** A scheduled start, distinct from the arrival time of an ordinary tick. */
+  startsAt?: number | undefined;
 }
 
 /** A stopped deck at the start of a track. */
@@ -66,10 +68,13 @@ const EASE_MS = 50;
  * steps by a millisecond or two at each one. Drawn raw that is a visible
  * stutter in the playhead; eased, it is invisible.
  */
-export function follow(shown: number, target: number, sinceMs: number): number {
-  const gap = target - shown;
+export function follow(shown: number, target: number, sinceMs: number, advanceSeconds = 0): number {
+  // Advance with playback first; ease only the remaining clock correction.
+  // Easing the moving position itself adds a permanent ~42 ms lag at 60 Hz.
+  const predicted = shown + advanceSeconds;
+  const gap = target - predicted;
   if (Math.abs(gap) > SNAP_SECONDS || sinceMs <= 0) return target;
-  return shown + gap * (1 - Math.exp(-sinceMs / EASE_MS));
+  return predicted + gap * (1 - Math.exp(-sinceMs / EASE_MS));
 }
 
 /**

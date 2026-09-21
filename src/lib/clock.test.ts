@@ -39,6 +39,18 @@ describe("extrapolate", () => {
 });
 
 describe("follow", () => {
+  it("adds no steady playback lag across frame rates and tempos", () => {
+    for (const fps of [30, 60, 120]) {
+      for (const rate of [0.5, 1, 1.08, 2]) {
+        let shown = 0;
+        for (let frame = 1; frame <= fps * 3; frame++) {
+          const target = frame * rate / fps;
+          shown = follow(shown, target, 1000 / fps, rate / fps);
+          expect(shown).toBeCloseTo(target, 9);
+        }
+      }
+    }
+  });
   it("closes a small gap gradually rather than jumping", () => {
     const next = follow(1.0, 1.01, 16);
     expect(next).toBeGreaterThan(1.0);

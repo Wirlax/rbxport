@@ -276,10 +276,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
         // A start held for the beat: the engine's frames say how much of the
         // wait is left, and the head stands still for that long from now.
         at: rate > 0 && deck.startInFrames > 0 ? now + (deck.startInFrames / rate) * 1000 : now,
+        startsAt: rate > 0 && deck.startInFrames > 0 ? now + (deck.startInFrames / rate) * 1000 : undefined,
         sampleRate: rate,
         playing: deck.playing,
         generation: deck.generation,
-        rate: 1,
+        rate: deck.tempo > 0 ? deck.tempo : 1,
       };
       const at = extrapolate(anchor.current, performance.now());
       setPosition(at);
@@ -394,7 +395,12 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK)
       frame = requestAnimationFrame(tick);
       const now = performance.now();
       const target = extrapolate(anchor.current, now);
-      const next = follow(positionRef.current, target, now - last);
+      // Ordinary tick arrivals must not reset this frame's elapsed motion.
+      // Only a scheduled start or a pinned scrub head pauses that motion.
+      const advance = anchor.current.playing
+        ? Math.max(0, now - Math.max(last, anchor.current.startsAt ?? last)) * anchor.current.rate / 1000
+        : 0;
+      const next = follow(positionRef.current, target, now - last, advance);
       last = now;
       emit(next);
     };

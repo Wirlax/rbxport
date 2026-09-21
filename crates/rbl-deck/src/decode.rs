@@ -96,7 +96,12 @@ impl Streamer {
         }
 
         let probed = symphonia::default::get_probe()
-            .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
+            .format(
+                &hint,
+                stream,
+                &FormatOptions::default(),
+                &MetadataOptions::default(),
+            )
             .map_err(|e| DeckError::Decode(e.to_string()))?;
         let format = probed.format;
 
@@ -115,9 +120,10 @@ impl Streamer {
         // Length in device-rate frames, which is what the playhead counts. A
         // file that does not say gets zero, and the deck reports what it has
         // played rather than a fraction of a length it does not know.
-        let total_frames = track.codec_params.n_frames.map_or(0, |frames| {
-            scale_frames(frames, source_rate, device_rate)
-        });
+        let total_frames = track
+            .codec_params
+            .n_frames
+            .map_or(0, |frames| scale_frames(frames, source_rate, device_rate));
 
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())
@@ -227,7 +233,13 @@ impl Streamer {
     /// One demuxer seek, in seconds.
     fn seek_to(&mut self, seconds: f64, mode: SeekMode) -> Result<SeekedTo> {
         self.format
-            .seek(mode, SeekTo::Time { time: Time::from(seconds), track_id: Some(self.track_id) })
+            .seek(
+                mode,
+                SeekTo::Time {
+                    time: Time::from(seconds),
+                    track_id: Some(self.track_id),
+                },
+            )
             .map_err(|e| DeckError::Decode(e.to_string()))
     }
 
@@ -267,7 +279,10 @@ impl Streamer {
             }
             let available = (self.ready.len() - self.taken) / 2;
             let take = available.min(wanted - written);
-            let from = self.ready.get(self.taken..self.taken + take * 2).unwrap_or(&[]);
+            let from = self
+                .ready
+                .get(self.taken..self.taken + take * 2)
+                .unwrap_or(&[]);
             if let Some(into) = out.get_mut(written * 2..written * 2 + take * 2) {
                 into.copy_from_slice(from);
             }
@@ -339,7 +354,9 @@ impl Streamer {
         loop {
             // The end of the stream is reported as an error rather than a
             // condition, and a reader that has run out is not a failure.
-            let Ok(packet) = self.format.next_packet() else { return Ok(false) };
+            let Ok(packet) = self.format.next_packet() else {
+                return Ok(false);
+            };
             if packet.track_id() != self.track_id {
                 continue;
             }
@@ -365,7 +382,11 @@ impl Streamer {
             // bed nobody is monitoring.
             for frame in buffer.samples().chunks(channels) {
                 let left = frame.first().copied().unwrap_or(0.0);
-                let right = if channels == 1 { left } else { frame.get(1).copied().unwrap_or(0.0) };
+                let right = if channels == 1 {
+                    left
+                } else {
+                    frame.get(1).copied().unwrap_or(0.0)
+                };
                 if let Some(channel) = self.pending.first_mut() {
                     channel.push(left);
                 }
@@ -436,8 +457,18 @@ impl Streamer {
         let take = frames.min(self.pending_frames());
         self.ready.reserve(take * 2);
         for at in 0..take {
-            let left = self.pending.first().and_then(|c| c.get(at)).copied().unwrap_or(0.0);
-            let right = self.pending.get(1).and_then(|c| c.get(at)).copied().unwrap_or(0.0);
+            let left = self
+                .pending
+                .first()
+                .and_then(|c| c.get(at))
+                .copied()
+                .unwrap_or(0.0);
+            let right = self
+                .pending
+                .get(1)
+                .and_then(|c| c.get(at))
+                .copied()
+                .unwrap_or(0.0);
             self.ready.push(left);
             self.ready.push(right);
         }
@@ -449,8 +480,18 @@ impl Streamer {
     fn interleave_resampled(&mut self, frames: usize) {
         self.ready.reserve(frames * 2);
         for at in 0..frames {
-            let left = self.resampled.first().and_then(|c| c.get(at)).copied().unwrap_or(0.0);
-            let right = self.resampled.get(1).and_then(|c| c.get(at)).copied().unwrap_or(0.0);
+            let left = self
+                .resampled
+                .first()
+                .and_then(|c| c.get(at))
+                .copied()
+                .unwrap_or(0.0);
+            let right = self
+                .resampled
+                .get(1)
+                .and_then(|c| c.get(at))
+                .copied()
+                .unwrap_or(0.0);
             self.ready.push(left);
             self.ready.push(right);
         }
@@ -544,8 +585,14 @@ mod tests {
             assert_eq!(streamer.seek(0).unwrap(), 0);
             let mut window = vec![0.0_f32; 8192];
             let frames = streamer.fill(&mut window).unwrap();
-            assert!(frames > 0, "no audio after seeking back to 0 at {device_rate} Hz");
-            assert!(window.iter().any(|s| *s != 0.0), "silence after seeking back to 0 at {device_rate} Hz");
+            assert!(
+                frames > 0,
+                "no audio after seeking back to 0 at {device_rate} Hz"
+            );
+            assert!(
+                window.iter().any(|s| *s != 0.0),
+                "silence after seeking back to 0 at {device_rate} Hz"
+            );
         }
     }
 

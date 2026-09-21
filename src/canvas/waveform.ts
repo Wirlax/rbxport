@@ -206,7 +206,8 @@ export function drawBands(
       const interpolate = (channel: number) => {
         const a = data[first * 3 + channel] ?? 0;
         const b = data[next * 3 + channel] ?? a;
-        const sharpAttack = b - a >= 16 && b >= a * 2;
+        // Even a quiet onset must not grow out of a silent bin early.
+        const sharpAttack = (a === 0 && b > 0) || (b - a >= 16 && b >= a * 2);
         return sharpAttack ? a : a + (b - a) * fraction;
       };
       low = interpolate(0);

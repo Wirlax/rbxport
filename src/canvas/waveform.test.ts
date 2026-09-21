@@ -269,6 +269,15 @@ describe("the three-band waveform", () => {
     }
   });
 
+  it("never draws even a quiet band before its first nonzero bin", () => {
+    const { ctx, fills } = recorder();
+    // The first bins of Love is Gonna Save Us: a quiet low-band onset must
+    // not be interpolated backwards just because it is below the jump threshold.
+    drawBands(ctx, new Uint8Array([0, 0, 0, 11, 79, 103]), 8, 254, "detail");
+    expect(fills.some((fill) => fill.x < 4)).toBe(false);
+    expect(fills.some((fill) => fill.x === 4)).toBe(true);
+  });
+
   it("smooths small rises in every band without flattening their peaks and dips", () => {
     for (const channel of [0, 1, 2]) {
       const { ctx, fills } = recorder();

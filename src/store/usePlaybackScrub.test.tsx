@@ -25,14 +25,14 @@ declare global {
 const RATE = 44_100;
 
 /** A tick as the engine sends it: deck A only, deck B idle. */
-function tickAt(seconds: number, generation: number, playing = true): Tick {
+function tickAt(seconds: number, generation: number, playing = true, tempo = 1): Tick {
   const deck = {
     frames: seconds * RATE,
     totalFrames: 300 * RATE,
     generation,
     playing,
     loaded: true,
-    tempo: 1,
+    tempo,
     masterTempo: false,
     keyShift: 0,
     startInFrames: 0, loopInFrames: 0, loopOutFrames: 0, looping: false,
@@ -159,6 +159,41 @@ async function settle() {
 }
 
 describe("a drag on a playing deck", () => {
+  it.each([0.5, 1, 1.25])("keeps playback at %s speed on the audio timeline instead of easing behind it", (tempo) => {
+    let clock = performance.now();
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      deliver(tickAt(1, 2, true, tempo));
+      runFrames();
+      for (let frame = 1; frame <= 120; frame++) {
+        clock += 1000 / 60;
+        if (frame % 6 === 0) deliver(tickAt(1 + frame * tempo / 60, 2, true, tempo));
+        runFrames();
+      }
+      expect(deck.positionRef.current).toBeCloseTo(1 + 2 * tempo, 6);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("does not advance before a scheduled audio start", () => {
+    let clock = performance.now();
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    try {
+      const tick = tickAt(1, 2);
+      tick.a.startInFrames = RATE / 10;
+      deliver(tick);
+      runFrames();
+      clock += 50;
+      runFrames();
+      expect(deck.positionRef.current).toBeCloseTo(1, 6);
+      clock += 75;
+      runFrames();
+      expect(deck.positionRef.current).toBeCloseTo(1.025, 6);
+    } finally {
+      now.mockRestore();
+    }
+  });
   it("leaves the playhead where the hand left it, tick after tick", () => {
     deliver(tickAt(1, 1));
     act(() => deck.scrubBegin());
