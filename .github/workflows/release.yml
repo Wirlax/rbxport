@@ -12,8 +12,9 @@ name: Release
 # read-only, so creating one would need a permission this file does not ask
 # for. The bucket is the download; the tag is the record.
 #
-# `workflow_dispatch` builds the same way without publishing, which is how a
-# change to this file is tried before a tag depends on it.
+# `workflow_dispatch` without release_tag builds a development preview.
+# Supplying an existing release_tag rebuilds that source with this workflow
+# and publishes it, without moving the source tag.
 #
 # Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
 # one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
@@ -29,39 +30,40 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to rebuild and publish (blank builds a development preview)"
+        required: false
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  REBUILD_TAG: ${{ inputs.release_tag }}
 
 jobs:
   build:
-    # Native on all three, deliberately. macOS signing and notarisation need a
+    # macOS signing and notarisation need a
     # real macOS with Xcode's notarytool, the Windows installer needs the MSVC
     # toolchain, and a Linux AppImage links against the host's GTK and
-    # WebKit; none cross-compiles from another, and the fleet has a host for
-    # each.
+    # WebKit. Both Mac architectures build on the Apple Silicon host.
     strategy:
       fail-fast: false
       matrix:
         include:
           - host: [self-hosted, macos, arm64]
-            # One binary for both Apple architectures, which is what a
-            # download page should be able to offer without asking. The host is
-            # Apple Silicon; the x86_64 half is a cross-compile against the
-            # same SDK, which is all pure Rust here.
-            target: universal-apple-darwin
-            # `app` as well as `dmg`: the updater's tarball and its signature
-            # are products of the `app` bundle step, and a `dmg`-only build
-            # produces neither — the first 0.5.0 attempt shipped a DMG and no
-            # update anyone could take.
+            target: aarch64-apple-darwin
             bundles: app,dmg
-            # The platform segment of the published filename, so a URL says
-            # which build it serves without anything having to be opened.
-            slug: darwin-universal
+            slug: darwin-aarch64
+          - host: [self-hosted, macos, arm64]
+            # Cross-compile Intel against the same macOS SDK on the Mac host.
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            slug: darwin-x86_64
           - host: [self-hosted, windows, x64]
             target: x86_64-pc-windows-msvc
             bundles: nsis
@@ -76,6 +78,10 @@ jobs:
             bundles: appimage,deb
             slug: linux-x86_64
     runs-on: ${{ matrix.host }}
+    # Both Mac jobs share the signing keychain search list on the same host.
+    concurrency:
+      group: ${{ startsWith(matrix.slug, 'darwin-') && 'release-macos-signing' || format('release-{0}-{1}', github.run_id, matrix.slug) }}
+      cancel-in-progress: false
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
       # anything to sign with is decided once, here.
@@ -97,6 +103,8 @@ jobs:
           $gitBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
 
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
 
       - name: Install the Linux build dependencies
         # CI's Linux list, which is what proves the workspace compiles there
@@ -202,7 +210,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         # Not on Windows. That host builds into a persistent C:/rbl-target
@@ -225,6 +233,7 @@ jobs:
           # self-hosted host means deleting the rustup the step above installed
           # — and the shims every later step resolves through.
           cache-bin: false
+          key: ${{ matrix.target }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -233,9 +242,12 @@ jobs:
         # file was not bumped is worse than a build that fails here.
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [ "${{ github.event_name }}" != "push" ]; then
+          version="${RELEASE_TAG#v}"
+          if [ "${{ github.event_name }}" != "push" ] && [ -z "$REBUILD_TAG" ]; then
             version="0.0.0-dev"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::invalid release version"; exit 1
           fi
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           node -e '
@@ -436,19 +448,27 @@ jobs:
           # the second Mac. With it, hdiutil's messages are in the log.
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --verbose
 
+      - name: Verify Mac architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.slug == 'darwin-aarch64' && 'arm64' || 'x86_64' }}
+        run: |
+          set -euo pipefail
+          binary="${CARGO_TARGET_DIR:-target}/${{ matrix.target }}/release/bundle/macos/rbxport.app/Contents/MacOS/rbxport"
+          actual="$(lipo -archs "$binary")"
+          if [ "$actual" != "$EXPECTED_ARCH" ]; then
+            echo "::error::Expected $EXPECTED_ARCH, got $actual"
+            exit 1
+          fi
+
       - name: Collect the installers
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
-          # Both bundlers put their output under a target directory, and which
-          # one that is depends on the workspace: this repo builds into `target`
-          # at the root, not `src-tauri/target` — or wherever CARGO_TARGET_DIR
-          # points, which on Windows is outside the workspace entirely. Found
-          # by running the macOS build locally, where a step that looked only
-          # under `src-tauri` collected nothing at all. All are searched rather
-          # than one being picked, since any can be right depending on cargo's
-          # config.
+          # Collect only this target's bundles, never another architecture's
+          # cached output. Windows sets CARGO_TARGET_DIR outside the workspace.
           # By path, and never the bundler's own working files: a failed DMG
           # run leaves `rw.NNNNN.<name>.dmg` scratch images beside the real
           # one, and a plain *.dmg glob picks those up. Found locally, with
@@ -458,7 +478,7 @@ jobs:
           # swaps itself for), on Windows the same setup .exe, on Linux the
           # AppImage (the .deb is for people) — and the `.sig` the bundler
           # wrote beside each.
-          find "${CARGO_TARGET_DIR:-target}" src-tauri/target -type f ! -name 'rw.*' \
+          find "${CARGO_TARGET_DIR:-target}/${{ matrix.target }}/release/bundle" -type f ! -name 'rw.*' \
             \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
                -o -path '*/bundle/nsis/*-setup.exe.sig' \
                -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \
@@ -468,7 +488,7 @@ jobs:
 
           # Renamed here, not at upload time, so the artifact and the object in
           # the bucket carry the same name. The bundlers produce
-          # `rbxport_0.1.0_universal.dmg`, `rbxport_0.1.0_x64-setup.exe` and
+          # `rbxport_0.1.0_aarch64.dmg`, `rbxport_0.1.0_x64-setup.exe` and
           # `rbxport_0.1.0_amd64.AppImage`; what gets published is
           # `rbxport-<semver>-<platform>[-setup].<ext>`, which is the
           # one shape a person can read, type and grep. Bare semver, because
@@ -614,9 +634,9 @@ jobs:
           }
 
   publish:
-    # Only a tag publishes. A manual run builds and stops, so this file can be
-    # changed without a bucket write to prove it.
-    if: github.event_name == 'push'
+    # Publish tag pushes and explicitly requested rebuilds of existing tags.
+    # A manual run without release_tag builds without publishing.
+    if: github.event_name == 'push' || inputs.release_tag != ''
     needs: build
     runs-on: [self-hosted, linux, x64]
     steps:
@@ -628,6 +648,7 @@ jobs:
       # on `ls: cannot access 'out'` after both builds had passed.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           sparse-checkout: CHANGELOG.md
           sparse-checkout-cone-mode: false
 
@@ -681,7 +702,7 @@ jobs:
           CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           test -n "$BUCKET"
           ls -l out
 
@@ -701,9 +722,8 @@ jobs:
           # page, which wants `downloads`: the installers by the platform
           # names the files carry. They are separate because the updater
           # refuses a `platforms` entry without a signature, and a DMG has
-          # none. A universal macOS build runs as one of two arches, so the
-          # same tarball is listed under both; `darwin-universal` is not a
-          # key the updater ever looks for. The updater looks for
+          # none. Each Mac architecture gets its own payload and signature.
+          # The updater looks for
           # `{os}-{arch}-{installer}` before `{os}-{arch}`, so on Linux the
           # AppImage sits under the plain key and the .deb, when the
           # bundler signed it, under `linux-x86_64-deb`: an app installed
@@ -725,18 +745,22 @@ jobs:
               }
               return { url: url(file), signature: fs.readFileSync("out/" + sig, "utf8").trim() };
             };
-            const mac = signed((f) => f.endsWith(".app.tar.gz"));
+            const macArm = signed((f) => f.endsWith("-darwin-aarch64.app.tar.gz"));
+            const macIntel = signed((f) => f.endsWith("-darwin-x86_64.app.tar.gz"));
+            if (!macArm || !macIntel) throw new Error("both Mac updater builds are required");
             const win = signed((f) => f.endsWith("-setup.exe"));
             const linux = signed((f) => f.endsWith(".AppImage"));
             const deb = signed((f) => f.endsWith(".deb"), true);
             const platforms = {};
-            if (mac) { platforms["darwin-aarch64"] = mac; platforms["darwin-x86_64"] = mac; }
+            platforms["darwin-aarch64"] = macArm;
+            platforms["darwin-x86_64"] = macIntel;
             if (win) platforms["windows-x86_64"] = win;
             if (linux) platforms["linux-x86_64"] = linux;
             if (deb) platforms["linux-x86_64-deb"] = deb;
             const downloads = {};
             for (const [slug, match] of [
-              ["darwin-universal", (f) => f.endsWith(".dmg")],
+              ["darwin-aarch64", (f) => f.endsWith("-darwin-aarch64.dmg")],
+              ["darwin-x86_64", (f) => f.endsWith("-darwin-x86_64.dmg")],
               ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
               ["linux-x86_64", (f) => f.endsWith(".AppImage")],
               ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
@@ -772,7 +796,7 @@ jobs:
           CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           # A few retries: a freshly written object is readable at once, but a
           # public domain enabled minutes ago answered 401 for its first ten
           # seconds, and that is a wait, not a failure.
