@@ -103,6 +103,11 @@ describe("AudioPane's limiter controls", () => {
     if (!ceiling || !release) throw new Error("no sliders");
     expect([ceiling.min, ceiling.max, ceiling.step]).toEqual(["-12", "0", "0.1"]);
     expect([release.min, release.max, release.step]).toEqual(["10", "1000", "10"]);
+    const input = slider("Limiter input gain");
+    if (!input) throw new Error("no input gain slider");
+    expect([input.min, input.max, input.step]).toEqual(["-24", "24", "0.1"]);
+    drag(input, 6);
+    expect(onLimiterChange).toHaveBeenLastCalledWith({ inputGainDb: 6 });
     drag(ceiling, -3);
     expect(onLimiterChange).toHaveBeenLastCalledWith({ ceilingDb: -3 });
     drag(release, 300);
@@ -110,7 +115,7 @@ describe("AudioPane's limiter controls", () => {
   });
 
   it("greys the sliders out while the limiter is off, but still shows the numbers", async () => {
-    mount({ enabled: false, ceilingDb: -6, releaseMs: 500 });
+    mount({ inputGainDb: 6, enabled: false, ceilingDb: -6, releaseMs: 500 });
     await settle();
     expect(toggle()?.checked).toBe(false);
     expect(slider("Limiter ceiling")?.disabled).toBe(true);
@@ -122,14 +127,13 @@ describe("AudioPane's limiter controls", () => {
   });
 
   it("meters the output per channel and the reduction, each with its figure", async () => {
-    mount(DEFAULT_LIMITER, 2.46, 0.5, 1);
+    mount({ ...DEFAULT_LIMITER, enabled: true }, 2.46, 0.5, 1);
     await settle();
     const meters = host.querySelectorAll<HTMLElement>("[role=meter]");
     expect([...meters].map((meter) => meter.getAttribute("aria-label"))).toEqual([
       "Output L",
       "Output R",
-      "Reduction L",
-      "Reduction R",
+      "Gain reduction",
     ]);
     // Half is six decibels down: nine tenths of a sixty-decibel scale.
     expect(meters[0]?.getAttribute("aria-valuenow")).toBe("90");
@@ -138,10 +142,25 @@ describe("AudioPane's limiter controls", () => {
     expect(host.textContent).toContain("0.0 dB");
     expect(host.textContent).toContain("−2.5 dB");
     // Reduction is on a twelve-decibel scale.
-    expect(meters[2]?.getAttribute("aria-valuenow")).toBe("21");
+    expect(meters[2]?.getAttribute("aria-valuenow")).toBe("2.46");
 
     mount(DEFAULT_LIMITER, 0);
     expect(host.textContent).toContain("−∞ dB");
-    expect(host.textContent).toContain("−0.0 dB");
+    expect(host.textContent).toContain("0.0 dB");
   });
+});
+
+it("reset restores ceiling and release without switching the limiter off", async () => {
+  mount({ inputGainDb: 6, enabled: true, ceilingDb: -2, releaseMs: 500 });
+  await settle();
+  const reset = [...host.querySelectorAll("button")].find(button => button.textContent === "Reset settings");
+  act(() => reset?.click());
+  expect(onLimiterChange).toHaveBeenCalledWith({ inputGainDb: DEFAULT_LIMITER.inputGainDb, ceilingDb: DEFAULT_LIMITER.ceilingDb, releaseMs: DEFAULT_LIMITER.releaseMs });
+});
+
+it("shows bypassed reduction as zero while continuing to meter output", async () => {
+  mount(DEFAULT_LIMITER, 4, 0.5, 0.5);
+  await settle();
+  expect(host.querySelector('[aria-label="Gain reduction"]')?.getAttribute("aria-valuenow")).toBe("0");
+  expect(host.querySelector('[aria-label="Gain reduction"]')?.getAttribute("aria-valuetext")).toBe("Limiter off");
 });

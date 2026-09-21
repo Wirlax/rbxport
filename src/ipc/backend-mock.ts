@@ -1167,7 +1167,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let master = 0.891_250_9;
 
   /** The master limiter, likewise. */
-  let limiter: Limiter = { enabled: false, ceilingDb: 0, releaseMs: 250 };
+  let limiter: Limiter = { enabled: false, inputGainDb: -4, ceilingDb: 0, releaseMs: 250 };
 
   const preferencesRequestListeners = new Set<(what: PreferencesRequest) => void>();
 
@@ -1789,6 +1789,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     setMasterLimiter: (wanted) => {
       limiter = {
         enabled: wanted.enabled,
+        inputGainDb: Number.isFinite(wanted.inputGainDb) ? Math.min(Math.max(wanted.inputGainDb, -24), 24) : -4,
         ceilingDb: Number.isFinite(wanted.ceilingDb)
           ? Math.min(Math.max(wanted.ceilingDb, -12), 0)
           : -0.3,

@@ -15,9 +15,10 @@ import type { Limiter } from "@/ipc/types";
 const STORAGE_KEY = "rbl.limiter.v1";
 
 /** The engine's own defaults, restated so a first run shows them at once. */
-export const DEFAULT_LIMITER: Limiter = { enabled: false, ceilingDb: 0, releaseMs: 250 };
+export const DEFAULT_LIMITER: Limiter = { enabled: false, inputGainDb: -4, ceilingDb: 0, releaseMs: 250 };
 
 /** The ranges the engine accepts; anything outside is clamped by it too. */
+export const INPUT_GAIN_DB = { min: -24, max: 24, step: 0.1 } as const;
 export const CEILING_DB = { min: -12, max: 0, step: 0.1 } as const;
 export const RELEASE_MS = { min: 10, max: 1000, step: 10 } as const;
 
@@ -32,6 +33,7 @@ export function sanitise(raw: unknown): Limiter {
   const candidate = (raw ?? {}) as Partial<Record<keyof Limiter, unknown>>;
   return {
     enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : DEFAULT_LIMITER.enabled,
+    inputGainDb: clampTo(candidate.inputGainDb, INPUT_GAIN_DB.min, INPUT_GAIN_DB.max, DEFAULT_LIMITER.inputGainDb),
     ceilingDb: clampTo(candidate.ceilingDb, CEILING_DB.min, CEILING_DB.max, DEFAULT_LIMITER.ceilingDb),
     releaseMs: clampTo(candidate.releaseMs, RELEASE_MS.min, RELEASE_MS.max, DEFAULT_LIMITER.releaseMs),
   };
@@ -72,6 +74,7 @@ export function useLimiter(): LimiterControl {
       // What the engine could do, which is what to show and to remember.
       setLimiter((current) =>
         current.enabled === set.enabled &&
+        current.inputGainDb === set.inputGainDb &&
         current.ceilingDb === set.ceilingDb &&
         current.releaseMs === set.releaseMs
           ? current

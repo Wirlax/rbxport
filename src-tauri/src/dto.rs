@@ -81,6 +81,9 @@ pub struct AudioDevicesDto {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LimiterDto {
+    /// Input gain in dB, −24 to +24. Missing in older clients means unity.
+    #[serde(default)]
+    pub input_gain_db: f32,
     pub enabled: bool,
     /// dBFS, −12 to 0.
     pub ceiling_db: f32,

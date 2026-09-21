@@ -759,6 +759,8 @@ export interface UpdateProgress {
  * the numbers to what it can do, and the interface shows that.
  */
 export interface Limiter {
+  /** Input gain in dB, −24 to +24. */
+  inputGainDb: number;
   enabled: boolean;
   /** dBFS, −12 to 0. */
   ceilingDb: number;

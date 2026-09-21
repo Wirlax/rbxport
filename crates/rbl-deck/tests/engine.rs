@@ -1238,8 +1238,10 @@ fn two_decks_summed(h: &Harness) -> Vec<f32> {
     h.wait_for_load(2);
     h.engine.play(Deck::A);
     h.engine.play(Deck::B);
-    // Past the fade in and the limiter's own settling.
-    h.play_until(Deck::A, 8_192);
+    // Past the fade in, input smoothing, and the 250 ms limiter release.
+    h.play_until(Deck::A, u64::from(RATE));
+    // Measure the overlap, excluding the initial input-gain smoothing ramp.
+    h.engine.master().reduction_db();
     let mut out = Vec::new();
     for _ in 0..40 {
         out.extend(h.sink.pull(512));
@@ -1257,9 +1259,9 @@ fn the_limiter_keeps_two_full_decks_under_its_ceiling() {
     let loudest = out.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
     assert!(loudest <= ceiling + 1e-5, "{loudest} reached the device, over {ceiling}");
     assert!(loudest > ceiling * 0.9, "{loudest}: the sum was turned down, not limited");
-    // Two decks at 0.99 is about six decibels over: that is what came off.
+    // Four dB of input headroom leaves about two dB to catch with both decks.
     let reduction = h.engine.master().reduction_db();
-    assert!((4.0..8.0).contains(&reduction), "the meter read {reduction} dB of reduction");
+    assert!((1.2..2.5).contains(&reduction), "the meter read {reduction} dB of reduction");
     // And no flat tops: the sum is a sine, and a sine's steps are smooth.
     assert_eq!(clicks(&out), 0);
 }

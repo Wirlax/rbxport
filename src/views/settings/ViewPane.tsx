@@ -172,9 +172,9 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           onChange={(browseLineSpace) => set({ browseLineSpace })}
         />
       </Section>
-      <Section title="VU Meter">
-        <Radios label="VU Meter" value={view.vuMeter}
-          choices={[{ value: "normal", label: "Normal" }, { value: "fabulous", label: "Fabulous" }]}
+      <Section title="RBXport VU Meter">
+        <Radios label="RBXport VU Meter" value={view.vuMeter}
+          choices={[{ value: "normal", label: "Normal (shows signal peaks, like rekordbox)" }, { value: "fabulous", label: "Advanced (peak + RMS, inspired by FabFilter Pro-L 2)" }]}
           onChange={(vuMeter) => set({ vuMeter })} />
       </Section>
       <Section title="Key display format">

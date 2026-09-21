@@ -24,15 +24,15 @@ const player = (page: Page) => page.getByRole("region", { name: "Preview player"
 test("View VU Meter switches modes and persists the selection", async ({ page }) => {
   await open(page);
   const dialog = await prefs(page);
-  const choices = dialog.getByRole("radiogroup", { name: "VU Meter", exact: true });
-  await expect(choices.getByRole("radio", { name: "Normal", exact: true })).toBeChecked();
-  await choices.getByRole("radio", { name: "Fabulous", exact: true }).click();
+  const choices = dialog.getByRole("radiogroup", { name: "RBXport VU Meter", exact: true });
+  await expect(choices.getByRole("radio", { name: "Normal (shows signal peaks, like rekordbox)", exact: true })).toBeChecked();
+  await choices.getByRole("radio", { name: "Advanced (peak + RMS, inspired by FabFilter Pro-L 2)", exact: true }).click();
   await expect(page.getByRole("banner").locator('[role="meter"][data-mode="fabulous"]')).toHaveCount(2);
   await expect(page.getByRole("banner").getByTestId("vu-rms")).toHaveCount(2);
   await page.reload();
   const again = await prefs(page);
-  await expect(again.getByRole("radio", { name: "Fabulous", exact: true })).toBeChecked();
-  await again.getByRole("radio", { name: "Normal", exact: true }).click();
+  await expect(again.getByRole("radio", { name: "Advanced (peak + RMS, inspired by FabFilter Pro-L 2)", exact: true })).toBeChecked();
+  await again.getByRole("radio", { name: "Normal (shows signal peaks, like rekordbox)", exact: true }).click();
   await expect(page.getByRole("banner").locator('[role="meter"][data-mode="normal"]')).toHaveCount(2);
   await expect(page.getByRole("banner").getByTestId("vu-rms")).toHaveCount(0);
 });
@@ -181,7 +181,7 @@ test("Audio has its own sections for the rate, the buffer, the metronome and the
   await open(page);
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "Audio" }).click();
-  for (const name of ["Sample Rate", "Buffer size", "Metronome", "Master limiter"]) {
+  for (const name of ["Sample Rate", "Buffer size", "Metronome", "RBXport Master Limiter"]) {
     await expect(dialog.getByRole("heading", { name })).toBeVisible();
   }
   await expect(dialog.getByRole("combobox", { name: "Sample Rate" })).toHaveValue("48000");
@@ -190,7 +190,7 @@ test("Audio has its own sections for the rate, the buffer, the metronome and the
   await expect(dialog.getByTestId("buffer-size")).toHaveText("512 samples (5.3 ms)");
   await expect(dialog.getByRole("radiogroup", { name: "Metronome" }).getByRole("radio", { name: "Click Sound 02" })).toBeChecked();
   await expect(dialog.getByRole("radiogroup", { name: "Metronome volume" }).getByRole("radio", { name: "Large" })).toBeChecked();
-  await expect(dialog.getByRole("switch", { name: /^Limiter/ })).toBeVisible();
+  await expect(dialog.getByRole("switch", { name: "Enable limiter" })).toBeVisible();
 });
 
 test("the deck's metronome button is live once a track is loaded", async ({ page }) => {

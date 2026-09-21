@@ -62,8 +62,8 @@ use fade::Ramp;
 use smooth::Smoothed;
 
 pub use limiter::{
-    Limiter, LimiterSettings, DEFAULT_CEILING_DB, DEFAULT_RELEASE_MS, MAX_CEILING_DB,
-    MAX_RELEASE_MS, MIN_CEILING_DB, MIN_RELEASE_MS,
+    Limiter, LimiterSettings, DEFAULT_CEILING_DB, DEFAULT_INPUT_GAIN_DB, DEFAULT_RELEASE_MS,
+    MAX_CEILING_DB, MAX_INPUT_GAIN_DB, MAX_RELEASE_MS, MIN_CEILING_DB, MIN_INPUT_GAIN_DB, MIN_RELEASE_MS,
 };
 pub use metronome::{ClickSound, ClickVolume, GridBeat, Metronome, MetronomeSettings};
 pub use mixer::{Band, Channel, Curve, Fade, MixerSettings};

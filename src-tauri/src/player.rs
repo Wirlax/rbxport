@@ -191,6 +191,7 @@ impl Player {
             wish: Mutex::new(StreamWish::default()),
             metronome: Mutex::new((rbl_deck::ClickSound::Two, rbl_deck::ClickVolume::Large)),
             limiter: Mutex::new(LimiterDto {
+                input_gain_db: rbl_deck::DEFAULT_INPUT_GAIN_DB,
                 enabled: false,
                 ceiling_db: rbl_deck::DEFAULT_CEILING_DB,
                 release_ms: rbl_deck::DEFAULT_RELEASE_MS,
@@ -203,6 +204,7 @@ impl Player {
 /// clamped it.
 fn limiter_of(settings: &rbl_deck::LimiterSettings) -> LimiterDto {
     LimiterDto {
+        input_gain_db: settings.input_gain_db(),
         enabled: settings.enabled(),
         ceiling_db: settings.ceiling_db(),
         release_ms: settings.release_ms(),
@@ -241,6 +243,7 @@ impl Player {
     }
 
     fn apply_limiter(settings: &rbl_deck::LimiterSettings, wanted: LimiterDto) {
+        settings.set_input_gain_db(wanted.input_gain_db);
         settings.set_enabled(wanted.enabled);
         settings.set_ceiling_db(wanted.ceiling_db);
         settings.set_release_ms(wanted.release_ms);
@@ -476,6 +479,7 @@ mod tests {
     fn a_new_player_carries_the_engine_s_limiter_defaults() {
         let limiter = Player::default().limiter();
         assert!(!limiter.enabled);
+        assert_eq!(limiter.input_gain_db, rbl_deck::DEFAULT_INPUT_GAIN_DB);
         assert_eq!(limiter.ceiling_db, rbl_deck::DEFAULT_CEILING_DB);
         assert_eq!(limiter.release_ms, rbl_deck::DEFAULT_RELEASE_MS);
     }
@@ -483,7 +487,7 @@ mod tests {
     #[test]
     fn set_limiter_returns_what_the_engine_would_clamp_to() {
         let player = Player::default();
-        let set = player.set_limiter(LimiterDto { enabled: false, ceiling_db: 3.0, release_ms: 5.0 });
+        let set = player.set_limiter(LimiterDto { input_gain_db: 6.0, enabled: false, ceiling_db: 3.0, release_ms: 5.0 });
         assert!(!set.enabled);
         assert_eq!(set.ceiling_db, 0.0, "a ceiling over full scale is full scale");
         assert_eq!(set.release_ms, 10.0, "a release under ten milliseconds is ten");
@@ -493,10 +497,12 @@ mod tests {
     fn set_limiter_turns_a_nan_into_the_default() {
         let player = Player::default();
         let set = player.set_limiter(LimiterDto {
+            input_gain_db: f32::NAN,
             enabled: true,
             ceiling_db: f32::NAN,
             release_ms: f32::NAN,
         });
+        assert_eq!(set.input_gain_db, rbl_deck::DEFAULT_INPUT_GAIN_DB);
         assert_eq!(set.ceiling_db, rbl_deck::DEFAULT_CEILING_DB);
         assert_eq!(set.release_ms, rbl_deck::DEFAULT_RELEASE_MS);
     }
@@ -506,11 +512,12 @@ mod tests {
         // No engine has been built: the setting still has to be there for
         // the build, and read back as set — clamped, not as asked.
         let player = Player::default();
-        player.set_limiter(LimiterDto { enabled: false, ceiling_db: -40.0, release_ms: 250.0 });
+        player.set_limiter(LimiterDto { input_gain_db: 6.0, enabled: false, ceiling_db: -40.0, release_ms: 250.0 });
         let held = player.limiter();
         assert!(!held.enabled);
         assert_eq!(held.ceiling_db, rbl_deck::MIN_CEILING_DB);
         assert_eq!(held.release_ms, 250.0);
+        assert_eq!(held.input_gain_db, 6.0);
     }
 
     #[test]

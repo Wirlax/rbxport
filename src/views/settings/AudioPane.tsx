@@ -13,10 +13,11 @@ import { useEffect, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { AudioDevices, Limiter } from "@/ipc/types";
 import { BUFFER_SIZES, SAMPLE_RATES, type SampleRate } from "@/lib/preferences";
-import { CEILING_DB, RELEASE_MS } from "@/store/useLimiter";
+import { CEILING_DB, DEFAULT_LIMITER, INPUT_GAIN_DB, RELEASE_MS } from "@/store/useLimiter";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Note, Radios, Section, Select, Separator, Slider, Sub, Toggle } from "./controls";
+import limiterStyles from "./MasterLimiter.module.css";
+import { Button, Note, Radios, Section, Select, Separator, Slider, Sub, Toggle } from "./controls";
 
 export type AudioTab = "configuration";
 
@@ -61,6 +62,8 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
   const [audio, setAudio] = useState<AudioDevices | null>(null);
   const { preferences, update } = usePreferencesContext();
   const prefs = preferences.audio;
+  const gainReduction = limiter.enabled && Number.isFinite(reduction) ? Math.max(0, reduction) : 0;
+  const limiterStatus = !limiter.enabled ? "Off" : gainReduction >= 0.1 ? "Limiting" : "Ready";
   const set = (patch: Partial<typeof prefs>) => update("audio", patch);
   // The slider moves over the stops; the stop is what is stored.
   const bufferStop = Math.max(0, BUFFER_SIZES.indexOf(prefs.bufferSize));
@@ -170,10 +173,14 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
       />
     </Section>
 
-    <Section title="Master limiter">
-      {/* What the device is given, per channel, and how far the limiter is
-          holding it down: two stereo meters, then two reduction meters, each
-          with its figure. */}
+    <Section title="RBXport Master Limiter">
+      <div className={limiterStyles.panel}>
+      <div className={limiterStyles.header}>
+        <Toggle label="Enable limiter" checked={limiter.enabled} onChange={(enabled) => onLimiterChange({ enabled })} />
+        <span className={limiterStyles.status} data-state={limiterStatus}>{limiterStatus}</span>
+      </div>
+      <p className={limiterStyles.help}>Keeps the combined deck output below the ceiling by turning down peaks.</p>
+      <div className={limiterStyles.monitor}>
       <div className={styles.meters} role="group" aria-label="Master output">
         <span className={styles.meterCaption}>Output</span>
         {([["L", peakLeft], ["R", peakRight]] as const).map(([channel, peak]) => (
@@ -186,6 +193,7 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round((vu?.[channel === "L" ? "left" : "right"].peak ?? fillOf(peak)) * 100)}
+              aria-valuetext={decibels(peak)}
               data-mode={vu?.mode ?? "normal"}
             >
               <VuMeterFill mode={vu?.mode ?? "normal"} channel={vu?.[channel === "L" ? "left" : "right"] ?? { peak: fillOf(peak), rms: 0, marker: 0 }} />
@@ -195,55 +203,52 @@ export function AudioPane({ limiter, onLimiterChange, reduction, vu, peakLeft = 
         ))}
       </div>
       <div className={styles.meters} role="group" aria-label="Limiter reduction">
-        <span className={styles.meterCaption}>Reduction</span>
-        {(["L", "R"] as const).map((channel) => (
-          <div key={channel} className={styles.meterRow}>
-            <span className={styles.meterLabel}>{channel}</span>
-            <div
-              className={styles.meterBar}
-              role="meter"
-              aria-label={`Reduction ${channel}`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(Math.min(reduction / REDUCTION_FULL_DB, 1) * 100)}
-            >
-              <span
-                className={styles.meterFill}
-                data-reduction
-                style={{ width: `${Math.min(reduction / REDUCTION_FULL_DB, 1) * 100}%` }}
-              />
-            </div>
-            <span className={styles.meterDb}>{`−${reduction.toFixed(1)} dB`}</span>
+        <div className={limiterStyles.readout}>
+          <span className={styles.meterCaption}>Gain reduction</span>
+          <span className={limiterStyles.value}>{gainReduction > 0 ? `−${gainReduction.toFixed(1)}` : "0.0"} dB</span>
+        </div>
+        <div className={styles.meterBar} role="meter" aria-label="Gain reduction"
+          aria-valuemin={0} aria-valuemax={REDUCTION_FULL_DB}
+          aria-valuenow={Math.min(gainReduction, REDUCTION_FULL_DB)}
+          aria-valuetext={limiter.enabled ? `${gainReduction.toFixed(1)} dB reduction` : "Limiter off"}>
+          <span className={styles.meterFill} data-reduction style={{ width: `${Math.min(gainReduction / REDUCTION_FULL_DB, 1) * 100}%` }} />
+        </div>
+      </div>
+      </div>
+      <div className={limiterStyles.controls}>
+        <div className={limiterStyles.field}>
+          <div className={limiterStyles.readout}>
+            <strong>Input gain</strong>{" "}<span className={limiterStyles.value}>{limiter.inputGainDb > 0 ? "+" : ""}{limiter.inputGainDb.toFixed(1)} dB</span>
           </div>
-        ))}
+          <p className={limiterStyles.help}>Level before limiting.</p>
+          <Slider label="Limiter input gain" value={limiter.inputGainDb} range={INPUT_GAIN_DB}
+            ends={[`${INPUT_GAIN_DB.min} dB`, `+${INPUT_GAIN_DB.max} dB`]}
+            disabled={!limiter.enabled} onChange={(inputGainDb) => onLimiterChange({ inputGainDb })} />
+        </div>
+        <div className={limiterStyles.field}>
+          <div className={limiterStyles.readout}>
+            <strong>Ceiling</strong>{" "}<span className={limiterStyles.value}>{limiter.ceilingDb.toFixed(1)} dBFS</span>
+          </div>
+          <p className={limiterStyles.help}>Maximum output level.</p>
+          <Slider label="Limiter ceiling" value={limiter.ceilingDb} range={CEILING_DB}
+            ends={[`${CEILING_DB.min} dBFS`, `${CEILING_DB.max} dBFS`]}
+            disabled={!limiter.enabled} onChange={(ceilingDb) => onLimiterChange({ ceilingDb })} />
+        </div>
+        <div className={limiterStyles.field}>
+          <div className={limiterStyles.readout}>
+            <strong>Release</strong>{" "}<span className={limiterStyles.value}>{Math.round(limiter.releaseMs)} ms</span>
+          </div>
+          <p className={limiterStyles.help}>Recovery after a peak. Longer is smoother.</p>
+          <Slider label="Limiter release" value={limiter.releaseMs} range={RELEASE_MS}
+            ends={[`${RELEASE_MS.min} ms · Fast`, `${RELEASE_MS.max} ms · Slow`]}
+            disabled={!limiter.enabled} onChange={(releaseMs) => onLimiterChange({ releaseMs })} />
+        </div>
       </div>
-      <Toggle
-        label="Limiter"
-        checked={limiter.enabled}
-        onChange={(enabled) => onLimiterChange({ enabled })}
-      />
-      <div className={styles.row} data-nested="">
-        <span>Ceiling {limiter.ceilingDb.toFixed(1)} dB</span>
+      <div className={limiterStyles.footer}>
+        <Button disabled={!limiter.enabled || (limiter.inputGainDb === DEFAULT_LIMITER.inputGainDb && limiter.ceilingDb === DEFAULT_LIMITER.ceilingDb && limiter.releaseMs === DEFAULT_LIMITER.releaseMs)}
+          onClick={() => onLimiterChange({ inputGainDb: DEFAULT_LIMITER.inputGainDb, ceilingDb: DEFAULT_LIMITER.ceilingDb, releaseMs: DEFAULT_LIMITER.releaseMs })}>Reset settings</Button>
       </div>
-      <Slider
-        label="Limiter ceiling"
-        value={limiter.ceilingDb}
-        range={CEILING_DB}
-        ends={[`${CEILING_DB.min} dB`, `${CEILING_DB.max} dB`]}
-        disabled={!limiter.enabled}
-        onChange={(ceilingDb) => onLimiterChange({ ceilingDb })}
-      />
-      <div className={styles.row} data-nested="">
-        <span>Release {Math.round(limiter.releaseMs)} ms</span>
       </div>
-      <Slider
-        label="Limiter release"
-        value={limiter.releaseMs}
-        range={RELEASE_MS}
-        ends={[`${RELEASE_MS.min} ms`, `${RELEASE_MS.max} ms`]}
-        disabled={!limiter.enabled}
-        onChange={(releaseMs) => onLimiterChange({ releaseMs })}
-      />
     </Section>
     </>
   );

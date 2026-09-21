@@ -32,8 +32,14 @@
 //! Nothing here allocates or locks once built. The interface writes settings
 //! as atomics and the callback reads them once a buffer.
 
+use crate::smooth::Smoothed;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+pub const MIN_INPUT_GAIN_DB: f32 = -24.0;
+pub const MAX_INPUT_GAIN_DB: f32 = 24.0;
+// Leave 4 dB of summing headroom: two full-scale signals need about 2 dB of limiting.
+pub const DEFAULT_INPUT_GAIN_DB: f32 = -4.0;
 
 /// How far ahead the limiter looks, in seconds.
 ///
@@ -61,6 +67,7 @@ pub const DEFAULT_RELEASE_MS: f32 = 250.0;
 #[derive(Debug)]
 pub struct LimiterSettings {
     enabled: AtomicBool,
+    input_gain_db: AtomicU32,
     ceiling_db: AtomicU32,
     release_ms: AtomicU32,
 }
@@ -69,6 +76,7 @@ impl Default for LimiterSettings {
     fn default() -> Self {
         Self {
             enabled: AtomicBool::new(false),
+            input_gain_db: AtomicU32::new(DEFAULT_INPUT_GAIN_DB.to_bits()),
             ceiling_db: AtomicU32::new(DEFAULT_CEILING_DB.to_bits()),
             release_ms: AtomicU32::new(DEFAULT_RELEASE_MS.to_bits()),
         }
@@ -76,6 +84,19 @@ impl Default for LimiterSettings {
 }
 
 impl LimiterSettings {
+    pub fn input_gain_db(&self) -> f32 {
+        f32::from_bits(self.input_gain_db.load(Ordering::Relaxed))
+    }
+
+    pub fn set_input_gain_db(&self, db: f32) {
+        let safe = if db.is_finite() {
+            db.clamp(MIN_INPUT_GAIN_DB, MAX_INPUT_GAIN_DB)
+        } else {
+            DEFAULT_INPUT_GAIN_DB
+        };
+        self.input_gain_db.store(safe.to_bits(), Ordering::Relaxed);
+    }
+
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
     }
@@ -92,8 +113,11 @@ impl LimiterSettings {
 
     /// The ceiling, in dBFS. Out of range is clamped and a NaN is the default.
     pub fn set_ceiling_db(&self, db: f32) {
-        let safe =
-            if db.is_finite() { db.clamp(MIN_CEILING_DB, MAX_CEILING_DB) } else { DEFAULT_CEILING_DB };
+        let safe = if db.is_finite() {
+            db.clamp(MIN_CEILING_DB, MAX_CEILING_DB)
+        } else {
+            DEFAULT_CEILING_DB
+        };
         self.ceiling_db.store(safe.to_bits(), Ordering::Relaxed);
     }
 
@@ -103,8 +127,11 @@ impl LimiterSettings {
 
     /// The release, in milliseconds. Out of range is clamped, a NaN the default.
     pub fn set_release_ms(&self, ms: f32) {
-        let safe =
-            if ms.is_finite() { ms.clamp(MIN_RELEASE_MS, MAX_RELEASE_MS) } else { DEFAULT_RELEASE_MS };
+        let safe = if ms.is_finite() {
+            ms.clamp(MIN_RELEASE_MS, MAX_RELEASE_MS)
+        } else {
+            DEFAULT_RELEASE_MS
+        };
         self.release_ms.store(safe.to_bits(), Ordering::Relaxed);
     }
 }
@@ -115,6 +142,7 @@ fn db_to_gain(db: f32) -> f32 {
 
 /// The limiter's state for one stream. Built once the device's rate is known.
 pub struct Limiter {
+    input_gain: Smoothed,
     /// The delay line, interleaved stereo, `lookahead` frames long.
     delay: Vec<f32>,
     /// Where the next frame goes in — and so where the oldest comes out.
@@ -151,6 +179,7 @@ impl Limiter {
         let lookahead = ((LOOKAHEAD_SECONDS * rate as f32).round() as usize).max(1);
         Self {
             delay: vec![0.0; lookahead * 2],
+            input_gain: Smoothed::new(1.0, rate),
             delay_at: 0,
             window: VecDeque::with_capacity(lookahead + 1),
             window_len: lookahead as u64 + 1,
@@ -180,14 +209,27 @@ impl Limiter {
         // The fraction of the gap to unity closed each frame on the way up.
         let rise = 1.0 - (-1.0 / (release * self.rate)).exp();
         let enabled = settings.enabled();
+        let input_target = if enabled {
+            db_to_gain(settings.input_gain_db())
+        } else {
+            1.0
+        };
 
         for frame in out.chunks_exact_mut(2) {
-            let (Some(&left), Some(&right)) = (frame.first(), frame.get(1)) else { continue };
+            let (Some(&left), Some(&right)) = (frame.first(), frame.get(1)) else {
+                continue;
+            };
+            let input_gain = self.input_gain.step(input_target);
+            let (left, right) = (left * input_gain, right * input_gain);
 
             // 1. What this frame asks for. Off asks for nothing, and the
             // release brings the gain home rather than snapping it there.
             let peak = left.abs().max(right.abs());
-            let wanted = if !enabled || peak <= ceiling { 1.0 } else { ceiling / peak };
+            let wanted = if !enabled || peak <= ceiling {
+                1.0
+            } else {
+                ceiling / peak
+            };
 
             // 2. The sliding minimum over the last `window_len` frames.
             while self.window.back().is_some_and(|&(_, gain)| gain >= wanted) {
@@ -259,13 +301,85 @@ impl Limiter {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp, reason = "unity is unity exactly, and that is the assertion")]
+#[allow(
+    clippy::float_cmp,
+    reason = "unity is unity exactly, and that is the assertion"
+)]
 mod tests {
     use super::*;
 
     const RATE: u32 = 48_000;
 
-    fn run(limiter: &mut Limiter, settings: &LimiterSettings, frames: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    #[test]
+    fn defaults_only_shave_about_two_db_off_two_full_scale_tracks() {
+        let settings = LimiterSettings::default();
+        settings.set_enabled(true);
+        let mut limiter = Limiter::new(RATE);
+        // Allow input smoothing to settle before measuring the overlap.
+        run(&mut limiter, &settings, &vec![(0.0, 0.0); RATE as usize]);
+        let output = run(&mut limiter, &settings, &tone(2.0, RATE as usize));
+        let reduction = -20.0 * limiter.take_floor().log10();
+        assert!(
+            (1.8..2.2).contains(&reduction),
+            "defaults reduced {reduction} dB"
+        );
+        assert!(output
+            .iter()
+            .all(|&(l, r)| l.abs().max(r.abs()) <= 1.000001));
+    }
+
+    #[test]
+    fn input_gain_changes_level_before_limiting_and_bypasses_when_disabled() {
+        for db in [-12.0, 6.0, 24.0] {
+            let mut limiter = Limiter::new(RATE);
+            let settings = LimiterSettings::default();
+            settings.set_input_gain_db(0.0);
+            settings.set_enabled(true);
+            settings.set_input_gain_db(db);
+            let input = vec![(0.25, 0.125); RATE as usize];
+            let output = run(&mut limiter, &settings, &input);
+            let expected = (0.25 * db_to_gain(db)).min(1.0);
+            let (left, right) = output[output.len() - 1];
+            assert!(
+                (left - expected).abs() < 1e-4,
+                "{db} dB gave {left}, expected {expected}"
+            );
+            assert!((right - left * 0.5).abs() < 1e-6);
+            assert!(output.iter().all(|&(l, r)| l <= 1.000001 && r <= 1.000001));
+            if db == 24.0 {
+                assert!(limiter.take_floor() < 0.3);
+            }
+            settings.set_enabled(false);
+            let bypassed = run(
+                &mut limiter,
+                &settings,
+                &vec![(0.25, 0.125); RATE as usize * 4],
+            );
+            assert!((bypassed[bypassed.len() - 1].0 - 0.25).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn changing_input_gain_mid_stream_is_smoothed() {
+        let mut limiter = Limiter::new(RATE);
+        let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
+        settings.set_enabled(true);
+        let input = vec![(0.01, 0.01); 4_800];
+        run(&mut limiter, &settings, &input);
+        settings.set_input_gain_db(24.0);
+        let output = run(&mut limiter, &settings, &input);
+        assert!(output
+            .windows(2)
+            .all(|pair| (pair[1].0 - pair[0].0).abs() < 0.001));
+        assert!(output[output.len() - 1].0 > 0.15);
+    }
+
+    fn run(
+        limiter: &mut Limiter,
+        settings: &LimiterSettings,
+        frames: &[(f32, f32)],
+    ) -> Vec<(f32, f32)> {
         let mut buffer: Vec<f32> = frames.iter().flat_map(|&(l, r)| [l, r]).collect();
         limiter.process(&mut buffer, settings);
         buffer.chunks_exact(2).map(|f| (f[0], f[1])).collect()
@@ -275,7 +389,8 @@ mod tests {
     fn tone(amplitude: f32, frames: usize) -> Vec<(f32, f32)> {
         (0..frames)
             .map(|i| {
-                let s = (i as f32 * 2.0 * std::f32::consts::PI * 100.0 / RATE as f32).sin() * amplitude;
+                let s =
+                    (i as f32 * 2.0 * std::f32::consts::PI * 100.0 / RATE as f32).sin() * amplitude;
                 (s, s)
             })
             .collect()
@@ -285,20 +400,27 @@ mod tests {
     fn a_new_limiter_looks_a_millisecond_and_a_half_ahead() {
         assert_eq!(Limiter::new(RATE).latency_frames(), 72);
         assert_eq!(Limiter::new(44_100).latency_frames(), 66);
-        assert!(Limiter::new(0).latency_frames() >= 1, "a nonsense rate still delays");
+        assert!(
+            Limiter::new(0).latency_frames() >= 1,
+            "a nonsense rate still delays"
+        );
     }
 
     #[test]
     fn quiet_audio_passes_untouched_but_late() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         let input = tone(0.5, 1_000);
         let output = run(&mut limiter, &settings, &input);
         let delay = limiter.latency_frames();
         for (i, &(l, r)) in output.iter().enumerate().skip(delay) {
             let (el, er) = input[i - delay];
-            assert!((l - el).abs() < 1e-6 && (r - er).abs() < 1e-6, "frame {i} was changed");
+            assert!(
+                (l - el).abs() < 1e-6 && (r - er).abs() < 1e-6,
+                "frame {i} was changed"
+            );
         }
         assert_eq!(limiter.take_floor(), 1.0, "nothing was reduced");
     }
@@ -307,21 +429,35 @@ mod tests {
     fn nothing_over_the_ceiling_leaves() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         let ceiling = db_to_gain(DEFAULT_CEILING_DB);
         // Two full-scale decks summed: the case that clipped.
         let input = tone(2.0, 4_800);
         let output = run(&mut limiter, &settings, &input);
-        let loudest = output.iter().map(|&(l, r)| l.abs().max(r.abs())).fold(0.0, f32::max);
-        assert!(loudest <= ceiling + 1e-6, "{loudest} is over the ceiling {ceiling}");
-        assert!(loudest > ceiling * 0.9, "{loudest}: the limiter is a fader, not a limiter");
-        assert!(limiter.take_floor() < 0.6, "six decibels over needs six off");
+        let loudest = output
+            .iter()
+            .map(|&(l, r)| l.abs().max(r.abs()))
+            .fold(0.0, f32::max);
+        assert!(
+            loudest <= ceiling + 1e-6,
+            "{loudest} is over the ceiling {ceiling}"
+        );
+        assert!(
+            loudest > ceiling * 0.9,
+            "{loudest}: the limiter is a fader, not a limiter"
+        );
+        assert!(
+            limiter.take_floor() < 0.6,
+            "six decibels over needs six off"
+        );
     }
 
     #[test]
     fn a_single_peak_is_ramped_into_rather_than_stepped() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         let delay = limiter.latency_frames();
         // Silence, one full-scale-times-two sample, silence.
@@ -331,17 +467,29 @@ mod tests {
         // The frame before the peak has already been turned down: the ramp
         // began a lookahead earlier.
         let before = output[500 + delay - 1].0;
-        assert!(before < 0.3, "the gain had not started moving before the peak: {before}");
+        assert!(
+            before < 0.3,
+            "the gain had not started moving before the peak: {before}"
+        );
         // The ramp is exactly a lookahead long: the frame before it begins is
         // untouched.
         let well_before = output[499].0;
-        assert!((well_before - 0.3).abs() < 1e-6, "the ramp started too early: {well_before}");
+        assert!(
+            (well_before - 0.3).abs() < 1e-6,
+            "the ramp started too early: {well_before}"
+        );
         // And the peak itself lands at the ceiling.
         let at = output[500 + delay].0;
-        assert!(at <= db_to_gain(DEFAULT_CEILING_DB) + 1e-6, "the peak got through: {at}");
+        assert!(
+            at <= db_to_gain(DEFAULT_CEILING_DB) + 1e-6,
+            "the peak got through: {at}"
+        );
         // No step: consecutive frames of the ramp differ by a bounded amount.
         for pair in output[500..500 + delay].windows(2) {
-            assert!((pair[0].0 - pair[1].0).abs() < 0.02, "a step in the ramp: {pair:?}");
+            assert!(
+                (pair[0].0 - pair[1].0).abs() < 0.02,
+                "a step in the ramp: {pair:?}"
+            );
         }
     }
 
@@ -349,6 +497,7 @@ mod tests {
     fn the_gain_comes_back_along_the_release() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         settings.set_release_ms(50.0);
         let mut input = tone(2.0, 480);
@@ -357,7 +506,10 @@ mod tests {
         // Twenty milliseconds after the loud part the tone is still held down;
         // half a second on it is back to what it was.
         let peak_around = |centre: usize| {
-            output[centre - 200..centre + 200].iter().map(|&(l, _)| l.abs()).fold(0.0, f32::max)
+            output[centre - 200..centre + 200]
+                .iter()
+                .map(|&(l, _)| l.abs())
+                .fold(0.0, f32::max)
         };
         let soon = peak_around(480 + 960);
         assert!(soon < 0.29, "no release yet: {soon}");
@@ -369,6 +521,7 @@ mod tests {
     fn switched_off_it_releases_to_unity_and_lets_the_sum_through() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(false);
         let input = tone(1.5, 4_800);
         let output = run(&mut limiter, &settings, &input);
@@ -381,9 +534,13 @@ mod tests {
     fn both_channels_move_together() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         // Loud on the left only: the right must be turned down the same.
-        let input: Vec<(f32, f32)> = tone(2.0, 4_800).into_iter().map(|(l, _)| (l, l * 0.25)).collect();
+        let input: Vec<(f32, f32)> = tone(2.0, 4_800)
+            .into_iter()
+            .map(|(l, _)| (l, l * 0.25))
+            .collect();
         let output = run(&mut limiter, &settings, &input);
         for &(l, r) in output.iter().skip(2_400) {
             if l.abs() > 1e-3 {
@@ -395,6 +552,13 @@ mod tests {
     #[test]
     fn settings_out_of_range_are_clamped_and_a_nan_is_the_default() {
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
+        settings.set_input_gain_db(100.0);
+        assert_eq!(settings.input_gain_db(), MAX_INPUT_GAIN_DB);
+        settings.set_input_gain_db(-100.0);
+        assert_eq!(settings.input_gain_db(), MIN_INPUT_GAIN_DB);
+        settings.set_input_gain_db(f32::NAN);
+        assert_eq!(settings.input_gain_db(), DEFAULT_INPUT_GAIN_DB);
         settings.set_ceiling_db(3.0);
         assert_eq!(settings.ceiling_db(), MAX_CEILING_DB);
         settings.set_ceiling_db(-40.0);
@@ -412,7 +576,10 @@ mod tests {
     fn clicks(frames: &[(f32, f32)]) -> usize {
         const NEIGHBOURHOOD: usize = 96;
         const CLICK_RATIO: f32 = 12.0;
-        let steps: Vec<f32> = frames.windows(2).map(|pair| (pair[1].0 - pair[0].0).abs()).collect();
+        let steps: Vec<f32> = frames
+            .windows(2)
+            .map(|pair| (pair[1].0 - pair[0].0).abs())
+            .collect();
         (NEIGHBOURHOOD..steps.len().saturating_sub(NEIGHBOURHOOD))
             .filter(|&i| {
                 let around: f32 = steps[i - NEIGHBOURHOOD..i]
@@ -429,6 +596,7 @@ mod tests {
     fn a_ceiling_lowered_mid_stream_holds_from_a_lookahead_on() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         let delay = limiter.latency_frames();
         // Settled under the default ceiling, then the ceiling drops by six.
@@ -438,16 +606,26 @@ mod tests {
         let output = run(&mut limiter, &settings, &tone(2.0, 4_800));
         // The frames still in the delay line were let through under the old
         // ceiling; every frame that entered under the new one leaves under it.
-        let loudest =
-            output.iter().skip(delay).map(|&(l, r)| l.abs().max(r.abs())).fold(0.0, f32::max);
-        assert!(loudest <= lower + 1e-6, "{loudest} is over the new ceiling {lower}");
-        assert!(loudest > lower * 0.9, "{loudest}: the new ceiling is not being reached");
+        let loudest = output
+            .iter()
+            .skip(delay)
+            .map(|&(l, r)| l.abs().max(r.abs()))
+            .fold(0.0, f32::max);
+        assert!(
+            loudest <= lower + 1e-6,
+            "{loudest} is over the new ceiling {lower}"
+        );
+        assert!(
+            loudest > lower * 0.9,
+            "{loudest}: the new ceiling is not being reached"
+        );
     }
 
     #[test]
     fn switching_on_over_a_loud_signal_ramps_rather_than_steps() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(false);
         let lookahead = limiter.latency_frames();
         let amplitude = 2.0;
@@ -460,19 +638,31 @@ mod tests {
         let floor = db_to_gain(DEFAULT_CEILING_DB) / amplitude;
         let tone_step = amplitude * 2.0 * std::f32::consts::PI * 100.0 / RATE as f32;
         let allowed = tone_step + amplitude * (1.0 - floor) / lookahead as f32;
-        let largest =
-            output.windows(2).map(|pair| (pair[1].0 - pair[0].0).abs()).fold(0.0, f32::max);
-        assert!(largest <= allowed + 1e-4, "a step of {largest} where the ramp allows {allowed}");
+        let largest = output
+            .windows(2)
+            .map(|pair| (pair[1].0 - pair[0].0).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            largest <= allowed + 1e-4,
+            "a step of {largest} where the ramp allows {allowed}"
+        );
         assert_eq!(clicks(&output), 0);
         // And it did switch on: the tail is at the ceiling, not at two.
-        let tail = output[8_000..].iter().map(|&(l, _)| l.abs()).fold(0.0, f32::max);
-        assert!(tail <= db_to_gain(DEFAULT_CEILING_DB) + 1e-6, "still off: {tail}");
+        let tail = output[8_000..]
+            .iter()
+            .map(|&(l, _)| l.abs())
+            .fold(0.0, f32::max);
+        assert!(
+            tail <= db_to_gain(DEFAULT_CEILING_DB) + 1e-6,
+            "still off: {tail}"
+        );
     }
 
     #[test]
     fn the_floor_is_reset_by_reading_it() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         settings.set_release_ms(100.0);
         run(&mut limiter, &settings, &tone(2.0, 4_800));
@@ -486,7 +676,10 @@ mod tests {
         run(&mut limiter, &settings, &tone(0.1, RATE as usize));
         let after = limiter.take_floor();
         assert!(after < 1.0, "the release had not started: {after}");
-        assert!(after >= loud - 1e-6, "quiet audio was reduced further: {after} under {loud}");
+        assert!(
+            after >= loud - 1e-6,
+            "quiet audio was reduced further: {after} under {loud}"
+        );
         // And once the release has run its course, a quiet buffer reads as
         // unity to within the exponential's tail.
         run(&mut limiter, &settings, &tone(0.1, 480));
@@ -498,17 +691,33 @@ mod tests {
     fn a_silent_channel_is_turned_down_with_its_loud_partner() {
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         // Loud on the left, nothing on the right: linked on the louder, so
         // the left is held to the ceiling, and the right stays at nothing.
-        let input: Vec<(f32, f32)> = tone(2.0, 4_800).into_iter().map(|(l, _)| (l, 0.0)).collect();
+        let input: Vec<(f32, f32)> = tone(2.0, 4_800)
+            .into_iter()
+            .map(|(l, _)| (l, 0.0))
+            .collect();
         let output = run(&mut limiter, &settings, &input);
         let ceiling = db_to_gain(DEFAULT_CEILING_DB);
         let loudest_left = output.iter().map(|&(l, _)| l.abs()).fold(0.0, f32::max);
-        assert!(loudest_left <= ceiling + 1e-6, "{loudest_left} is over the ceiling");
-        assert!(loudest_left > ceiling * 0.9, "{loudest_left}: the left was not limited to the ceiling");
-        assert!(output.iter().all(|&(_, r)| r == 0.0), "silence came out as something");
-        assert!(limiter.take_floor() < 0.6, "the left's peak did not drive the gain");
+        assert!(
+            loudest_left <= ceiling + 1e-6,
+            "{loudest_left} is over the ceiling"
+        );
+        assert!(
+            loudest_left > ceiling * 0.9,
+            "{loudest_left}: the left was not limited to the ceiling"
+        );
+        assert!(
+            output.iter().all(|&(_, r)| r == 0.0),
+            "silence came out as something"
+        );
+        assert!(
+            limiter.take_floor() < 0.6,
+            "the left's peak did not drive the gain"
+        );
     }
 
     #[test]
@@ -517,12 +726,17 @@ mod tests {
         // audio should still be unity to the last bit.
         let mut limiter = Limiter::new(RATE);
         let settings = LimiterSettings::default();
+        settings.set_input_gain_db(0.0);
         settings.set_enabled(true);
         let mut buffer = vec![0.1_f32; 512];
         for _ in 0..(RATE as usize * 60 / 256) {
             buffer.fill(0.1);
             limiter.process(&mut buffer, &settings);
         }
-        assert!(buffer.iter().all(|&s| (s - 0.1).abs() < 1e-7), "drifted: {}", buffer[300]);
+        assert!(
+            buffer.iter().all(|&s| (s - 0.1).abs() < 1e-7),
+            "drifted: {}",
+            buffer[300]
+        );
     }
 }
