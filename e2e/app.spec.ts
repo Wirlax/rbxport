@@ -1166,6 +1166,38 @@ test("a second single click edits a playlist title", async ({ page }) => {
   await expect(page.getByTestId("player-title")).toHaveText("Edited Playlist Title");
 });
 
+test("Undo restores a song title after committing an edit in a test playlist", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const playlist = page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first();
+  await playlist.click();
+  await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
+  const cell = page.locator('[role="gridcell"][data-col="title"]').nth(3);
+  await expect(cell).not.toBeEmpty();
+  const original = await cell.innerText();
+  const edited = `${original} (undo test)`;
+
+  await cell.click();
+  await cell.click();
+  const input = cell.locator("input");
+  await expect(input).toBeFocused();
+  await input.fill(edited);
+  await input.press("Enter");
+  await expect(input).toHaveCount(0);
+  await expect(cell).toHaveText(edited);
+  await expect(page.getByRole("contentinfo")).toContainText("Title saved.");
+
+  // Put focus outside the editor: Undo must reverse the saved library edit,
+  // not merely undo the input's uncommitted typing.
+  await page.getByTestId("browser-title").click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(cell).toHaveText(original);
+
+  // Reopening the playlist must read the restored value from the backend.
+  await page.getByRole("treeitem").filter({ hasText: "All Tracks" }).first().click();
+  await playlist.click();
+  await expect(cell).toHaveText(original);
+});
+
 test("the key column is not typed over: it is checked against the library's own", async ({
   page,
 }) => {
