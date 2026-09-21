@@ -115,6 +115,7 @@ export function LinkPane() {
 
   return (
     <Section title="PRO DJ LINK" label="Link">
+      {problem ? <p className={styles.linkError} role="alert">{problem}</p> : null}
       <div className={styles.linkSummary}>
         <div>
           <strong className={styles.linkStatus} data-connected={link?.on && link.state === "up"} data-state={link?.state} role="status">{status}</strong>
@@ -133,7 +134,6 @@ export function LinkPane() {
           </Button>
         )}
       </div>
-      {problem ? <p className={styles.linkError} role="alert">{problem}</p> : null}
       <fieldset className={styles.linkKeySort} disabled={!canChoose}>
         <legend>Key sorting</legend>
         <label><input type="radio" name="link-key-sort" checked={preferences.djSystem.linkKeySort === "alphabetical"}
