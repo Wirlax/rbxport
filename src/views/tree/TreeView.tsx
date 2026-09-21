@@ -19,6 +19,7 @@ import {
   subtreeIds, toggle, visibleNodes, searchTree, type TreeSearchScope, type Source,
 } from "@/lib/tree";
 import { SourceRail } from "./SourceRail";
+import { usePreferences } from "@/store/usePreferences";
 
 /**
  * The name, while it is being typed over.
@@ -68,7 +69,7 @@ function RenameField({ name, onCommit, onCancel }: {
 
 const Row = memo(function Row({
   node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu, count,
-  renaming, onRename, onRenameEnd,
+  renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
   movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
 }: {
   node: TreeNode;
@@ -77,6 +78,8 @@ const Row = memo(function Row({
   renaming: boolean;
   onRename: ((node: TreeNode, name: string) => void) | undefined;
   onRenameEnd: (() => void) | undefined;
+  onRenameStart: ((node: TreeNode) => void) | undefined;
+  doubleClickToEdit: boolean;
   /** This node can be picked up and moved somewhere else in the tree. */
   movable: boolean;
   /**
@@ -121,6 +124,7 @@ const Row = memo(function Row({
   // pointer is marked — every playlist lighting up for the whole drag read
   // as a grid of errors — and a drag that ends elsewhere clears it.
   const [over, setOver] = useState(false);
+  const pressedOnSelected = useRef(false);
   useEffect(() => {
     if (!droppable) setOver(false);
   }, [droppable]);
@@ -132,7 +136,12 @@ const Row = memo(function Row({
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       // A note is information, not a place: nothing to select.
       onMouseDown={() => node.kind !== "note" && onSelect(node)}
-      draggable={movable}
+      draggable={movable && !renaming}
+      onKeyDown={(e) => {
+        if (e.key !== "F2" || renaming || !onRenameStart) return;
+        e.preventDefault();
+        onRenameStart(node);
+      }}
       onDragStart={(e) => {
         if (!movable) return;
         // Stops the drag being read as a track drag by the rows' own handlers.
@@ -229,7 +238,18 @@ const Row = memo(function Row({
           onCancel={() => onRenameEnd?.()}
         />
       ) : (
-        <span className={styles.label}>{node.name}</span>
+        <span className={styles.label}
+          onMouseDown={(e) => {
+            // Capture selection before the row's mousedown selects it.
+            pressedOnSelected.current = selected && e.button === 0 && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+          }}
+          onClick={() => {
+            if (!doubleClickToEdit && pressedOnSelected.current) onRenameStart?.(node);
+          }}
+          onDoubleClick={(e) => {
+            if (doubleClickToEdit && !e.shiftKey && !e.metaKey && !e.ctrlKey) onRenameStart?.(node);
+          }}
+        >{node.name}</span>
       )}
       {count !== undefined && !renaming ? (
         <span className={styles.count} aria-label={`${count} tracks`}>({count})</span>
@@ -295,6 +315,7 @@ export function TreeView({
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
 }: TreeViewProps) {
+  const { advanced: { doubleClickToEdit } } = usePreferences();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<TreeSearchScope>("all");
   /** The tree menu: where it is, and which node it was opened on. */
@@ -302,6 +323,15 @@ export function TreeView({
   /** The row whose name is being typed over, if any. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const endRename = useCallback(() => setRenamingId(null), []);
+  const beginRename = useCallback((node: TreeNode) => {
+    if (!readOnly && onRenameNode &&
+        (node.kind === "playlist" || node.kind === "smartPlaylist" || node.kind === "folder")) {
+      setRenamingId(node.id);
+    }
+  }, [readOnly, onRenameNode]);
+  useEffect(() => {
+    if (readOnly) endRename();
+  }, [readOnly, endRename]);
 
   /** The node in hand while it is being dragged somewhere else in the tree. */
   const [moving, setMoving] = useState<TreeNode | null>(null);
@@ -442,9 +472,11 @@ export function TreeView({
             onDropTracks={onDropTracks}
             onMenu={(node, at) => setMenu({ ...at, node })}
             count={showCounts && node.kind === "playlist" ? node.childCount : undefined}
-            renaming={node.id === renamingId}
-            onRename={onRenameNode}
+            renaming={!readOnly && node.id === renamingId}
+            onRename={readOnly ? undefined : onRenameNode}
             onRenameEnd={endRename}
+            onRenameStart={readOnly || !onRenameNode ? undefined : beginRename}
+            doubleClickToEdit={doubleClickToEdit}
             movable={
               Boolean(onMoveNode) &&
               (node.kind === "playlist" || node.kind === "smartPlaylist" || node.kind === "folder")
@@ -505,7 +537,7 @@ export function TreeView({
                 onSortItems?.(menu.node);
                 break;
               case "rename":
-                setRenamingId(menu.node.id);
+                beginRename(menu.node);
                 break;
               case "delete":
                 onDeleteNode?.(menu.node);

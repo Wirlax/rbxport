@@ -263,11 +263,49 @@ test("a playlist is renamed in the row, and Escape puts the old name back", asyn
   await expect(page.getByRole("treeitem").filter({ hasText: "Something else entirely" })).toHaveCount(0);
 });
 
+test("clicking a selected playlist name edits it and clicking away saves", async ({ page }) => {
+  await open(page);
+  await item(page, "Eurodance").click();
+  const name = item(page, "Melodic Vox").getByText("Melodic Vox", { exact: true });
+  await name.click();
+  await expect(page.getByRole("textbox", { name: "Rename Melodic Vox" })).toHaveCount(0);
+  await name.click();
+  const field = page.getByRole("textbox", { name: "Rename Melodic Vox" });
+  await field.fill("Evening set");
+  await page.getByRole("searchbox", { name: "Search library tree", exact: true }).click();
+  await expect(item(page, "Evening set")).toBeVisible();
+  await expect(page.getByRole("contentinfo")).toContainText("Renamed to Evening set.");
+});
+
+test("playlist names respect double-click to edit and F2 supports folders", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("rbl.preferences", JSON.stringify({ advanced: { doubleClickToEdit: true } })));
+  await open(page);
+  const name = item(page, "Melodic Vox").getByText("Melodic Vox", { exact: true });
+  await name.click();
+  await name.click();
+  const field = page.getByRole("textbox", { name: "Rename Melodic Vox" });
+  await expect(field).toHaveCount(0);
+  await name.dblclick();
+  await field.fill("Cancelled name");
+  await field.press("Escape");
+  await expect(name).toBeVisible();
+  const folder = item(page, "CURRENT");
+  await folder.click();
+  await folder.press("F2");
+  const folderField = page.getByRole("textbox", { name: "Rename CURRENT", exact: true });
+  await folderField.fill("Current sets");
+  await folderField.press("Enter");
+  await expect(item(page, "Current sets")).toBeVisible();
+});
+
 test("renaming is refused while rekordbox holds the library", async ({ page }) => {
   // Every write is greyed rather than raced, which is the rule the rest of
   // the menu follows.
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await item(page, "Melodic Vox").getByText("Melodic Vox", { exact: true }).dblclick();
+  await item(page, "Melodic Vox").press("F2");
+  await expect(page.getByRole("textbox", { name: "Rename Melodic Vox" })).toHaveCount(0);
   await item(page, "Melodic Vox").click({ button: "right" });
   const menu = page.getByRole("menu", { name: "Playlist" });
   await expect(menu.getByRole("menuitem", { name: "Rename Playlist" })).toBeDisabled();
