@@ -251,7 +251,7 @@ describe("SyncManager", () => {
 });
 
 it("imports cue/grid information from selected devices only", async () => {
-  const button = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("Import cues & grids"))!;
+  const button = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("CUE GRID INFO"))!;
   expect(button.disabled).toBe(true);
   click(box("USB A"));
   await settle();

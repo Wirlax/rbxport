@@ -13,7 +13,7 @@
  * reading the stick.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, LoaderCircle, Search, Usb, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
 import { FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
@@ -308,11 +308,10 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         )}
         Sync Manager
       </header>
-      <div className={styles.intro}>Choose the playlists to take with you and the USB devices to sync them to.</div>
       <div className={styles.body}>
         <section className={styles.column} aria-label="rbxport">
           <div className={styles.headingRow}>
-            <div><h2 className={styles.heading}>Playlists</h2><p className={styles.columnNote}>{selectedCount} of {playlists.length} selected</p></div>
+            <div><h2 className={styles.heading}>rbxport</h2><p className={styles.columnNote}>{selectedCount} of {playlists.length} playlists selected</p></div>
             <button type="button" className={styles.textButton} disabled={busy || selectedCount === 0}
               onClick={() => setTicked(new Set())}>Clear selection</button>
           </div>
@@ -361,8 +360,6 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
 
         <div className={styles.middle}>
           <div className={styles.syncActions}>
-          <span className={styles.direction}>Library <ArrowRight size={14} aria-hidden="true" /> USB</span>
-          <strong className={styles.selectionSummary}>{selectionSummary}</strong>
           <button
             type="button"
             className={styles.sync}
@@ -372,29 +369,26 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
             aria-busy={busy || undefined}
             aria-describedby="sync-selection-hint"
           >
-            {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>Sync <ArrowRight size={16} aria-hidden="true" /></>}
+            {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
           <label className={styles.ejectOption}>
             <input type="checkbox" className={styles.tick} checked={ejectAfterSync} disabled={busy}
               aria-label="Eject after syncing" onChange={e => setEjectAfterSync(e.currentTarget.checked)} />
             Eject after syncing
           </label>
-          <p id="sync-selection-hint" className={styles.actionHint}>{selectionHint}</p>
           </div>
           <div className={styles.importActions}>
-          <span className={styles.direction}>Library <ArrowLeft size={14} aria-hidden="true" /> USB</span>
           <button type="button" className={styles.button} onClick={importCues}
             disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary}
             title={preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids." : "Import cues and beat grids from USB to rbxport"}>
-            {operation === "import" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" ? "Importing…" : "Import cues & grids"}
+            {operation === "import" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" ? "Importing…" : "CUE GRID INFO"}
           </button>
-          <p className={styles.actionHint}>{preferences.advanced.protectLibrary ? "Turn off Library Protection to import changes." : "Bring cue and beat-grid changes back to your library."}</p>
           </div>
         </div>
 
         <section className={styles.column} aria-label="Device">
           <div className={styles.headingRow}>
-            <div><h2 className={styles.heading}>USB devices</h2><p className={styles.columnNote}>{tickedDevices.size} of {devices.length} selected</p></div>
+            <div><h2 className={styles.heading}>Device</h2><p className={styles.columnNote}>{tickedDevices.size} of {devices.length} selected</p></div>
             <button
               type="button"
               className={styles.refresh}
@@ -404,7 +398,6 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
               {loadingDevices ? "Refreshing…" : "Refresh"}
             </button>
           </div>
-          <p className={styles.deviceHint}>Use the arrow to browse a device’s playlists.</p>
           {devicesError ? <p className={styles.empty} role="alert">{devicesError}</p> : null}
           <div className={styles.list} role="tree" aria-label="Devices">
             {devices.map((device) => {
@@ -424,7 +417,6 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                       if (!expanded) void readDevice(device.path, false).catch(e => setDeviceErrors(current => new Map(current).set(device.path, e instanceof Error ? e.message : "Could not read this USB device.")));
                     }} />
                   <label className={styles.rowSelection}>
-                  <Usb size={16} className={styles.usbIcon} aria-hidden="true" />
                   <span className={styles.name} title={device.path}>{device.name}</span>
                   <TickBox state={on ? "on" : "off"} label={device.name} disabled={busy} onChange={(next) => tickDevice(device.path, next)} />
                   </label>
@@ -457,9 +449,11 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           {status.map((line) => (
             <div key={line}>{line}</div>
           ))}
-          {status.length === 0 ? <span className={styles.idleStatus}>{selectionHint}</span> : null}
+          {status.length === 0 ? <span className={styles.selectionSummary}>{selectionSummary}</span> : null}
+          {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{selectionHint}</span> : null}
           </div>
         </div>
+        {status.length > 0 ? <span id="sync-selection-hint" hidden>{selectionHint}</span> : null}
         <button type="button" className={styles.button} onClick={onClose}>
           Close
         </button>
