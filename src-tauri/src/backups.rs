@@ -20,6 +20,7 @@ pub struct BackupProgress {
     pub total_bytes: u64,
     pub error: Option<String>,
     pub path: Option<String>,
+    pub current_item: Option<String>,
 }
 
 /// Reserve the job before spawning, so requests from two windows cannot queue duplicates.
@@ -32,11 +33,16 @@ pub fn start(state: std::sync::Arc<AppState>) -> AppResult<()> {
         *progress = BackupProgress { running: true, phase: "preparing".into(), ..Default::default() };
     }
     tauri::async_runtime::spawn_blocking(move || {
+        let mut last_detail = std::time::Instant::now();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            create_with_progress(&state, &mut |phase, copied_bytes, total_bytes| {
+            create_with_progress(&state, &mut |phase, copied_bytes, total_bytes, item| {
                 let mut progress = state.backup_progress.lock();
                 if progress.phase == "stopping" {
                     return Err(AppError::new(crate::error::ErrorKind::Cancelled, "Backup stopped."));
+                }
+                if progress.phase != phase || progress.current_item.is_none() || last_detail.elapsed() >= std::time::Duration::from_secs(1) {
+                    progress.current_item = Some(item.to_owned());
+                    last_detail = std::time::Instant::now();
                 }
                 progress.phase = phase.into();
                 progress.copied_bytes = copied_bytes;
@@ -46,6 +52,7 @@ pub fn start(state: std::sync::Arc<AppState>) -> AppResult<()> {
         })).unwrap_or_else(|_| Err(error("Backup worker stopped unexpectedly.")));
         let mut progress = state.backup_progress.lock();
         progress.running = false;
+        progress.current_item = None;
         match result {
             Ok(path) => { progress.phase = "complete".into(); progress.path = Some(path); }
             Err(e) if e.kind == crate::error::ErrorKind::Cancelled => { progress.phase = "cancelled".into(); }
@@ -251,9 +258,9 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
 }
 
 pub fn create(state: &AppState) -> AppResult<String> {
-    create_with_progress(state, &mut |_, _, _| Ok(()))
+    create_with_progress(state, &mut |_, _, _, _| Ok(()))
 }
-fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u64) -> AppResult<()>) -> AppResult<String> {
+fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u64, &str) -> AppResult<()>) -> AppResult<String> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
     let location = state.location()?;
@@ -264,12 +271,6 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     crate::file_journal::recover(state.backup_dir(), &location)?;
     let tree = analysis(&location);
     let wal = sidecar(&location.master_db, "-wal");
-    let mut check = || progress("preparing", 0, 0);
-    let total = tree_size(&location.master_db, &mut check)?
-        + if wal.exists() { tree_size(&wal, &mut check)? } else { 0 }
-        + if tree.exists() { tree_size(&tree, &mut check)? } else { 0 };
-    progress("copying", 0, total)?;
-    let mut copied = 0;
     let root = state.backup_dir();
     crate::durable::create_dir_all(root).map_err(error)?;
     let created_at = millis();
@@ -278,17 +279,41 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     let target = root.join(format!("library-{created_at}-{id}"));
     let result = (|| {
         fs::create_dir(&partial).map_err(error)?;
-        let mut copied_file = |bytes| { copied += bytes; progress("copying", copied, total) };
-        let mut bytes = copy_progress(&location.master_db, &partial.join("master.db"), &mut copied_file)?;
+        let mut refused = None;
+        let plan = if tree.exists() {
+            let prepared = crate::backup_copy::TreeCopyPlan::prepare(&tree, &partial.join("analysis"), &mut |_| {
+                progress("preparing", 0, 0, "Scanning analysis files").map_err(|e| {
+                    refused = Some(e);
+                    std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
+                })
+            });
+            if let Some(error) = refused { return Err(error); }
+            Some(prepared.map_err(error)?)
+        } else { None };
+        let mut check = || progress("preparing", 0, 0, "Measuring database files");
+        let total = tree_size(&location.master_db, &mut check)?
+            + if wal.exists() { tree_size(&wal, &mut check)? } else { 0 }
+            + plan.as_ref().map_or(0, |plan| plan.bytes);
+        progress("copying", 0, total, "Database · master.db")?;
+        let mut copied = 0;
+        let mut copied_file = |bytes, source: Option<&Path>| {
+            copied += bytes;
+            let item = match source {
+                Some(path) if path.starts_with(&tree) => format!("Analysis files · USBANLZ/{}", path.strip_prefix(&tree).unwrap_or(path).display()),
+                Some(path) => format!("Database · {}", path.file_name().unwrap_or_default().to_string_lossy()),
+                None => "Analysis files · Preparing folders / saving copied files".to_owned(),
+            };
+            progress("copying", copied, total, &item)
+        };
+        let mut bytes = copy_progress(&location.master_db, &partial.join("master.db"), &mut |bytes| copied_file(bytes, Some(&location.master_db)))?;
         let wal = sidecar(&location.master_db, "-wal");
         if wal.exists() {
-            bytes += copy_progress(&wal, &partial.join("master.db-wal"), &mut copied_file)?;
+            bytes += copy_progress(&wal, &partial.join("master.db-wal"), &mut |bytes| copied_file(bytes, Some(&wal)))?;
         }
-        let tree = analysis(&location);
-        if tree.exists() {
+        if let Some(plan) = plan {
             let mut refused = None;
-            let copied = crate::backup_copy::copy_tree(&tree, &partial.join("analysis"), &mut |bytes| {
-                copied_file(bytes).map_err(|e| {
+            let copied = plan.copy(&mut |bytes, source| {
+                copied_file(bytes, source).map_err(|e| {
                     refused = Some(e);
                     std::io::Error::new(std::io::ErrorKind::Interrupted, "Backup stopped")
                 })
@@ -298,7 +323,7 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         } else {
             fs::create_dir(partial.join("analysis")).map_err(error)?;
         }
-        progress("validating", bytes, total)?;
+        progress("validating", bytes, total, "Checking database · master.db")?;
         validate_database(&partial.join("master.db"), &location)?;
         remove(&partial.join("master.db-shm"))?;
         let saved = Manifest {
@@ -312,7 +337,7 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
             &serde_json::to_vec(&saved).map_err(error)?,
         )
         .map_err(error)?;
-        progress("validating", bytes, total)?;
+        progress("validating", bytes, total, "Finishing backup · manifest.json")?;
         fs::rename(&partial, &target).map_err(error)?;
         crate::durable::sync_dir(root).map_err(error)?;
         Ok(target.to_string_lossy().into_owned())
@@ -577,7 +602,9 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, vec![1; 3 * 1024 * 1024]).unwrap();
         let mut last = (0, 0);
-        let saved = create_with_progress(&state, &mut |phase, copied, total| {
+        let mut items = std::collections::HashSet::new();
+        let saved = create_with_progress(&state, &mut |phase, copied, total, item| {
+            items.insert(item.to_owned());
             if phase == "copying" {
                 assert!(copied >= last.0);
                 assert!(copied <= total);
@@ -587,8 +614,11 @@ mod tests {
         }).unwrap();
         assert!(last.0 > 3 * 1024 * 1024);
         assert_eq!(last.0, last.1);
+        assert!(items.contains("Database · master.db"));
+        assert!(items.contains("Analysis files · USBANLZ/test/ANLZ0000.DAT"));
+        assert!(items.contains("Checking database · master.db"));
         let before = rating(&state);
-        let result = create_with_progress(&state, &mut |phase, copied, _| {
+        let result = create_with_progress(&state, &mut |phase, copied, _, _| {
             if phase == "copying" && copied > 0 {
                 Err(AppError::new(crate::error::ErrorKind::Cancelled, "Backup stopped."))
             } else { Ok(()) }

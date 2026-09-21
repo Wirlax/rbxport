@@ -3,6 +3,7 @@
 use std::{fs, io, path::Path};
 
 type Progress<'a> = dyn FnMut(u64) -> io::Result<()> + 'a;
+type TreeProgress<'a> = dyn FnMut(u64, Option<&Path>) -> io::Result<()> + 'a;
 
 pub fn copy_file(source: &Path, target: &Path, progress: &mut Progress<'_>) -> io::Result<u64> {
     progress(0)?;
@@ -31,108 +32,138 @@ pub fn copy_file(source: &Path, target: &Path, progress: &mut Progress<'_>) -> i
 /// Copy independent analysis files with bounded I/O concurrency. The caller's
 /// callback stays on this thread; all workers finish before an error returns,
 /// so the caller can safely remove the incomplete snapshot.
-pub fn copy_tree(source: &Path, target: &Path, progress: &mut Progress<'_>) -> io::Result<u64> {
-    let workers = std::thread::available_parallelism()
-        .map_or(2, usize::from)
-        .min(4);
-    copy_tree_with_workers(source, target, progress, workers)
-}
-
+#[cfg(test)]
 fn copy_tree_with_workers(
     source: &Path,
     target: &Path,
     progress: &mut Progress<'_>,
     workers: usize,
 ) -> io::Result<u64> {
-    use std::sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc,
-    };
-    let mut pending = vec![(source.to_path_buf(), target.to_path_buf())];
-    let mut directories = Vec::new();
-    let mut files = Vec::new();
-    while let Some((source, target)) = pending.pop() {
-        progress(0)?;
-        let meta = fs::symlink_metadata(&source)?;
-        if meta.file_type().is_symlink() || (!meta.is_dir() && !meta.is_file()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Unsupported file in backup",
-            ));
-        }
-        if meta.is_dir() {
-            fs::create_dir_all(&target)?;
-            for entry in fs::read_dir(&source)? {
-                let entry = entry?;
-                pending.push((entry.path(), target.join(entry.file_name())));
+    TreeCopyPlan::prepare(source, target, progress)?.copy_with_workers(&mut |bytes, _| progress(bytes), workers)
+}
+
+pub struct TreeCopyPlan {
+    directories: Vec<std::path::PathBuf>,
+    files: Vec<(std::path::PathBuf, std::path::PathBuf)>,
+    pub bytes: u64,
+}
+
+impl TreeCopyPlan {
+    /// Enumerate and size once; copying consumes this exact list.
+    pub fn prepare(source: &Path, target: &Path, progress: &mut Progress<'_>) -> io::Result<Self> {
+        let mut bytes = 0;
+        let mut pending = vec![(source.to_path_buf(), target.to_path_buf())];
+        let mut directories = Vec::new();
+        let mut files = Vec::new();
+        while let Some((source, target)) = pending.pop() {
+            progress(0)?;
+            let meta = fs::symlink_metadata(&source)?;
+            if meta.file_type().is_symlink() || (!meta.is_dir() && !meta.is_file()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Unsupported file in backup",
+                ));
             }
-            directories.push(target);
-        } else {
-            files.push((source, target));
-        }
-    }
-    let next = AtomicUsize::new(0);
-    let stopped = AtomicBool::new(false);
-    let mut bytes = 0;
-    let mut failure = None;
-    std::thread::scope(|scope| {
-        // Bound queued updates as well as workers, even for tiny cloned files.
-        let (sender, receiver) = mpsc::sync_channel::<io::Result<u64>>(32);
-        for _ in 0..workers.max(1).min(files.len()) {
-            let sender = sender.clone();
-            let files = &files;
-            let next = &next;
-            let stopped = &stopped;
-            scope.spawn(move || {
-                while !stopped.load(Ordering::Acquire) {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((source, target)) = files.get(index) else {
-                        break;
-                    };
-                    let result = copy_file(source, target, &mut |bytes| {
-                        if stopped.load(Ordering::Acquire) {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Interrupted,
-                                "Backup stopped",
-                            ));
-                        }
-                        sender
-                            .send(Ok(bytes))
-                            .map_err(|_| io::Error::other("Backup progress disconnected"))
-                    });
-                    if let Err(error) = result {
-                        let _ = sender.send(Err(error));
-                        stopped.store(true, Ordering::Release);
-                        break;
-                    }
+            if meta.is_dir() {
+                for entry in fs::read_dir(&source)? {
+                    let entry = entry?;
+                    pending.push((entry.path(), target.join(entry.file_name())));
                 }
-            });
-        }
-        drop(sender);
-        for update in receiver {
-            if failure.is_some() {
-                continue;
-            }
-            let result = update.and_then(|delta| {
-                bytes += delta;
-                progress(delta)
-            });
-            if let Err(error) = result {
-                failure = Some(error);
-                stopped.store(true, Ordering::Release);
+                directories.push(target);
+            } else {
+                bytes += meta.len();
+                files.push((source, target));
             }
         }
-    });
-    if let Some(error) = failure {
-        return Err(error);
+        Ok(Self {
+            directories,
+            files,
+            bytes,
+        })
     }
-    // Children must be durable before their parent. Never publish a snapshot
-    // until every worker and every directory flush has finished.
-    for directory in directories.iter().rev() {
-        progress(0)?;
-        crate::durable::sync_dir(directory)?;
+
+    pub fn copy(self, progress: &mut TreeProgress<'_>) -> io::Result<u64> {
+        let workers = std::thread::available_parallelism()
+            .map_or(2, usize::from)
+            .min(4);
+        self.copy_with_workers(progress, workers)
     }
-    Ok(bytes)
+
+    fn copy_with_workers(self, progress: &mut TreeProgress<'_>, workers: usize) -> io::Result<u64> {
+        use std::sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            mpsc,
+        };
+        let Self {
+            directories, files, ..
+        } = self;
+        for directory in &directories {
+            progress(0, None)?;
+            fs::create_dir_all(directory)?;
+        }
+        let next = AtomicUsize::new(0);
+        let stopped = AtomicBool::new(false);
+        let mut bytes = 0;
+        let mut failure = None;
+        std::thread::scope(|scope| {
+            // Bound queued updates as well as workers, even for tiny cloned files.
+            let (sender, receiver) = mpsc::sync_channel::<io::Result<(usize, u64)>>(32);
+            for _ in 0..workers.max(1).min(files.len()) {
+                let sender = sender.clone();
+                let files = &files;
+                let next = &next;
+                let stopped = &stopped;
+                scope.spawn(move || {
+                    while !stopped.load(Ordering::Acquire) {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((source, target)) = files.get(index) else {
+                            break;
+                        };
+                        let result = copy_file(source, target, &mut |bytes| {
+                            if stopped.load(Ordering::Acquire) {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::Interrupted,
+                                    "Backup stopped",
+                                ));
+                            }
+                            sender
+                                .send(Ok((index, bytes)))
+                                .map_err(|_| io::Error::other("Backup progress disconnected"))
+                        });
+                        if let Err(error) = result {
+                            let _ = sender.send(Err(error));
+                            stopped.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(sender);
+            for update in receiver {
+                if failure.is_some() {
+                    continue;
+                }
+                let result = update.and_then(|(index, delta)| {
+                    bytes += delta;
+                    progress(delta, files.get(index).map(|(source, _)| source.as_path()))
+                });
+                if let Err(error) = result {
+                    failure = Some(error);
+                    stopped.store(true, Ordering::Release);
+                }
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        // Children must be durable before their parent. Never publish a snapshot
+        // until every worker and every directory flush has finished.
+        for directory in directories.iter().rev() {
+            progress(0, None)?;
+            crate::durable::sync_dir(directory)?;
+        }
+        Ok(bytes)
+    }
 }
 
 #[cfg(any(not(windows), test))]
@@ -330,6 +361,22 @@ mod tests {
             .unwrap();
         }
         source
+    }
+
+    #[test]
+    fn copy_reuses_the_sized_file_list_without_enumerating_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tree_fixture(dir.path(), 4);
+        let target = dir.path().join("backup");
+        let plan = TreeCopyPlan::prepare(&source, &target, &mut |_| Ok(())).unwrap();
+        assert_eq!(plan.bytes, 4 * 64 * 1024);
+        assert!(!target.exists(), "preparation only reads source metadata");
+        // The app holds the edit gate during both phases. A new unrelated
+        // entry here demonstrates that copying consumes the prepared list.
+        fs::write(source.join("later.dat"), b"not in plan").unwrap();
+        assert_eq!(plan.copy(&mut |_| Ok(())).unwrap(), 4 * 64 * 1024);
+        assert!(!target.join("later.dat").exists());
+        assert!(target.join("0000/analysis.dat").is_file());
     }
 
     #[test]
