@@ -227,7 +227,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     });
   }, [nodes, byId]);
 
-  const canSync = tickedDevices.size > 0 && !busy && !loadingDevices;
+  const canSync = selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
 
   const sync = useCallback(() => {
     if (!canSync) return;
