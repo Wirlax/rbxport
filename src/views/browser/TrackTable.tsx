@@ -252,11 +252,13 @@ const EditableCell = memo(function EditableCell({
         } : undefined}
         onDoubleClick={(e) => {
           cancelPendingEdit();
-          // Swallowed only when the double click is the gesture that opens
-          // the editor. Otherwise it belongs to the row, where it loads the
-          // track into the deck — taking it unconditionally stopped a
-          // double-click on a cell loading anything at all.
-          if (doubleClickLoads || onClick) return;
+          // Only a title cell hands its double click to the row, to load the
+          // track — every other editable cell opens on it regardless of
+          // click-to-edit, including the double click that both selects an
+          // unselected row and opens the cell in the same gesture (the first
+          // click's selection flips `onClick` true before the second click
+          // lands, which used to make this handler defer to the row here).
+          if (doubleClickLoads) return;
           e.stopPropagation();
           begin();
         }}
