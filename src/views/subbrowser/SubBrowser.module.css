@@ -32,6 +32,8 @@
    same drag handle. */
 .splitter {
   position: relative;
+  /* Keep the padded grab area above the browser's rows and sticky header. */
+  z-index: 3;
   background: var(--c-black);
   cursor: col-resize;
   touch-action: none;
