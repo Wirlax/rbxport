@@ -7,6 +7,14 @@ the version numbers [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-09-22
+
+### Fixed
+- Checking for updates reaches the download server again; it was pointed at
+  a location that had gone away.
+
+## [0.9.0] — 2026-09-21
+
 ### Changed
 - Collaborative playlist is gone from the tree menu with the other cloud
   rows, rather than greyed: there is no cloud library behind this app.

@@ -3492,7 +3492,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "rbl-analysis"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "rbl-anlz",
  "rbl-audio",
@@ -3508,7 +3508,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-anlz"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dirs 5.0.1",
  "rbl-core",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-audio"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "mp3lame-encoder",
  "rubato",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -3546,7 +3546,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-db"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64 0.22.1",
  "blowfish",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-dbserver"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "socket2",
  "thiserror 2.0.20",
@@ -3577,7 +3577,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-deck"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "cc",
  "cpal",
@@ -3593,7 +3593,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-devices"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dirs 5.0.1",
  "rbl-anlz",
@@ -3610,7 +3610,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-difftool"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "flate2",
  "rbl-db",
@@ -3624,7 +3624,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-export"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "rbl-analysis",
  "rbl-anlz",
@@ -3645,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-fakecdj"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "rbl-dbserver",
  "rbl-nfs",
@@ -3656,7 +3656,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-index"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "crc32fast",
  "memchr",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-link"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "alphatheta-connect",
  "if-addrs",
@@ -3697,7 +3697,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-nfs"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "nix",
  "socket2",
@@ -3709,7 +3709,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-onelibrary"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "flate2",
  "rbl-core",
@@ -3721,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-pdb"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "thiserror 2.0.20",
  "tracing",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-prolink"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "tempfile",
  "thiserror 2.0.20",
@@ -3738,7 +3738,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-usbtest"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "rbl-anlz",
  "rbl-core",
@@ -3753,7 +3753,7 @@ dependencies = [
 
 [[package]]
 name = "rbxport"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dirs 5.0.1",
  "libc",
