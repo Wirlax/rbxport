@@ -134,6 +134,7 @@ test("the column headings are the measured height", async ({ page }) => {
 
 // Playwright's headless Chromium runs with `--hide-scrollbars`, so a bar there
 // has no width to measure; its styles can still be read. WebKit draws them.
+// TODO: run these geometry checks in headed Chromium with visible scrollbars.
 const HIDDEN_BARS = "headless Chromium hides its scrollbars; WebKit measures them";
 
 test("the list's scrollbars are the measured column with the thumb inset in it, and the column grid still adds up", async ({ page, browserName }) => {

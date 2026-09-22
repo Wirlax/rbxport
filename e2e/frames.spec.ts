@@ -21,6 +21,7 @@ import { expect, test, type Page } from "@playwright/test";
  * them. Same reasoning as the ten-minute xrun test in the TODO — a timing gate
  * wants a machine that is not shared. `pnpm e2e` still runs it everywhere else.
  */
+// TODO: run this timing gate on a dedicated runner without competing workloads.
 test.skip(
   process.env.GITHUB_ACTIONS === "true",
   "a frame-timing gate cannot be measured on a shared runner",

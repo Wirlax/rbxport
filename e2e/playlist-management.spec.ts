@@ -357,6 +357,7 @@ test("the line shows where the rows would land before they are let go", async ({
 }) => {
   // Driven by hand, so the drag can be inspected halfway. Chromium alone
   // synthesises HTML5 drag events from raw mouse moves.
+  // TODO: enable WebKit when raw mouse moves can start native HTML5 drags.
   test.skip(browserName !== "chromium", "only Chromium drags from mouse events");
   await open(page);
   await openPlaylist(page);
