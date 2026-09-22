@@ -277,12 +277,7 @@ test("the top bar carries what rekordbox's does, in its order", async ({ page })
   expect(xs).toEqual([...xs].sort((a, b) => a - b));
 });
 
-test.skip("the level knob turns, and both meters are the measured size", async ({ page }) => {
-  // TODO: flaky on CI — the notch assertion at the top of the drag (holds at
-  // "10" for 85px past the top before letting go to "11") fails there but
-  // passes locally. Not confirmed whether this is pre-existing timing
-  // flakiness or a side effect of the master-level mount fix in
-  // src/store/useMaster.ts (2026-09-22). Needs investigation before re-enabling.
+test("the level knob turns, and both meters are the measured size", async ({ page }) => {
   await page.goto("/");
   const bar = page.getByRole("banner");
   const knob = bar.getByRole("slider", { name: "Master level" });
@@ -301,14 +296,13 @@ test.skip("the level knob turns, and both meters are the measured size", async (
   await expect.poll(async () => Number(await knob.getAttribute("aria-valuenow")))
     .toBeLessThan(10);
 
-  // Pulled past 10 the knob holds there; keep pulling for a moment and it
-  // lets go to 11, full level.
+  // The notch is distance-based: from 5, 60px reaches 10, then another
+  // 85px releases to 11. Check either side without a timing assumption.
   await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9);
   await page.mouse.down();
-  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) - 200, { steps: 6 });
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9 - 100, { steps: 6 });
   await expect(knob).toHaveAttribute("aria-valuenow", "10");
-  await page.waitForTimeout(600);
-  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) - 201);
+  await page.mouse.move((box?.x ?? 0) + 9, (box?.y ?? 0) + 9 - 150);
   await expect(knob).toHaveAttribute("aria-valuenow", "11");
   await page.mouse.up();
 
@@ -325,15 +319,17 @@ test.skip("the level knob turns, and both meters are the measured size", async (
   expect(vu?.height).toBeCloseTo(await width("--s-top-meter-h"), 0);
 
   // Green, yellow, red by position rather than by level: the gradient is
-  // painted across the whole track and revealed by the fill's width, so a loud
+  // painted across the whole track and revealed by clipping, so a loud
   // moment does not turn the quiet end of the bar red.
-  const fill = bar.getByRole("meter", { name: "Master output L" }).locator("span");
+  const fill = bar.getByRole("meter", { name: "Master output L" }).locator("[data-mode] > span").first();
   const paint = await fill.evaluate((el) => ({
     image: getComputedStyle(el).backgroundImage,
-    size: getComputedStyle(el).backgroundSize,
+    width: el.getBoundingClientRect().width,
+    clip: getComputedStyle(el).clipPath,
   }));
   expect(paint.image).toContain("linear-gradient");
-  expect(Number.parseFloat(paint.size)).toBeCloseTo(await width("--s-top-vu-w"), 0);
+  expect(paint.width).toBeCloseTo(await width("--s-top-vu-w"), 0);
+  expect(paint.clip).toContain("inset(");
 });
 
 test("the tree and the browser are separated by a black gutter", async ({ page }) => {
