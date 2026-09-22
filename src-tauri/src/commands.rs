@@ -740,13 +740,11 @@ pub async fn export_playlist<R: tauri::Runtime>(
 /// Writes the same playlists to every destination, and says how each fared.
 ///
 /// The Sync Manager's SYNC. The selection is built once — each track read
-/// once however many sticks it goes to — and written stick by stick, so two
-/// sticks synced together hold the same thing. One stick failing (pulled,
+/// once however many sticks it goes to — and written to every selected stick
+/// concurrently, so two sticks synced together hold the same thing. One stick failing (pulled,
 /// full, refusing a write) must not stop the rest: the outcome is per stick,
-/// and only building the selection can fail the whole run. The window hears
-/// `sync:progress` before and after each stick, because a run over several
-/// sticks is minutes long and a button that says nothing for minutes reads
-/// as a hang.
+/// and only building the selection can fail the whole run. Every export owns
+/// its progress event, so the window can show each stick moving independently.
 #[tauri::command]
 #[allow(clippy::too_many_arguments, reason = "the Sync Manager's own settings, one per IPC field the frontend already sends")]
 pub async fn sync_devices<R: tauri::Runtime>(
@@ -770,47 +768,69 @@ pub async fn sync_devices<R: tauri::Runtime>(
     blocking("sync_devices", move || {
         let selection =
             ExportSelection::from_playlists(&state, &library, &share, &playlists, automatic.unwrap_or(false))?;
-        let mut reports = Vec::with_capacity(destinations.len());
-        for destination in destinations {
-            let progress = |state: &'static str| {
-                let _ = tauri::Emitter::emit(
-                    &app,
-                    "sync:progress",
-                    SyncProgressDto { path: destination.clone(), state },
-                );
-            };
-            progress("writing");
-            let stick = std::path::Path::new(&destination);
-            let written = selection
-                .for_stick(&state, &library, &share, stick, delete_unlisted_music.unwrap_or(false))
-                .and_then(|selection| write_export_with_progress(&app, stick, &selection, defaults.as_ref(), compatibility_format));
-            reports.push(match written {
-                Ok(report) => {
-                    let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
-                    if eject_after_sync.unwrap_or(false) {
-                        if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty()) {
-                            progress("ejecting");
-                            match rbl_devices::eject::eject(stick) {
-                                Ok(()) => result.ejected = true,
-                                Err(e) => result.eject_error = Some(e.to_string()),
-                            }
-                        } else {
-                            result.eject_error = Some("The sync was incomplete or could not be verified. Review it before ejecting.".to_owned());
-                        }
-                    }
-                    progress("done");
-                    result
-                },
-                Err(e) => {
-                    progress("failed");
-                    tracing::warn!(destination, error = %e, "sync to one device failed");
-                    SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
-                }
-            });
-        }
-        Ok(reports)
+        // The selection contains owned tracks and analysis. Clone it for each
+        // worker rather than rereading the library, then preserve the user's
+        // device order when collecting reports.
+        std::thread::scope(|scope| {
+            Ok(destinations.into_iter().map(|destination| {
+                let app = app.clone();
+                let state = Arc::clone(&state);
+                let library = Arc::clone(&library);
+                let selection = selection.clone();
+                let share = share.clone();
+                let defaults = defaults.clone();
+                scope.spawn(move || sync_one_device(
+                    &app, &state, &library, &share, &selection, destination,
+                    defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
+                    eject_after_sync.unwrap_or(false), compatibility_format,
+                ))
+            }).map(|worker| worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
+                path: "Unknown device".to_owned(), report: None,
+                error: Some("The sync worker stopped unexpectedly.".to_owned()),
+                ejected: false, eject_error: None,
+            })).collect())
+        })
     })
     .await
+}
+
+#[allow(clippy::too_many_arguments, reason = "one independent USB sync worker")]
+fn sync_one_device<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>, state: &AppState, library: &rbl_index::Library,
+    share: &std::path::Path, selection: &ExportSelection, destination: String,
+    defaults: Option<&crate::device_settings::StickDefaultsDto>, delete_unlisted_music: bool,
+    eject_after_sync: bool, compatibility_format: Option<rbl_export::CompatibilityFormat>,
+) -> SyncDeviceReportDto {
+    let progress = |state: &'static str| {
+        let _ = tauri::Emitter::emit(app, "sync:progress", SyncProgressDto { path: destination.clone(), state });
+    };
+    progress("writing");
+    let stick = std::path::Path::new(&destination);
+    let written = selection.for_stick(state, library, share, stick, delete_unlisted_music)
+        .and_then(|selection| write_export_with_progress(app, stick, &selection, defaults, compatibility_format));
+    match written {
+        Ok(report) => {
+            let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
+            if eject_after_sync {
+                if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty()) {
+                    progress("ejecting");
+                    match rbl_devices::eject::eject(stick) {
+                        Ok(()) => result.ejected = true,
+                        Err(e) => result.eject_error = Some(e.to_string()),
+                    }
+                } else {
+                    result.eject_error = Some("The sync was incomplete or could not be verified. Review it before ejecting.".to_owned());
+                }
+            }
+            progress("done");
+            result
+        },
+        Err(e) => {
+            progress("failed");
+            tracing::warn!(destination, error = %e, "sync to one device failed");
+            SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
+        }
+    }
 }
 
 /// Export Track: puts tracks on a stick on their own, in no playlist,
