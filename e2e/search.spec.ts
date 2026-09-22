@@ -24,11 +24,13 @@ test("track search offers the reference scopes and searches the selected field",
   await expect(input).toHaveValue("ARTBAT");
 });
 
-test("tree search distinguishes intelligent playlists and supports keyboard selection", async ({ page }) => {
+test("tree search scopes to a kind of row and supports keyboard selection", async ({ page }) => {
+  // Intelligent playlist was a fourth option here until the feature that
+  // creates and edits them was hidden as unfinished (851ed28, 2026-09-20).
   await page.goto("/");
   await page.getByRole("button", { name: "Tree search scope", exact: true }).click();
   const menu = page.getByRole("menu", { name: "Tree search scope" });
-  await expect(menu.getByRole("menuitemradio")).toHaveText(["✓All", "Playlist", "Intelligent playlist", "Folder"]);
+  await expect(menu.getByRole("menuitemradio")).toHaveText(["✓All", "Playlist", "Folder"]);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
@@ -36,7 +38,7 @@ test("tree search distinguishes intelligent playlists and supports keyboard sele
   await expect(input).toBeFocused();
   await input.fill("a");
   await page.getByRole("button", { name: "Tree search scope", exact: true }).click();
-  await expect(menu.getByRole("menuitemradio", { name: "Intelligent playlist", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "Folder", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.getByTestId("browser-title").click();
   await expect(menu).toHaveCount(0);
 });
