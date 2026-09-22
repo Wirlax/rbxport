@@ -2206,10 +2206,20 @@ test("BEAT SYNC stays lit and follows the master's tempo until RST or MASTER end
   // track sits second is the mock's business, not this test's.
   const bpmBAtRest = await bpmB.innerText();
 
+  // The BPM readout reveals both decks' tempo sliders at once — it is one
+  // shared preference, not per deck. Deck A's RST starts locked, guarding
+  // against an accidental nudge, so its first click only unlocks it.
+  await bpmA.click();
+  const sliderA = a.getByRole("slider", { name: "Tempo" });
+  const sliderB = b.getByRole("slider", { name: "Tempo" });
+  const resetA = a.getByRole("button", { name: "Reset tempo" });
+  const resetB = b.getByRole("button", { name: "Reset tempo" });
+  await resetA.click();
+
   // Lit once pressed, and the follower's own tempo steps are not its to take.
   await sync.click();
   await expect(sync).toHaveAttribute("aria-pressed", "true");
-  await expect(b.getByRole("button", { name: "Faster" })).toBeDisabled();
+  await expect(sliderB).toHaveAttribute("aria-disabled", "true");
   await expect.poll(async () => Number(await bpmB.innerText())).toBeCloseTo(
     Number(await bpmA.innerText()),
     0,
@@ -2217,18 +2227,21 @@ test("BEAT SYNC stays lit and follows the master's tempo until RST or MASTER end
 
   // Nudging the master moves the follower with it.
   const leaderBefore = Number(await bpmA.innerText());
-  await a.getByRole("button", { name: "Faster" }).click();
+  await sliderA.press("ArrowDown");
   await expect.poll(async () => Number(await bpmA.innerText())).toBeGreaterThan(leaderBefore);
   await expect.poll(async () => Number(await bpmB.innerText())).toBeCloseTo(
     Number(await bpmA.innerText()),
     0,
   );
 
-  // RST puts the follower back at its file's speed and takes it off sync.
-  await b.getByRole("button", { name: "Reset tempo" }).click();
+  // RST puts the follower back at its file's speed and takes it off sync —
+  // deck B's RST was never clicked before, so the first click only unlocks
+  // it and the second actually resets.
+  await resetB.click();
+  await resetB.click();
   await expect(sync).toHaveAttribute("aria-pressed", "false");
   await expect(bpmB).toHaveText(bpmBAtRest);
-  await expect(b.getByRole("button", { name: "Faster" })).toBeEnabled();
+  await expect(sliderB).toHaveAttribute("aria-disabled", "true");
 
   // Synced again, then made master: a master follows nobody, so its light goes out.
   await sync.click();
@@ -2256,19 +2269,26 @@ test("the tempo control moves the deck's BPM, and MT and RST are real", async ({
   const resting = await at();
   expect(resting).toBeGreaterThan(0);
 
+  // The BPM readout reveals the tempo slider; RST starts locked, guarding
+  // against an accidental nudge, so the first click only unlocks it.
+  await bpm.click();
+  const reset = deck.getByRole("button", { name: "Reset tempo" });
+  const slider = deck.getByRole("slider", { name: "Tempo" });
+  await reset.click();
+  await expect(slider).toHaveAttribute("aria-disabled", "false");
+
   // A tenth of a percent a press, which is the step a CDJ's fine setting uses.
-  await deck.getByRole("button", { name: "Faster" }).click();
+  await slider.press("ArrowDown");
   await expect.poll(at).toBeGreaterThan(resting);
-  await deck.getByRole("button", { name: "Slower" }).click();
-  await deck.getByRole("button", { name: "Slower" }).click();
+  await slider.press("ArrowUp");
+  await slider.press("ArrowUp");
   await expect.poll(at).toBeLessThan(resting);
 
-  // RST puts it back, and goes inert once there is nothing to reset.
-  const reset = deck.getByRole("button", { name: "Reset tempo" });
+  // RST puts it back, and locks the slider again once there is nothing to reset.
   await expect(reset).toBeEnabled();
   await reset.click();
   await expect.poll(at).toBe(resting);
-  await expect(reset).toBeDisabled();
+  await expect(slider).toHaveAttribute("aria-disabled", "true");
 
   // MT is a toggle: the key stays put while the speed changes.
   const mt = deck.getByRole("button", { name: "Master tempo" });
