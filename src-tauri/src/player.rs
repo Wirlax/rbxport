@@ -35,7 +35,7 @@ const TICKS_PER_DECK_TICK: u32 = 3;
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools, reason = "the deck's flags, sent together")]
 pub struct DeckTickDto {
-    pub frames: u64,
+    pub frames: i64,
     pub total_frames: u64,
     /// Bumped on every load and seek, so the interface snaps its playhead
     /// rather than easing it towards a position it did not expect.
@@ -416,7 +416,11 @@ pub fn start_ticker<R: Runtime>(app: &AppHandle<R>) {
 
 pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> TickDto {
     let deck = |s: &rbl_deck::DeckSnapshot| DeckTickDto {
-        frames: s.position_frames,
+        frames: if s.pre_roll_frames > 0 {
+            -i64::try_from(s.pre_roll_frames).unwrap_or(i64::MAX)
+        } else {
+            i64::try_from(s.position_frames).unwrap_or(i64::MAX)
+        },
         total_frames: s.total_frames,
         generation: s.generation,
         playing: s.playing,

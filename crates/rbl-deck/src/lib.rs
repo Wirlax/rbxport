@@ -622,12 +622,16 @@ impl Engine {
         self.settle_device();
     }
 
-    /// Moves the playhead, in frames at the device rate.
-    pub fn seek_frames(&self, deck: Deck, frame: u64) {
-        let Some(handle) = self.deck(deck) else { return };
+    fn seek_with_pre_roll(&self, deck: Deck, frame: u64, pre_roll: u64) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
         // The clock moves now rather than when the first block after the seek
         // is played: a seek while paused must show where it landed.
-        handle.clock().set_position(frame.min(handle.clock().total().max(frame)));
+        handle.clock().set_pre_roll(pre_roll);
+        handle
+            .clock()
+            .set_position(frame.min(handle.clock().total().max(frame)));
         // A head moved by hand is no longer where the beat was worked out
         // from; whatever wait was pending is over.
         handle.clock().set_start_in(0);
@@ -645,6 +649,11 @@ impl Engine {
         handle.clock().bump_generation();
         handle.send(deck::Command::Seek(frame));
         handle.send(deck::Command::Wake);
+    }
+
+    /// Moves the playhead, in frames at the device rate.
+    pub fn seek_frames(&self, deck: Deck, frame: u64) {
+        self.seek_with_pre_roll(deck, frame, 0);
     }
 
     /// Moves the playhead, in milliseconds.
@@ -695,7 +704,8 @@ impl Engine {
 
     pub fn seek_ms(&self, deck: Deck, ms: f64) {
         let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
-        self.seek_frames(deck, frames);
+        let pre_roll = ((-ms).clamp(0.0, 5000.0) * f64::from(self.sample_rate) / 1000.0) as u64;
+        self.seek_with_pre_roll(deck, frames, pre_roll);
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -736,13 +746,20 @@ impl Engine {
     /// simulated drag: rounding took the rate's spread from 13% of its mean to
     /// 38%, and stopped the head outright in 21 blocks out of 258.
     pub fn scrub_to_ms(&self, deck: Deck, ms: f64) {
-        let Some(handle) = self.deck(deck) else { return };
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
         let frames = (ms.max(0.0) * f64::from(self.sample_rate) / 1000.0) as u64;
         // Stamped here, on the way in, rather than counted in blocks on the
         // way out: the same argument as the fractional milliseconds above, on
         // the other axis. Distance over time is the speed, and rounding either
         // of them quantises it.
-        handle.send(deck::Command::ScrubTo(frames, std::time::Instant::now()));
+        let pre_roll = ((-ms).clamp(0.0, 5000.0) * f64::from(self.sample_rate) / 1000.0) as u64;
+        handle.send(deck::Command::ScrubTo(
+            frames,
+            pre_roll,
+            std::time::Instant::now(),
+        ));
     }
 
     /// Ends a drag. The playhead lands under the pointer, not on the read
@@ -778,6 +795,7 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
     fn unwrap_or_default_snapshot(self) -> DeckSnapshot {
         self.unwrap_or(DeckSnapshot {
             position_frames: 0,
+            pre_roll_frames: 0,
             total_frames: 0,
             generation: 0,
             sample_rate: 0,
@@ -833,6 +851,33 @@ impl DeckReader {
             let frames = out.len() / 2;
             let passed = usize::try_from(self.clock.pass_start(frames as u64)).unwrap_or(frames);
             if passed >= frames {
+                return;
+            }
+            out.get_mut(passed * 2..).unwrap_or(&mut [])
+        } else {
+            out
+        };
+        // Before the file starts, retain its queued audio and move only the
+        // silent lead-in. A held scrub or paused deck keeps its position.
+        let out = if self.clock.pre_roll() > 0 {
+            let held = self.clock.scrubbing() || !self.clock.playing();
+            let rate = f64::from(self.clock.tempo());
+            let available = out.len() / 2;
+            let waiting = (self.clock.pre_roll() as f64 / rate).ceil() as usize;
+            let passed = if held { available } else { available.min(waiting) };
+            // Fade the last sample into silence without consuming the song.
+            for frame in out[..passed * 2].chunks_exact_mut(2) {
+                if self.ramp.silent_now() { break; }
+                let gain = self.ramp.step(false);
+                frame[0] += self.last.0 * gain;
+                frame[1] += self.last.1 * gain;
+            }
+            if self.ramp.silent_now() {
+                self.adopt(self.clock.generation());
+            }
+            if held { return; }
+            self.clock.pass_pre_roll((passed as f64 * rate).ceil() as u64);
+            if passed == available {
                 return;
             }
             out.get_mut(passed * 2..).unwrap_or(&mut [])

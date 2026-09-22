@@ -137,8 +137,8 @@ describe("splitTime", () => {
     expect(splitTime(601).main).toHaveLength(5);
   });
 
-  it("never prints a negative or a NaN", () => {
-    expect(splitTime(-5).main).toBe("00:00");
+  it("shows negative positions and handles NaN", () => {
+    expect(splitTime(-5).main).toBe("−00:05");
     expect(splitTime(Number.NaN).main).toBe("00:00");
   });
 });
@@ -154,7 +154,7 @@ describe("memoryTime", () => {
     expect(memoryTime(338_100).startsWith(splitTime(338.1).main)).toBe(true);
   });
 
-  it("never prints a negative or a NaN", () => {
+  it("shows negative positions and handles NaN", () => {
     expect(memoryTime(-1)).toBe("00:00:000");
     expect(memoryTime(Number.NaN)).toBe("00:00:000");
   });

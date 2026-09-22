@@ -40,7 +40,7 @@ pub enum Command {
     /// gap between reports to whole blocks quantises the measured speed by a
     /// sixth — the same mistake on the time axis that rounding the position to
     /// whole milliseconds was on the distance axis. See `Engine::scrub_to_ms`.
-    ScrubTo(u64, Instant),
+    ScrubTo(u64, u64, Instant),
     /// The drag is over: the streamer picks up where the head was left.
     ScrubEnd,
     /// How fast to play, as a multiple of the file's own speed.
@@ -225,7 +225,7 @@ impl Worker {
             Command::Load(path) => self.load(&path),
             Command::Seek(frame) => self.seek(frame),
             Command::ScrubBegin => self.scrub_begin(),
-            Command::ScrubTo(frame, at) => self.scrub_to(frame, at),
+            Command::ScrubTo(frame, pre_roll, at) => self.scrub_to(frame, pre_roll, at),
             Command::ScrubEnd => self.scrub_end(),
             Command::SetTempo(tempo) => self.set_tempo(tempo),
             Command::SetMasterTempo(on) => {
@@ -267,6 +267,7 @@ impl Worker {
             Ok(streamer) => {
                 let total = streamer.total_frames();
                 self.generation = self.clock.bump_generation();
+                self.clock.set_pre_roll(0);
                 self.clock.set_position(0);
                 self.head = 0.0;
                 self.restart_stretch();
@@ -282,6 +283,7 @@ impl Worker {
             }
             Err(e) => {
                 self.clock.set_total(0);
+                self.clock.set_pre_roll(0);
                 self.clock.set_position(0);
                 (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
             }
@@ -387,6 +389,7 @@ impl Worker {
         self.streamer = None;
         self.generation = self.clock.bump_generation();
         self.clock.set_loaded(false);
+        self.clock.set_pre_roll(0);
         self.clock.set_position(0);
         self.clock.set_total(0);
         self.clock.set_end_of_stream(false);
@@ -409,7 +412,8 @@ impl Worker {
         self.clock.set_scrubbing(true);
     }
 
-    fn scrub_to(&mut self, frame: u64, at: Instant) {
+    fn scrub_to(&mut self, frame: u64, pre_roll: u64, at: Instant) {
+        self.clock.set_pre_roll(pre_roll);
         // Output frames since the report before this one, which is what the
         // head's speed is measured over. Nothing for the first report of a
         // drag: there is no report before it to measure against.
@@ -428,14 +432,21 @@ impl Worker {
     /// the hand on a fast one and barely moved at all on a click; landing on
     /// it turned a click on the overview into a jump that sprang back.
     fn scrub_end(&mut self) {
-        let Some(scrubber) = self.scrubber.take() else { return };
-        self.clock.set_scrubbing(false);
+        let Some(scrubber) = self.scrubber.take() else {
+            return;
+        };
         self.window = PcmWindow::empty();
         // The streamer has been sitting wherever the window was filled from,
         // so it has to be put where the drag finished before playback resumes.
         let total = self.clock.total();
-        let at = if total > 0 { scrubber.target().min(total) } else { scrubber.target() };
+        let at = if total > 0 {
+            scrubber.target().min(total)
+        } else {
+            scrubber.target()
+        };
+        self.clock.bump_generation();
         self.seek(at);
+        self.clock.set_scrubbing(false);
     }
 
     /// Decodes the window a drag reads from, centred on `at`.

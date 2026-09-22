@@ -13,6 +13,7 @@ pub struct DeckClock {
     /// Frames of output produced since the track was loaded, at the device
     /// rate — the position of the playhead.
     position: AtomicU64,
+    pre_roll: AtomicU64,
     /// The track's length in device-rate frames, or 0 when it is not known.
     total: AtomicU64,
     /// Bumped on every load and every seek. Blocks in the ring carry the
@@ -58,6 +59,8 @@ pub struct DeckClock {
 #[allow(clippy::struct_excessive_bools, reason = "a snapshot of the deck's flags, read together")]
 pub struct DeckSnapshot {
     pub position_frames: u64,
+    /// Track-rate frames of silence remaining before time zero.
+    pub pre_roll_frames: u64,
     pub total_frames: u64,
     pub generation: u32,
     pub sample_rate: u32,
@@ -82,6 +85,7 @@ impl DeckClock {
     pub fn snapshot(&self) -> DeckSnapshot {
         DeckSnapshot {
             position_frames: self.position.load(Ordering::Relaxed),
+            pre_roll_frames: self.pre_roll(),
             total_frames: self.total.load(Ordering::Relaxed),
             generation: self.generation.load(Ordering::Relaxed),
             sample_rate: self.sample_rate.load(Ordering::Relaxed),
@@ -169,6 +173,22 @@ impl DeckClock {
 
     pub fn set_key_shift(&self, semitones: i8) {
         self.key_shift.store(i32::from(semitones), Ordering::Relaxed);
+    }
+
+    pub fn pre_roll(&self) -> u64 {
+        self.pre_roll.load(Ordering::Relaxed)
+    }
+
+    pub fn set_pre_roll(&self, frames: u64) {
+        self.pre_roll.store(frames, Ordering::Relaxed);
+    }
+
+    pub fn pass_pre_roll(&self, frames: u64) {
+        let _ = self
+            .pre_roll
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+                Some(left.saturating_sub(frames))
+            });
     }
 
     pub fn position(&self) -> u64 {

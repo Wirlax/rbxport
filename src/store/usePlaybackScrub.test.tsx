@@ -313,3 +313,20 @@ describe("letting go", () => {
     }
   });
 });
+
+
+it("holds a negative scrub position, clamps at minus five seconds, and sends the landing", async () => {
+  deliver(tickAt(1, 2, false));
+  act(() => { deck.scrubBegin(); deck.scrubTo(-2.5); });
+  expect(deck.positionRef.current).toBe(-2.5);
+  deliver(tickAt(0, 3, false));
+  expect(deck.positionRef.current).toBe(-2.5);
+  act(() => deck.scrubTo(-9));
+  expect(deck.positionRef.current).toBe(-5);
+  act(() => deck.scrubEnd());
+  await settle();
+  expect(sent).toContain("to:-5000");
+  expect(sent.at(-1)).toBe("end");
+  deliver(tickAt(-5, 4, false));
+  expect(deck.positionRef.current).toBe(-5);
+});

@@ -189,13 +189,13 @@ export function dragSeconds(
  * Returned split so the caller can size the fraction differently.
  */
 export function splitTime(seconds: number): { main: string; tenths: string } {
-  const safe = Number.isFinite(seconds) ? Math.max(seconds, 0) : 0;
+  const safe = Number.isFinite(seconds) ? Math.abs(seconds) : 0;
   const whole = Math.floor(safe);
   const tenths = Math.floor((safe - whole) * 10);
   const minutes = Math.floor(whole / 60);
   const rest = whole % 60;
   return {
-    main: `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`,
+    main: `${seconds < 0 ? "−" : ""}${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`,
     tenths: String(tenths),
   };
 }

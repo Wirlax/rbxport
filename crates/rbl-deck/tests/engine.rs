@@ -1355,3 +1355,77 @@ fn the_metronome_keeps_its_volume_when_the_master_is_turned_down() {
     assert!(at_full > 0.05, "the click is heard at full: {at_full}");
     assert!((at_tenth - at_full).abs() < 0.02, "the click changed with the master: {at_full} then {at_tenth}");
 }
+
+#[test]
+fn negative_seek_is_bounded_pauses_and_plays_through_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lead-in.wav");
+    flat(&path, RATE as usize * 2);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.seek_ms(Deck::A, -9000.0);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, u64::from(RATE) * 5);
+    h.sink.pull(512);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, u64::from(RATE) * 5);
+    h.engine.seek_ms(Deck::A, -100.0);
+    std::thread::sleep(Duration::from_millis(30));
+    h.engine.play(Deck::A);
+    let silence = h.sink.pull(4410);
+    assert!(silence.iter().all(|sample| sample.abs() < INAUDIBLE));
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, 0);
+    assert_eq!(h.position(Deck::A), 0);
+    let audio = h.play_until(Deck::A, 1024);
+    assert!(audio.iter().any(|sample| sample.abs() > 0.1));
+    assert!(
+        h.position(Deck::A) < 2048,
+        "lead-in must not consume the song"
+    );
+}
+
+#[test]
+fn negative_scrub_lands_before_zero_and_positive_seek_clears_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scrub-lead-in.wav");
+    flat(&path, RATE as usize * 2);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.scrub_begin(Deck::A);
+    h.engine.scrub_to_ms(Deck::A, -8000.0);
+    h.engine.scrub_end(Deck::A);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.engine.snapshot().a.pre_roll_frames == 0 {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    std::thread::sleep(Duration::from_millis(30));
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, u64::from(RATE) * 5);
+    assert_eq!(h.position(Deck::A), 0);
+    assert!(!h.engine.snapshot().a.playing);
+    h.engine.seek_ms(Deck::A, 500.0);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, 0);
+}
+
+
+#[test]
+fn lead_in_obeys_tempo_and_pause() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tempo-lead-in.wav");
+    flat(&path, RATE as usize * 2);
+    let h = harness();
+    h.engine.load(Deck::A, &path);
+    h.wait_for_load(1);
+    h.engine.set_tempo(Deck::A, 1.5);
+    h.engine.seek_ms(Deck::A, -1000.0);
+    std::thread::sleep(Duration::from_millis(30));
+    h.engine.play(Deck::A);
+    h.sink.pull(4410);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, 44100 - 6615);
+    h.engine.pause(Deck::A);
+    h.sink.pull(4410);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, 44100 - 6615);
+    h.engine.play(Deck::A);
+    h.sink.pull(4410);
+    assert_eq!(h.engine.snapshot().a.pre_roll_frames, 44100 - 13230);
+}

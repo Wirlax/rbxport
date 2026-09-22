@@ -980,9 +980,9 @@ export const Player = memo(function Player({
     const apply = (seconds: number) => {
       const at = total > 0 ? Math.min(seconds / total, 1) : 0;
       if (overviewHead.current) {
-        overviewHead.current.style.transform = `translateX(${at * overview.width}px)`;
+        overviewHead.current.style.transform = `translateX(${Math.max(0, at) * overview.width}px)`;
       }
-      if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${at})`;
+      if (scrubFill.current) scrubFill.current.style.transform = `scaleX(${Math.max(0, at)})`;
       // The detail head does not move at all: the layer under it does, by a
       // transform on the compositor rather than a redraw. Redrawing the canvas
       // from React state stepped it at the tick rate — ten times a second,
@@ -1822,7 +1822,7 @@ export const Player = memo(function Player({
               onPointerCancel={endDrag}
               role="progressbar"
               aria-label="Position"
-              aria-valuemin={0}
+              aria-valuemin={-5}
               aria-valuemax={Math.round(total)}
               aria-valuenow={Math.round(playback.positionRef.current)}
             >

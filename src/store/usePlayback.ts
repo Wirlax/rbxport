@@ -461,7 +461,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const seek = useCallback(
     (seconds: number) => {
       if (idle || !Number.isFinite(seconds)) return;
-      const at = Math.max(0, seconds);
+      const at = Math.max(-5, seconds);
       // Locally first: the head must move under the pointer, not a tick later.
       anchor.current = {
         ...anchor.current,
@@ -522,7 +522,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const scrubTo = useCallback(
     (seconds: number) => {
       if (idle || !Number.isFinite(seconds)) return;
-      const at = Math.max(seconds, 0);
+      const at = Math.max(seconds, -5);
       // Pinned, not merely moved: a drag on a playing deck must not carry on
       // running forward between pointer moves, which is what made a steady
       // hand look like a shaking one.

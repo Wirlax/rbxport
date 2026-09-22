@@ -1781,7 +1781,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     deckSeek: (_deck, positionMs) => {
-      deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      deckA.frames = Math.max(-5 * SAMPLE_RATE, Math.round((positionMs / 1000) * SAMPLE_RATE));
       deckA.generation += 1;
       sendTick();
       return wait(undefined);
@@ -1821,7 +1821,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // the position moves, nothing is heard, and the visuals are the same.
     deckScrubBegin: () => wait(undefined),
     deckScrubTo: (_deck, positionMs) => {
-      deckA.frames = Math.max(0, Math.round((positionMs / 1000) * SAMPLE_RATE));
+      deckA.frames = Math.max(-5 * SAMPLE_RATE, Math.round((positionMs / 1000) * SAMPLE_RATE));
       sendTick();
       return wait(undefined);
     },
