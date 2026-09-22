@@ -62,7 +62,7 @@ test("opening it shows two trees and two lists at the measured widths, and closi
   await expect(page.getByRole("navigation", { name: "Library" })).toHaveCount(2);
   await expect(page.getByRole("tablist", { name: "Library sources" })).toHaveCount(2);
   await expect(page.getByRole("grid")).toHaveCount(2);
-  await expect(panel.getByRole("searchbox")).toBeVisible();
+  await expect(panel.getByRole("searchbox", { name: "Search within this track list" })).toBeVisible();
 
   const panelBox = await panel.boundingBox();
   expect(panelBox?.width).toBeCloseTo(await token(page, "--s-sub-browse-w"), 0);
@@ -110,7 +110,7 @@ test("selecting in one browser does not move the other", async ({ page }) => {
   await expect(mainTitle).toContainText("All Tracks");
 
   // Its search is its own as well.
-  await panel.getByRole("searchbox").fill("zzz-nothing-matches");
+  await panel.getByRole("searchbox", { name: "Search within this track list" }).fill("zzz-nothing-matches");
   await expect(subTitle).toContainText("(0 Tracks)");
   await expect(mainTitle).not.toContainText("(0 Tracks)");
 });
