@@ -318,7 +318,7 @@ impl Beacon {
         let packet = rbl_prolink::load_track_command(REKORDBOX_NAME, number, player_number, track_id);
         let to = SocketAddr::V4(SocketAddrV4::new(address, self.player_port));
         let sent = self.commands.send_to(&packet, to)?;
-        tracing::info!(player_number, track_id, %address, sent, "load track sent");
+        tracing::debug!(player_number, track_id, %address, sent, "load track sent");
         tracing::trace!(%to, bytes = %hex(&packet, packet.len()), "load track packet");
         Ok(())
     }
@@ -545,7 +545,7 @@ fn announce_loop(
 fn send_announce(socket: &UdpSocket, out: &join::Outgoing, broadcast: SocketAddr, port: u16) {
     let to = out.to.map_or(broadcast, |ip| SocketAddr::V4(SocketAddrV4::new(ip, port)));
     match socket.send_to(&out.packet, to) {
-        Ok(_) => tracing::debug!(what = out.what, len = out.packet.len(), %to, "sent"),
+        Ok(_) => tracing::trace!(what = out.what, len = out.packet.len(), %to, "sent"),
         Err(error) => tracing::warn!(%error, what = out.what, %to, "not sent"),
     }
 }
@@ -880,7 +880,7 @@ fn hear_player_status(
     let loaded = from_us.then_some(state.track_id);
     let cued = matches!(state.play_state, PlayState::Cued | PlayState::Cuing);
     if player.loaded != loaded {
-        tracing::info!(
+        tracing::debug!(
             number = player.number,
             was = player.loaded,
             now = loaded,
@@ -896,7 +896,7 @@ fn hear_player_status(
         tracing::debug!(number = player.number, playing, play_state = ?state.play_state, "player play state changed");
     }
     if player.master != state.is_master {
-        tracing::info!(number = player.number, master = state.is_master, "player master state changed");
+        tracing::debug!(number = player.number, master = state.is_master, "player master state changed");
     }
     player.kind = kind;
     player.loaded = loaded;
@@ -1030,7 +1030,7 @@ fn tempo_x100(track_bpm: Option<f64>, pitch_percent: f64) -> u32 {
 
 fn send(socket: &UdpSocket, packet: &[u8], to: Ipv4Addr, port: u16, what: &str) {
     match socket.send_to(packet, SocketAddr::V4(SocketAddrV4::new(to, port))) {
-        Ok(_) => tracing::debug!(what, %to, port, len = packet.len(), "sent"),
+        Ok(_) => tracing::trace!(what, %to, port, len = packet.len(), "sent"),
         Err(error) => tracing::warn!(%error, %to, what, "not sent"),
     }
 }

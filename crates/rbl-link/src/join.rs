@@ -126,7 +126,7 @@ impl Join {
             (State::Probing { .. }, PROBE_SUBTYPE_PROBE) if reply.status == NUMBER_REPLY_IN_USE => {
                 if let Some(index) = REKORDBOX_CLAIM_NUMBERS.iter().position(|&n| n == reply.number) {
                     if !self.in_use[index] {
-                        tracing::info!(number = reply.number, holder = %reply.name, "device number in use");
+                        tracing::debug!(number = reply.number, holder = %reply.name, "device number in use");
                     }
                     self.in_use[index] = true;
                 }

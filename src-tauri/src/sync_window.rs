@@ -55,11 +55,11 @@ pub async fn open_sync_window(app: tauri::AppHandle) -> AppResult<()> {
     builder
         // In the log, because a window that opens blank says nothing itself.
         .on_navigation(|url| {
-            tracing::info!(%url, "sync window navigation");
+            tracing::debug!(%url, "sync window navigation");
             true
         })
         .on_page_load(|_, payload| {
-            tracing::info!(url = %payload.url(), event = ?payload.event(), "sync window page load");
+            tracing::debug!(url = %payload.url(), event = ?payload.event(), "sync window page load");
         })
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(720.0, 420.0)

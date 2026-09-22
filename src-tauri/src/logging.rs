@@ -12,6 +12,10 @@
 //! packet-by-packet lines LINK writes are at `trace`. Dependencies say
 //! nothing below `warn` whatever the level. `RUST_LOG`, when set, is taken
 //! as the whole filter instead, for a per-crate mix (`rbl_link=trace`).
+//! Symphonia's recoverable MP3 warnings are hidden: a decoder reset at a seek
+//! can legitimately start without preceding frame data, then the demuxer may
+//! scan past an incomplete header while finding the next packet. Decode
+//! failures still reach us through `rbl_deck`.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -43,7 +47,10 @@ const DEFAULT_LEVEL: &str = "debug";
 fn filter_for(level: &str) -> String {
     let deps = if level == "error" { "error" } else { "warn" };
     let ours: Vec<String> = OUR_CRATES.iter().map(|c| format!("{c}={level}")).collect();
-    format!("{deps},{}", ours.join(","))
+    format!(
+        "{deps},symphonia_bundle_mp3::layer3=error,symphonia_bundle_mp3::demuxer=error,{}",
+        ours.join(",")
+    )
 }
 
 /// The filter to run with, and a complaint about `LOG_LEVEL` when it names
@@ -115,7 +122,7 @@ pub fn install() {
     };
 
     tracing_subscriber::registry().with(filter).with(stdout).with(file).init();
-    tracing::info!(dir = %dir.display(), "logging to stdout and a daily file");
+    tracing::debug!(dir = %dir.display(), "logging to stdout and a daily file");
     if let Some(complaint) = complaint {
         tracing::warn!("{complaint}");
     }
@@ -133,6 +140,8 @@ mod tests {
     fn level_applies_to_our_crates_and_keeps_dependencies_quiet() {
         let filter = filter_for("trace");
         assert!(filter.starts_with("warn,"));
+        assert!(filter.contains("symphonia_bundle_mp3::layer3=error"));
+        assert!(filter.contains("symphonia_bundle_mp3::demuxer=error"));
         assert!(filter.contains("rbl_link=trace"));
         assert!(filter.contains("rbxport=trace"));
         assert!(filter_for("error").starts_with("error,"));

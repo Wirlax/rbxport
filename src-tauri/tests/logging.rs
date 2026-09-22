@@ -22,6 +22,16 @@ fn log_level_trace_reaches_the_file() {
     tracing::trace!(target: "rbl_link::beacon", marker = "needle-trace", "a trace line");
     tracing::debug!(target: "rbl_nfs", marker = "needle-debug", "a debug line");
     tracing::debug!(marker = "needle-foreign", "a debug line from a crate that is not ours");
+    tracing::warn!(
+        target: "symphonia_bundle_mp3::layer3",
+        marker = "needle-mp3-reservoir",
+        "an expected seek warning"
+    );
+    tracing::warn!(
+        target: "symphonia_bundle_mp3::demuxer",
+        marker = "needle-mp3-demuxer",
+        "an expected seek scan warning"
+    );
 
     // The file is written off-thread; give it a moment.
     let mut text = String::new();
@@ -41,5 +51,13 @@ fn log_level_trace_reaches_the_file() {
     assert!(text.contains("needle-debug"), "debug line missing from {text}");
     assert!(text.contains("logging to stdout and a daily file"));
     assert!(!text.contains("needle-foreign"), "a dependency's debug line reached the file: {text}");
+    assert!(
+        !text.contains("needle-mp3-reservoir"),
+        "Symphonia's expected seek warning reached the file: {text}"
+    );
+    assert!(
+        !text.contains("needle-mp3-demuxer"),
+        "Symphonia's expected seek scan warning reached the file: {text}"
+    );
     assert!(!text.contains("\u{1b}["), "ANSI colour in the file: {text}");
 }

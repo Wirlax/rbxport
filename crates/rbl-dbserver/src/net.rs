@@ -61,7 +61,7 @@ pub fn serve_session(
     SockRef::from(&*stream)
         .set_tcp_keepalive(&TcpKeepalive::new().with_time(KEEPALIVE_AFTER).with_interval(KEEPALIVE_INTERVAL))?;
     let peer = stream.peer_addr().map_or_else(|_| "?".to_owned(), |a| a.to_string());
-    tracing::info!(%peer, "player connected to the database server");
+    tracing::debug!(%peer, "player connected to the database server");
 
     let mut session = handler.open();
     let mut pending: Vec<u8> = Vec::with_capacity(4096);
@@ -73,7 +73,7 @@ pub fn serve_session(
     while !stop.load(Ordering::Relaxed) {
         match stream.read(&mut chunk) {
             Ok(0) => {
-                tracing::info!(%peer, "player closed its database session");
+                tracing::debug!(%peer, "player closed its database session");
                 return Ok(());
             }
             Ok(len) => {
@@ -84,7 +84,6 @@ pub fn serve_session(
             Err(error) => {
                 // A keepalive that went unanswered ends here too, as a
                 // timed-out or reset connection.
-                tracing::warn!(%peer, %error, "database session read failed");
                 return Err(error);
             }
         }
@@ -117,7 +116,7 @@ pub fn serve_session(
             tracing::trace!(%peer, pending = pending.len(), "partial message held for the next read");
         }
         for message in messages {
-            tracing::debug!(
+            tracing::trace!(
                 %peer,
                 tx = message.transaction,
                 kind = %kind::name(message.kind),
@@ -125,7 +124,7 @@ pub fn serve_session(
                 "database request"
             );
             let replies = session.handle(&message);
-            tracing::debug!(%peer, tx = message.transaction, replies = replies.len(), "database reply");
+            tracing::trace!(%peer, tx = message.transaction, replies = replies.len(), "database reply");
             for reply in &replies {
                 let bytes = reply.encode();
                 tracing::trace!(
@@ -157,6 +156,16 @@ fn hex(bytes: &[u8]) -> String {
 
 fn is_timeout(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+}
+
+fn is_disconnect(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 /// The port-query service and the database server, both listening.
@@ -265,7 +274,11 @@ where
         // slow session must not stall the others.
         drop(std::thread::spawn(move || {
             if let Err(error) = session(&mut stream) {
-                tracing::warn!(%peer, %error, "session ended with an error");
+                if is_disconnect(&error) {
+                    tracing::debug!(%peer, %error, "peer ended its database session");
+                } else {
+                    tracing::warn!(%peer, %error, "database session failed");
+                }
             }
         }));
     }

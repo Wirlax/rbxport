@@ -17,6 +17,6 @@ pub fn startup_milestone(window: tauri::WebviewWindow, phase: String) {
     };
     if REPORTED.fetch_or(flag, Ordering::Relaxed) & flag != 0 { return; }
     if let Some(start) = START.get() {
-        tracing::info!(phase, elapsed_ms = start.elapsed().as_millis(), "startup milestone");
+        tracing::debug!(phase, elapsed_ms = start.elapsed().as_millis(), "startup milestone");
     }
 }

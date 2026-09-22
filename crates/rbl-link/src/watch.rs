@@ -57,7 +57,7 @@ impl Watcher {
                         tracing::trace!(%from, len, bytes = %rbl_prolink::hex(packet, 64), "announce port received");
                         if let Ok(keep_alive) = KeepAlive::decode(packet) {
                             if !table.peers().iter().any(|p| p.device_number == keep_alive.device_number) {
-                                tracing::info!(
+                                tracing::debug!(
                                     number = keep_alive.device_number,
                                     name = %keep_alive.name,
                                     kind = ?keep_alive.device_type,
@@ -70,7 +70,7 @@ impl Watcher {
                     }
                     let expired = table.expire(now);
                     if expired > 0 {
-                        tracing::info!(expired, "devices silent too long; gone from the network");
+                        tracing::debug!(expired, "devices silent too long; gone from the network");
                     }
                     if last_report.elapsed() >= REPORT_EVERY {
                         last_report = Instant::now();

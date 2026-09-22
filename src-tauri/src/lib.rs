@@ -106,7 +106,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
                     if let Some(library) = prepared.and_then(|snapshot| snapshot.validated(fp)) {
                         let load_ms =
                             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        tracing::info!(tracks = library.len(), load_ms, "library from cache");
+                        tracing::debug!(tracks = library.len(), load_ms, "library from cache");
                         let read_only = rbl_db::is_rekordbox_running();
                         app.state::<Arc<AppState>>().set_library(
                             library, read_only, db_version, load_ms, location,
@@ -121,7 +121,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
                 match rbl_index::load_with_cue_reader(&db, cue_reader) {
                     Ok((library, stats)) => {
                         let load_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        tracing::info!(
+                        tracing::debug!(
                             tracks = stats.tracks,
                             playlists = stats.playlists,
                             heap_mb = stats.heap_bytes / 1_048_576,
@@ -287,7 +287,7 @@ fn fit_window<R: tauri::Runtime>(window: &tauri::Window<R>) {
         return;
     }
 
-    tracing::info!(
+    tracing::debug!(
         from = format!("{}x{} at {},{}", current.width, current.height, current.x, current.y),
         to = format!("{}x{} at {},{}", fitted.width, fitted.height, fitted.x, fitted.y),
         "window did not fit the screen"
@@ -333,7 +333,7 @@ pub fn run() {
 
     let mut context = tauri::generate_context!();
     if let Some(args) = browser_args() {
-        tracing::info!(port = %std::env::var(DEVTOOLS_PORT_ENV).unwrap_or_default(), "webview remote debugging on");
+        tracing::debug!(port = %std::env::var(DEVTOOLS_PORT_ENV).unwrap_or_default(), "webview remote debugging on");
         for window in &mut context.config_mut().app.windows {
             window.additional_browser_args = Some(args.clone());
         }

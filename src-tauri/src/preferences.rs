@@ -71,11 +71,11 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
         // started and finished loading. What 0.5.1's blank white window on
         // Windows was diagnosed with.
         .on_navigation(|url| {
-            tracing::info!(%url, "preferences navigation");
+            tracing::debug!(%url, "preferences navigation");
             true
         })
         .on_page_load(|_, payload| {
-            tracing::info!(url = %payload.url(), event = ?payload.event(), "preferences page load");
+            tracing::debug!(url = %payload.url(), event = ?payload.event(), "preferences page load");
         })
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(WIDTH, 480.0)

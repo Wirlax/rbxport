@@ -335,7 +335,7 @@ impl Server {
         if let Some(key) = &key {
             let replies = self.replies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some((_, reply)) = replies.iter().find(|(k, _)| k == key) {
-                tracing::debug!(%from, port, "call seen before; its reply sent again");
+                tracing::trace!(%from, port, "call seen before; its reply sent again");
                 return Some(reply.clone());
             }
         }
@@ -436,7 +436,7 @@ impl Server {
                 } else {
                     0
                 };
-                tracing::debug!(xid = call.xid, program, protocol, port, "portmap GETPORT answered");
+                tracing::trace!(xid = call.xid, program, protocol, port, "portmap GETPORT answered");
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
                 writer.u32(u32::from(port));
                 writer.into_bytes()
@@ -617,10 +617,10 @@ impl Server {
             .child(parent, &name)
             .and_then(|index| Some((vfs.handle(index)?, vfs.attributes(index)?)));
         let Some((child_handle, attributes)) = found else {
-            tracing::debug!(xid = call.xid, parent = %vfs.name(parent).unwrap_or_default(), %name, "lookup found nothing");
+            tracing::trace!(xid = call.xid, parent = %vfs.name(parent).unwrap_or_default(), %name, "lookup found nothing");
             return Self::status_only(call.xid, nfs_status::NOENT);
         };
-        tracing::debug!(xid = call.xid, %name, size = attributes.size, "lookup found a node");
+        tracing::trace!(xid = call.xid, %name, size = attributes.size, "lookup found a node");
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
         writer.u32(nfs_status::OK).opaque_fixed(child_handle.as_bytes());
         write_attributes(&mut writer, &attributes);
@@ -650,7 +650,7 @@ impl Server {
 
         let wanted = (count as usize).min(MAX_READ);
         if offset == 0 {
-            tracing::info!(xid = call.xid, file = %source.display(), size = attributes.size, "player started reading a file");
+            tracing::debug!(xid = call.xid, file = %source.display(), size = attributes.size, "player started reading a file");
         }
         // A file that vanished between the export and the read is the normal
         // case here, not an I/O fault worth distinguishing.
@@ -663,7 +663,7 @@ impl Server {
         };
         // At or past the end libFilSiNE answers IO, not an empty success.
         if data.is_empty() && wanted > 0 {
-            tracing::debug!(xid = call.xid, offset, size = attributes.size, "read at the end of the file; IO, as rekordbox answers");
+            tracing::trace!(xid = call.xid, offset, size = attributes.size, "read at the end of the file; IO, as rekordbox answers");
             return Self::status_only(call.xid, nfs_status::IO);
         }
         tracing::trace!(xid = call.xid, offset, wanted, got = data.len(), "read served");
@@ -723,7 +723,7 @@ impl Server {
             writer.some().u32(attributes.fileid).utf16(&name).u32(attributes.fileid);
         }
         let eof = at >= children.len();
-        tracing::debug!(
+        tracing::trace!(
             xid = call.xid,
             directory = %vfs.name(index).unwrap_or_default(),
             cookie,

@@ -80,7 +80,7 @@ fn serve(app: &AppHandle, port: u16) {
             return;
         }
     };
-    tracing::info!(port, "test port open");
+    tracing::debug!(port, "test port open");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {

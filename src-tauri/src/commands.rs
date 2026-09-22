@@ -631,7 +631,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
             Ok(status)
         }
         Err(problem) => {
-            tracing::error!(%problem, "LINK could not start");
+            tracing::warn!(%problem, "LINK could not start");
             Ok(LinkStatusDto::off(Some(problem)))
         }
     }

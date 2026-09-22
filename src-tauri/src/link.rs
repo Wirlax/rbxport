@@ -440,11 +440,11 @@ where
         report(players.iter().map(PeerDto::from_player).collect());
     }) {
         Ok(watcher) => {
-            tracing::info!("watching the network for players");
+            tracing::debug!("watching the network for players");
             Some(watcher)
         }
         Err(error) => {
-            tracing::warn!(%error, "network watcher not started (rekordbox may hold the port)");
+            tracing::debug!(%error, "network watcher not started (rekordbox may hold the port)");
             None
         }
     }

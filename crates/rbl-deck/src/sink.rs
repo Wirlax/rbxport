@@ -305,9 +305,13 @@ fn build_stream(render: Render, wanted: Option<&str>, wish: StreamWish, health: 
     let (config, format) = configure(&device, wish)?;
     let rate = config.sample_rate;
     let channels = config.channels;
-    tracing::info!(device = %device, rate, buffer = ?config.buffer_size, "audio output opened");
+    tracing::debug!(device = %device, rate, buffer = ?config.buffer_size, "audio output opened");
 
-    let error = |e: cpal::Error| tracing::error!(error = %e, "audio device error");
+    let error = |e: cpal::Error| match e.kind() {
+        cpal::ErrorKind::Xrun => tracing::warn!(error = %e, "audio buffer underrun or overrun"),
+        cpal::ErrorKind::DeviceChanged => tracing::info!(error = %e, "audio output changed"),
+        _ => tracing::error!(error = %e, "audio device error"),
+    };
     let stream = match format {
         cpal::SampleFormat::F32 => build::<f32>(&device, config, channels, render, error, health),
         cpal::SampleFormat::I16 => build::<i16>(&device, config, channels, render, error, health),
