@@ -4,7 +4,8 @@ name: Release
 # first two where the signing secrets exist, and publishes the installers to the R2 bucket as
 # `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
 # name — plus `latest.json`, so a page can find the newest version without
-# a folder listing.
+# a folder listing. Only the 5 most recently published versions are kept;
+# publish prunes older ones once the new one is confirmed live.
 #
 # R2 is the only place a release is published. No GitHub Release is created:
 # this repository is private and release assets inherit that, so a download
@@ -275,3 +276,48 @@ jobs:
           '); do
             curl -fsI --retry 5 --retry-all-errors --retry-delay 5 "$url" > /dev/null
           done
+
+      - name: Prune old versions
+        # Only the 5 most recent versions stay in the bucket; run after the
+        # re-fetch check so a broken publish never costs an old, working
+        # version. latest.json and anything not named
+        # rbxport-<semver>-... are never touched.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          aws s3api list-objects-v2 --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
+            --query 'Contents[].Key' --output json > /tmp/keys.json
+          node -e '
+            const fs = require("fs");
+            const keys = JSON.parse(fs.readFileSync("/tmp/keys.json", "utf8")) || [];
+            const versions = new Set();
+            for (const key of keys) {
+              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
+              if (m) versions.add(m[1]);
+            }
+            const sorted = [...versions].sort((a, b) => {
+              const pa = a.split(".").map(Number);
+              const pb = b.split(".").map(Number);
+              for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pb[i] - pa[i];
+              return 0;
+            });
+            const keep = new Set(sorted.slice(0, 5));
+            const drop = keys.filter((key) => {
+              const m = /^rbxport-(\d+\.\d+\.\d+)-/.exec(key);
+              return m && !keep.has(m[1]);
+            });
+            console.log("keeping", sorted.slice(0, 5).join(", ") || "(nothing published yet)");
+            console.log("deleting", drop.length, "objects from", sorted.slice(5).join(", ") || "(nothing to prune)");
+            fs.writeFileSync("/tmp/delete.json", JSON.stringify({ Objects: drop.map((Key) => ({ Key })), Quiet: true }));
+          '
+          if [ "$(node -p 'require("/tmp/delete.json").Objects.length')" -gt 0 ]; then
+            aws s3api delete-objects --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
+              --delete file:///tmp/delete.json
+          fi
