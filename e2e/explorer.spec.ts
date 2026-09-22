@@ -112,8 +112,9 @@ test("selecting a folder lists its audio files, the library's rows first among t
   await expect(loose).toContainText("Untitled Bounce 1");
   await expect(loose).toContainText("Untitled Bounce 1.wav");
 
-  // Searching narrows it the way it narrows a playlist.
-  await page.getByRole("searchbox").fill("bounce");
+  // Searching narrows it the way it narrows a playlist. The tree grew its
+  // own search field too (2026-09-20); this one is the track list's.
+  await page.getByRole("searchbox", { name: "Search within this track list" }).fill("bounce");
   await expect(rows).toHaveCount(2);
 });
 
@@ -132,6 +133,10 @@ test("a folder with nothing under it, and one that cannot be read, open empty", 
 });
 
 test("a loose file cannot be rated: the library does not hold it", async ({ page }) => {
+  // Writable, so the rating reaches the "not in the collection" refusal
+  // rather than stopping at the mock's read-only default first.
+  await page.goto("/?writable=1");
+  await expect(page.getByRole("treeitem", { name: /Melodic Vox/ })).toBeVisible();
   const { rail, item, open, rows } = parts(page);
   await rail.getByRole("tab", { name: "Explorer" }).click();
   await open("Music").click();
