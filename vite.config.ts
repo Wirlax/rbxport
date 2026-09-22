@@ -23,6 +23,9 @@ export default defineConfig({
           identifierNamesGenerator: "hexadecimal",
           renameGlobals: false,
           renameProperties: false,
+          // Vite discovers lazy chunks' CSS dependencies after renderChunk.
+          // Keep import paths literal so that discovery survives obfuscation.
+          ignoreImports: true,
           // Preserve CSP and keep the deck/canvas hot paths inexpensive.
           controlFlowFlattening: false,
           deadCodeInjection: false,
