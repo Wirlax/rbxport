@@ -170,6 +170,7 @@ pub struct Player {
     /// and rebuilt on a device change, and a setting that only lived in it
     /// would go back to the default every time.
     limiter: Mutex<LimiterDto>,
+    master_level: Mutex<f32>,
 }
 
 impl Default for Player {
@@ -186,6 +187,7 @@ impl Player {
     pub fn with_sink(open_sink: SinkOpener) -> Self {
         Self {
             engine: Mutex::new(None),
+            master_level: Mutex::new(1.0),
             open_sink,
             ticking: std::sync::atomic::AtomicBool::new(false),
             loaded_tracks: Mutex::new(std::collections::HashMap::new()),
@@ -236,12 +238,23 @@ impl Player {
         })?;
         // What the interface asked for, before the first callback runs.
         Self::apply_limiter(engine.limiter(), *self.limiter.lock());
+        engine.master().set_gain(*self.master_level.lock());
         let (sound, volume) = *self.metronome.lock();
         engine.metronome().set_sound(sound);
         engine.metronome().set_volume(volume);
         let engine = Arc::new(engine);
         *held = Some(Arc::clone(&engine));
         Ok(engine)
+    }
+
+    /// Retain the level when an output-device change rebuilds the engine.
+    pub fn set_master_level(&self, level: f32) {
+        let engine = self.engine.lock();
+        let safe = if level.is_finite() { level.clamp(0.0, 1.0) } else { 1.0 };
+        *self.master_level.lock() = safe;
+        if let Some(engine) = engine.as_ref() {
+            engine.master().set_gain(safe);
+        }
     }
 
     fn apply_limiter(settings: &rbl_deck::LimiterSettings, wanted: LimiterDto) {

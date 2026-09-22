@@ -1623,8 +1623,8 @@ pub async fn set_master_level<R: tauri::Runtime>(
     player: State<'_, Arc<crate::player::Player>>,
     level: f32,
 ) -> AppResult<()> {
-    let engine = player.engine(&app)?;
-    engine.master().set_gain(level);
+    player.engine(&app)?;
+    player.set_master_level(level);
     Ok(())
 }
 

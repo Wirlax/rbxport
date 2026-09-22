@@ -7,7 +7,7 @@
  * home on the next tick — what the callback actually applied, not what it was
  * asked for.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { VuMeterMode } from "@/lib/preferences";
@@ -89,8 +89,21 @@ export interface Master {
   setLevel: (level: number) => void;
 }
 
+const LEVEL_STORAGE_KEY = "rbl.master-level.v1";
+
+function loadLevel(): number {
+  try {
+    const raw = localStorage.getItem(LEVEL_STORAGE_KEY);
+    const value: unknown = raw === null ? 1 : JSON.parse(raw);
+    return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+  } catch {
+    return 1;
+  }
+}
+
 export function useMaster(mode: VuMeterMode = "normal"): Master {
-  const [state, setState] = useState({ level: 1, peakLeft: 0, peakRight: 0, reduction: 0, vu: emptyVu(mode) });
+  const [state, setState] = useState(() => ({ level: loadLevel(), peakLeft: 0, peakRight: 0, reduction: 0, vu: emptyVu(mode) }));
+  const wantedLevel = useRef(state.level);
 
   useEffect(() => {
     let live = true;
@@ -158,6 +171,13 @@ export function useMaster(mode: VuMeterMode = "normal"): Master {
 
     void (async () => {
       const backend = await getBackend();
+      if (!live) return;
+      try {
+        await backend.setMasterLevel(wantedLevel.current);
+      } catch {
+        // Keep the remembered knob position if the audio device is unavailable.
+      }
+      if (!live) return;
       // The meters come on their own beat, three times as often as the decks.
       const unlisten = backend.onMeters((meters) => {
         if (!live) return;
@@ -206,7 +226,14 @@ export function useMaster(mode: VuMeterMode = "normal"): Master {
     };
   }, [mode]);
 
-  const setLevel = useCallback((level: number) => {
+  const setLevel = useCallback((value: number) => {
+    const level = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+    wantedLevel.current = level;
+    try {
+      localStorage.setItem(LEVEL_STORAGE_KEY, JSON.stringify(level));
+    } catch {
+      // Storage failures must not prevent adjusting the volume.
+    }
     // Locally first: a knob that waits a tenth of a second to move is a knob
     // that feels broken.
     setState((current) => ({ ...current, level }));

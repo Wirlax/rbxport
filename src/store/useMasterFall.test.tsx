@@ -33,6 +33,8 @@ let metered: (meters: Meters) => void;
 let frames: (() => void)[];
 /** The clock the hook reads, advanced only by `elapse`. */
 let clock: number;
+let engineLevel = 1;
+const setMasterLevel = vi.fn((level: number) => { engineLevel = level; return Promise.resolve(); });
 
 const idle: Tick["a"] = {
   frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
@@ -42,7 +44,7 @@ const idle: Tick["a"] = {
 function stubBackend(): Backend {
   return {
     deckState: () => Promise.resolve({
-      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: 1, reduction: 0, shiftsKey: true,
+      a: idle, b: idle, sampleRate: 44_100, peakLeft: 0, peakRight: 0, master: engineLevel, reduction: 0, shiftsKey: true,
     } satisfies Tick),
     onDeckTick: () => () => {},
     onDeckEvent: () => () => {},
@@ -50,7 +52,7 @@ function stubBackend(): Backend {
       metered = listener;
       return () => {};
     },
-    setMasterLevel: () => Promise.resolve(),
+    setMasterLevel,
   } as unknown as Backend;
 }
 
@@ -62,6 +64,9 @@ function Probe() {
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   frames = [];
+  localStorage.clear();
+  engineLevel = 1;
+  setMasterLevel.mockClear();
   clock = 1000;
   vi.useFakeTimers();
   vi.stubGlobal("performance", { now: () => clock });
@@ -186,4 +191,18 @@ describe("the master meters when the readings stop", () => {
     expect(master.peakLeft).toBe(0);
     expect(master.level).toBe(0.62);
   });
+});
+
+
+it.each([0, 0.37, 1])("restores master volume %s after a fresh session", async (level) => {
+  await act(async () => { master.setLevel(level); await Promise.resolve(); });
+  expect(JSON.parse(localStorage.getItem("rbl.master-level.v1")!)).toBe(level);
+  act(() => root.unmount());
+  engineLevel = 1;
+  setMasterLevel.mockClear();
+  root = createRoot(host);
+  await act(async () => { root.render(<Probe />); await Promise.resolve(); });
+  expect(setMasterLevel).toHaveBeenCalledWith(level);
+  expect(engineLevel).toBe(level);
+  expect(master.level).toBe(level);
 });
