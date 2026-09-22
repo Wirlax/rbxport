@@ -98,7 +98,7 @@ test("HOT CUE color CDJ draws every pad and badge in the one green", async ({ pa
   // The mock's fourth track has coloured hot cues: pad A carries its colour.
   const padA = player(page).locator('[aria-label="Hot cues"]').getByRole("button", { name: "Hot cue A", exact: true });
   await expect(padA).toHaveAttribute("style", /--cue-colour/);
-  const badgeA = page.getByTestId("player-overview").locator('[title="Hot cue A"]');
+  const badgeA = page.getByTestId("player-overview").locator('[data-cue="A"]');
   await expect(badgeA).toHaveAttribute("style", /--cue-colour/);
 
   const dialog = await prefs(page);
@@ -136,16 +136,16 @@ test("the Beat Count Display counts bars, or down to the next memory cue", async
   await open(page);
   await load(page);
   const bars = page.getByTestId("player-bars");
-  await expect(bars).toHaveText(/^\d+\.\dBars$/);
+  await expect(bars).toHaveText(/^\d+\.\d Bars$/);
 
   const dialog = await prefs(page);
   await dialog.getByRole("radio", { name: "Count to the next MEMORY CUE (Beats)" }).click();
   // The mock's memory cue is at 2 % of the track: ahead of a fresh load.
   await expect(bars).toHaveText(/^-\d+Beats$/);
   await dialog.getByRole("radio", { name: "Count to the next MEMORY CUE (Bars)" }).click();
-  await expect(bars).toHaveText(/^-\d+\.\dBars$/);
+  await expect(bars).toHaveText(/^-\d+\.\d Bars$/);
   await dialog.getByRole("radio", { name: "Current Position (Bars)" }).click();
-  await expect(bars).toHaveText(/^\d+\.\dBars$/);
+  await expect(bars).toHaveText(/^\d+\.\d Bars$/);
 });
 
 test("a click on the enlarged waveform plays, and again pauses and sets the cue, unless off", async ({ page }) => {
@@ -197,14 +197,13 @@ test("the deck's metronome button is live once a track is loaded", async ({ page
   await open(page);
   // The GRID EDIT row lives behind the pad row's GRID tab.
   await player(page).getByRole("tab", { name: "GRID" }).click();
-  const metronome = player(page).getByRole("button", { name: /^Metronome:/ });
+  const metronome = player(page).getByRole("button", { name: /^Metronome volume:/ });
   await expect(metronome).toBeDisabled();
   await load(page);
   await expect(metronome).toBeEnabled();
-  for (const level of ["Low", "Medium", "High", "Off", "Low"]) {
+  for (const level of ["Low", "Medium", "High", "Low"]) {
     await metronome.click();
-    await expect(metronome).toHaveAccessibleName(`Metronome: ${level}`);
-    await expect(metronome).toHaveAttribute("aria-pressed", String(level !== "Off"));
+    await expect(metronome).toHaveAccessibleName(`Metronome volume: ${level}`);
   }
 });
 
@@ -250,7 +249,7 @@ test("About groups version and update controls", async ({ page }) => {
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "About" }).click();
   await expect(dialog.getByRole("heading", { name: "About" })).toHaveCount(0);
-  await expect(dialog.getByText("Made with ❤️ in California")).toBeVisible();
+  await expect(dialog.getByText("Made by TRIODE with ❤️ in California")).toBeVisible();
   await expect(dialog.getByRole("region", { name: "Support", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("heading", { name: "rbxport", exact: true })).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Author links" })).toBeVisible();
@@ -317,51 +316,18 @@ test("the player's ≡ opens rekordbox's own menu, and its choices are the View 
   await page.keyboard.press("Escape");
 });
 
-test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", async ({ page }) => {
+// Typing a BPM directly and dragging the readout to open a fader popup were
+// TempoField's; the deck tempo slider that replaced it (0bd2668, 2026-09-20)
+// is covered by "the deck tempo slider cycles ranges, resets, and can be
+// hidden" below. What is left here, and unique to this test, is the key
+// shift, which that redesign did not touch.
+test("a BPM's key can be shifted a semitone either way, independent of tempo", async ({ page }) => {
   await open(page);
   await load(page);
   const deck = player(page);
   const bpm = deck.getByTestId("player-bpm");
-  const resting = Number(await bpm.innerText());
-  expect(resting).toBeGreaterThan(0);
+  const resting = await bpm.innerText();
 
-  // Typed: the deck plays at the BPM asked for.
-  await bpm.dblclick();
-  const box = deck.getByRole("textbox", { name: "BPM" });
-  await box.fill(String(resting + 3));
-  await box.press("Enter");
-  await expect(bpm).toHaveText(`${(resting + 3).toFixed(2)}`);
-  // Escape leaves it alone.
-  await bpm.dblclick();
-  await box.fill("999");
-  await box.press("Escape");
-  await expect(bpm).toHaveText(`${(resting + 3).toFixed(2)}`);
-  await deck.getByRole("button", { name: "Reset tempo" }).click();
-  await expect(bpm).toHaveText(resting.toFixed(2));
-
-  // Dragged: the fader opens under the number and the same drag drives it —
-  // down is faster, as a CDJ's is.
-  const at = await bpm.boundingBox();
-  if (!at) throw new Error("no BPM field");
-  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2 + 30, { steps: 6 });
-  const fader = deck.getByRole("dialog", { name: "Tempo" });
-  await expect(fader).toBeVisible();
-  await page.mouse.up();
-  await expect(fader.getByRole("radio", { name: "±6" })).toHaveAttribute("aria-checked", "true");
-  expect(Number(await bpm.innerText())).toBeGreaterThan(resting);
-  await expect(fader.getByTestId("tempo-percent")).toHaveText(/^\+\d\.\d\d%$/);
-
-  // WIDE reaches double speed; the range buttons keep the tempo where it is.
-  await fader.getByRole("radio", { name: "WIDE" }).click();
-  await expect(fader.getByRole("slider", { name: "Tempo" })).toHaveAttribute("aria-valuemax", "100");
-  await fader.getByRole("slider", { name: "Tempo" }).focus();
-  const shown = Number(await bpm.innerText());
-  await page.keyboard.press("ArrowDown");
-  expect(Number(await bpm.innerText())).toBeGreaterThan(shown);
-
-  // A semitone either way, shown beside the fader.
   const shift = deck.getByTestId("key-shift");
   await expect(shift).toHaveCount(0);
   await deck.getByRole("button", { name: "Key up a semitone" }).click();
@@ -370,10 +336,7 @@ test("a BPM can be typed, dragged on a CDJ's fader, and shifted a semitone", asy
   await deck.getByRole("button", { name: "Key down a semitone" }).click();
   await expect(shift).toHaveText("-1");
   // The BPM is untouched by the key.
-  expect(Number(await bpm.innerText())).toBeCloseTo(Number(await bpm.innerText()), 2);
-
-  await page.keyboard.press("Escape");
-  await expect(fader).toBeHidden();
+  await expect(bpm).toHaveText(resting);
 });
 
 test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ page }) => {
