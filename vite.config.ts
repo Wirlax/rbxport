@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import process from "node:process";
 import JavaScriptObfuscator from "javascript-obfuscator";
@@ -8,7 +7,7 @@ import JavaScriptObfuscator from "javascript-obfuscator";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), {
+  plugins: [react(), {
     name: "obfuscate-production",
     apply: "build",
     enforce: "post",
