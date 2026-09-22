@@ -43,9 +43,10 @@ function rows(menu: Locator) {
 test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page }) => {
   const menu = await openTreeMenu(page);
   const items = await rows(menu);
-  // Thirteen in the capture, less the three cloud rows and Collaborative
-  // playlist, plus Rename.
-  expect(items).toHaveLength(10);
+  // Thirteen in the capture, less the three cloud rows, Collaborative
+  // playlist and Create New Intelligent Playlist (unfinished, hidden
+  // 2026-09-20), plus Rename.
+  expect(items).toHaveLength(9);
   for (const item of items) {
     expect(item.height, item.label).toBe(25);
     expect(item.fontSize, item.label).toBe("12.5px");
@@ -57,7 +58,7 @@ test("the rows are on rekordbox's 25pt pitch in its 12.5px face", async ({ page 
   // Two entries in one group are a row apart; across a separator they are a
   // row and the 11pt separator block apart (1pt rule, 5pt above and below).
   const at = (label: string) => items.find((i) => i.label === label)!.top;
-  expect(at("Create New Intelligent Playlist") - at("Create New Playlist")).toBe(25);
+  expect(at("Create New Folder") - at("Create New Playlist")).toBe(25);
   expect(at("Create New Playlist") - at("Export Playlist")).toBe(36);
   expect(at("Add To Shortcut") - at("Export a playlist to a file")).toBe(36);
 });
@@ -78,10 +79,11 @@ test("the panel is a point of padding inside a one-point hairline", async ({ pag
   expect(panel.paddingBottom).toBe("1px");
   expect(panel.paddingLeft).toBe("0px");
   expect(panel.border).toBe("1px");
-  // Ten rows, six separators, the padding and the hairline. The capture's
-  // panel is 812px tall at 2x: four cloud rows and a separator shorter, one
+  // Nine rows, six separators, the padding and the hairline. The capture's
+  // panel is 812px tall at 2x: four cloud rows, a separator and Create New
+  // Intelligent Playlist (unfinished, hidden 2026-09-20) shorter, one
   // Rename taller.
-  expect(panel.height).toBe(10 * 25 + 6 * 11 + 2 + 2);
+  expect(panel.height).toBe(9 * 25 + 6 * 11 + 2 + 2);
 
   const separators = await menu.evaluate((m) => {
     const box = m.getBoundingClientRect();
@@ -126,10 +128,8 @@ test("entries that open a submenu carry the arrow, 17pt in from the right", asyn
 
 test("the greyed entries are said to be disabled, and the live ones are not", async ({ page }) => {
   const menu = await openTreeMenu(page);
-  // Greyed and announced so: the one rekordbox has that this does not, and
-  // the writes the mock's read-only library refuses.
+  // Greyed and announced so: the writes the mock's read-only library refuses.
   const greyed = [
-    "Create New Intelligent Playlist",
     "Playlist display setting",
     "Add Artwork",
   ];
