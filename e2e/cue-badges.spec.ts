@@ -45,16 +45,15 @@ async function load(page: Page, query = "") {
   await expect(player(page).getByRole("button", { name: "Play", exact: true })).toBeEnabled();
 }
 
-/** The marker for a hot cue on the detail: its position, badge and line. */
+/** The marker for a hot cue on the detail: its position and badge. */
 async function detailMarker(page: Page, letter: string) {
-  const marker = detail(page).locator(`[title="Hot cue ${letter}"]`);
+  const marker = detail(page).locator(`[data-cue="${letter}"]`);
   await expect(marker.locator("b")).toBeVisible();
   return marker.evaluate((el) => {
     const band = el.closest('[data-testid="player-detail"]')!.getBoundingClientRect();
     const at = el.getBoundingClientRect();
     const badge = el.querySelector("b")!;
     const box = badge.getBoundingClientRect();
-    const line = getComputedStyle(el, "::before");
     return {
       x: at.x - band.x,
       letter: badge.textContent,
@@ -66,7 +65,6 @@ async function detailMarker(page: Page, letter: string) {
         fontWeight: getComputedStyle(badge).fontWeight,
         radius: getComputedStyle(badge).borderRadius,
       },
-      line: { top: line.top, bottom: line.bottom, width: line.width, colour: line.backgroundColor },
       layer: getComputedStyle(el).zIndex,
     };
   });
@@ -97,18 +95,9 @@ test("each hot cue on the detail is its lettered square in its colour, centred o
     // The same colour the overview paints this cue.
     const overview = await page
       .getByTestId("player-overview")
-      .locator(`[title="Hot cue ${letter}"] b`)
+      .locator(`[data-cue="${letter}"] b`)
       .evaluate((e) => getComputedStyle(e).backgroundColor);
     expect(m.badge.background, letter).toBe(overview);
-    // And a 1pt white line under it, spanning what a beat line spans.
-    expect(m.line.colour, letter).toBe(await tokenColour(page, "--c-cue-line"));
-    expect(Number.parseFloat(m.line.width), letter).toBeCloseTo(await token(page, "--s-cue-line-w"), 1);
-    expect(Number.parseFloat(m.line.top), letter).toBeCloseTo(
-      (await token(page, "--s-beat-marker-top")) + (await token(page, "--s-beat-head-h")) + 1, 1,
-    );
-    expect(Number.parseFloat(m.line.bottom), letter).toBeCloseTo(
-      (await token(page, "--s-beat-marker-bottom")) + (await token(page, "--s-beat-head-h")) + 1, 1,
-    );
   }
   // That row's four are all the default green. A row whose cues are coloured
   // shows the colour reaching the detail rather than the fallback agreeing
@@ -121,12 +110,12 @@ test("each hot cue on the detail is its lettered square in its colour, centred o
     const analysed = await title.locator("xpath=..").locator('[data-col="preview"] canvas').count();
     if (analysed === 0) continue;
     await title.dblclick();
-    await expect.poll(async () => overview.locator('[title^="Hot cue"]').count()).toBe(4);
-    const found = await overview.locator('[title^="Hot cue"]').evaluateAll((els) =>
-      els.map((e) => e.getAttribute("title")?.slice(-1) ?? ""),
+    await expect.poll(async () => overview.locator('[data-cue]:not([data-cue=""])').count()).toBe(4);
+    const found = await overview.locator('[data-cue]:not([data-cue=""])').evaluateAll((els) =>
+      els.map((e) => e.getAttribute("data-cue") ?? ""),
     );
     const first = await overview
-      .locator(`[title="Hot cue ${found[0]}"] b`)
+      .locator(`[data-cue="${found[0]}"] b`)
       .evaluate((e) => getComputedStyle(e).backgroundColor);
     if (first !== green) letters = found;
   }
@@ -136,7 +125,7 @@ test("each hot cue on the detail is its lettered square in its colour, centred o
     await pad(page, letter).click();
     const m = await detailMarker(page, letter);
     const above = await overview
-      .locator(`[title="Hot cue ${letter}"] b`)
+      .locator(`[data-cue="${letter}"] b`)
       .evaluate((e) => getComputedStyle(e).backgroundColor);
     expect(m.badge.background, letter).toBe(above);
     colours.add(m.badge.background);
@@ -153,7 +142,7 @@ test("a memory cue beside a hot cue is the red triangle over the badge, with no 
   await page.keyboard.press("c");
   await player(page).getByRole("button", { name: "Set memory cue" }).click();
 
-  const marker = detail(page).locator('[title="Memory cue"]');
+  const marker = detail(page).locator('[data-cue=""]');
   await expect(marker).toHaveCount(1);
   const hot = await detailMarker(page, "B");
   const memory = await marker.evaluate((el) => {

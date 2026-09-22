@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { enableTooltips } from "./helpers";
 
 /**
  * The information panel's three tabs against the mock backend.
@@ -98,6 +99,7 @@ test("Escape puts a field back", async ({ page }) => {
 });
 
 test("the fields the writer will not take are read-only and say why", async ({ page }) => {
+  await enableTooltips(page);
   const panel = await openPanel(page, "/?writable");
   await panel.getByRole("tab", { name: "Info" }).click();
   for (const name of ["Album Artist", "BPM", "Mix Name", "Message"]) {

@@ -144,7 +144,7 @@ test("hot cues are badges on the overview, and the same badge centred lower on t
   const overview = page.getByTestId("player-overview");
   // The marker itself is zero-width — the position is its left edge — so the
   // badge inside it is what there is to look at.
-  const badge = overview.locator('[title^="Hot cue"] b').first();
+  const badge = overview.locator('[data-cue]:not([data-cue=""]) b').first();
   await expect(badge).toBeVisible();
 
   const size = await token(page, "--s-cue-badge");
@@ -162,7 +162,7 @@ test("hot cues are badges on the overview, and the same badge centred lower on t
   // measures the rest of that marker.
   const out = page.getByRole("button", { name: "Zoom out", exact: true });
   for (let i = 0; i < 3; i++) await out.click();
-  const inDetail = page.getByTestId("player-detail").locator('[title^="Hot cue"] b').first();
+  const inDetail = page.getByTestId("player-detail").locator('[data-cue]:not([data-cue=""]) b').first();
   await expect(inDetail).toBeVisible();
   const detail = await page.getByTestId("player-detail").boundingBox();
   const badgeInDetail = await inDetail.boundingBox();
@@ -201,17 +201,17 @@ test("a hot cue's badge, pad and panel chip all take the colour rekordbox draws 
     const analysed = await title.locator("xpath=..").locator('[data-col="preview"] canvas').count();
     if (analysed === 0) continue;
     await title.dblclick();
-    await expect.poll(async () => overview.locator('[title^="Hot cue"]').count()).toBe(4);
-    const letters = await overview.locator('[title^="Hot cue"]').evaluateAll((els) =>
-      els.map((e) => e.getAttribute("title")?.slice(-1) ?? ""),
+    await expect.poll(async () => overview.locator('[data-cue]:not([data-cue=""])').count()).toBe(4);
+    const letters = await overview.locator('[data-cue]:not([data-cue=""])').evaluateAll((els) =>
+      els.map((e) => e.getAttribute("data-cue") ?? ""),
     );
-    const first = await background(`[data-testid="player-overview"] [title="Hot cue ${letters[0]}"] b`);
+    const first = await background(`[data-testid="player-overview"] [data-cue="${letters[0]}"] b`);
     if (first !== green) markers = letters;
   }
   expect(markers).toHaveLength(4);
   await player.getByRole("tab", { name: "HOT CUE" }).click();
   for (const letter of markers) {
-    const badge = await background(`[data-testid="player-overview"] [title="Hot cue ${letter}"] b`);
+    const badge = await background(`[data-testid="player-overview"] [data-cue="${letter}"] b`);
     expect(drawn).toContain(badge);
     // The pad's inner square and the panel's letter chip are the same colour.
     // The pad row and the HOT CUE list both name their slots `Hot cue A`,

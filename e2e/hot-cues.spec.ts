@@ -10,6 +10,7 @@
  * browser row's CUE mark all redrawn from the one array.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { enableTooltips } from "./helpers";
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
 // The pads and the list's rows share a name, so each is found in its own box.
@@ -21,9 +22,9 @@ const listRow = (page: Page, letter: string) =>
 const clearButton = (page: Page, letter: string) =>
   panel(page).getByRole("button", { name: `Clear hot cue ${letter}` });
 const overviewBadge = (page: Page, letter: string) =>
-  page.getByTestId("player-overview").locator(`[title="Hot cue ${letter}"]`);
+  page.getByTestId("player-overview").locator(`[data-cue="${letter}"]`);
 const detailBadge = (page: Page, letter: string) =>
-  page.getByTestId("player-detail").locator(`[title="Hot cue ${letter}"]`);
+  page.getByTestId("player-detail").locator(`[data-cue="${letter}"]`);
 /** The browser's attribute cell for the loaded row: CUE when the track has hot cues. */
 const cueMark = (page: Page) => page.locator('[role="gridcell"][data-col="attr"]').nth(3);
 const elapsed = (page: Page) => player(page).locator('[class*="elapsed"]');
@@ -45,6 +46,7 @@ async function playAWhile(page: Page) {
 }
 
 test("an empty pad sets the hot cue at the playhead, and its ✕ in the list clears it", async ({ page }) => {
+  await enableTooltips(page);
   await load(page, "?writable=1");
 
   // The mock's track has A to D; E is the first empty pad.
@@ -94,8 +96,8 @@ test("the simple player's overview wears the badge too", async ({ page }) => {
   await page.getByRole("button", { name: "Layout" }).click();
   await page.getByRole("menuitemradio", { name: "SIMPLE PLAYER" }).click();
   const strip = page.getByTestId("simple-player-overview");
-  await expect(strip.locator('[title="Hot cue D"]')).toHaveCount(1);
-  await expect(strip.locator('[title="Hot cue E"]')).toHaveCount(1);
+  await expect(strip.locator('[data-cue="D"]')).toHaveCount(1);
+  await expect(strip.locator('[data-cue="E"]')).toHaveCount(1);
 });
 
 test("the browser row's CUE mark follows the deck without a reload", async ({ page }) => {
@@ -129,6 +131,7 @@ test("the browser row's CUE mark follows the deck without a reload", async ({ pa
 
 test("with rekordbox holding the library, setting and clearing are refused and calling is not", async ({ page }) => {
   // The mock's library is read-only unless asked otherwise.
+  await enableTooltips(page);
   await load(page);
   await expect(page.getByRole("contentinfo")).toContainText("Read-only");
 

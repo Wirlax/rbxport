@@ -9,6 +9,7 @@
  * trip: written, announced, refetched, redrawn.
  */
 import { expect, test, type Page } from "@playwright/test";
+import { enableTooltips } from "./helpers";
 
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
 const memoryRows = (page: Page) =>
@@ -35,6 +36,7 @@ async function cueSomewhereIn(page: Page) {
 test("with rekordbox holding the library, storing and deleting are refused and calling is not", async ({ page }) => {
   // The mock's library is read-only unless asked otherwise, which is the
   // state every other write is tested against.
+  await enableTooltips(page);
   await load(page);
   const deck = player(page);
   await expect(page.getByRole("contentinfo")).toContainText("Read-only");
@@ -59,7 +61,7 @@ test("MEMORY stores the cue point, and the list and both waveforms show it", asy
   await load(page, "?writable=1");
   const deck = player(page);
   const overview = page.getByTestId("player-overview");
-  await expect(overview.locator('[title="Memory cue"]')).toHaveCount(1);
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(1);
   await expect(memoryRows(page)).toHaveCount(1);
 
   await cueSomewhereIn(page);
@@ -68,7 +70,7 @@ test("MEMORY stores the cue point, and the list and both waveforms show it", asy
   // The row appears, in position order, and the overview marks it. No
   // reload: the table underneath keeps its rows.
   await expect(memoryRows(page)).toHaveCount(2);
-  await expect(overview.locator('[title="Memory cue"]')).toHaveCount(2);
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(2);
   const rows = page.getByRole("complementary", { name: "Cue list" }).getByText(/^\d\d:\d\d:\d\d\d$/);
   const times = await rows.allTextContents();
   expect(times).toHaveLength(2);
@@ -83,7 +85,7 @@ test("MEMORY stores the cue point, and the list and both waveforms show it", asy
   // and the marker goes with the row.
   await deck.getByRole("button", { name: "Delete memory cue", exact: true }).click();
   await expect(memoryRows(page)).toHaveCount(1);
-  await expect(overview.locator('[title="Memory cue"]')).toHaveCount(1);
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(1);
 });
 
 test("the M and X keys are MEMORY and its ✕, and a row's ✕ deletes that row", async ({ page }) => {
@@ -102,7 +104,7 @@ test("the M and X keys are MEMORY and its ✕, and a row's ✕ deletes that row"
   await expect(memoryRows(page)).toHaveCount(1);
   await memoryRows(page).first().click();
   await expect(memoryRows(page)).toHaveCount(0);
-  await expect(page.getByTestId("player-overview").locator('[title="Memory cue"]')).toHaveCount(0);
+  await expect(page.getByTestId("player-overview").locator('[data-cue=""]')).toHaveCount(0);
 });
 
 test("◀ and ▶ call the memory cue either side of the playhead", async ({ page }) => {
