@@ -1,15 +1,30 @@
 /**
  * About: what this is, which version, who made it, and under what terms.
  * Not a pane rekordbox has — its version is under the application menu.
+ *
+ * A check runs here rather than asking the main window for one, because
+ * this pane may be a window of its own with no main window's state to read.
+ * Its result, and any download's progress — this pane's own or one an
+ * automatic check is running silently elsewhere — are shown in place.
  */
 import { useEffect, useState, type SVGProps } from "react";
 import { Github, Globe, Instagram, Twitch } from "lucide-react";
 
 import { getBackend } from "@/ipc/client";
+import type { UpdateProgress } from "@/ipc/types";
+import { formatBytes } from "@/lib/changelog";
 import { usePreferencesContext } from "@/store/usePreferences";
 import layout from "./PaneLayout.module.css";
 import styles from "./Preferences.module.css";
 import { Button, Select, Toggle } from "./controls";
+
+/** Where a check this pane made itself has got to. */
+type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "upToDate"; version: string }
+  | { kind: "available"; version: string }
+  | { kind: "ready"; version: string };
 
 // Discord brand mark from Simple Icons (CC0).
 function DiscordIcon({ size = 19, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
@@ -30,9 +45,27 @@ export const ABOUT_LINKS = [
 export function AboutPane() {
   const { preferences, update } = usePreferencesContext();
   const { checkUpdates, updateFrequency } = preferences.advanced;
-  const [openingUpdates, setOpeningUpdates] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  // A download's progress, whoever started it: an automatic check running
+  // silently in the main window counts just as much as one from here.
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | undefined;
+    void getBackend().then((backend) => {
+      if (!live) return;
+      stop = backend.onUpdateProgress((next) => {
+        if (live) setProgress(next);
+      });
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -55,13 +88,43 @@ export function AboutPane() {
   };
 
   const checkForUpdates = () => {
-    setOpeningUpdates(true);
+    setUpdateStatus({ kind: "checking" });
     setUpdateError(null);
-    void getBackend()
-      .then((backend) => backend.requestPreferencesReset("updates"))
-      .catch(() => setUpdateError("Couldn’t open updates. Please try again."))
-      .finally(() => setOpeningUpdates(false));
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        const found = await backend.checkForUpdate();
+        if (found.version === null) {
+          setUpdateStatus({ kind: "upToDate", version: found.currentVersion });
+        } else if (found.ready) {
+          setUpdateStatus({ kind: "ready", version: found.version });
+        } else {
+          setUpdateStatus({ kind: "available", version: found.version });
+          // An update found is taken without asking, as any check's is; this
+          // pane shows the download happening rather than starting it unseen.
+          void backend.downloadUpdate().catch(() => {});
+        }
+      } catch {
+        setUpdateStatus({ kind: "idle" });
+        setUpdateError("Couldn’t check for updates. Please try again.");
+      }
+    })();
   };
+
+  const statusText = updateStatus.kind === "checking"
+    ? "Checking for updates…"
+    : updateStatus.kind === "upToDate"
+    ? `rbxport v${updateStatus.version} is up to date.`
+    : updateStatus.kind === "available"
+    ? `Update available v${updateStatus.version}.`
+    : updateStatus.kind === "ready"
+    ? `Update v${updateStatus.version} downloaded — restart rbxport to use it.`
+    : null;
+
+  // Done when the last event's downloaded byte count reached the total; the
+  // final event of a download always carries that, even with no total known
+  // until then.
+  const downloading = progress !== null && !(progress.total !== null && progress.downloaded >= progress.total);
 
   return (
     <>
@@ -71,8 +134,8 @@ export function AboutPane() {
             <h1 className={styles.aboutName}>rbxport</h1>
             <p className={styles.aboutVersion} data-testid="about-version">v{version ?? "—"}</p>
           </div>
-          <Button disabled={openingUpdates} onClick={checkForUpdates}>
-            {openingUpdates ? "Opening…" : "Check for updates"}
+          <Button disabled={updateStatus.kind === "checking"} onClick={checkForUpdates}>
+            {updateStatus.kind === "checking" ? "Checking…" : "Check for updates"}
           </Button>
         </div>
         <div className={styles.aboutUpdates}>
@@ -95,6 +158,36 @@ export function AboutPane() {
             />
           </div>
           <p className={layout.help}>Updates are downloaded in the background and applied after you exit.</p>
+          {statusText ? <p className={styles.updateHint} aria-live="polite">{statusText}</p> : null}
+          {downloading ? (
+            <div className={styles.updateProgressRow}>
+              <div
+                className={styles.updateProgress}
+                role="progressbar"
+                aria-label="Downloading update"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={
+                  progress?.total != null ? Math.round((progress.downloaded / progress.total) * 100) : undefined
+                }
+                data-indeterminate={progress?.total == null || undefined}
+              >
+                <span
+                  className={styles.updateProgressFill}
+                  style={
+                    progress?.total != null
+                      ? { width: `${Math.min((progress.downloaded / progress.total) * 100, 100)}%` }
+                      : undefined
+                  }
+                />
+              </div>
+              <span className={styles.updateProgressText}>
+                {progress?.total != null
+                  ? `${formatBytes(progress.downloaded)} of ${formatBytes(progress.total)}`
+                  : formatBytes(progress?.downloaded ?? 0)}
+              </span>
+            </div>
+          ) : null}
           {updateError ? <p className={styles.updateError} role="alert">{updateError}</p> : null}
         </div>
       </section>

@@ -738,7 +738,7 @@ export interface AudioDevices {
 }
 
 /** What the Preferences window can ask the main window to do. */
-export type PreferencesRequest = "columns" | "layout" | "updates";
+export type PreferencesRequest = "columns" | "layout";
 
 /** One release's section of the changelog. */
 export interface UpdateChange {

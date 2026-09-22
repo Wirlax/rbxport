@@ -6,6 +6,8 @@
 //! against the real one.
 
 mod windowfit;
+mod file_drop;
+mod file_drag;
 mod startup;
 pub mod analysis;
 pub mod commands;
@@ -419,6 +421,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             startup::startup_milestone,
+            file_drop::dropped_file_paths,
+            file_drag::drag_tracks,
             menu::set_history_menu,
             commands::library_summary,
             commands::playlist_tree,

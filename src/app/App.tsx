@@ -11,7 +11,7 @@ import { useEventCallback } from "@/store/useEventCallback";
 import type { TrackSearchField } from "@/lib/search";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getBackend } from "@/ipc/client";
+import { droppedFilePaths, getBackend } from "@/ipc/client";
 import type {
   Backend, DeckId, Device, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
@@ -108,6 +108,23 @@ export function App() {
 
 function AppBody() {
   useEffect(() => { reportStartupPaint("shell-painted"); }, []);
+  useEffect(() => {
+    // Native file drags can land anywhere, including outside a drop target.
+    // Cancel WebKit's file navigation without stopping playlist/deck handlers.
+    const preventFileNavigation = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files") || event.dataTransfer?.files.length) {
+        event.preventDefault();
+      }
+    };
+    // Accept file drags first so WebKit dispatches a DOM drop instead of
+    // falling back to native navigation before a drop handler can run.
+    document.addEventListener("dragover", preventFileNavigation, true);
+    document.addEventListener("drop", preventFileNavigation, true);
+    return () => {
+      document.removeEventListener("dragover", preventFileNavigation, true);
+      document.removeEventListener("drop", preventFileNavigation, true);
+    };
+  }, []);
   // Read once, synchronously, so the first render is already the layout the
   // window closed with rather than the default that then jumps.
   const [restored] = useState(loadSession);
@@ -779,6 +796,59 @@ function AppBody() {
       })();
     },
     [draggedTracks, tree, report, refuse, refuseLoose, advancedPrefs.protectLibrary],
+  );
+
+  /**
+   * Files dragged in from outside the app (Finder, Explorer) and dropped on
+   * a playlist: imported, then added to that playlist, the way a dragged
+   * track already is.
+   */
+  const importDroppedFilesTo = useCallback(
+    (playlistId: string, files: File[]) => {
+      if (advancedPrefs.protectLibrary) {
+        refuse(refusal(true));
+        return;
+      }
+      void (async () => {
+        try {
+          // Resolve immediately, before any other async work: macOS's drag
+          // pasteboard belongs to the current OS drag, not to the File object.
+          const paths = await droppedFilePaths(files);
+          const backend = await getBackend();
+          const imported = await backend.importPaths(paths);
+          if (imported.tracks.length > 0) {
+            await backend.edits.addTracksToPlaylist(playlistId, imported.tracks.map((t) => t.id));
+          }
+          const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
+          const total = imported.imported + imported.skipped.length;
+          report(
+            imported.skipped.length === 0
+              ? `Imported ${imported.imported} of ${total} files into ${name}.`
+              : `Imported ${imported.imported} of ${total} files into ${name}; ${imported.skipped.length} skipped.`,
+          );
+          setTree(await backend.playlistTree());
+          if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
+        } catch (e) {
+          refuse(e instanceof Error ? e.message : "Those files could not be imported.");
+        }
+      })();
+    },
+    [tree, report, refuse, advancedPrefs.protectLibrary, analysisPrefs.auto, analysis],
+  );
+
+  /**
+   * The same drop, for files dropped straight into the open playlist's own
+   * list rather than onto its row in the tree — the tree row is easy to miss
+   * with a full list open, and an empty playlist has no rows to aim at.
+   * `undefined` outside a real playlist so the list gives no false promise
+   * of a drop it would not act on.
+   */
+  const importDroppedFilesIntoOpen = useMemo(
+    () =>
+      readOnly || selectedNode?.kind !== "playlist"
+        ? undefined
+        : (files: File[]) => importDroppedFilesTo(selectedNode.id, files),
+    [readOnly, selectedNode, importDroppedFilesTo],
   );
 
   /**
@@ -1544,12 +1614,7 @@ function AppBody() {
     void getBackend().then((backend) => {
       if (!live) return;
       stop = backend.onPreferencesReset((what) => {
-        if (what === "updates") {
-          // The Update Manager is this window's; Preferences gets out of
-          // its way, as it would if it were a window of its own.
-          setSettingsOpen(null);
-          checkForUpdates(true);
-        } else if (what === "columns") {
+        if (what === "columns") {
           cols.reset();
         } else {
           setTreeWidth(clampWidth(305, bounds()));
@@ -1562,7 +1627,7 @@ function AppBody() {
       live = false;
       stop?.();
     };
-  }, [cols, bounds, checkForUpdates]);
+  }, [cols, bounds]);
 
   const refreshDevices = useCallback(() => {
     void (async () => {
@@ -1795,9 +1860,9 @@ function AppBody() {
     onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode, readOnly,
   }), [draggedTracks, addDraggedTo, exportPlaylist, exportPlaylistFile, createPlaylistIn, createFolderIn, deleteNode, renameNode, readOnly]);
   const subList = useMemo(() => ({
-    onDragTracks: setDraggedTracks, players: deckCount(layout), onLoadTrack: loadTrack,
+    onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInFinder: revealTrack, onRate: rateTrack, onComment: commentTrack, pendingEdits, readOnly,
-  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly]);
+  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly, refuse]);
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
@@ -1934,6 +1999,7 @@ function AppBody() {
           onSelect={setSelectedNode}
           dragging={draggedTracks !== null}
           onDropTracks={addDraggedTo}
+          onDropFiles={readOnly ? undefined : importDroppedFilesTo}
           onExport={exportPlaylist}
           onExportFile={exportPlaylistFile}
           onCreatePlaylist={createPlaylistIn}
@@ -2005,6 +2071,8 @@ function AppBody() {
           onFocusedRow={setPlayerTrack}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
+          onDragError={refuse}
+          onDropFiles={importDroppedFilesIntoOpen}
           players={deckCount(layout)}
           onLoadTrack={loadTrack}
           onRate={rateTrack}

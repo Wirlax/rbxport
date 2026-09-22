@@ -6,6 +6,7 @@
  * tokens. Rows are virtualized and keyed by row id so a re-sort moves DOM nodes
  * instead of rewriting every cell.
  */
+import { dragTracksToDesktop, nativeTrackDragging } from "@/ipc/client";
 import { SearchField } from "@/components/SearchField";
 import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
@@ -333,7 +334,7 @@ const TrackRow = memo(function TrackRow({
   onSelect: (index: number, id: string, e: React.MouseEvent) => void;
   /** Load the track into the player. A double-click, as in rekordbox. */
   onOpen: (index: number) => void;
-  onDragStart: (row: RowDto) => void;
+  onDragStart: (row: RowDto) => boolean;
   /** Set the track's rating. Absent in a build that cannot write. */
   onRate: ((id: string, stars: number) => void) | undefined;
   /** Set the track's comment. */
@@ -350,6 +351,9 @@ const TrackRow = memo(function TrackRow({
   onReorderOver: (index: number, below: boolean) => void;
   onReorderDrop: () => void;
 }) {
+  const nativePress = useRef<{ x: number; y: number } | null>(null);
+  const suppressClick = useRef(false);
+
   if (!row) {
     // A skeleton, not a blank: while the page is in flight a dim bar stands in
     // for each text cell, so a fast scroll reads as content loading rather than
@@ -393,9 +397,30 @@ const TrackRow = memo(function TrackRow({
       onMouseDown={(e) => {
         if (pressSelects(e, selected)) onSelect(index, row.id, e);
       }}
+      onPointerDown={(e) => {
+        suppressClick.current = false;
+        if (nativeTrackDragging() && e.button === 0 &&
+            !(e.target as HTMLElement).closest("input, button, [contenteditable=true]")) {
+          nativePress.current = { x: e.clientX, y: e.clientY };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }
+      }}
+      onPointerMove={(e) => {
+        const press = nativePress.current;
+        if (!press) return;
+        if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
+        nativePress.current = null;
+        suppressClick.current = true;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        e.preventDefault();
+        onDragStart(row);
+      }}
+      onPointerUp={() => { nativePress.current = null; }}
+      onPointerCancel={() => { nativePress.current = null; }}
       // The plain click a press on a selected row held back, now that the
       // release has shown it was not a drag.
       onClick={(e) => {
+        if (suppressClick.current) return;
         if (clickSettles(e, selected)) onSelect(index, row.id, e);
       }}
       onDoubleClick={() => onOpen(index)}
@@ -403,9 +428,14 @@ const TrackRow = memo(function TrackRow({
         e.preventDefault();
         onMenu(index, row, { x: e.clientX, y: e.clientY });
       }}
-      draggable
+      draggable={!nativeTrackDragging()}
       onDragStart={(e) => {
-        onDragStart(row);
+        if (onDragStart(row)) {
+          // Replace the HTML source with a native file source. Destinations
+          // inside the app still receive normal DOM drag/drop events.
+          e.preventDefault();
+          return;
+        }
         // Both, because the same drag has two meanings: copied into a playlist
         // or a deck, moved within the list it came from. A `dropEffect` the
         // `effectAllowed` does not cover is an invalid pair, and the browser
@@ -426,13 +456,15 @@ const TrackRow = memo(function TrackRow({
         // Taking the event is what lets the drop happen at all; the browser
         // refuses one over an element that did not ask for it.
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
+        e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
         const box = e.currentTarget.getBoundingClientRect();
         onReorderOver(index, e.clientY > box.top + box.height / 2);
       }}
       onDrop={(e) => {
-        if (!reorderable) return;
+        // External files must bubble to the playlist's import target.
+        if (!reorderable || dropEdge === null) return;
         e.preventDefault();
+        e.stopPropagation();
         onReorderDrop();
       }}
       data-drop={dropEdge ?? undefined}
@@ -611,6 +643,13 @@ export interface TrackTableProps {
   onSelectedRow?: (row: RowDto | null) => void;
   /** What is being dragged, so a drop target knows what it would get. */
   onDragTracks?: (drag: TrackDrag | null) => void;
+  /**
+   * Files dragged in from outside the app (Finder, Explorer) and dropped
+   * anywhere in the list. Absent unless the open view is a playlist tracks
+   * can actually be added to.
+   */
+  onDropFiles?: ((files: File[]) => void) | undefined;
+  onDragError?: ((message: string) => void) | undefined;
   /** Edit a track's rating or comment. Absent where writes are impossible. */
   onRate?: (id: string, stars: number) => void;
   onComment?: (id: string, comment: string) => void;
@@ -710,7 +749,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
 export const TrackTable = memo(function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
@@ -727,6 +766,8 @@ export const TrackTable = memo(function TrackTable({
   // other menu here is.
   const [trafficMenu, setTrafficMenu] = useState(false);
   const trafficBox = useRef<HTMLDivElement>(null);
+  // A file dragged in from outside the app, hovering the list.
+  const [fileOver, setFileOver] = useState(false);
   useEffect(() => {
     if (!trafficMenu) return;
     const onDown = (event: MouseEvent) => {
@@ -768,6 +809,7 @@ export const TrackTable = memo(function TrackTable({
     onFirstRows(rows, view.count);
   }, [onFirstRows, view]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [dragKey, setDragKey] = useState<ColumnKey | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: ColumnKey } | null>(null);
@@ -967,18 +1009,40 @@ export const TrackTable = memo(function TrackTable({
   const carrying = useRef<readonly string[] | null>(null);
   const [dropAt, setDropAt] = useState<{ index: number; below: boolean } | null>(null);
 
+  const nativeDrag = useRef(false);
+  const dragGeneration = useRef(0);
+  const finishDraggingTracks = useEventCallback(() => {
+    carrying.current = null;
+    nativeDrag.current = false;
+    setDropAt(null);
+    onDragTracks?.(null);
+  });
+
   const startDraggingTracks = useEventCallback(
     (row: RowDto) => {
+      const generation = ++dragGeneration.current;
       carrying.current = selection.ids.has(row.id) ? [...selection.ids] : [row.id];
       startDragOut(row);
+      if (!nativeTrackDragging()) return false;
+      nativeDrag.current = true;
+      void dragTracksToDesktop(carrying.current)
+        .catch((error: unknown) => onDragError?.(error instanceof Error ? error.message : String(error)))
+        // AppKit can finish before WKWebView dispatches its DOM drop. Keep
+        // the track payload through that dispatch, including on cancellation.
+        .finally(() => { window.setTimeout(() => {
+          if (dragGeneration.current === generation) finishDraggingTracks();
+        }, 100); });
+      return true;
     },
   );
 
   const endDraggingTracks = useEventCallback(() => {
-    carrying.current = null;
-    setDropAt(null);
-    onDragTracks?.(null);
+    if (!nativeDrag.current) finishDraggingTracks();
   });
+
+  const isBelowTracks = (target: EventTarget, y: number) =>
+    scrollRef.current?.contains(target as Node) && rowsRef.current !== null &&
+    y >= rowsRef.current.getBoundingClientRect().bottom;
 
   /** Where the carried rows would go, as the pointer moves over a row. */
   const reorderOver = useEventCallback(
@@ -995,9 +1059,8 @@ export const TrackTable = memo(function TrackTable({
    * rewrites `TrackNo` from what it is handed, and a partial list would leave
    * the rest of the playlist to be appended in its old order.
    */
-  const reorderDrop = useEventCallback(() => {
+  const reorderDrop = useEventCallback((at: { index: number; below: boolean } | null = dropAt) => {
     const moved = carrying.current;
-    const at = dropAt;
     setDropAt(null);
     if (!onReorder || moved === null || at === null || moved.length === 0) return;
     void (async () => {
@@ -1191,6 +1254,40 @@ export const TrackTable = memo(function TrackTable({
         ["--f-size-ui" as string]: `calc(${fontScale} * var(--f-size-ui-base))`,
         ["--browse-weight" as string]: preferences.view.browseBold ? 700 : 400,
       }}
+      data-file-over={fileOver || undefined}
+      onDragOver={(e) => {
+        if (carrying.current) {
+          if (onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
+            reorderOver(view.count - 1, true);
+          }
+          return;
+        }
+        if (!onDropFiles || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setFileOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setFileOver(false);
+      }}
+      onDrop={(e) => {
+        setFileOver(false);
+        if (carrying.current) {
+          e.preventDefault();
+          if (onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
+            reorderDrop({ index: view.count - 1, below: true });
+          }
+          return;
+        }
+        if (!e.dataTransfer.types.includes("Files") && e.dataTransfer.files.length === 0) return;
+        // File drops never invoke WebKit's default media navigation.
+        e.preventDefault();
+        if (!onDropFiles || e.dataTransfer.files.length === 0) return;
+        onDropFiles(Array.from(e.dataTransfer.files));
+      }}
     >
       <div className={styles.browserHead}>
         <span className={styles.title} data-testid="browser-title">
@@ -1283,7 +1380,7 @@ export const TrackTable = memo(function TrackTable({
           {header}
         </div>
 
-        <div className={styles.inner} style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        <div className={styles.inner} ref={rowsRef} style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {items.map((item) => {
             const row = view.rowAt(item.index);
             return (

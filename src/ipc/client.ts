@@ -4,6 +4,7 @@
  * Views import the typed functions here; they never call `invoke` themselves,
  * so the IPC surface stays auditable and the mock can stand in wholesale.
  */
+import { detectPlatform } from "@/lib/shortcuts";
 import type {
   AnalysisResult, AudioDevices, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, DeviceSyncState,
   Diagnostics, Duplicates, GridState, Limiter, PreferencesRequest, SmartRule, SyncDeviceReport, SyncProgress, UpdateCheck,
@@ -16,6 +17,35 @@ import type {
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/** Native file sources allow one track drag to land in Finder or in our webview. */
+export function nativeTrackDragging(): boolean {
+  return isTauri && detectPlatform().mac;
+}
+
+/** Resolves when the native drag finishes, including cancellation. */
+export async function dragTracksToDesktop(ids: readonly string[]): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    await invoke("drag_tracks", { ids: [...ids] });
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/** Resolve a DOM file drop without intercepting the webview's internal drags. */
+export async function droppedFilePaths(files: File[]): Promise<string[]> {
+  if (files.length === 0) throw new Error("No files were dropped.");
+  const paths = files.map((file) => (file as File & { path?: string }).path);
+  if (paths.every((path): path is string => Boolean(path))) return paths;
+  if (!isTauri) throw new Error("Drop files in the desktop app to import them.");
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    return await invoke<string[]>("dropped_file_paths", { names: files.map((file) => file.name) });
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
 
 /** Keep the native Edit menu in sync with the focused editor's history. */
 export async function setHistoryMenu(undo: string | null, redo: string | null): Promise<void> {

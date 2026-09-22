@@ -692,6 +692,14 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .updateHint { margin: 8px 0 0; color: var(--c-text-dim); }
 .updateError { color: var(--c-error); margin: 0 0 12px; }
 
+.updateProgressRow { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; }
+.updateProgress { position: relative; flex: 1; height: 6px; overflow: hidden; border-radius: 3px; background: var(--c-meter-track); }
+.updateProgressFill { display: block; height: 100%; width: 0; background: var(--c-accent); transition: width 120ms linear; }
+/* No total to measure against: a third of the bar slides back and forth. */
+.updateProgress[data-indeterminate] .updateProgressFill { position: absolute; width: 33%; animation: updateProgressSlide 1.2s ease-in-out infinite alternate; }
+@keyframes updateProgressSlide { from { left: 0; } to { left: 67%; } }
+.updateProgressText { flex: none; min-width: 10em; text-align: right; color: var(--c-text-dim); font-size: var(--f-size-sm); font-variant-numeric: tabular-nums; }
+
 .aboutIdentity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
 .aboutIdentity .aboutName { font-size: 22px; letter-spacing: -0.03em; }
 .aboutIdentity .aboutVersion { font-size: var(--f-size-sm); }

@@ -18,6 +18,7 @@ TODO.md
 .claude/worktrees/
 
 # generated / local-only
+test-mp3s/
 design/sketch/dist/
 fixtures/build/
 test-results/

@@ -1,16 +1,16 @@
 /**
  * @vitest-environment jsdom
  *
- * The Updates section in About: the switch writes the
- * preference, and the button asks the main window to check — through the
- * backend, because this pane may be a window of its own.
+ * The Updates section in About: the switch writes the preference, and the
+ * button checks in place — this pane may be a window of its own, so it
+ * talks to the backend directly rather than asking the main window to.
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, PreferencesRequest } from "@/ipc/types";
+import type { Backend, UpdateCheck, UpdateProgress } from "@/ipc/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
 import { PreferencesProvider, type PreferencesStore } from "@/store/usePreferences";
 import { AboutPane } from "./AboutPane";
@@ -22,7 +22,9 @@ declare global {
 let host: HTMLDivElement;
 let root: Root;
 let update: ReturnType<typeof vi.fn>;
-let requested: PreferencesRequest[];
+let checkForUpdate: ReturnType<typeof vi.fn>;
+let downloadUpdate: ReturnType<typeof vi.fn>;
+let progressListeners: Set<(progress: UpdateProgress) => void>;
 
 function mount(preferences: Preferences = DEFAULT_PREFERENCES) {
   const store = { preferences, update, reset: vi.fn() } as unknown as PreferencesStore;
@@ -47,15 +49,27 @@ function section(title = "About"): Element {
   return found;
 }
 
+function checkButton(): HTMLButtonElement {
+  const button = Array.from(section().querySelectorAll("button")).find(
+    (b) => b.textContent === "Check for updates" || b.textContent === "Checking…",
+  );
+  if (!button) throw new Error("no Check for Updates button");
+  return button;
+}
+
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   update = vi.fn();
-  requested = [];
+  progressListeners = new Set();
+  checkForUpdate = vi.fn<() => Promise<UpdateCheck>>();
+  downloadUpdate = vi.fn().mockResolvedValue({ version: "0.5.0", installed: true });
   __setBackend({
     appVersion: () => Promise.resolve("0.4.0"),
-    requestPreferencesReset: (what: PreferencesRequest) => {
-      requested.push(what);
-      return Promise.resolve();
+    checkForUpdate,
+    downloadUpdate,
+    onUpdateProgress: (listener: (progress: UpdateProgress) => void) => {
+      progressListeners.add(listener);
+      return () => progressListeners.delete(listener);
     },
   } as unknown as Backend);
   host = document.createElement("div");
@@ -89,15 +103,51 @@ describe("AboutPane › Updates", () => {
     expect(update).toHaveBeenCalledWith("advanced", { checkUpdates: true });
   });
 
-  it("the button asks the main window for a check rather than checking here", async () => {
+  it("the button checks here and reports an update found", async () => {
+    checkForUpdate.mockResolvedValue({
+      currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null,
+    });
     mount();
-    const button = Array.from(section().querySelectorAll("button")).find(
-      (b) => b.textContent === "Check for updates",
-    );
-    if (!button) throw new Error("no Check for Updates button");
-    act(() => button.click());
+    act(() => checkButton().click());
     await settle();
-    expect(requested).toEqual(["updates"]);
+    expect(checkForUpdate).toHaveBeenCalledTimes(1);
+    expect(downloadUpdate).toHaveBeenCalledTimes(1);
     expect(update).not.toHaveBeenCalled();
+    expect(section().textContent).toContain("Update available v0.5.0.");
+  });
+
+  it("the button reports being up to date", async () => {
+    checkForUpdate.mockResolvedValue({
+      currentVersion: "0.4.0", version: null, date: null, changes: [], ready: null,
+    });
+    mount();
+    act(() => checkButton().click());
+    await settle();
+    expect(downloadUpdate).not.toHaveBeenCalled();
+    expect(section().textContent).toContain("rbxport v0.4.0 is up to date.");
+  });
+
+  it("a check that cannot reach the server shows an error, not a crash", async () => {
+    checkForUpdate.mockRejectedValue(new Error("offline"));
+    mount();
+    act(() => checkButton().click());
+    await settle();
+    expect(section().querySelector('[role="alert"]')?.textContent).toBe("Couldn’t check for updates. Please try again.");
+  });
+
+  it("a download in progress shows a bar under Automatic updates, whoever started it", async () => {
+    mount();
+    await settle();
+    expect(section().querySelector('[role="progressbar"]')).toBeNull();
+    act(() => {
+      for (const listener of progressListeners) listener({ downloaded: 500_000, total: 2_000_000 });
+    });
+    const bar = section().querySelector('[role="progressbar"]');
+    expect(bar).not.toBeNull();
+    expect(bar?.getAttribute("aria-valuenow")).toBe("25");
+    act(() => {
+      for (const listener of progressListeners) listener({ downloaded: 2_000_000, total: 2_000_000 });
+    });
+    expect(section().querySelector('[role="progressbar"]')).toBeNull();
   });
 });

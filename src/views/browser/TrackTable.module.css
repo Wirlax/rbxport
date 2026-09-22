@@ -11,6 +11,12 @@
   background: var(--c-black);
 }
 
+/* A file dragged in from outside the app, hovering the list. */
+.browser[data-file-over] {
+  outline: 2px solid var(--c-select);
+  outline-offset: -2px;
+}
+
 /* The title row: 26pt of panel with a measured point of black under it
    before the column headings, drawn as a border so the row and its line are
    one grid track. The search field sits at the right, 20pt short of the

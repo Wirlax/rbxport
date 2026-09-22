@@ -32,8 +32,8 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-cleanup`}>Delete music outside playlists</strong>
-        <span id={`${id}-cleanup-help`} className={styles.description}>On sync, remove RBXport’s USB copies outside the selected playlists. Originals stay untouched.</span>
+        <strong id={`${id}-cleanup`}>Delete music not in any playlist</strong>
+        <span id={`${id}-cleanup-help`} className={styles.description}>On sync, removes music files from the USB stick that aren’t in any playlist.</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
         aria-labelledby={`${id}-cleanup`} aria-describedby={`${id}-cleanup-help`}

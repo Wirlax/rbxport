@@ -68,7 +68,7 @@ function RenameField({ name, onCommit, onCancel }: {
 }
 
 const Row = memo(function Row({
-  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onMenu, count,
+  node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onDropFiles, onMenu, count,
   renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
   movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
 }: {
@@ -96,6 +96,8 @@ const Row = memo(function Row({
   /** Whether a track drag could land here. */
   droppable: boolean;
   onDropTracks: ((playlistId: string) => void) | undefined;
+  /** Files dragged in from outside the app, dropped on this row. */
+  onDropFiles: ((playlistId: string, files: File[]) => void) | undefined;
   onMenu: ((node: TreeNode, at: { x: number; y: number }) => void) | undefined;
   /** Whether anything sits under this node, so it can be opened at all. */
   branch: boolean;
@@ -125,9 +127,14 @@ const Row = memo(function Row({
   // as a grid of errors — and a drag that ends elsewhere clears it.
   const [over, setOver] = useState(false);
   const pressedOnSelected = useRef(false);
+  // A file dragged in from Finder/Explorer never sets `dragging`/`droppable`
+  // (nothing inside the app started that drag), so it is its own path: any
+  // playlist row that was given `onDropFiles` takes one, gated on the
+  // browser's own file-drag signal instead.
+  const fileDroppable = node.kind === "playlist" && Boolean(onDropFiles);
   useEffect(() => {
-    if (!droppable) setOver(false);
-  }, [droppable]);
+    if (!droppable && !fileDroppable) setOver(false);
+  }, [droppable, fileDroppable]);
   return (
     <div
       className={styles.node}
@@ -169,6 +176,15 @@ const Row = memo(function Row({
           onMoveOver(node, edge);
           return;
         }
+        // A file drag from outside the app: `dataTransfer.files` is empty
+        // until the drop, but `types` carries "Files" throughout, which is
+        // the browser's own signal that this is worth taking.
+        if (!droppable && fileDroppable && e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setOver(true);
+          return;
+        }
         // Only a playlist takes tracks: a folder holds playlists, and dropping
         // into one would have to invent which.
         if (!droppable) return;
@@ -188,6 +204,11 @@ const Row = memo(function Row({
           onMoveDrop();
           return;
         }
+        if (!droppable && fileDroppable && e.dataTransfer.files.length > 0) {
+          e.preventDefault();
+          onDropFiles?.(node.id, Array.from(e.dataTransfer.files));
+          return;
+        }
         if (!droppable) return;
         e.preventDefault();
         onDropTracks?.(node.id);
@@ -200,8 +221,8 @@ const Row = memo(function Row({
         e.preventDefault();
         onMenu(node, { x: e.clientX, y: e.clientY });
       }}
-      data-droppable={droppable || undefined}
-      data-over={(droppable && over) || undefined}
+      data-droppable={(droppable || fileDroppable) || undefined}
+      data-over={((droppable || fileDroppable) && over) || undefined}
       role="treeitem"
       aria-selected={selected}
       aria-expanded={branch ? open : undefined}
@@ -286,6 +307,8 @@ export interface TreeViewProps {
   dragging?: boolean;
   /** Drop the dragged tracks onto a playlist. */
   onDropTracks?: (playlistId: string) => void;
+  /** Files dragged in from outside the app (Finder, Explorer), dropped onto a playlist. */
+  onDropFiles?: ((playlistId: string, files: File[]) => void) | undefined;
   /**
    * A lazy node was opened: read what is under it. The Explorer's folders,
    * whose children are not known until somebody looks.
@@ -309,7 +332,7 @@ export interface TreeViewProps {
 }
 
 export const TreeView = memo(function TreeView({
-  nodes, selectedId, onSelect, dragging, onDropTracks, onExport, onExportFile,
+  nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
@@ -470,6 +493,7 @@ export const TreeView = memo(function TreeView({
             onToggle={onToggle}
             droppable={Boolean(dragging) && node.kind === "playlist"}
             onDropTracks={onDropTracks}
+            onDropFiles={onDropFiles}
             onMenu={(node, at) => setMenu({ ...at, node })}
             count={showCounts && node.kind === "playlist" ? node.childCount : undefined}
             renaming={!readOnly && node.id === renamingId}

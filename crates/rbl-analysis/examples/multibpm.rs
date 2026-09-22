@@ -29,8 +29,10 @@
 //! | `run`     | stage, reset, import, analyse, report |
 //!
 //! `filter` is a case-insensitive substring of the original's title or file
-//! name, to run one song. The staging directory is `target/multibpm/tracks`
-//! or `RB_LITE_MULTIBPM`; backups go beside it.
+//! name, to run one song. The staging directory is `test-mp3s/tracks`
+//! (gitignored, outside `target/` so a clean build cannot delete files a
+//! real library row still points at) or `RB_LITE_MULTIBPM`; backups go
+//! beside it.
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
@@ -81,7 +83,7 @@ impl Track {
 /// rekordbox marks a row whose path holds `..` as missing.
 fn root() -> PathBuf {
     let raw = std::env::var("RB_LITE_MULTIBPM").map_or_else(
-        |_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/multibpm"),
+        |_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-mp3s"),
         PathBuf::from,
     );
     let _ = std::fs::create_dir_all(&raw);

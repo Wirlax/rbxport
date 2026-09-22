@@ -48,7 +48,7 @@ export type SubTreeProps = Pick<
 /** Likewise for its list: dragging out, loading decks, the writes. */
 export type SubListProps = Pick<
   TrackTableProps,
-  "onDragTracks" | "players" | "onLoadTrack" | "onShowInFinder" | "onRate" | "onComment"
+  "onDragTracks" | "onDragError" | "players" | "onLoadTrack" | "onShowInFinder" | "onRate" | "onComment"
   | "pendingEdits" | "readOnly"
 >;
 
