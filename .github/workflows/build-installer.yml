@@ -321,6 +321,21 @@ jobs:
           echo "Identities visible to codesign:"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
+      - name: Clear prior bundle artifacts
+        # `C:/rbl-target` persists on the Windows host to avoid MAX_PATH in
+        # OpenSSL. Tauri leaves prior installers beside a new bundle there;
+        # collecting every matching file published an old rekordbox-lite
+        # installer under a new rbxport release name. Only the final bundle
+        # directory is disposable, never the compiled target cache.
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="${CARGO_TARGET_DIR:-target}/${{ inputs.target }}/release/bundle"
+          case "$bundle_dir" in
+            */release/bundle) rm -rf "$bundle_dir" ;;
+            *) echo "::error::refusing unexpected bundle directory: $bundle_dir"; exit 1 ;;
+          esac
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -471,6 +486,15 @@ jobs:
           # A release that uploads nothing is worse than one that fails: it
           # looks like it worked.
           test "$(find out -type f | wc -l)" -gt 0
+
+      - name: Verify the Windows installer identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem out\*-setup.exe)
+          if ($installers.Count -ne 1) { throw "Expected one Windows installer, found $($installers.Count)." }
+          $name = $installers[0].VersionInfo.ProductName
+          if ($name -ne "rbxport") { throw "Expected installer product name rbxport, got $name." }
 
       - name: The disk image is notarised too, not just the app inside it
         # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and
