@@ -91,18 +91,24 @@ export interface Master {
 
 const LEVEL_STORAGE_KEY = "rbl.master-level.v1";
 
-function loadLevel(): number {
+/** `null` when nothing was ever saved, so the engine's own default is left alone. */
+function loadLevel(): number | null {
   try {
     const raw = localStorage.getItem(LEVEL_STORAGE_KEY);
-    const value: unknown = raw === null ? 1 : JSON.parse(raw);
-    return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+    if (raw === null) return null;
+    const value: unknown = JSON.parse(raw);
+    return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
   } catch {
-    return 1;
+    return null;
   }
 }
 
 export function useMaster(mode: VuMeterMode = "normal"): Master {
-  const [state, setState] = useState(() => ({ level: loadLevel(), peakLeft: 0, peakRight: 0, reduction: 0, vu: emptyVu(mode) }));
+  // The knob's placeholder until the backend answers, and what a first run
+  // (nothing remembered yet) restores to: the engine's own idle default, not
+  // full, which `show(now.master)` below overwrites either way.
+  const remembered = useRef(loadLevel());
+  const [state, setState] = useState(() => ({ level: remembered.current ?? 1, peakLeft: 0, peakRight: 0, reduction: 0, vu: emptyVu(mode) }));
   const wantedLevel = useRef(state.level);
 
   useEffect(() => {
@@ -172,10 +178,14 @@ export function useMaster(mode: VuMeterMode = "normal"): Master {
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
-      try {
-        await backend.setMasterLevel(wantedLevel.current);
-      } catch {
-        // Keep the remembered knob position if the audio device is unavailable.
+      // Nothing to restore: leave the engine's own default alone rather than
+      // pushing the knob's full-scale placeholder onto it.
+      if (remembered.current !== null) {
+        try {
+          await backend.setMasterLevel(remembered.current);
+        } catch {
+          // Keep the remembered knob position if the audio device is unavailable.
+        }
       }
       if (!live) return;
       // The meters come on their own beat, three times as often as the decks.
