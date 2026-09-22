@@ -727,19 +727,9 @@ pub async fn export_playlist<R: tauri::Runtime>(
     let progress_app = app.clone();
     let report = blocking("export_playlist", move || {
         let selection = ExportSelection::from_playlists(&state, &library, &share, std::slice::from_ref(&playlist), false)?;
-        // Per track, as `sync:progress` is per stick: the status bar follows
-        // a long export rather than showing a busy flag alone.
-        let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
-        let mut on_progress = |p: &rbl_export::ExportProgress| {
-            let _ = tauri::Emitter::emit(
-                &progress_app,
-                "export:progress",
-                ExportProgressDto { done: u32::try_from(p.done).unwrap_or(u32::MAX), total, title: p.title.clone() },
-            );
-        };
         let destination = std::path::Path::new(&destination);
         let selection = selection.for_stick(&state, &library, &share, destination, delete_unlisted_music.unwrap_or(false))?;
-        write_export(destination, &selection, defaults.as_ref(), compatibility_format, &mut on_progress)
+        write_export_with_progress(&progress_app, destination, &selection, defaults.as_ref(), compatibility_format)
     })
     .await?;
 
@@ -793,7 +783,7 @@ pub async fn sync_devices<R: tauri::Runtime>(
             let stick = std::path::Path::new(&destination);
             let written = selection
                 .for_stick(&state, &library, &share, stick, delete_unlisted_music.unwrap_or(false))
-                .and_then(|selection| write_export(stick, &selection, defaults.as_ref(), compatibility_format, &mut |_| {}));
+                .and_then(|selection| write_export_with_progress(&app, stick, &selection, defaults.as_ref(), compatibility_format));
             reports.push(match written {
                 Ok(report) => {
                     let mut result = SyncDeviceReportDto { path: destination.clone(), report: Some(report), error: None, ejected: false, eject_error: None };
@@ -838,6 +828,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
+    let progress_app = app.clone();
     let report = blocking("export_tracks_to_device", move || {
         let stick = std::path::Path::new(&destination);
         if !stick.is_dir() {
@@ -857,7 +848,7 @@ pub async fn export_tracks_to_device<R: tauri::Runtime>(
             }
         }
         let selection = ExportSelection::from_playlists_and_tracks(&state, &library, &share, &playlists, &loose, automatic)?;
-        write_export(stick, &selection, defaults.as_ref(), compatibility_format, &mut |_| {})
+        write_export_with_progress(&progress_app, stick, &selection, defaults.as_ref(), compatibility_format)
     })
     .await?;
     let _ = tauri::Emitter::emit(&app, "export:done", &report);
@@ -1192,12 +1183,86 @@ fn source_track(
 /// Writes a selection to one destination and reads it back.
 ///
 /// Runs inside a `blocking` closure: it copies audio over USB.
+static EXPORT_PROGRESS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, ExportProgressDto>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static EXPORT_CANCEL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[tauri::command]
+pub fn cancel_export(path: String) {
+    if let Ok(jobs) = EXPORT_CANCEL.lock() {
+        if let Some(cancel) = jobs.get(&path) {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+#[tauri::command]
+pub fn export_progress() -> Vec<ExportProgressDto> {
+    EXPORT_PROGRESS.lock().map(|jobs| jobs.values().cloned().collect()).unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn eject_device(path: String) -> AppResult<()> {
+    blocking("eject_device", move || {
+        // Keep new exports from starting until the OS has finished ejecting.
+        let jobs = EXPORT_PROGRESS.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        if jobs.get(&path).is_some_and(|job| job.state == "writing") {
+            return Err(AppError::internal("This device is being exported to. Wait for the export to finish."));
+        }
+        let result = rbl_devices::eject::eject(std::path::Path::new(&path))
+            .map_err(|e| AppError::internal(e.to_string()));
+        drop(jobs);
+        result
+    }).await
+}
+
+fn write_export_with_progress<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    destination: &std::path::Path,
+    selection: &ExportSelection,
+    defaults: Option<&crate::device_settings::StickDefaultsDto>,
+    compatibility_format: Option<rbl_export::CompatibilityFormat>,
+) -> AppResult<ExportReportDto> {
+    let total = u32::try_from(selection.tracks.len()).unwrap_or(u32::MAX);
+    let path = destination.to_string_lossy().into_owned();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut jobs = EXPORT_CANCEL.lock().map_err(|e| AppError::internal(e.to_string()))?;
+        if jobs.contains_key(&path) {
+            return Err(AppError::internal("An export to this device is already running."));
+        }
+        jobs.insert(path.clone(), Arc::clone(&cancel));
+    }
+    let emit = |state, done, title: String| {
+        let progress = ExportProgressDto {
+            path: destination.to_string_lossy().into_owned(), state, done, total, title,
+        };
+        if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
+            jobs.insert(progress.path.clone(), progress.clone());
+        }
+        let _ = tauri::Emitter::emit(app, "export:progress", progress);
+    };
+    emit("writing", 0, String::new());
+    let mut done = 0;
+    let result = write_export(destination, selection, defaults, compatibility_format, &mut |p| {
+        done = u32::try_from(p.done).unwrap_or(u32::MAX);
+        emit("writing", done, p.title.clone());
+    }, &|| cancel.load(std::sync::atomic::Ordering::Relaxed));
+    let cancelled = result.as_ref().err().is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
+    emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done },
+        result.as_ref().err().map_or_else(String::new, |e| e.message.clone()));
+    if let Ok(mut jobs) = EXPORT_CANCEL.lock() { jobs.remove(&path); }
+    result
+}
+
 pub(crate) fn write_export(
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
+    cancelled: &dyn Fn() -> bool,
 ) -> AppResult<ExportReportDto> {
     if !destination.is_dir() {
         return Err(AppError::new(
@@ -1214,15 +1279,16 @@ pub(crate) fn write_export(
         .filter(|name| !export_root.join(name).exists())
         .filter_map(|name| std::fs::read(settings_root.join(name)).ok().map(|bytes| (name, bytes))).collect();
     let library_defaults = defaults.map(crate::device_settings::library_defaults);
-    let report = rbl_export::export_with_options(
+    let report = rbl_export::export_cancellable(
         destination,
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
         &rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
         progress,
+        cancelled,
     )
-    .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
+    .map_err(|e| AppError::new(if matches!(e, rbl_export::ExportError::Cancelled) { ErrorKind::Cancelled } else { ErrorKind::Internal }, e.to_string()))?;
     if let Some(defaults) = defaults {
         crate::device_settings::write_dev_defaults(destination, defaults)?;
     }
@@ -2471,6 +2537,8 @@ async fn import_collection<R: tauri::Runtime>(
                 &progress_app,
                 "import:progress",
                 ExportProgressDto {
+                    path: path.clone(),
+                    state: "writing",
                     done: u32::try_from(done).unwrap_or(u32::MAX),
                     total: u32::try_from(total).unwrap_or(u32::MAX),
                     title: String::new(),

@@ -16,7 +16,7 @@ import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
-  PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady,
+  PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -592,6 +592,33 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     ["/Volumes/TEST", ["Main Set", "Warm Up", "Closing"]],
   ]);
   const syncProgressListeners = new Set<(progress: SyncProgress) => void>();
+  const exportListeners = new Set<(progress: ExportProgress) => void>();
+  const exportJobs = new Map<string, ExportProgress>();
+  const cancelledExports = new Set<string>();
+  const tellExport = (path: string, state: ExportProgress["state"], done = 0, total = 100) => {
+    const progress: ExportProgress = { path, state, done, total, title: "" };
+    exportJobs.set(path, progress);
+    for (const listener of exportListeners) listener(progress);
+  };
+  const mockExport = async (path: string, write: () => ExportReport) => {
+    cancelledExports.delete(path);
+    tellExport(path, "writing");
+    await wait(undefined);
+    if (cancelledExports.has(path)) {
+      tellExport(path, "cancelled");
+      throw new Error("Export stopped.");
+    }
+    tellExport(path, "writing", 50);
+    try {
+      const report = write();
+      await wait(undefined);
+      tellExport(path, "done", 100);
+      return report;
+    } catch (error) {
+      tellExport(path, "failed");
+      throw error;
+    }
+  };
 
   /**
    * "Writes" playlists to a stick: no filesystem in a browser, so this is
@@ -1596,7 +1623,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           reused: 0, removed: 0, skipped: [], verified: true,
         });
       }
-      return wait(writeTo(device, [playlistId], defaults, deleteUnlistedMusic));
+      return mockExport(destination, () => writeTo(device, [playlistId], defaults, deleteUnlistedMusic));
     },
     exportTracksToDevice: (tracks, destination, defaults) => {
       const device = devices.find((d) => d.path === destination);
@@ -1604,7 +1631,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const loose = looseTracks.get(destination) ?? new Set<string>();
       for (const track of tracks) loose.add(track);
       looseTracks.set(destination, loose);
-      return wait(writeTo(device, (syncSelections.get(destination) ?? []).map(p => p.libraryId), defaults));
+      return mockExport(destination, () => writeTo(device, (syncSelections.get(destination) ?? []).map(p => p.libraryId), defaults));
     },
 
     // No windows in a browser: the shell draws the manager over itself.
@@ -1624,8 +1651,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           for (const listener of syncProgressListeners) listener({ path, state });
         };
         tell("writing");
+        cancelledExports.delete(path);
+        tellExport(path, "writing");
+        await wait(undefined);
+        tellExport(path, "writing", 50);
         await wait(undefined);
         const device = devices.find((d) => d.path === path);
+        if (cancelledExports.has(path)) {
+          tellExport(path, "cancelled");
+          tell("failed");
+          reports.push({ path, error: "Export stopped." });
+          continue;
+        }
         if (device) {
           const report = writeTo(device, playlists, defaults, deleteUnlistedMusic);
           const ejected = Boolean(ejectAfterSync && report.verified && report.skipped.length === 0);
@@ -1637,15 +1674,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           if (automatic) autoSync.add(path);
           else autoSync.delete(path);
           tell("done");
+          tellExport(path, "done", 100);
         } else {
           reports.push({ path, error: "That device is no longer connected." });
           tell("failed");
+          tellExport(path, "failed");
         }
       }
       return reports;
     },
     smartRule: (playlist) => wait(smartRules.get(playlist) ?? { logic: "all", conditions: [] }),
     importUsb: () => Promise.resolve({ tracks: 0, histories: 0, settings: 0, skipped: 0 }),
+    ejectDevice: async (path) => {
+      const index = devices.findIndex(device => device.path === path);
+      if (index < 0) throw new Error("That device is no longer connected.");
+      devices.splice(index, 1);
+      await wait(undefined);
+    },
     deviceSyncState: (path) => {
       if (!devices.some((d) => d.path === path)) {
         return Promise.reject(new Error("That device is no longer connected."));
@@ -1667,7 +1712,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // One device, so the panel has something to show. A browser cannot see a
     // real volume; the app asks the OS.
     listDevices: () => wait(devices.map((device) => ({ ...device, fileSystem: "FAT32" }))),
-    onExportProgress: () => () => undefined,
+    onExportProgress: (listener) => { exportListeners.add(listener); return () => { exportListeners.delete(listener); }; },
+    exportProgress: () => wait([...exportJobs.values()]),
+    cancelExport: (path) => { cancelledExports.add(path); return Promise.resolve(); },
     // A browser opens the address itself.
     openUrl: (url) => {
       window.open(url, "_blank", "noopener");

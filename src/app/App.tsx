@@ -1,4 +1,5 @@
 import { useBackupProgress } from "@/store/useBackupProgress";
+import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
 import { useEventCallback } from "@/store/useEventCallback";
 /**
@@ -333,6 +334,7 @@ function AppBody() {
   // Every write path reads this one flag: rekordbox holding the database,
   // or Library Protection in Preferences, refuse the same way.
   const backupJob = useBackupProgress();
+  const exportJobs = useExportProgress();
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
   useEffect(() => {
     let live = true;
@@ -1301,7 +1303,8 @@ function AppBody() {
           report(exportSummary(name, written));
           setDevices(await backend.listDevices());
         } catch (e) {
-          refuse(e instanceof Error ? e.message : "That export could not be written.");
+          if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
+          else refuse(e instanceof Error ? e.message : "That export could not be written.");
         } finally {
           setSyncing(false);
         }
@@ -1722,24 +1725,6 @@ function AppBody() {
     [devices, selectedNode],
   );
 
-  // A long export says where it is, track by track, in the status bar.
-  useEffect(() => {
-    if (!syncing) return undefined;
-    let stop: (() => void) | undefined;
-    let live = true;
-    void (async () => {
-      const backend = await getBackend();
-      if (!live) return;
-      stop = backend.onExportProgress(({ done, total, title }) => {
-        report(`Writing ${done + 1} of ${total}: ${title}`);
-      });
-    })();
-    return () => {
-      live = false;
-      stop?.();
-    };
-  }, [syncing, report]);
-
   const syncToDevice = useCallback(
     async (playlistId: string) => {
       if (!selectedDevice) return;
@@ -1752,7 +1737,8 @@ function AppBody() {
         if (written !== null) report(exportSummary(selectedDevice.name, written));
         setDevices(await backend.listDevices());
       } catch (e) {
-        refuse(e instanceof Error ? e.message : "That export could not be written.");
+        if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
+        else refuse(e instanceof Error ? e.message : "That export could not be written.");
       } finally {
         setSyncing(false);
       }
@@ -1789,7 +1775,8 @@ function AppBody() {
         }
         report(exportSummary(node.name, written));
       } catch (e) {
-        refuse(e instanceof Error ? e.message : "That export could not be written.");
+        if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
+        else refuse(e instanceof Error ? e.message : "That export could not be written.");
       }
     })();
   }, [report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat]);
@@ -2205,6 +2192,9 @@ function AppBody() {
       </div>
 
       <StatusBar
+        exports={[...exportJobs.values()].filter(job => job.state === "writing").map(job => ({
+          ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
+        }))}
         onReportBug={openReport}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
@@ -2221,7 +2211,7 @@ function AppBody() {
         // Everything that went wrong, in one place and in red: the deck's
         // refusals, a library that would not open, and a write the library
         // turned down.
-        error={playerError ?? loadError ?? (note?.failed === true ? note.text : null)}
+        error={playerError ?? loadError ?? [...exportJobs.values()].find(job => job.state === "failed")?.title ?? (note?.failed === true ? note.text : null)}
         onOpenProtection={!playerError && !loadError && note?.failed && note.text === refusal(true) && advancedPrefs.protectLibrary
           ? () => openPreferences("libraryProtection") : undefined}
         onCancelAnalysis={analysis.running ? analysis.cancel : undefined}

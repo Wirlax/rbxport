@@ -390,6 +390,8 @@ export interface Backend {
   deleteBackup(path: string): Promise<void>;
   /** Called after each track of an export, while one runs. Returns its own unsubscribe. */
   onExportProgress(listener: (progress: ExportProgress) => void): () => void;
+  exportProgress(): Promise<ExportProgress[]>;
+  cancelExport(path: string): Promise<void>;
   /** A yes-or-no question in the platform's own dialog; false when dismissed. */
   confirm(message: string): Promise<boolean>;
   /** The volumes an export could be written to, and what is on each. */
@@ -645,6 +647,9 @@ export interface Backend {
     /** Convert incompatible USB copies; undefined preserves the source format. */
     compatibilityFormat?: "wav" | "mp3",
   ): Promise<SyncDeviceReport[]>;
+
+  /** Safely eject a mounted USB device; fails if it is in use. */
+  ejectDevice(path: string): Promise<void>;
 
   /** What a stick was last synced with, and what it holds now. */
   deviceSyncState(path: string): Promise<DeviceSyncState>;
@@ -1102,8 +1107,10 @@ export interface Backup {
   bytes: number;
 }
 
-/** Where an export has got to, after each track. */
+/** Per-device progress; done counts tracks processed before the current one. */
 export interface ExportProgress {
+  path: string;
+  state: "writing" | "done" | "failed" | "cancelled";
   done: number;
   total: number;
   title: string;

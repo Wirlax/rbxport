@@ -131,6 +131,10 @@
 .row[aria-selected="true"] { background: var(--c-raised); }
 .rowSelection { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; align-self: stretch; cursor: pointer; }
 .rowSelection:has(input:disabled) { cursor: default; }
+.ejectButton { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 6px; border: 0; border-radius: 3px; background: none; color: var(--c-text-dim); cursor: pointer; }
+.ejectButton svg { width: 12px; height: 14px; }
+.ejectButton:hover:not(:disabled) { background: var(--c-raised); color: var(--c-text); }
+.ejectButton:disabled { opacity: .4; cursor: default; }
 .twisty {
   flex: none;
   display: grid;
@@ -306,3 +310,7 @@
   .middle { width: 136px; }
   .headingRow { flex-wrap: wrap; }
 }
+.exportProgress { display: grid; gap: 6px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.exportProgress progress { width: 100%; height: 6px; appearance: none; border: 0; border-radius: 3px; overflow: hidden; background: var(--c-raised); accent-color: var(--c-accent); }
+.exportProgress progress::-webkit-progress-bar { background: var(--c-raised); }
+.exportProgress progress::-webkit-progress-value { background: var(--c-accent); }

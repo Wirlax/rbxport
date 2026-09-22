@@ -1,8 +1,12 @@
 import styles from "./StatusBar.module.css";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
+import type { ExportProgress } from "@/ipc/types";
+import { exportPercent } from "@/store/useExportProgress";
+import { StopExport } from "@/components/StopExport";
 
 export interface StatusBarProps {
+  exports?: readonly (ExportProgress & { name: string })[];
   /** The build's version, shown beside the name; null until it is read. */
   version?: string | null;
   /** General status text; empty when idle. */
@@ -32,6 +36,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
+  exports = [],
   version = null,
   activity = "",
   analysisProgress,
@@ -83,6 +88,12 @@ export function StatusBar({
           ) : null}
         </span>
       )}
+      {exports.map(job => <span key={job.path} className={styles.backupMeter} title={job.title}>
+        <span>Exporting {job.name}</span>
+        <progress className={styles.backupProgress} aria-label={`Exporting ${job.name}`} max={100} value={exportPercent(job)} />
+        <span className={styles.backupPercent}>({exportPercent(job)}%)</span>
+        <StopExport path={job.path} className={styles.stop} />
+      </span>)}
       {backupProgress ? <span className={styles.backupMeter} title={backupActivity}>
         <span>Backup</span>
         <progress className={styles.backupProgress} aria-label="Backup progress"

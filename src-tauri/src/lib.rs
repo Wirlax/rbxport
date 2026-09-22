@@ -445,6 +445,8 @@ pub fn run() {
             commands::link_nudge_master,
             commands::link_take_master_tempo,
             commands::export_playlist,
+            commands::export_progress,
+            commands::cancel_export,
             commands::list_devices,
             commands::track_beats,
             // The decks. The audio device is not opened until one of these
@@ -507,6 +509,7 @@ pub fn run() {
             report::open_report_attachment,
             report::save_bug_report,
             commands::sync_devices,
+            commands::eject_device,
             commands::export_tracks_to_device,
             commands::device_sync_state,
             usb_import::import_usb,

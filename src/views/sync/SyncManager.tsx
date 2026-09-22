@@ -15,14 +15,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
-import { FolderIcon, ListIcon } from "@/components/icons";
+import { EjectIcon, FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSyncState, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
 import { exportSummary } from "@/lib/exportSummary";
+import { errorMessage } from "@/lib/errorMessage";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { usePreferences } from "@/store/usePreferences";
+import { useExportProgress, exportPercent } from "@/store/useExportProgress";
+import { StopExport } from "@/components/StopExport";
 import styles from "./SyncManager.module.css";
 
 export interface SyncManagerProps {
@@ -85,6 +88,7 @@ function TickBox({
 }
 
 export function SyncManager({ windowed = false, onClose, onSynced }: SyncManagerProps) {
+  const exportJobs = useExportProgress();
   const window_ = useRef<HTMLDivElement>(null);
   const [tree, setTree] = useState<readonly TreeNode[]>([]);
   const [devices, setDevices] = useState<readonly Device[]>([]);
@@ -99,8 +103,9 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [treeError, setTreeError] = useState("");
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [devicesError, setDevicesError] = useState("");
-  const [operation, setOperation] = useState<"sync" | "import" | null>(null);
-  const busy = operation !== null;
+  const [operation, setOperation] = useState<"sync" | "import" | "eject" | null>(null);
+  const [ejectingPath, setEjectingPath] = useState<string | null>(null);
+  const busy = operation !== null || [...exportJobs.values()].some(job => job.state === "writing");
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
@@ -228,6 +233,29 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   }, [nodes, byId]);
 
   const canSync = selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
+
+  const ejectDevice = async (device: Device) => {
+    if (busy || loadingDevices) return;
+    setOperation("eject");
+    setEjectingPath(device.path);
+    setStatus([`Ejecting ${device.name}…`]);
+    try {
+      const backend = await getBackend();
+      await backend.ejectDevice(device.path);
+      setDevices(current => current.filter(d => d.path !== device.path));
+      setTickedDevices(current => new Set([...current].filter(path => path !== device.path)));
+      setExpandedDevices(current => new Set([...current].filter(path => path !== device.path)));
+      setStates(current => { const next = new Map(current); next.delete(device.path); return next; });
+      setDeviceErrors(current => { const next = new Map(current); next.delete(device.path); return next; });
+      setStatus([`${device.name}: Safely ejected.`]);
+      onSynced?.();
+    } catch (e) {
+      setStatus([`${device.name}: Could not eject. ${errorMessage(e)}`]);
+    } finally {
+      setEjectingPath(null);
+      setOperation(null);
+    }
+  };
 
   const sync = useCallback(() => {
     if (!canSync) return;
@@ -406,6 +434,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
               const on = tickedDevices.has(device.path);
               const expanded = expandedDevices.has(device.path);
               const read = states.get(device.path);
+              const job = exportJobs.get(device.path);
               const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
               const free = device.totalBytes > 0 ? `${device.freeBytes === 0 ? "0.0 GB" : formatSpace(device.freeBytes)} free (${Math.round(device.freeBytes / device.totalBytes * 100)}%)` : "Space unknown";
               const freePercent = device.totalBytes > 0 ? Math.max(0, Math.min(100, device.freeBytes / device.totalBytes * 100)) : null;
@@ -422,6 +451,14 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                   <span className={styles.name} title={device.path}>{device.name}</span>
                   <TickBox state={on ? "on" : "off"} label={device.name} disabled={busy} onChange={(next) => tickDevice(device.path, next)} />
                   </label>
+                  <button type="button" className={styles.ejectButton}
+                    aria-label={`Eject ${device.name}`} title={`Safely eject ${device.name}`}
+                    disabled={busy || loadingDevices} aria-busy={ejectingPath === device.path || undefined}
+                    onClick={() => void ejectDevice(device)}>
+                    {ejectingPath === device.path
+                      ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" />
+                      : <EjectIcon />}
+                  </button>
                 </div>
                 <div className={styles.storage}>
                   <p className={styles.capacity}>{fileSystem}{device.totalBytes > 0 ? ` · ${formatSpace(device.totalBytes)} total` : ""}</p>
@@ -432,6 +469,12 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                     {usedPercent !== null ? <span style={{ width: `${usedPercent}%` }} /> : null}
                   </div>
                   <div className={styles.storageLabels}>{usedPercent !== null ? <span><i aria-hidden="true" />{used} used</span> : null}<span>{free}</span></div>
+                  {job ? <div className={styles.exportProgress}>
+                    <span>{job.state === "cancelled" ? "Export stopped" : job.state === "failed" ? "Export failed" : job.state === "done" ? "Export complete" : `Exporting ${device.name}`} ({exportPercent(job)}%)</span>
+                    <progress aria-label={`Exporting ${device.name}`} max={100} value={exportPercent(job)} />
+                    {job.state === "writing" ? <StopExport path={job.path} className={styles.button} /> : null}
+                    {job.state === "failed" ? <span role="alert">{job.title}</span> : null}
+                  </div> : null}
                 </div>
                 {!expanded && deviceErrors.has(device.path) ? <p className={styles.capacity} role="alert">{deviceErrors.get(device.path)}</p> : null}
                 {expanded ? <div className={styles.library} role="group" aria-label={`${device.name} library`}>
@@ -457,7 +500,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         </div>
         {status.length > 0 ? <span id="sync-selection-hint" hidden>{selectionHint}</span> : null}
         <button type="button" className={styles.button} onClick={onClose}>
-          Close
+          {busy ? "Run in background" : "Close"}
         </button>
       </footer>
     </div>

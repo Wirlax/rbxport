@@ -377,10 +377,12 @@ pub struct BackupDto {
     pub bytes: u64,
 }
 
-/// Where an export has got to, sent after each track as `export:progress`.
+/// Per-device progress, including verified completion or failure.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportProgressDto {
+    pub path: String,
+    pub state: &'static str,
     pub done: u32,
     pub total: u32,
     pub title: String,

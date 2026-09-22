@@ -11,7 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
-import type { Backend, Device, DeviceSyncState, SyncDeviceReport, SyncProgress, TreeNode } from "@/ipc/types";
+import type { Backend, Device, DeviceSyncState, SyncDeviceReport, SyncProgress, TreeNode, ExportProgress } from "@/ipc/types";
 import { SyncManager } from "./SyncManager";
 import { PreferencesProvider } from "@/store/usePreferences";
 import { DEFAULT_PREFERENCES } from "@/lib/preferences";
@@ -19,6 +19,8 @@ import { DEFAULT_PREFERENCES } from "@/lib/preferences";
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
+let exportProgress: ((progress: ExportProgress) => void) | undefined;
+const cancelExport = vi.fn(() => Promise.resolve());
 
 const TREE: TreeNode[] = [
   { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
@@ -55,6 +57,7 @@ let host: HTMLDivElement;
 let root: Root;
 let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
+let ejectDevice: ReturnType<typeof vi.fn>;
 let progress: ((p: SyncProgress) => void) | null;
 let onClose: ReturnType<typeof vi.fn>;
 
@@ -73,10 +76,12 @@ const click = (el: HTMLElement | null | undefined) => {
 const status = () => host.querySelector('[role="status"]')?.textContent ?? "";
 
 beforeEach(async () => {
+  cancelExport.mockClear();
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
   onClose = vi.fn();
   importUsb = vi.fn(() => Promise.resolve({ tracks: 2, histories: 0, settings: 0, skipped: 0 }));
+  ejectDevice = vi.fn(() => Promise.resolve());
   syncDevices = vi.fn((playlists: string[], destinations: string[]) =>
     Promise.resolve(destinations.map((path) => report(path, playlists.length * 10))),
   );
@@ -88,6 +93,13 @@ beforeEach(async () => {
       return state ? Promise.resolve(state) : Promise.reject(new Error("gone"));
     },
     syncDevices,
+    cancelExport,
+    ejectDevice,
+    onExportProgress: (listener: (progress: ExportProgress) => void) => {
+      exportProgress = listener;
+      return () => { exportProgress = undefined; };
+    },
+    exportProgress: () => Promise.resolve([]),
     importUsb,
     confirm: () => Promise.resolve(true),
     onSyncProgress: (listener: (p: SyncProgress) => void) => {
@@ -113,6 +125,73 @@ afterEach(() => {
 });
 
 describe("SyncManager", () => {
+  it("stops an export started outside Sync Manager", async () => {
+    const job: ExportProgress = { path: "/Volumes/USB B", state: "writing", done: 3, total: 10, title: "Track" };
+    act(() => exportProgress?.(job));
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Stop export to /Volumes/USB B"]'));
+    await settle();
+    expect(cancelExport).toHaveBeenCalledWith(job.path);
+    expect(host.textContent).toContain("Stopping…");
+    act(() => exportProgress?.({ ...job, state: "cancelled" }));
+    expect(host.textContent).toContain("Export stopped");
+    expect(host.querySelector('button[aria-label="Stop export to /Volumes/USB B"]')).toBeNull();
+  });
+  it("ejects only the chosen drive and clears it from the sync selection", async () => {
+    click(box("USB A"));
+    await settle();
+    let finish = () => {};
+    ejectDevice.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const eject = host.querySelector<HTMLButtonElement>('button[aria-label="Eject USB A"]');
+    click(eject);
+    await settle();
+    expect(ejectDevice).toHaveBeenCalledWith("/Volumes/USB A");
+    expect(eject?.disabled).toBe(true);
+    expect(status()).toBe("Ejecting USB A…");
+    expect(host.querySelector('button[aria-label="SYNC"]')).toHaveProperty("disabled", true);
+    act(() => finish());
+    await settle();
+    expect(box("USB A")).toBeNull();
+    expect(box("USB B")).not.toBeNull();
+    expect(box("USB B")?.checked).toBe(false);
+    expect(host.textContent).toContain("0 of 1 selected");
+    expect(status()).toBe("USB A: Safely ejected.");
+  });
+
+  it("keeps the drive available when safe ejection fails", async () => {
+    ejectDevice.mockRejectedValueOnce({ kind: "internal", message: "Device is busy." });
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="Eject USB B"]'));
+    await settle();
+    expect(status()).toContain("Could not eject. Device is busy.");
+    expect(box("USB B")).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Eject USB B"]')).toHaveProperty("disabled", false);
+  });
+
+  it("prevents manual ejection while an export is running in the background", () => {
+    act(() => exportProgress?.({ path: "/Volumes/USB B", state: "writing", done: 1, total: 10, title: "Track" }));
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Eject USB B"]');
+    expect(button?.disabled).toBe(true);
+    click(button);
+    expect(ejectDevice).not.toHaveBeenCalled();
+  });
+
+  it("shows per-device progress and lets the window close while exporting", () => {
+    const job: ExportProgress = { path: "/Volumes/USB B", state: "writing", done: 3, total: 10, title: "Track" };
+    act(() => exportProgress?.(job));
+    const meter = host.querySelector<HTMLProgressElement>('progress[aria-label="Exporting USB B"]');
+    expect(meter?.value).toBe(30);
+    expect(host.textContent).toContain("Exporting USB B (30%)");
+    const background = [...host.querySelectorAll("button")].find(button => button.textContent === "Run in background");
+    expect(background?.disabled).toBe(false);
+    click(background ?? null);
+    expect(onClose).toHaveBeenCalled();
+    act(() => exportProgress?.({ ...job, done: 10 }));
+    expect(meter?.value).toBe(99);
+    act(() => exportProgress?.({ ...job, state: "done", done: 10 }));
+    expect(meter?.value).toBe(100);
+    act(() => exportProgress?.({ ...job, state: "failed", title: "Device disconnected" }));
+    expect(meter?.value).toBe(30);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Device disconnected");
+  });
   it("passes cleanup and the chosen compatibility format to sync", async () => {
     const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
       ...DEFAULT_PREFERENCES.usbExport, deleteUnlistedMusic: true,
