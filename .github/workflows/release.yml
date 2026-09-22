@@ -17,6 +17,13 @@ name: Release
 # Supplying an existing release_tag rebuilds that source with this workflow
 # and publishes it, without moving the source tag.
 #
+# Nothing builds until `rust`, `windows` and `frontend` pass: clippy, the
+# Rust test suite, a Windows-native `cargo check`, and the frontend's lint,
+# typecheck, unit tests, bundle budget and Playwright e2e. These used to be
+# a separate CI workflow on the same tag trigger; folded in here so a broken
+# build can never publish — a dependency across two workflow files is not
+# one GitHub Actions can enforce.
+#
 # Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
 # one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
 # VM. A hosted image preinstalls a toolchain; an arc host is somebody's actual
@@ -46,10 +53,229 @@ env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
+  # Gate the builds on the same checks CI used to run separately. Folded in
+  # here, not left as their own workflow, so a broken build never publishes:
+  # a separate CI run had no dependency GitHub Actions could enforce across
+  # workflow files. Each of these shares a physical host with a build job
+  # below (rust/linux with build-other's Linux leg, windows with its Windows
+  # leg, frontend/macos with build-macos) — `needs` on the build jobs forces
+  # them to run one after the other on that host instead of racing it.
+  rust:
+    runs-on: [self-hosted, linux, x64]
+    env:
+      # Tests must never be able to open the installed library read-write.
+      # This is the same switch the writer checks.
+      RB_LITE_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+
+      - name: Install the Linux build dependencies
+        # The webview ones are only for the Tauri shell; the rbl-* crates build
+        # without a webview, which is the point of keeping tauri out of them.
+        # ALSA is not in that category: `rbl-deck` depends on cpal, whose
+        # `alsa-sys` build script panics outright without the headers, so the
+        # whole workspace failed to compile on Linux without this line.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev libasound2-dev
+
+      # dtolnay/rust-toolchain drives rustup; it does not install it. Hosted
+      # images ship rustup, an arc host need not — so install it on first use
+      # and put it on PATH for the rest of the job.
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # cache-bin caches ~/.cargo/bin and prunes it on restore, which on a
+          # self-hosted host means deleting the rustup the step above installed
+          # — and the shims every later step resolves through.
+          cache-bin: false
+
+      - name: Clippy
+        # The workspace denies the lints that matter (unwrap, panic, print,
+        # the perf group), so a warning here is a real finding.
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+  # Check Windows-specific code on the same tags that trigger release builds.
+  # `check` catches the platform-specific code; the release builds the installer.
+  #
+  # It has to run on Windows. Cross-checking from macOS gets as far as the
+  # audio and protocol crates — `cargo check -p rbl-deck -p rbl-core
+  # -p rbl-prolink -p rbl-pdb --target x86_64-pc-windows-msvc` passes — and
+  # then stops at rusqlite's vendored OpenSSL, whose build wants a
+  # Windows-native perl.
+  windows:
+    runs-on: [self-hosted, windows, x64]
+    steps:
+      # `shell: bash` resolves bash from PATH, and on a Windows desktop the
+      # WindowsApps WSL stub shadows Git's bash. WSL bash cannot see the
+      # runner's workspace under its Windows path, so a bash step would fail on
+      # a path that plainly exists. Nothing below uses bash today, but a step
+      # added later would inherit the trap, and this costs a second.
+      - name: Put Git Bash ahead of the WSL stub
+        shell: pwsh
+        run: |
+          $gitBin = "$env:ProgramFiles\Git\bin"
+          if (-not (Test-Path "$gitBin\bash.exe")) {
+            throw "Git for Windows is not installed at $gitBin - bash steps cannot run."
+          }
+          $gitBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+
+      - name: Ensure rustup
+        # Same reason as the Linux job. The desktop had a rustup-less Rust in
+        # ~/.cargo/bin, which is exactly the shape dtolnay/rust-toolchain
+        # cannot work with.
+        shell: pwsh
+        run: |
+          $cargoBin = "$env:USERPROFILE\.cargo\bin"
+          if (-not (Test-Path "$cargoBin\rustup.exe")) {
+            $init = "$env:TEMP\rustup-init.exe"
+            Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $init
+            & $init -y --no-modify-path --profile minimal --default-toolchain stable
+            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed with exit code $LASTEXITCODE" }
+          }
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - name: Ensure perl for the vendored OpenSSL
+        # rusqlite's `bundled-sqlcipher-vendored-openssl` builds OpenSSL from
+        # source, and OpenSSL is configured by a perl script. `cargo check`
+        # runs build scripts, so this is needed here and not only at release.
+        #
+        # Strawberry rather than the perl inside Git for Windows: OpenSSL's
+        # Configure emits msys-style paths under that one and the MSVC build
+        # then cannot find its own files. OPENSSL_SRC_PERL is read by
+        # openssl-src and points it at this interpreter specifically.
+        #
+        # nasm is deliberately not installed: openssl-src falls back to
+        # `no-asm` when it is absent, which is slower crypto in a build that
+        # only ever opens a local SQLite file.
+        shell: pwsh
+        run: |
+          $perl = "C:\Strawberry\perl\bin\perl.exe"
+          if (-not (Test-Path $perl)) {
+            winget install --id StrawberryPerl.StrawberryPerl --exact --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            if (-not (Test-Path $perl)) { throw "Strawberry Perl installed but $perl is missing" }
+          }
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+
+      - name: Keep the Windows target directory short
+        # The runner's workspace is ~95 characters deep, and openssl-src's
+        # copy of the OpenSSL tree underneath `target` pushes its deepest
+        # files past MAX_PATH, where they silently fail to copy and Configure
+        # reports them "missing". The release build hit this first; the
+        # `check` profile's paths are ~30 characters shorter and happened to
+        # fit, which is luck, not margin. Same directory as the release uses,
+        # and it doubles as this host's persistent build cache.
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_DIR=C:/rbl-target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # No rust-cache here: C:/rbl-target and ~/.cargo both persist on this
+      # host, and rust-cache's save step deletes ~/.cargo/registry/src —
+      # which left the release's cached build scripts linking against source
+      # trees that no longer existed (LNK1181). See release.yml.
+
+      - name: Check
+        run: cargo check --workspace --all-targets
+
+  # On the Mac, not the Linux host, because of one test. `e2e/frames.spec.ts`
+  # asserts that two playing decks cost under 3 ms more per frame than an idle
+  # window, and WebKit on the Linux VM is software-rendered: it measures 10-13 ms
+  # there, three times out of three, single-worker or not, while Chromium on the
+  # same box passes. Measured, not assumed — and the budget is not the thing to
+  # move, because macOS is where the shipped app runs on WKWebView, so this is
+  # also the WebKit the number is supposed to be about.
+  frontend:
+    runs-on: [self-hosted, macos, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+
+      # setup-node, never the host's node: the arc hosts have node under nvm or
+      # not at all, and the runner's environment does not see a shell profile.
+      - uses: pnpm/action-setup@v4
+        with:
+          # Its default is `~/setup-pnpm`, one fixed path per host. Two jobs on
+          # the same Mac — a CI run and a release, say — both installing there
+          # at once is how the first release's macOS build failed before it had
+          # done anything: `ENOTEMPTY: directory not empty` from the loser of
+          # the race. RUNNER_TEMP belongs to one runner, and each arc runner is
+          # its own throwaway.
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        # eslint.config.js encodes the frontend rules in CLAUDE.md: no polling,
+        # no deep clones of rows, invoke only in src/ipc, and no sorting or
+        # filtering a row array in a view.
+        run: pnpm lint
+
+      - name: Typecheck and build
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Bundle budget
+        # perf-budgets.json is enforced, not aspirational.
+        run: pnpm budget
+
+      - name: Generated files are up to date
+        # tokens.css and icons.tsx are generated and committed; a stale one
+        # means the source and the shipped file disagree.
+        run: |
+          pnpm tokens
+          pnpm icons
+          git diff --exit-code -- src/styles/tokens.css src/components/icons.tsx
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: End-to-end
+        run: pnpm e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   build-macos:
     # Serialize only the Macs: both may share a signing keychain search list.
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
+    needs: [rust, windows, frontend]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -76,6 +302,7 @@ jobs:
 
   build-other:
     # Windows and Linux build alongside the serialized Mac jobs.
+    needs: [rust, windows, frontend]
     strategy:
       fail-fast: false
       matrix:
