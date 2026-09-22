@@ -1189,9 +1189,9 @@ static EXPORT_CANCEL: std::sync::LazyLock<std::sync::Mutex<std::collections::Has
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 #[tauri::command]
-pub fn cancel_export(path: String) {
+pub fn cancel_export(path: &str) {
     if let Ok(jobs) = EXPORT_CANCEL.lock() {
-        if let Some(cancel) = jobs.get(&path) {
+        if let Some(cancel) = jobs.get(path) {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
