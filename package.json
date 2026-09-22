@@ -1,12 +1,12 @@
 {
   "name": "rbxport",
   "private": true,
-  "version": "0.9.1",
+  "version": "0.10.4",
   "license": "GPL-2.0-or-later",
   "packageManager": "pnpm@10.17.1",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/sync-version.mjs && tauri dev",
     "dev:web": "vite",
     "dev:mock": "cross-env RBL_MOCK=1 vite",
     "build": "tsc --noEmit && vite build",
