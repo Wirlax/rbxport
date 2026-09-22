@@ -2532,12 +2532,13 @@ test("the simple player is one strip, the way rekordbox draws it", async ({ page
   await expect(page.getByRole("complementary", { name: "Cue list" })).toHaveCount(0);
 
   // The measured geometry: a 59pt strip (1pt black over a 58pt row), the
-  // browser 3pt under it, the 40pt ring centred in a 58pt column, a 48pt
-  // sleeve 8pt on from it, and the overview 16.5pt tall from 30pt down.
+  // browser 4pt under it (a point wider than the capture measured, by
+  // request), the 40pt ring centred in a 58pt column, a 48pt sleeve 8pt on
+  // from it, and the overview 16.5pt tall from 30pt down.
   const box = await strip.boundingBox();
   expect(box?.height).toBeCloseTo(59, 0);
   const body = await page.getByTestId("body").boundingBox();
-  expect((body?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(62, 0);
+  expect((body?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(63, 0);
   const play = await strip.getByRole("button", { name: "Pause", exact: true }).boundingBox();
   expect(play?.width).toBeCloseTo(40, 0);
   expect((play?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(9, 0);
