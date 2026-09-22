@@ -61,6 +61,7 @@ jobs:
   # leg, frontend/macos with build-macos) — `needs` on the build jobs forces
   # them to run one after the other on that host instead of racing it.
   rust:
+    name: Rust tests
     runs-on: [self-hosted, linux, x64]
     env:
       # Tests must never be able to open the installed library read-write.
@@ -121,6 +122,7 @@ jobs:
   # then stops at rusqlite's vendored OpenSSL, whose build wants a
   # Windows-native perl.
   windows:
+    name: Win compile check
     runs-on: [self-hosted, windows, x64]
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
@@ -210,6 +212,7 @@ jobs:
   # move, because macOS is where the shipped app runs on WKWebView, so this is
   # also the WebKit the number is supposed to be about.
   frontend:
+    name: UI tests
     runs-on: [self-hosted, macos, arm64]
     steps:
       - uses: actions/checkout@v4
@@ -272,6 +275,7 @@ jobs:
           retention-days: 7
 
   build-macos:
+    name: Build ${{ matrix.platform }}
     # Serialize only the Macs: both may share a signing keychain search list.
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
@@ -285,10 +289,12 @@ jobs:
             target: aarch64-apple-darwin
             bundles: app,dmg
             slug: darwin-aarch64
+            platform: Mac ARM
           - host: [self-hosted, macos, arm64]
             target: x86_64-apple-darwin
             bundles: app,dmg
             slug: darwin-x86_64
+            platform: Mac Intel
     uses: ./.github/workflows/build-installer.yml
     secrets: inherit
     with:
@@ -301,6 +307,7 @@ jobs:
       preview: ${{ github.event_name != 'push' && inputs.release_tag == '' }}
 
   build-other:
+    name: Build ${{ matrix.platform }}
     # Windows and Linux build alongside the serialized Mac jobs.
     needs: [rust, windows, frontend]
     strategy:
@@ -311,10 +318,12 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
             slug: windows-x86_64
+            platform: Windows
           - host: [self-hosted, linux, x64]
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
             slug: linux-x86_64
+            platform: Linux
     uses: ./.github/workflows/build-installer.yml
     secrets: inherit
     with:
@@ -327,6 +336,7 @@ jobs:
       preview: ${{ github.event_name != 'push' && inputs.release_tag == '' }}
 
   publish:
+    name: Publish to R2
     # Publish tag pushes and explicitly requested rebuilds of existing tags.
     # A manual run without release_tag builds without publishing.
     if: github.event_name == 'push' || inputs.release_tag != ''

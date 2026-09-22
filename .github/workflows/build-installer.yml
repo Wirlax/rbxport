@@ -32,6 +32,7 @@ env:
 
 jobs:
   build:
+    name: Package
     runs-on: ${{ fromJSON(inputs.host) }}
     env:
       # `secrets` is not a context a step `if:` can read, so whether there is
@@ -575,4 +576,3 @@ jobs:
           foreach ($f in "msal_token_cache.json", "service_principal_entries.json", "msal_http_cache.json") {
             Remove-Item "$env:USERPROFILE\.azure\$f" -Force -ErrorAction SilentlyContinue
           }
-
