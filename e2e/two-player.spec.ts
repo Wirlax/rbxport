@@ -124,11 +124,8 @@ test("deck A is laid out the way the capture measures it", async ({ page }) => {
   expect(memory.y - controls.y).toBeCloseTo(await token(page, "--s-player-dual-control-pad"), 0);
   const q = await box(a.getByRole("button", { name: "Quantize" }));
   expect(right(deck) - right(q)).toBeCloseTo(await token(page, "--s-player-dual-right-inset"), 0);
-  const mt = await box(a.getByRole("button", { name: "Master tempo" }));
-  const rst = await box(a.getByRole("button", { name: "Reset tempo" }));
-  expect(mt.width).toBeCloseTo(await token(page, "--s-player-dual-tempo-btn-w"), 0);
-  expect(rst.x - right(mt)).toBeCloseTo(await token(page, "--s-player-dual-ctrl-gap"), 0);
-  expect(q.x - right(rst)).toBeCloseTo(await token(page, "--s-player-dual-ctrl-group-gap"), 0);
+  // MT and RST used to sit inline here; the deck tempo slider replaced them
+  // (0bd2668, 2026-09-20), reached from the BPM readout instead.
 
   // The detail takes everything under the control row to the deck's bottom
   // edge, the deck's full width: no zoom column, no inset, nothing under it.
@@ -149,15 +146,17 @@ test("the control row stands in for the pad row: no tabs, no pads, the capture's
     await expect(deck.getByRole("button", { name: "Hot cue A" })).toHaveCount(0);
     // The row, left to right as the capture has it.
     const row = deck.getByTestId("player-controls");
+    // The tempo step and MT/RST buttons that used to sit here moved into the
+    // deck tempo slider (0bd2668, 2026-09-20), behind the BPM readout.
     await expect(row.getByRole("button")).toHaveText([
-      "", "", "", "MEMORY", "AU", "MA", "‹", "›", "−", "+", "", "", "MT", "RST", "Q",
+      "", "", "", "MEMORY", "AU", "MA", "‹", "›", "", "", "Q",
     ]);
     await expect(row.getByRole("button", { name: "Loop in" })).toBeDisabled();
     await expect(row.getByRole("button", { name: "Loop out" })).toBeDisabled();
-    await expect(row.getByRole("button", { name: "Shift the grid earlier" })).toBeDisabled();
+    // Both mock rows this loads are analysed, with a grid to edit.
+    await expect(row.getByRole("button", { name: "Shift the grid earlier" })).toBeEnabled();
     await expect(row.getByRole("button", { name: "Set memory cue" })).toBeEnabled();
-    await expect(row.getByRole("button", { name: "Master tempo" })).toBeEnabled();
-    await expect(row.getByTestId("player-bpm")).not.toHaveText("");
+    await expect(deck.getByTestId("player-bpm")).not.toHaveText("");
   }
   // The buttons are ordered left to right on the page as well as in the DOM.
   const xs: number[] = [];
@@ -210,7 +209,8 @@ test("deck B reads the other way up, and its detail meets deck A's at the centre
   // Deck B's detail is the one drawn upside down; its overlays hang from the
   // bottom of the band rather than the top.
   const bars = b.getByTestId("player-bars");
-  await expect(bars).toHaveCSS("bottom", "0px");
+  // 4pt, not flush against the bottom edge when flipped (0bd2668, 2026-09-20).
+  await expect(bars).toHaveCSS("bottom", "4px");
   const beat = b.getByTestId("player-detail").locator("span[style*='left']").first();
   const beatBox = await box(beat);
   const beatBoxA = await box(a.getByTestId("player-detail").locator("span[style*='left']").first());
