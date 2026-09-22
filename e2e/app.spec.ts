@@ -612,7 +612,7 @@ test("a track loads into the player on a double-click, not a click", async ({ pa
 test("editing a comment does not also load the track", async ({ page }) => {
   // The comment cell opens its editor on a double-click, which would otherwise
   // reach the row underneath and start playback.
-  await page.goto("/");
+  await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.locator('[role="gridcell"][data-col="comment"]').first().dblclick();
   await expect(page.locator('[role="gridcell"][data-col="comment"] input')).toBeVisible();
@@ -1054,7 +1054,7 @@ test("only the playlist under a dragged track lights up, and it goes dark when t
 });
 
 test("a track can be rated by clicking its stars", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 
   // Not the first row: it sits under the sticky column header.
@@ -1066,7 +1066,7 @@ test("a track can be rated by clicking its stars", async ({ page }) => {
 
 test("clicking the star already set clears the rating", async ({ page }) => {
   // The only way back to no rating, and how rekordbox behaves.
-  await page.goto("/");
+  await page.goto("/?writable=1");
   const stars = page.locator('[data-col="rating"] [role="radiogroup"]').nth(3);
   // The mock's ratings are deterministic but not zero, so pick a star the row
   // is not already on: clicking the current one clears rather than sets.
@@ -1084,7 +1084,7 @@ test("clicking the star already set clears the rating", async ({ page }) => {
 });
 
 test("a comment is edited in place, and Escape abandons the edit", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?writable=1");
   const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
   const before = await cell.innerText();
 
@@ -1098,7 +1098,7 @@ test("a comment is edited in place, and Escape abandons the edit", async ({ page
 });
 
 test("a comment commits on Enter", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?writable=1");
   const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
   await cell.dblclick();
   const field = page.getByRole("textbox", { name: "Comment" });
@@ -1307,7 +1307,7 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
   // A write makes the backend re-read the library; waiting for that before the
   // star fills in feels broken.
-  await page.goto("/");
+  await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 
   const stars = page.locator('[data-col="rating"] [role="radiogroup"]').nth(3);
@@ -1316,7 +1316,7 @@ test("a rating appears at once rather than waiting for the reload", async ({ pag
 });
 
 test("an edited comment shows before the backend catches up", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?writable=1");
   const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
   await cell.dblclick();
   const field = page.getByRole("textbox", { name: "Comment" });
