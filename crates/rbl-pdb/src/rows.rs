@@ -15,6 +15,7 @@ pub const TRACK_STRINGS: usize = 21;
 /// Slot numbers within a track row's string block.
 pub mod slot {
     pub const ISRC: usize = 0;
+    pub const HOT_CUE_AUTO_LOAD: usize = 7;
     pub const DATE_ADDED: usize = 10;
     pub const RELEASE_DATE: usize = 11;
     pub const MIX_NAME: usize = 12;
@@ -29,6 +30,7 @@ pub mod slot {
 /// Everything needed to write one track row.
 #[derive(Debug, Clone, Default)]
 pub struct TrackInput {
+    pub hot_cue_auto_load: bool,
     pub id: u32,
     pub artist_id: u32,
     pub album_id: u32,
@@ -88,6 +90,7 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
         }
     };
     set(&mut strings, slot::ISRC, &input.isrc);
+    set(&mut strings, slot::HOT_CUE_AUTO_LOAD, if input.hot_cue_auto_load { "ON" } else { "" });
     set(&mut strings, slot::DATE_ADDED, &input.date_added);
     set(&mut strings, slot::RELEASE_DATE, &input.release_date);
     set(&mut strings, slot::MIX_NAME, &input.mix_name);
@@ -101,7 +104,12 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     let block_len = TRACK_STRINGS * 2;
     let mut row = vec![0_u8; TRACK_FIXED_LEN + block_len];
 
-    put_u2(&mut row, 0x02, 0); // index_shift, assigned by the page writer
+    // These are part of the record layout, not optional metadata. A zero
+    // subtype makes the CDJ-3000 ignore the tracks; zero trailer words leave
+    // its string columns misread. Pinned against rekordbox's MP3 export and
+    // CDJ-3000 firmware browse/load tests (docs/audits/usb-track-records.md).
+    put_u2(&mut row, 0x00, 0x24); // track record with 16-bit string offsets
+    put_u2(&mut row, 0x02, 0); // index_shift
     put_u4(&mut row, 0x04, 0); // bitmask
     put_u4(&mut row, 0x08, input.sample_rate);
     put_u4(&mut row, 0x0c, 0); // composer_id
@@ -123,12 +131,15 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     put_u2(&mut row, 0x50, input.year);
     put_u2(&mut row, 0x52, input.sample_depth);
     put_u2(&mut row, 0x54, input.duration_sec);
+    put_u2(&mut row, 0x56, 0x29);
     if let Some(b) = row.get_mut(0x58) {
         *b = input.color_id;
     }
     if let Some(b) = row.get_mut(0x59) {
         *b = input.rating;
     }
+    put_u2(&mut row, 0x5a, audio_file_type(&input.filename));
+    put_u2(&mut row, 0x5c, 3);
 
     // Append each string, recording where it landed.
     let mut offsets = [0_u16; TRACK_STRINGS];
@@ -144,6 +155,23 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     }
 
     row
+}
+
+/// `DeviceSQL`'s audio format code, from the exported filename (which can
+/// differ from the source after compatibility conversion).
+pub fn audio_file_type(filename: &str) -> u16 {
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    match extension.to_ascii_lowercase().as_str() {
+        "mp3" => 1,
+        "m4a" | "mp4" | "aac" => 4,
+        "flac" => 5,
+        "wav" => 11,
+        "aif" | "aiff" => 12,
+        _ => 0,
+    }
 }
 
 /// `genres` and `labels`: u4 id then an inline string.

@@ -72,6 +72,8 @@ pub fn db_id(conn: &Connection) -> Result<u64> {
 /// What one exported track needs that the index does not hold.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrackExtras {
+    pub metadata: rbl_core::ExportMetadata,
+    pub cues: Vec<rbl_anlz::cues::ExportCue>,
     /// Other places the file may be, after `FolderPath`: the local copy of a
     /// cloud-synced track (`rb_LocalFolderPath`) and where it was imported
     /// from (`OrgFolderPath`). Empty entries are left out.
@@ -91,21 +93,61 @@ pub fn track_extras(conn: &Connection, ids: &[String]) -> Result<HashMap<String,
         let marks = vec!["?"; chunk.len()].join(",");
         let params = rusqlite::params_from_iter(chunk.iter());
         let mut stmt = conn.prepare(&format!(
-            "SELECT ID, rb_LocalFolderPath, OrgFolderPath FROM djmdContent WHERE ID IN ({marks})"
+            "SELECT ID, rb_LocalFolderPath, OrgFolderPath, TrackNo, DiscNo, BitDepth, DJPlayCount, Analysed, HotCueAutoLoad, DateCreated, ISRC FROM djmdContent WHERE ID IN ({marks})"
         ))?;
         let rows = stmt.query_map(params, |r| {
             Ok((
                 r.get::<_, Option<String>>(0)?.unwrap_or_default(),
                 r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                rbl_core::ExportMetadata {
+                    track_number: r.get::<_, Option<u32>>(3)?.unwrap_or(0),
+                    disc_number: r.get::<_, Option<u16>>(4)?.unwrap_or(0),
+                    bit_depth: r.get::<_, Option<u16>>(5)?.unwrap_or(0),
+                    play_count: r.get::<_, Option<u32>>(6)?.unwrap_or(0),
+                    analysed: r.get::<_, Option<u32>>(7)?.unwrap_or(0),
+                    hot_cue_auto_load: r.get::<_, Option<String>>(8)?.is_some_and(|v| v == "on"),
+                    date_created: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                    isrc: r.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                },
             ))
         })?;
-        for (id, local, org) in rows.filter_map(std::result::Result::ok) {
+        for row in rows {
+            let (id, local, org, metadata) = row?;
             let extras = out.entry(id).or_default();
+            extras.metadata = metadata;
             for path in [local, org] {
                 if !path.is_empty() && !extras.alternate_paths.contains(&path) {
                     extras.alternate_paths.push(path);
                 }
+            }
+        }
+        if has_table(conn, "djmdCue") {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT ContentID, Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment, ActiveLoop, BeatLoopSize
+                 FROM djmdCue WHERE rb_local_deleted=0 AND Kind IN (0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17)
+                 AND ContentID IN ({marks}) ORDER BY rowid DESC"
+            ))?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+                let kind = r.get::<_, Option<u8>>(1)?.unwrap_or(0);
+                let color = r.get::<_, Option<i64>>(4)?.unwrap_or(255);
+                let end = r.get::<_, Option<i64>>(3)?.unwrap_or(-1);
+                let beats = r.get::<_, Option<u32>>(8)?.unwrap_or(0);
+                Ok((r.get::<_, String>(0)?, rbl_anlz::cues::ExportCue {
+                    kind,
+                    time_ms: r.get::<_, Option<u32>>(2)?.unwrap_or(0),
+                    loop_time_ms: u32::try_from(end).ok(),
+                    color_id: if kind == 0 { u8::try_from(color).ok().filter(|c| *c != 255).unwrap_or(0) } else {0},
+                    color_code: r.get::<_, Option<u8>>(5)?.unwrap_or(0),
+                    comment: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    active_loop: r.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
+                    loop_numerator: u16::try_from(beats >> 16).unwrap_or(0),
+                    loop_denominator: u16::try_from(beats & 0xffff).unwrap_or(0),
+                }))
+            })?;
+            for row in rows {
+                let (id, cue) = row?;
+                out.entry(id).or_default().cues.push(cue);
             }
         }
         if tagged {

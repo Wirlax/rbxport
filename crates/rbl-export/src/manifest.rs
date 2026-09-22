@@ -62,6 +62,11 @@ pub struct ManifestPlaylist {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestTrack {
     #[serde(default)]
+    pub analysis_hashes: std::collections::BTreeMap<String, u64>,
+    /// Companion files required by the completed export.
+    #[serde(default)]
+    pub analysis_extensions: Vec<String>,
+    #[serde(default)]
     pub audio_hash: u64,
     /// The id a player sees. Kept stable across syncs so a deck's own caches,
     /// and any playlist that names it, still point at the same track.
@@ -192,6 +197,8 @@ mod tests {
             version: MANIFEST_VERSION,
             written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
             tracks: vec![ManifestTrack {
+                analysis_hashes: std::collections::BTreeMap::new(),
+                analysis_extensions: vec!["DAT".into()],
                 audio_hash: 0,
                 export_id: 7,
                 library_id: 42,

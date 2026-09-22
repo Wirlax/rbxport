@@ -6,6 +6,31 @@
 )]
 use rbl_export::{export_full, verify, Manifest, SourcePlaylist, SourceTrack, SyncSource};
 use std::path::Path;
+
+#[test]
+fn stopping_export_preserves_the_published_usb_library() {
+    for stop_at in [3, 4] {
+        let sources = tempfile::tempdir().unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let tracks = vec![track(sources.path(), 1), track(sources.path(), 2)];
+        sync(usb.path(), &tracks[..1], &[playlist(10, &[0])]).unwrap();
+        let db = rbl_export::export_root(usb.path()).join("rekordbox/export.pdb");
+        let before = std::fs::read(&db).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let result = rbl_export::export_cancellable(
+            usb.path(), &tracks, &[playlist(10, &[0, 1])], &[],
+            &rbl_export::ExportOptions { sync: Some(&SyncSource { db_id: 123, tree: vec![], automatic: false }), ..Default::default() }, &mut |_| {}, &|| {
+                calls.set(calls.get() + 1);
+                calls.get() >= stop_at
+            },
+        );
+        assert!(matches!(result, Err(rbl_export::ExportError::Cancelled)), "{result:?}");
+        assert_eq!(std::fs::read(&db).unwrap(), before);
+        let check = verify(usb.path()).unwrap();
+        assert!(check.is_ok());
+        assert_eq!(check.tracks, 1);
+    }
+}
 fn track(root: &Path, id: u64) -> SourceTrack {
     let path = root.join(format!("{id}.mp3"));
     std::fs::write(&path, vec![id as u8; 128]).unwrap();

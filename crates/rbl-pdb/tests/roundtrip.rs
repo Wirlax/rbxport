@@ -171,6 +171,23 @@ use rbl_pdb::rows::{
 };
 
 #[test]
+fn track_record_control_words_match_the_player_accepted_layout() {
+    // Independent byte assertions: the semantic parser ignores these words
+    // and previously round-tripped records that the CDJ displayed as empty.
+    for (filename, format) in [
+        ("track.mp3", 1_u16), ("TRACK.MP3", 1), ("track.m4a", 4),
+        ("track.aac", 4), ("track.flac", 5), ("track.wav", 11),
+        ("track.aif", 12), ("track.aiff", 12),
+    ] {
+        let row = track_row(&TrackInput { filename: filename.into(), ..Default::default() });
+        assert_eq!(&row[..2], &[0x24, 0], "{filename}: track subtype");
+        assert_eq!(&row[0x56..0x58], &[0x29, 0], "{filename}: record trailer");
+        assert_eq!(&row[0x5a..0x5c], &format.to_le_bytes(), "{filename}: playback format");
+        assert_eq!(&row[0x5c..0x5e], &[3, 0], "{filename}: record trailer");
+    }
+}
+
+#[test]
 fn a_written_track_reads_back_field_for_field() {
     let input = TrackInput {
         id: 42,

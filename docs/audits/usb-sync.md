@@ -141,3 +141,17 @@ watcher were closed at the end.
 - Known parity differences include analysis-directory naming, the cloud
   credential file, and My Tag master-ID derivation. A failed full comparison
   must not be reported as a parity pass merely because these are known.
+
+### 2026-09-22: empty-playlist fix
+
+The player failure above was traced to zeroed track-record control words.
+The corrected writer now browses all 61 playlist entries and loads/plays two
+tracks in the firmware emulator. See [usb-track-records.md](usb-track-records.md)
+for the isolated tests, USB B repair, and remaining waveform limitations.
+
+### Analysis repair, 2026-09-22
+
+The waveform and cue failures above are repaired and rechecked on USB B.
+See [the analysis export audit](usb-analysis-export.md) for the cause,
+asset counts, reference comparisons and firmware validation. Historical
+failures above describe the export before this repair.

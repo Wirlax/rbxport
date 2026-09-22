@@ -161,6 +161,8 @@ fn annotated(name: &str) -> String {
 /// Ids are the stick-local ones an export assigns, not rekordbox's.
 #[derive(Debug, Clone, Default)]
 pub struct Track {
+    pub metadata: rbl_core::ExportMetadata,
+    pub file_type: i64,
     pub year: i64,
     pub release_date: String,
     pub bitrate: i64,
@@ -356,6 +358,11 @@ impl Builder {
                 track.year, track.release_date, track.bitrate, track.sample_rate,
             ],
         )?;
+        self.conn.execute(
+            "UPDATE content SET discNo=?2,bitDepth=?3,djPlayCount=?4,analysedBits=?5,isHotCueAutoLoadOn=?6,dateCreated=?7,isrc=?8,fileType=?9 WHERE content_id=?1",
+            params![track.content_id,track.metadata.disc_number,track.metadata.bit_depth,track.metadata.play_count,
+                track.metadata.analysed & !64,track.metadata.hot_cue_auto_load,track.metadata.date_created,track.metadata.isrc,track.file_type],
+        )?;
         self.tracks += 1;
         Ok(())
     }
@@ -436,6 +443,21 @@ impl Builder {
                 let values = (0..columns.len()).map(|i| row.get::<_,rusqlite::types::Value>(i)).collect::<std::result::Result<Vec<_>,_>>()?;
                 self.conn.execute(&insert, rusqlite::params_from_iter(values))?;
             }
+        }
+        Ok(())
+    }
+
+    /// Replace this selected track's cues after carrying device-only rows.
+    pub fn replace_cues(&mut self, content: i64, cues: &[rbl_anlz::cues::ExportCue]) -> Result<()> {
+        self.conn.execute("DELETE FROM cue WHERE content_id=?1", [content])?;
+        for cue in cues {
+            self.conn.execute(
+                "INSERT INTO cue (content_id,kind,colorTableIndex,cueComment,isActiveLoop,beatLoopNumerator,beatLoopDenominator,inUsec,outUsec,in150FramePerSec,out150FramePerSec)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                params![content,cue.kind,cue.color_code,cue.comment,cue.active_loop,cue.loop_numerator,cue.loop_denominator,
+                    i64::from(cue.time_ms)*1000,cue.loop_time_ms.map_or(-1, |v| i64::from(v)*1000),
+                    i64::from(cue.time_ms)*150/1000,cue.loop_time_ms.map_or(-1, |v| i64::from(v)*150/1000)],
+            )?;
         }
         Ok(())
     }

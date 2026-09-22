@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 tempfile = "3"
+rbl-anlz = { path = "../rbl-anlz" }
 rbl-core = { path = "../rbl-core" }
 thiserror = { workspace = true }
 tracing = { workspace = true }

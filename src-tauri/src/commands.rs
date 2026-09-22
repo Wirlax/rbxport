@@ -1159,7 +1159,10 @@ fn source_track(
         .filter(|p| !p.is_empty())
         .map(|p| share.join(p.trim_start_matches(['/', '\\'])));
     Ok(rbl_export::SourceTrack {
-        device: None,        // The content id is how a second export to the same stick
+        cues: Some(extra.cues.clone()),
+        metadata: extra.metadata.clone(),
+        device: None,
+        // The content id is how a second export to the same stick
         // recognises a track it has already written.
         id: library.ids.get(i).copied().unwrap_or(0),
         source_path: source_audio(library.folder_path.get(i), &extra.alternate_paths),

@@ -366,6 +366,22 @@ impl crate::Anlz {
     }
 }
 
+
+impl Section {
+    /// Mask a plaintext phrase section as rekordbox does on USB export.
+    /// Existing masked bytes and all unknown fields are preserved.
+    #[must_use]
+    pub fn with_export_phrase_mask(&self) -> Self {
+        if self.tag != FourCc::new(b"PSSI") { return self.clone(); }
+        let mut raw = self.header.clone();
+        raw.extend_from_slice(&self.payload);
+        if raw.len() < 8 || Mood::from_u16(be16(&raw, 6)).is_none() { return self.clone(); }
+        let count = be16(&raw, 4);
+        unmask(&mut raw[6..], count);
+        Self::new(b"PSSI", raw[..self.header.len()].to_vec(), raw[self.header.len()..].to_vec())
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod edit_tests {

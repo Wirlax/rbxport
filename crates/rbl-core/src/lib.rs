@@ -53,6 +53,20 @@ impl core::fmt::Display for FourCc {
     }
 }
 
+
+/// Library metadata needed by both USB database formats beyond the browse index.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExportMetadata {
+    pub track_number: u32,
+    pub disc_number: u16,
+    pub bit_depth: u16,
+    pub play_count: u32,
+    pub analysed: u32,
+    pub hot_cue_auto_load: bool,
+    pub date_created: String,
+    pub isrc: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

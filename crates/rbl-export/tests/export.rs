@@ -84,6 +84,40 @@ fn metadata_survives_the_round_trip() {
 }
 
 #[test]
+fn verification_rejects_player_incompatible_records_and_sync_repairs_them() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut t = track(src.path(), 1, "Kept", "Artist");
+    t.id = 1;
+    let tracks = vec![t];
+    let playlists = vec![SourcePlaylist {
+        id: 1, name: "Playlist".into(), track_indices: vec![0], ..Default::default()
+    }];
+    export(dest.path(), &tracks, &playlists).unwrap();
+    let path = dest.path().join("PIONEER/rekordbox/export.pdb");
+    for (field, message) in [(0, "record subtype"), (0x56, "record trailer"), (0x5a, "audio format"), (0x5c, "record trailer")] {
+        let mut bytes = std::fs::read(&path).unwrap();
+        let parsed = rbl_pdb::Pdb::parse(&bytes).unwrap();
+        let offset = parsed.rows(parsed.table(rbl_pdb::PageType::Tracks).unwrap())[0].offset;
+        bytes[offset + field..offset + field + 2].fill(0);
+        std::fs::write(&path, bytes).unwrap();
+        let bad = verify(dest.path()).unwrap();
+        assert_eq!(bad.tracks, 1, "semantic read-back still sees the track");
+        assert_eq!(bad.playlist_entries, 1);
+        assert!(!bad.is_ok());
+        assert!(bad.errors.iter().any(|e| e.contains(message)), "{:?}", bad.errors);
+
+        // Existing broken exports must remain readable for reconciliation,
+        // so a normal re-sync can repair them without clearing the stick.
+        export(dest.path(), &tracks, &playlists).unwrap();
+        let repaired = verify(dest.path()).unwrap();
+        assert!(repaired.is_ok(), "{:?}", repaired.errors);
+        assert_eq!(repaired.tracks, 1);
+        assert_eq!(repaired.playlist_entries, 1);
+    }
+}
+
+#[test]
 fn every_export_carries_rekordboxs_eight_colours() {
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
@@ -516,6 +550,9 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
         let pdb_bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
         let pdb = rbl_pdb::Pdb::parse(&pdb_bytes).unwrap();
         let rows = pdb.track_rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap());
+        let raw = pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap())[0];
+        assert_eq!(pdb.u2_at(raw, 0x5a), match ext { "wav" => 11, "mp3" => 1, "flac" => 5, _ => unreachable!() },
+            "the CDJ format must describe the exported audio, including conversion");
         assert_eq!(rows[0].file_path, entry.audio);
         assert_eq!(rows[0].sample_rate, if compatibility.is_some() { 44100 } else { 96000 });
         assert_eq!(rows[0].bitrate, bitrate);
@@ -565,4 +602,89 @@ fn compatibility_does_not_reencode_already_compatible_audio() {
     assert!(manifest.tracks[0].conversion.is_empty());
     assert!(manifest.tracks[0].audio.ends_with(".wav"));
     assert_eq!(std::fs::read(dest.path().join(manifest.tracks[0].audio.trim_start_matches('/'))).unwrap(), original);
+}
+
+#[test]
+fn exports_cues_metadata_and_all_companions_and_repairs_a_missing_ext() {
+    use rbl_anlz::cues::ExportCue;
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut t = track(src.path(), 1, "Complete", "Artist");
+    t.id = 11;
+    t.metadata = rbl_core::ExportMetadata {
+        track_number: 7, disc_number: 2, bit_depth: 24, play_count: 42,
+        analysed: 105, hot_cue_auto_load: true, ..Default::default()
+    };
+    t.cues = Some(vec![
+        ExportCue { kind: 1, time_ms: 1000, color_code: 46, comment: "Drop".into(), ..Default::default() },
+        ExportCue { kind: 5, time_ms: 2000, ..Default::default() },
+        ExportCue { time_ms: 3000, loop_time_ms: Some(5000), ..Default::default() },
+    ]);
+    let dat = rbl_anlz::AnlzBuilder::new().path("?/library.mp3")
+        .beat_grid(&[rbl_anlz::Beat {beat_number:1,tempo_x100:12800,time_ms:0}])
+        .raw(rbl_core::FourCc::new(b"PWAV"), vec![0;8], vec![1,2,3]).finish();
+    let ext = rbl_anlz::AnlzBuilder::new().path("?/library.mp3")
+        .raw(rbl_core::FourCc::new(b"PWV3"), vec![0;12], vec![4,5,6]).finish();
+    t.analysis = vec![("DAT".into(),dat),("EXT".into(),ext),("2EX".into(),rbl_anlz::AnlzBuilder::new().path("?/library.mp3").finish())];
+    export(dest.path(), &[t.clone()], &[]).unwrap();
+    let check = verify(dest.path()).unwrap();
+    assert!(check.is_ok(), "{:?}", check.errors);
+    assert_eq!((check.overview_waveforms,check.detail_waveforms,check.beat_grids,check.hot_cues,check.memory_cues),(1,1,1,2,1));
+    let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
+    let saved = &manifest.tracks[0];
+    let ext = dest.path().join(saved.anlz_dir.trim_start_matches('/')).join("ANLZ0000.EXT");
+    let parsed = rbl_anlz::Anlz::read(&ext).unwrap();
+    assert_eq!(parsed.path().as_deref(),Some(saved.audio.as_str()));
+    assert_eq!(parsed.waveform(b"PWV3").unwrap().1, &[4,5,6]);
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&dest.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let metadata: (i64,i64,i64,i64,i64,i64) = db.connection().query_row("SELECT trackNo,discNo,bitDepth,djPlayCount,analysedBits,isHotCueAutoLoadOn FROM content",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).unwrap();
+    assert_eq!(metadata,(7,2,24,42,41,1));
+    let bytes = std::fs::read(dest.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
+    let pdb = rbl_pdb::Pdb::parse(&bytes).unwrap();
+    let row = pdb.rows(pdb.table(rbl_pdb::PageType::Tracks).unwrap())[0];
+    assert_eq!(pdb.string_ref(row, 0x5e + 7 * 2), "ON");
+    let count:i64 = db.connection().query_row("SELECT count(*) FROM cue",[],|r|r.get(0)).unwrap();
+    assert_eq!(count,3);
+    drop(db);
+    let mut corrupted = bytes;
+    let empty_string = corrupted[row.offset + 0x5e..row.offset + 0x60].to_vec();
+    corrupted[row.offset + 0x5e + 14..row.offset + 0x60 + 14].copy_from_slice(&empty_string);
+    std::fs::write(dest.path().join("PIONEER/rekordbox/export.pdb"), corrupted).unwrap();
+    assert!(verify(dest.path()).unwrap().errors.iter().any(|e| e.contains("hot-cue auto-load disagrees")));
+    export(dest.path(), &[t.clone()], &[]).unwrap();
+    assert!(verify(dest.path()).unwrap().is_ok());
+    std::fs::remove_file(&ext).unwrap();
+    assert!(verify(dest.path()).unwrap().errors.iter().any(|e|e.contains("Missing exported analysis companion")));
+    export(dest.path(), &[t.clone()], &[]).unwrap();
+    assert!(verify(dest.path()).unwrap().is_ok());
+    t.cues = Some(Vec::new());
+    t.metadata.hot_cue_auto_load = false;
+    export(dest.path(), &[t], &[]).unwrap();
+    let check = verify(dest.path()).unwrap();
+    assert!(check.is_ok(), "{:?}", check.errors);
+    assert_eq!((check.hot_cues,check.memory_cues),(0,0));
+}
+
+#[test]
+fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut tracks = Vec::new();
+    for number in [890,7142] {
+        let mut t = track(src.path(), number, "Collision", "Artist");
+        let path = src.path().join(format!("collision-{number}.mp3"));
+        std::fs::rename(&t.source_path, &path).unwrap();
+        t.source_path = path;
+        t.id = u64::from(number);
+        tracks.push(t);
+    }
+    export(dest.path(), &tracks, &[]).unwrap();
+    let before = rbl_export::Manifest::load(dest.path()).unwrap();
+    assert_ne!(before.tracks[0].anlz_dir,before.tracks[1].anlz_dir);
+    assert!(before.tracks[0].anlz_dir.ends_with("0001C095"));
+    let report = export(dest.path(), &tracks, &[]).unwrap();
+    assert_eq!(report.analysis_files,0);
+    let after = rbl_export::Manifest::load(dest.path()).unwrap();
+    assert_eq!(before.tracks[1].audio,after.tracks[1].audio);
+    assert!(verify(dest.path()).unwrap().is_ok());
 }

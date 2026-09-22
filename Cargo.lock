@@ -3768,6 +3768,7 @@ name = "rbl-onelibrary"
 version = "0.10.4"
 dependencies = [
  "flate2",
+ "rbl-anlz",
  "rbl-core",
  "rusqlite",
  "tempfile",

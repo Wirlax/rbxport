@@ -258,7 +258,8 @@ fn a_file_deleted_off_the_stick_is_put_back() {
 
     let audio = dest.path().join("Contents/TRIODE/Single/source-1.mp3");
     std::fs::remove_file(&audio).unwrap();
-    let anlz = dest.path().join("PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT");
+    let saved = rbl_export::Manifest::load(dest.path()).unwrap();
+    let anlz = dest.path().join(saved.tracks[0].anlz_dir.trim_start_matches('/')).join("ANLZ0000.DAT");
     std::fs::remove_file(&anlz).unwrap();
 
     // The manifest still says both are there. Trusting it would leave a stick

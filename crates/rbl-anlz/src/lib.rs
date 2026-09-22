@@ -14,6 +14,7 @@
 //! derived from those. Re-emitting a parsed file therefore reproduces it byte
 //! for byte, including tags we cannot author ourselves.
 
+pub mod cues;
 pub mod encode;
 pub mod grid;
 pub mod phrase;

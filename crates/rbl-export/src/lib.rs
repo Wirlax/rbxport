@@ -33,6 +33,8 @@ use rbl_pdb::rows::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
+    #[error("Export stopped.")]
+    Cancelled,
     #[error("the destination is not a directory: {0}")]
     NotADirectory(PathBuf),
     #[error("the device went away during the export")]
@@ -55,6 +57,9 @@ const PAGE_SIZE: usize = 4096;
 /// One track to export.
 #[derive(Debug, Clone, Default)]
 pub struct SourceTrack {
+    pub metadata: rbl_core::ExportMetadata,
+    /// None preserves analysis cue lists; Some replaces them with library cues.
+    pub cues: Option<Vec<rbl_anlz::cues::ExportCue>>,
     /// Existing device identity, supplied by reconciliation rather than callers.
     pub device: Option<DeviceTrack>,
     /// `djmdContent.ID`, or 0 for a file that is not in the library. This is
@@ -256,6 +261,16 @@ struct Layout {
     /// The analysis directory, relative to the stick root.
     anlz_dir: String,
     file_name: String,
+}
+
+/// CDJ-3000 firmware 3.20, `sub_12f3f28`: UTF-16 path hash and shard.
+/// Matches all 61 independently exported rekordbox reference tracks.
+fn analysis_directory(audio: &str, root: &str) -> String {
+    let hash = audio.encode_utf16().take_while(|c| *c != 0)
+        .fold(0_u32, |h, c| h.wrapping_mul(0x34f5_501d).wrapping_add(u32::from(c) * 0x93b6)) % 0x0003_0d43;
+    let shard = [0, 2, 6, 7, 9, 13, 16].iter().enumerate()
+        .fold(0_u32, |shard, (i, bit)| shard | ((hash >> bit) & 1) << i);
+    format!("/{root}/USBANLZ/P{shard:03X}/{hash:08X}")
 }
 
 fn layout(track: &SourceTrack, export_id: u32) -> Layout {
@@ -556,6 +571,22 @@ pub fn export_with_options(
     options: &ExportOptions<'_>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
+    export_cancellable(destination, tracks, playlists, my_tags, options, progress, &|| false)
+}
+
+/// Cancellation is checked between tracks and before publishing staged files.
+/// Once publication starts it finishes atomically rather than leaving a partial library.
+#[allow(clippy::too_many_lines, reason = "ordered export publication pipeline")]
+pub fn export_cancellable(
+    destination: &Path,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    my_tags: &[SourceMyTag],
+    options: &ExportOptions<'_>,
+    progress: &mut dyn FnMut(&ExportProgress),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ExportReport> {
+    if cancelled() { return Err(ExportError::Cancelled); }
     let &ExportOptions { defaults, sync, compatibility } = options;
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -636,11 +667,15 @@ pub fn export_with_options(
     }
     let mut deletions = Vec::new();
     let mut written_audio_paths = BTreeSet::new();
+    let mut written_analysis_paths: BTreeSet<String> = tracks.iter()
+        .filter_map(|t| t.device.as_ref().filter(|d| d.preserve).map(|d| path_key(&d.analysis_dir)))
+        .collect();
     for (index, track) in tracks.iter().enumerate() {
         // Reported before the track is dealt with, so a skip reports too:
         // whatever happens below, the count moves on by one.
         publication.check_root()?;
         progress(&ExportProgress { done: index, total: tracks.len(), title: track.title.clone() });
+        if cancelled() { return Err(ExportError::Cancelled); }
         let export_id = ids.get(index).copied().unwrap_or(0);
         let mut place = layouts[index].clone();
         let source = track.source_path.to_string_lossy().into_owned();
@@ -674,6 +709,21 @@ pub fn export_with_options(
             let parent = place.audio.rsplit_once('/').map_or("/Contents", |(parent, _)| parent);
             place.audio = format!("{parent}/{name}");
             place.file_name = name;
+        }
+        if !track.device.as_ref().is_some_and(|d| d.preserve) {
+            place.anlz_dir = analysis_directory(&place.audio, root_name);
+            let original = PathBuf::from(&place.audio);
+            let stem = original.file_stem().unwrap_or_default().to_string_lossy();
+            let ext = original.extension().map_or(String::new(), |e| format!(".{}", e.to_string_lossy()));
+            let parent = original.parent().unwrap_or(Path::new("/Contents"));
+            let mut suffix = 0_u32;
+            while !written_analysis_paths.insert(path_key(&place.anlz_dir)) {
+                suffix += 1;
+                if suffix > 200_003 { return Err(ExportError::Conflict("Analysis directory space exhausted".into())); }
+                place.file_name = format!("{stem}-{export_id}-{suffix}{ext}");
+                place.audio = format!("{}/{}", parent.display(), place.file_name);
+                place.anlz_dir = analysis_directory(&place.audio, root_name);
+            }
         }
         if !written_audio_paths.insert(path_key(&place.audio)) {
             return Err(ExportError::Conflict(format!("Conversion would create duplicate audio path: {}", place.audio)));
@@ -726,19 +776,26 @@ pub fn export_with_options(
             }
         }
 
-        let converted_analysis = if conversion.is_some() {
+        let exported_analysis = if track.device.as_ref().is_some_and(|d| d.preserve) { None } else {
             Some(track.analysis.iter().map(|(extension, bytes)| {
                 let mut parsed = rbl_anlz::parse(bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
                 let path_bytes = rbl_anlz::AnlzBuilder::new().path(&place.audio).finish();
                 let path = rbl_anlz::parse(&path_bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
                 parsed.sections.retain(|s| s.as_path().is_none());
                 parsed.sections.splice(0..0, path.sections);
+                parsed.sections = parsed.sections.iter().map(rbl_anlz::Section::with_export_phrase_mask).collect();
+                if let Some(cues) = &track.cues {
+                    if extension == "DAT" || extension == "EXT" {
+                        parsed.sections.retain(|s| !s.is_cue_list());
+                        parsed.sections.extend(rbl_anlz::cues::sections(cues, extension == "EXT"));
+                    }
+                }
                 Ok::<_, std::io::Error>((extension.clone(), parsed.to_bytes()))
             }).collect::<std::io::Result<Vec<_>>>()?)
-        } else { None };
-        let analysis = converted_analysis.as_deref().unwrap_or(&track.analysis);
+        };
+        let analysis = exported_analysis.as_deref().unwrap_or(&track.analysis);
         if let Some(c) = carried {
-            snapshot::check_analysis(destination, c, &track.analysis)?;
+            snapshot::check_analysis(destination, c, analysis)?;
         }
         let mut analysis_hash: u64 = 0;
         for (extension, bytes) in analysis {
@@ -785,6 +842,8 @@ pub fn export_with_options(
         };
 
         recorded.push(ManifestTrack {
+            analysis_hashes: analysis.iter().map(|(e, b)| (e.clone(), manifest::hash(b))).collect(),
+            analysis_extensions: analysis.iter().map(|(e, _)| e.clone()).collect(),
             export_id,
             library_id: track.id,
             source,
@@ -802,7 +861,11 @@ pub fn export_with_options(
         // The same facts the pdb row carries, kept for exportLibrary.db.
         // Gathered here rather than re-derived later, so the two databases
         // cannot disagree about a path or a size.
+        let mut metadata = track.metadata.clone();
+        if conversion.is_some() { metadata.bit_depth = 16; }
         one_library_tracks.push(OneLibraryTrack {
+            metadata,
+            cues: track.cues.clone(),
             year: track.year, release_date: track.release_date.clone(),
             bitrate: if conversion.is_some() { 0 } else { track.bitrate },
             sample_rate: if conversion.is_some() { 44_100 } else { track.sample_rate },
@@ -830,6 +893,7 @@ pub fn export_with_options(
         });
 
         track_rows.push(track_row(&TrackInput {
+            hot_cue_auto_load: track.metadata.hot_cue_auto_load,
             id: export_id,
             artwork_id,
             artist_id: interns.artists.id(&track.artist),
@@ -850,7 +914,11 @@ pub fn export_with_options(
                 (if conversion.is_some() { output_size } else if track.file_size > 0 { track.file_size } else { size }).min(u64::from(u32::MAX)),
             )
             .unwrap_or(0),
-            track_number: export_id,
+            track_number: track.metadata.track_number,
+            disc_number: track.metadata.disc_number,
+            sample_depth: conversion.map_or(track.metadata.bit_depth, |_| 16),
+            play_count: u16::try_from(track.metadata.play_count).unwrap_or(u16::MAX),
+            isrc: track.metadata.isrc.clone(),
             title: track.title.clone(),
             filename: place.file_name,
             file_path: place.audio,
@@ -991,6 +1059,7 @@ pub fn export_with_options(
     if snapshot::Snapshot::read(destination)? != before || snapshot::analysis_stamp(destination, &before)? != analysis_before {
         return Err(ExportError::Conflict("The device changed during sync. Close other writers and retry.".into()));
     }
+    if cancelled() { return Err(ExportError::Cancelled); }
     publication.commit(&files)?;
     for (path, directory) in obsolete {
         if !retained.contains(&path.to_lowercase()) { remove_under(destination, &path, directory); }
@@ -1145,6 +1214,8 @@ fn my_tag_master_db_id(sync: Option<&SyncSource>) -> u32 {
 
 /// The subset of a track `exportLibrary.db` needs.
 struct OneLibraryTrack {
+    metadata: rbl_core::ExportMetadata,
+    cues: Option<Vec<rbl_anlz::cues::ExportCue>>,
     year: u16, release_date: String, bitrate: u32, sample_rate: u32,
     export_id: u32,
     library_id: u64,
@@ -1315,6 +1386,11 @@ fn write_one_library(
     if let Some(path) = existing_database.filter(|p| p.exists()) {
         builder.preserve_cues(path).map_err(|e| one_library_error(&e))?;
     }
+    for track in tracks {
+        if let Some(cues) = &track.cues {
+            builder.replace_cues(i64::from(track.export_id), cues).map_err(|e| one_library_error(&e))?;
+        }
+    }
     for history in &before.history {
         builder.add_history(history.id, &history.name, history.parent, history.sequence, history.folder).map_err(|e| one_library_error(&e))?;
         for (position, id) in history.tracks.iter().enumerate() {
@@ -1343,6 +1419,8 @@ fn add_tracks(
         let key = builder.intern(LookupTable::Key, &track.key).map_err(|e| one_library_error(&e))?;
         builder
             .add_track(&Track {
+                metadata: track.metadata.clone(),
+                file_type: i64::from(rbl_pdb::rows::audio_file_type(&track.file_name)),
                 year: i64::from(track.year), release_date: track.release_date.clone(),
                 bitrate: i64::from(track.bitrate), sample_rate: i64::from(track.sample_rate),
                 content_id: i64::from(track.export_id),
@@ -1355,7 +1433,7 @@ fn add_tracks(
                 color_id: Some(i64::from(track.color_id)),
                 bpm_x100: i64::from(track.bpm_x100),
                 length: i64::from(track.duration_sec),
-                track_no: i64::from(track.export_id),
+                track_no: i64::from(track.metadata.track_number),
                 path: track.audio_path.clone(),
                 file_name: track.file_name.clone(),
                 file_size: i64::try_from(track.file_size).unwrap_or(i64::MAX),
@@ -1514,6 +1592,12 @@ fn staged_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_paths_match_independent_rekordbox_exports() {
+        assert_eq!(analysis_directory("/Contents/Hosanna, Westend/Drum Death - Extended Mix/20130688_drum_death_(extended_mix).mp3", "PIONEER"), "/PIONEER/USBANLZ/P002/0002583E");
+        assert_eq!(analysis_directory("/Contents/Meduza, Aya Anne, GENESI (ITA)/Freak EP/20063130_freak_(feat._aya_anne)_(feat._aya_a.mp3", "PIONEER"), "/PIONEER/USBANLZ/P018/00008F82");
+    }
 
     #[test]
     fn fat_safe_replaces_characters_a_stick_cannot_hold() {

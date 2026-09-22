@@ -575,20 +575,20 @@ pub fn check_analysis(
     // Missing files are repairable. Changed valid files may be player edits.
     if !current.is_empty() && analysis_hash(&current) != old.analysis && current != desired {
         // Only compare the musical edits; a path/header rewrite or corruption can be repaired.
-        let musical = |files: &[(String, Vec<u8>)]| {
-            files
-                .iter()
-                .filter_map(|(_, b)| rbl_anlz::parse(b).ok())
-                .flat_map(|a| {
-                    a.sections
-                        .into_iter()
-                        .filter(|s| s.is_cue_list() || s.as_beat_grid().is_some())
-                        .map(|s| format!("{s:?}"))
-                })
-                .collect::<Vec<_>>()
+        let musical = |bytes: &[u8]| {
+            rbl_anlz::parse(bytes).ok().map(|a| a.sections.into_iter()
+                .filter(|s| s.is_cue_list() || s.as_beat_grid().is_some()).collect::<Vec<_>>())
         };
-        if musical(&current) != musical(desired) {
-            return Err(ExportError::Conflict("USB cues or beat grids changed since the last sync. Import the USB cues/grids before exporting.".into()));
+        for (extension, bytes) in &current {
+            if old.analysis_hashes.get(extension).is_some_and(|h| *h == crate::manifest::hash(bytes)) {
+                continue;
+            }
+            // Compare only surviving companions. A missing EXT is repairable,
+            // not evidence that the user deleted all of its cue points.
+            let target = desired.iter().find(|(e, _)| e == extension).map(|(_, b)| b.as_slice()).unwrap_or_default();
+            if musical(bytes).is_some() && musical(bytes) != musical(target) {
+                return Err(ExportError::Conflict("USB cues or beat grids changed since the last sync. Import the USB cues/grids before exporting.".into()));
+            }
         }
     }
     Ok(())
