@@ -727,7 +727,7 @@ mod refresh_tests {
         assert_eq!(parallel.ranks, serial.ranks);
         assert_eq!(parallel.playlists().members, serial.playlists().members);
         for row in 0..serial.len() {
-            assert_eq!(parallel.cues_of(row as u32), serial.cues_of(row as u32));
+            assert_eq!(parallel.cues_of(u32::try_from(row).unwrap_or(0)), serial.cues_of(u32::try_from(row).unwrap_or(0)));
             assert_eq!(parallel.search.get(row), serial.search.get(row));
         }
         let live_cues = serial.cues.read().parts().0.len();
@@ -763,7 +763,7 @@ mod refresh_tests {
         for row in 0..full.len() {
             assert_eq!(incremental.comment.get(row), full.comment.get(row));
             assert_eq!(incremental.search.get(row), full.search.get(row));
-            assert_eq!(incremental.cues_of(row as Row), original.cues_of(row as Row));
+            assert_eq!(incremental.cues_of(Row::try_from(row).unwrap_or(0)), original.cues_of(Row::try_from(row).unwrap_or(0)));
         }
         let row = incremental.row_of(&ids[0]).unwrap() as usize;
         assert_ne!(original.comment.get(row), incremental.comment.get(row));

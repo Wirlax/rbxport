@@ -88,8 +88,8 @@ impl AppState {
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
             analysis_write: parking_lot::Mutex::new(()),
-            backup_progress: parking_lot::Mutex::new(Default::default()),
-            backup_sizes: parking_lot::Mutex::new(Default::default()),
+            backup_progress: parking_lot::Mutex::new(crate::backups::BackupProgress::default()),
+            backup_sizes: parking_lot::Mutex::new(crate::backup_sizes::SizeCache::default()),
             inner: RwLock::new(Inner { next_view_id: 1, generation: 1, ..Inner::default() }),
             backup_dir,
             backup_destination: RwLock::new(backup_destination),
@@ -129,7 +129,7 @@ impl AppState {
         let bytes = serde_json::to_vec(&directory).map_err(|e| AppError::internal(e.to_string()))?;
         crate::durable::write(&self.backup_dir.join("backup-destination.json"), &bytes)
             .map_err(|e| AppError::internal(format!("The backup folder setting could not be saved: {e}")))?;
-        *self.backup_destination.write() = directory.clone();
+        self.backup_destination.write().clone_from(&directory);
         Ok(directory.to_string_lossy().into_owned())
     }
 
@@ -714,16 +714,16 @@ mod edit_refresh_tests {
         let history = {
             let lib = state.library().unwrap();
             let histories = lib.histories();
-            let index = histories.members.iter().rposition(|members| members.contains(&(row as u32))).unwrap();
+            let index = histories.members.iter().rposition(|members| members.contains(&u32::try_from(row).unwrap_or(0))).unwrap();
             histories.ids[index].to_string()
         };
-        state.write_then(|w| w.remove_from_history(&history, &[track.clone()]), |db, _| {
+        state.write_then(|w| w.remove_from_history(&history, std::slice::from_ref(&track)), |db, _| {
             refresh_after_edit(&state, db, Touched::Histories(Vec::new()))
         }).unwrap();
         let current = state.library().unwrap();
         let histories = current.histories();
         let index = histories.ids.iter().position(|id| id.to_string() == history).unwrap();
-        assert!(!histories.members[index].contains(&(row as u32)));
+        assert!(!histories.members[index].contains(&u32::try_from(row).unwrap_or(0)));
         drop(histories);
         state.write_then(|w| w.set_field(&track, rbl_db::write::TrackField::PlayCount, "0"), |db, _| {
             refresh_after_edit(&state, db, Touched::Metadata(vec![track.clone()]))

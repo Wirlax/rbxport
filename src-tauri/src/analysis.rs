@@ -214,34 +214,7 @@ fn analyse_and_save(
     // decode's length would be the cap, not the track's.
     let length_sec = (audio.duration_secs() < DECODE_CAP_SECS - 1.0).then_some(duration_sec);
 
-    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), &location, track_id,
-        bpm_x100, Some(relative.clone()), true, &[
-            (dat.clone(), files.dat), (rbl_anlz::sibling(&dat, "EXT"), files.ext),
-            (rbl_anlz::sibling(&dat, "2EX"), files.two_ex),
-        ])?;
-    if let Err(e) = journal.publish() {
-        journal.rollback()?;
-        return Err(e);
-    }
-    let written = state
-        .write(|writer| {
-            writer.set_analysis(
-                track_id,
-                &rbl_db::write::AnalysisWrite {
-                    bpm_x100,
-                    key: detected_key.as_deref(),
-                    analysis_path: &relative,
-                    length_sec,
-                },
-            )
-        })
-        .map_err(write_error);
-    if let Err(e) = written {
-        journal.reconcile(&location)?;
-        return Err(e);
-    }
-    journal.commit()?;
-    editor.forget_history(track_id);
+    save_analysis_files(state, &location, track_id, &dat, files, bpm_x100, detected_key.as_deref(), &relative, length_sec, editor)?;
 
     Ok(AnalysisResultDto {
         track_id: track_id.to_owned(),
@@ -254,6 +227,52 @@ fn analyse_and_save(
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         analysis_path: relative,
     })
+}
+
+/// Journals, publishes and registers a fresh analysis — the on-disk half of
+/// [`analyse_and_save`], once the analysis itself has been computed.
+#[allow(clippy::too_many_arguments, reason = "everything analyse_and_save already computed, passed through")]
+fn save_analysis_files(
+    state: &AppState,
+    location: &rbl_db::LibraryLocation,
+    track_id: &str,
+    dat: &std::path::Path,
+    files: rbl_anlz::AnalysisFiles,
+    bpm_x100: u32,
+    detected_key: Option<&str>,
+    relative: &str,
+    length_sec: Option<u32>,
+    editor: &crate::grid::GridEditor,
+) -> AppResult<()> {
+    let journal = crate::file_journal::FileJournal::prepare(state.backup_dir(), location, track_id,
+        bpm_x100, Some(relative.to_owned()), true, &[
+            (dat.to_owned(), files.dat), (rbl_anlz::sibling(dat, "EXT"), files.ext),
+            (rbl_anlz::sibling(dat, "2EX"), files.two_ex),
+        ])?;
+    if let Err(e) = journal.publish() {
+        journal.rollback()?;
+        return Err(e);
+    }
+    let written = state
+        .write(|writer| {
+            writer.set_analysis(
+                track_id,
+                &rbl_db::write::AnalysisWrite {
+                    bpm_x100,
+                    key: detected_key,
+                    analysis_path: relative,
+                    length_sec,
+                },
+            )
+        })
+        .map_err(write_error);
+    if let Err(e) = written {
+        journal.reconcile(location)?;
+        return Err(e);
+    }
+    journal.commit()?;
+    editor.forget_history(track_id);
+    Ok(())
 }
 
 fn ensure_analysis_unlocked(state: &AppState, editor: &crate::grid::GridEditor, track: &str) -> AppResult<()> {

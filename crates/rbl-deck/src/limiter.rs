@@ -325,7 +325,7 @@ mod tests {
         );
         assert!(output
             .iter()
-            .all(|&(l, r)| l.abs().max(r.abs()) <= 1.000001));
+            .all(|&(l, r)| l.abs().max(r.abs()) <= 1.000_001));
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod tests {
                 "{db} dB gave {left}, expected {expected}"
             );
             assert!((right - left * 0.5).abs() < 1e-6);
-            assert!(output.iter().all(|&(l, r)| l <= 1.000001 && r <= 1.000001));
+            assert!(output.iter().all(|&(l, r)| l <= 1.000_001 && r <= 1.000_001));
             if db == 24.0 {
                 assert!(limiter.take_floor() < 0.3);
             }

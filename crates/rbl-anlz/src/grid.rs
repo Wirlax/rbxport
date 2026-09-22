@@ -1,4 +1,4 @@
-//! Beat-grid edits recovered from rekordbox 7.2.11's BeatGridAdjustment.
+//! Beat-grid edits recovered from rekordbox 7.2.11's `BeatGridAdjustment`.
 //! See the private pre-release beat-grid audit for Ghidra addresses/evidence.
 //! Times are integer milliseconds; interval calculations round ties to even.
 use crate::Beat;
@@ -190,7 +190,7 @@ pub fn apply_from(beats: &[Beat], from_ms: Option<u32>, edit: Edit) -> Vec<Beat>
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn grid() -> Vec<Beat> { (0..9).map(|i| Beat { time_ms: i * 500, beat_number: (i % 4 + 1) as u16, tempo_x100: 12000 }).collect() }
+    fn grid() -> Vec<Beat> { (0..9).map(|i| Beat { time_ms: i * 500, beat_number: u16::try_from(i % 4 + 1).unwrap_or(0), tempo_x100: 12000 }).collect() }
     fn times(beats: &[Beat]) -> Vec<u32> { beats.iter().map(|b| b.time_ms).collect() }
     #[test]
     fn recovered_stretch_uses_target_distance_and_even_rounding() {

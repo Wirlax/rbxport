@@ -195,6 +195,7 @@ mod tests {
     /// tests in this binary open and close files on their own threads, and a
     /// count taken across one of their closes came out level once in six runs.
     #[test]
+    #[cfg(unix)]
     fn it_counts_the_descriptors_a_process_holds() {
         use std::os::fd::AsRawFd;
 

@@ -63,6 +63,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp, reason = "a reset writes literal 0.0, not a computed value")]
     fn startup_is_zero_padded_and_rate_change_resets_history() {
         let mut rms = WindowRms::new();
         rms.set_rate(1000);

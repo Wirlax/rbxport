@@ -213,7 +213,7 @@ fn buffered_copy(source: &Path, target: &Path, progress: &mut Progress<'_>) -> i
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod mac {
-    use super::*;
+    use super::{io, Path};
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     pub(super) fn try_clone(source: &Path, target: &Path) -> io::Result<bool> {
@@ -374,7 +374,7 @@ mod tests {
             fs::create_dir_all(&directory).unwrap();
             fs::write(
                 directory.join("analysis.dat"),
-                vec![(i % 256) as u8; 64 * 1024],
+                vec![u8::try_from(i % 256).unwrap_or(0); 64 * 1024],
             )
             .unwrap();
         }
@@ -478,6 +478,7 @@ mod tests {
 
     #[test]
     #[ignore = "manual copy throughput measurement"]
+    #[allow(clippy::print_stdout, reason = "the point of this manual benchmark is its printed timing")]
     fn compare_serial_and_parallel_tree_copy() {
         let dir = tempfile::tempdir().unwrap();
         let source = tree_fixture(dir.path(), 512);
@@ -492,6 +493,7 @@ mod tests {
 
     #[test]
     fn native_copy_is_independent_and_reports_the_file_size() {
+        use io::Write;
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source.dat");
         let target = dir.path().join("backup.dat");
@@ -505,7 +507,6 @@ mod tests {
         assert_eq!(copied, reported);
         assert_eq!(copied, 2 * 1024 * 1024);
         // In-place writes exercise copy-on-write, rather than replacing inodes.
-        use io::Write;
         fs::OpenOptions::new()
             .write(true)
             .open(&source)

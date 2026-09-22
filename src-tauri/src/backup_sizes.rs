@@ -28,7 +28,7 @@ pub struct BackupSizes {
     pub other: u64,
 }
 impl BackupSizes {
-    fn add(&mut self, other: Self) {
+    fn add(&mut self, other: &Self) {
         self.database += other.database;
         self.artwork += other.artwork;
         self.vocals += other.vocals;
@@ -141,7 +141,7 @@ pub fn cached(state: &AppState, refresh: bool) -> AppResult<BackupSizes> {
 
 fn measure(state: &AppState) -> AppResult<BackupSizes> {
     let location = state.location()?;
-    let track_count = state.read_db(|db| db.live_track_count()).map_err(|e| AppError::internal(e.to_string()))?;
+    let track_count = state.read_db(rbl_db::Library::live_track_count).map_err(|e| AppError::internal(e.to_string()))?;
     measure_paths(
         &location.master_db,
         &location.share_root.join("PIONEER/USBANLZ"),
@@ -216,7 +216,7 @@ fn walk(path: &Path, sizes: &mut BackupSizes, is_artwork: bool) -> io::Result<()
         if is_artwork {
             sizes.artwork += meta.len();
         } else {
-            sizes.add(analysis_sizes(path, meta.len())?);
+            sizes.add(&analysis_sizes(path, meta.len())?);
         }
     } else {
         return Err(io::Error::new(
@@ -258,7 +258,7 @@ fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
         }
         match &header[..4] {
             b"PWAV" | b"PWV2" | b"PWV3" | b"PWV4" | b"PWV5" | b"PWV6" | b"PWV7" => {
-                sizes.waveforms += section_len
+                sizes.waveforms += section_len;
             }
             b"PCOB" | b"PCO2" => sizes.cues += section_len,
             b"PQTZ" | b"PQT2" => sizes.beat_grids += section_len,
@@ -273,7 +273,7 @@ fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic, reason = "the panic in a scan closure proves the cache never called it")]
 mod tests {
     use super::*;
     #[test]

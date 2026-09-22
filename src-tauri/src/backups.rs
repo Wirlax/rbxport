@@ -312,6 +312,7 @@ pub fn validate_destination(directory: &Path, location: &rbl_db::LibraryLocation
     Ok(())
 }
 
+#[allow(clippy::too_many_lines, reason = "one linear backup pipeline; splitting it would hide the order writes happen in")]
 fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u64, &str) -> AppResult<()>) -> AppResult<String> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
@@ -585,23 +586,22 @@ fn validate_staged_database(
     valid
 }
 
-pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
-    let _gate = state.edit_gate.lock();
-    let _files = state.analysis_write.lock();
-    let location = state.location()?;
-    writable(&location)?;
-    if state.link_running() {
-        return Err(error("Turn off PRO DJ LINK before restoring the library."));
-    }
+/// Unpacks a ZIP if that's what was given, then validates the backup at
+/// rest — the part of [`restore`] before anything is swapped into place.
+///
+/// The returned `Extracted` guard (when the backup was a ZIP) must outlive
+/// the restore: dropping it deletes the unpacked directory `path` then
+/// points at.
+fn locate_restore(state: &AppState, path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<(PathBuf, bool, Vec<String>, Option<crate::backup_zip::Extracted>)> {
     let path = if is_zip(path) { checked_archive(path)? } else { checked(&state.backup_destination(), path)? };
     let unpacked = if is_zip(&path) {
-        manifest(&path, &location)?;
+        manifest(&path, location)?;
         crate::durable::create_dir_all(state.backup_dir()).map_err(error)?;
         Some(crate::backup_zip::extract(&path, state.backup_dir()).map_err(error)?)
     } else { None };
     let path = unpacked.as_ref().map_or(path, |value| value.0.clone());
     let (includes_artwork, library_files) = if path.is_dir() {
-        let saved = manifest(&path, &location)?;
+        let saved = manifest(&path, location)?;
         if !path.join("analysis").is_dir() {
             return Err(error("The backup analysis folder is missing."));
         }
@@ -615,6 +615,20 @@ pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
         }
         (saved.includes_artwork, saved.library_files)
     } else { (false, Vec::new()) };
+    Ok((path, includes_artwork, library_files, unpacked))
+}
+
+pub fn restore(state: &AppState, path: &Path) -> AppResult<()> {
+    let _gate = state.edit_gate.lock();
+    let _files = state.analysis_write.lock();
+    let location = state.location()?;
+    writable(&location)?;
+    if state.link_running() {
+        return Err(error("Turn off PRO DJ LINK before restoring the library."));
+    }
+    // Held for the rest of the restore: dropping it early would delete the
+    // extracted directory `path` points at while it is still being read.
+    let (path, includes_artwork, library_files, _unpacked) = locate_restore(state, path, &location)?;
     state.with_closed_reader(|| {
         recover(state.backup_dir(), &location)?;
         crate::file_journal::recover(state.backup_dir(), &location)?;
@@ -926,7 +940,7 @@ mod tests {
         let mut anlz = b"PMAI".to_vec();
         for word in [12u32, 40] { anlz.extend(word.to_be_bytes()); }
         anlz.extend(b"PVDI");
-        for word in [24u32, 28, 1024, 0x56220001, 4] { anlz.extend(word.to_be_bytes()); }
+        for word in [24u32, 28, 1024, 0x5622_0001, 4] { anlz.extend(word.to_be_bytes()); }
         anlz.extend([0, 2, 4, 1]);
         fs::write(&vocals, &anlz).unwrap();
         let root = location.master_db.parent().unwrap();

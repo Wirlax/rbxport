@@ -1,4 +1,4 @@
-//! `exportLibrary.db` — the Device Library Plus / OneLibrary database.
+//! `exportLibrary.db` — the Device Library Plus / `OneLibrary` database.
 //!
 //! Keep it consistent with the legacy `export.pdb` library when exporting
 //! both formats. It also carries master-library identities for round trips.

@@ -1,7 +1,9 @@
 //! Retain device-only playlists/tracks and history while replacing the selected
 //! master-library portion. Device identities are never inferred from titles.
 use crate::{
-    snapshot::Snapshot, DeviceTrack, ExportError, Manifest, Result, SourcePlaylist, SourceTrack,
+    snapshot::{Library, Snapshot},
+    sync_record::SyncRecord,
+    DeviceTrack, ExportError, Manifest, Result, SourcePlaylist, SourceTrack,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -26,7 +28,23 @@ pub fn prepare(
         return Ok((tracks, playlists));
     };
     let existing_sources = sources(root, before)?;
-    for track in &mut tracks {
+    identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
+    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
+    identify_playlists(&mut playlists, previous, record.as_ref());
+    retain_device_only(&current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref())?;
+    Ok((tracks, playlists))
+}
+
+/// Ties a track already in the selection to the device row it came from, so
+/// its file/analysis are kept rather than treated as a fresh import.
+fn identify_tracks(
+    tracks: &mut [SourceTrack],
+    before: &Snapshot,
+    previous: Option<&Manifest>,
+    db_id: u64,
+    existing_sources: &BTreeMap<u32, SourceTrack>,
+) {
+    for track in tracks {
         if track.device.is_some() {
             continue;
         }
@@ -56,8 +74,15 @@ pub fn prepare(
             }
         }
     }
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
-    for p in &mut playlists {
+}
+
+/// Ties a playlist already in the selection to the device row it came from.
+fn identify_playlists(
+    playlists: &mut [SourcePlaylist],
+    previous: Option<&Manifest>,
+    record: Option<&SyncRecord>,
+) {
+    for p in playlists {
         if p.device_id != 0 {
             continue;
         }
@@ -68,28 +93,35 @@ pub fn prepare(
                     .find(|old| old.library_id == p.id && p.id != 0 && !old.device_only)
             })
             .map(|p| p.export_id)
-            .or_else(|| {
-                record
-                    .as_ref()
-                    .and_then(|r| r.device_ids.get(&p.id).copied())
-            })
+            .or_else(|| record.and_then(|r| r.device_ids.get(&p.id).copied()))
             .unwrap_or(0);
     }
-    let owned: BTreeSet<u32> = previous
-        .map(|m| {
+}
+
+/// Keeps whatever the device holds that this sync's selection does not name:
+/// playlists nobody chose (and their ancestor folders), and the tracks those
+/// playlists or the play history still reference.
+#[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
+fn retain_device_only(
+    current: &Library,
+    tracks: &mut Vec<SourceTrack>,
+    playlists: &mut Vec<SourcePlaylist>,
+    before: &Snapshot,
+    previous: Option<&Manifest>,
+    existing_sources: &BTreeMap<u32, SourceTrack>,
+    record: Option<&SyncRecord>,
+) -> Result<()> {
+    let owned: BTreeSet<u32> = previous.map_or_else(
+        || record.map(|r| r.device_ids.values().copied().collect()).unwrap_or_default(),
+        |m| {
             m.playlists
                 .iter()
                 .filter(|p| !p.device_only)
                 .map(|p| p.export_id)
                 .filter(|id| *id != 0)
                 .collect()
-        })
-        .unwrap_or_else(|| {
-            record
-                .as_ref()
-                .map(|r| r.device_ids.values().copied().collect())
-                .unwrap_or_default()
-        });
+        },
+    );
     let retained: Vec<_> = current
         .playlists
         .iter()
@@ -179,7 +211,7 @@ pub fn prepare(
                 .collect::<Result<_>>()?,
         });
     }
-    Ok((tracks, playlists))
+    Ok(())
 }
 
 /// Read complete track metadata from whichever database exists. Both formats
@@ -189,97 +221,123 @@ fn sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>>
     let manifest = Manifest::load(root);
     let dir = crate::export_root(root).join("rekordbox");
     if before.one.is_some() {
-        let db = rbl_onelibrary::ExportLibrary::open_read_only(&dir.join("exportLibrary.db"))
-            .map_err(sql)?;
-        let mut q = db.connection().prepare("SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''), COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''), COALESCE(c.dateAdded,''), COALESCE(c.releaseDate,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0), COALESCE(c.color_id,0), COALESCE(c.releaseYear,0), COALESCE(c.bitrate,0), COALESCE(c.samplingRate,0), COALESCE(c.fileSize,0), COALESCE(i.path,'') FROM content c LEFT JOIN artist a ON a.artist_id=c.artist_id_artist LEFT JOIN album al ON al.album_id=c.album_id LEFT JOIN genre g ON g.genre_id=c.genre_id LEFT JOIN label l ON l.label_id=c.label_id LEFT JOIN key k ON k.key_id=c.key_id LEFT JOIN image i ON i.image_id=c.image_id").map_err(sql)?;
-        let rows = q
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, u32>(0)?,
-                    SourceTrack {
-                        title: r.get(1)?,
-                        artist: r.get(2)?,
-                        album: r.get(3)?,
-                        genre: r.get(4)?,
-                        label: r.get(5)?,
-                        key: r.get(6)?,
-                        comment: r.get(7)?,
-                        date_added: r.get(8)?,
-                        release_date: r.get(9)?,
-                        bpm_x100: r.get(10)?,
-                        duration_sec: r.get(11)?,
-                        rating: r.get::<_, u8>(12)? / 51,
-                        color_id: r.get(13)?,
-                        year: r.get(14)?,
-                        bitrate: r.get(15)?,
-                        sample_rate: r.get(16)?,
-                        file_size: u64::try_from(r.get::<_, i64>(17)?).unwrap_or(0),
-                        artwork: None,
-                        ..SourceTrack::default()
-                    },
-                    r.get::<_, String>(18)?,
-                ))
-            })
-            .map_err(sql)?;
-        for row in rows {
-            let (id, mut track, artwork) = row.map_err(sql)?;
-            if !artwork.is_empty() {
-                track.artwork = Some(crate::checked_under(root, &artwork)?);
-            }
-            out.insert(id, track);
-        }
+        sources_from_one(root, &dir, &mut out)?;
     }
     if before.legacy.is_some() {
-        let bytes = std::fs::read(dir.join("export.pdb"))?;
-        let pdb = rbl_pdb::Pdb::parse(&bytes).map_err(sql)?;
-        use rbl_pdb::PageType;
-        let names = |kind| -> BTreeMap<u32, String> {
-            pdb.table(kind)
-                .map(|t| {
-                    pdb.named_rows(t)
-                        .into_iter()
-                        .map(|n| (n.id, n.name))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let artists = names(PageType::Artists);
-        let albums = names(PageType::Albums);
-        let genres = names(PageType::Genres);
-        let labels = names(PageType::Labels);
-        let keys = names(PageType::Keys);
-        let art = names(PageType::Artwork);
-        for t in pdb
-            .table(PageType::Tracks)
-            .map(|t| pdb.track_rows(t))
-            .unwrap_or_default()
-        {
-            out.entry(t.id).or_insert(SourceTrack {
-                title: t.title,
-                artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
-                album: albums.get(&t.album_id).cloned().unwrap_or_default(),
-                genre: genres.get(&t.genre_id).cloned().unwrap_or_default(),
-                label: labels.get(&t.label_id).cloned().unwrap_or_default(),
-                key: keys.get(&t.key_id).cloned().unwrap_or_default(),
-                comment: t.comment,
-                date_added: t.date_added,
-                release_date: t.release_date,
-                bpm_x100: t.tempo_x100,
-                duration_sec: t.duration_sec,
-                rating: t.rating,
-                color_id: t.color_id,
-                year: t.year,
-                bitrate: t.bitrate,
-                sample_rate: t.sample_rate,
-                file_size: u64::from(t.file_size),
-                artwork: art
-                    .get(&t.artwork_id)
-                    .map(|p| crate::checked_under(root, p))
-                    .transpose()?,
-                ..SourceTrack::default()
-            });
-        }
+        sources_from_legacy(root, &dir, &mut out)?;
     }
+    fill_source_details(root, before, manifest.as_ref(), &mut out)?;
+    Ok(out)
+}
+
+/// `OneLibrary`'s share of [`sources`]: every track it has metadata for.
+fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(&dir.join("exportLibrary.db"))
+        .map_err(sql)?;
+    let mut q = db.connection().prepare("SELECT c.content_id, COALESCE(c.title,''), COALESCE(a.name,''), COALESCE(al.name,''), COALESCE(g.name,''), COALESCE(l.name,''), COALESCE(k.name,''), COALESCE(c.djComment,''), COALESCE(c.dateAdded,''), COALESCE(c.releaseDate,''), COALESCE(c.bpmx100,0), COALESCE(c.length,0), COALESCE(c.rating,0), COALESCE(c.color_id,0), COALESCE(c.releaseYear,0), COALESCE(c.bitrate,0), COALESCE(c.samplingRate,0), COALESCE(c.fileSize,0), COALESCE(i.path,'') FROM content c LEFT JOIN artist a ON a.artist_id=c.artist_id_artist LEFT JOIN album al ON al.album_id=c.album_id LEFT JOIN genre g ON g.genre_id=c.genre_id LEFT JOIN label l ON l.label_id=c.label_id LEFT JOIN key k ON k.key_id=c.key_id LEFT JOIN image i ON i.image_id=c.image_id").map_err(sql)?;
+    let rows = q
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                SourceTrack {
+                    title: r.get(1)?,
+                    artist: r.get(2)?,
+                    album: r.get(3)?,
+                    genre: r.get(4)?,
+                    label: r.get(5)?,
+                    key: r.get(6)?,
+                    comment: r.get(7)?,
+                    date_added: r.get(8)?,
+                    release_date: r.get(9)?,
+                    bpm_x100: r.get(10)?,
+                    duration_sec: r.get(11)?,
+                    rating: r.get::<_, u8>(12)? / 51,
+                    color_id: r.get(13)?,
+                    year: r.get(14)?,
+                    bitrate: r.get(15)?,
+                    sample_rate: r.get(16)?,
+                    file_size: u64::try_from(r.get::<_, i64>(17)?).unwrap_or(0),
+                    artwork: None,
+                    ..SourceTrack::default()
+                },
+                r.get::<_, String>(18)?,
+            ))
+        })
+        .map_err(sql)?;
+    for row in rows {
+        let (id, mut track, artwork) = row.map_err(sql)?;
+        if !artwork.is_empty() {
+            track.artwork = Some(crate::checked_under(root, &artwork)?);
+        }
+        out.insert(id, track);
+    }
+    Ok(())
+}
+
+/// The legacy database's share of [`sources`]: whatever `OneLibrary` did not
+/// already provide (`or_insert`), since both name the same tracks.
+fn sources_from_legacy(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack>) -> Result<()> {
+    use rbl_pdb::PageType;
+    let bytes = std::fs::read(dir.join("export.pdb"))?;
+    let pdb = rbl_pdb::Pdb::parse(&bytes).map_err(sql)?;
+    let names = |kind| -> BTreeMap<u32, String> {
+        pdb.table(kind)
+            .map(|t| {
+                pdb.named_rows(t)
+                    .into_iter()
+                    .map(|n| (n.id, n.name))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let artists = names(PageType::Artists);
+    let albums = names(PageType::Albums);
+    let genres = names(PageType::Genres);
+    let labels = names(PageType::Labels);
+    let keys = names(PageType::Keys);
+    let art = names(PageType::Artwork);
+    for t in pdb
+        .table(PageType::Tracks)
+        .map(|t| pdb.track_rows(t))
+        .unwrap_or_default()
+    {
+        out.entry(t.id).or_insert(SourceTrack {
+            title: t.title,
+            artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
+            album: albums.get(&t.album_id).cloned().unwrap_or_default(),
+            genre: genres.get(&t.genre_id).cloned().unwrap_or_default(),
+            label: labels.get(&t.label_id).cloned().unwrap_or_default(),
+            key: keys.get(&t.key_id).cloned().unwrap_or_default(),
+            comment: t.comment,
+            date_added: t.date_added,
+            release_date: t.release_date,
+            bpm_x100: t.tempo_x100,
+            duration_sec: t.duration_sec,
+            rating: t.rating,
+            color_id: t.color_id,
+            year: t.year,
+            bitrate: t.bitrate,
+            sample_rate: t.sample_rate,
+            file_size: u64::from(t.file_size),
+            artwork: art
+                .get(&t.artwork_id)
+                .map(|p| crate::checked_under(root, p))
+                .transpose()?,
+            ..SourceTrack::default()
+        });
+    }
+    Ok(())
+}
+
+/// Fills in what neither database's row alone carries: the checked source
+/// path, My Tags, the analysis file bytes, and the device identity — for
+/// every track the merged library actually has.
+fn fill_source_details(
+    root: &Path,
+    before: &Snapshot,
+    manifest: Option<&Manifest>,
+    out: &mut BTreeMap<u32, SourceTrack>,
+) -> Result<()> {
     let current = before.merged_library();
     for t in current.as_ref().into_iter().flat_map(|l| &l.tracks) {
         let track = out
@@ -310,7 +368,7 @@ fn sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>>
             .get(&t.id)
             .copied()
             .or_else(|| {
-                manifest.as_ref().and_then(|m| {
+                manifest.and_then(|m| {
                     m.tracks
                         .iter()
                         .find(|old| old.export_id == t.id)
@@ -327,7 +385,7 @@ fn sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>>
             preserve: true,
         });
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Convert a missing sibling database without changing the device selection.

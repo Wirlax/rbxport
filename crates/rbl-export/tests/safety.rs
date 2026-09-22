@@ -72,7 +72,7 @@ fn missing_source_leaves_every_existing_database_and_audio_unchanged() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[playlist(10, &[0])]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
     std::fs::remove_file(&t.source_path).unwrap();
     assert!(sync(usb.path(), &[t], &[playlist(10, &[0])]).is_err());
@@ -111,7 +111,7 @@ fn identity_is_written_and_another_master_cannot_reuse_the_manifest() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 42);
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let snap = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
     assert_eq!(snap.identity.get(&1), Some(&(123, 42)));
     let result = export_full(
@@ -137,7 +137,7 @@ fn device_metadata_conflict_does_not_replace_either_database() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     edit(
         usb.path(),
         "UPDATE content SET title='Edited on device' WHERE content_id=1",
@@ -199,7 +199,7 @@ fn folders_and_playlist_ids_survive_reorder() {
     let b = playlist(20, &[0]);
     sync(
         usb.path(),
-        &[t.clone()],
+        std::slice::from_ref(&t),
         &[folder.clone(), a.clone(), b.clone()],
     )
     .unwrap();
@@ -262,7 +262,7 @@ fn hidden_library_stays_hidden_and_plus_only_record_is_read() {
     let t = track(src.path(), 1);
     std::fs::create_dir_all(usb.path().join(".PIONEER")).unwrap();
     std::fs::write(usb.path().join(".PIONEER/DEVSETTING.DAT"), b"existing").unwrap();
-    sync(usb.path(), &[t.clone()], &[playlist(10, &[0])]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     sync(usb.path(), &[t], &[playlist(10, &[0])]).unwrap();
     assert!(!usb.path().join("PIONEER").exists());
     assert!(verify(usb.path()).unwrap().is_ok());
@@ -277,7 +277,7 @@ fn same_size_audio_corruption_is_repaired() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let m = Manifest::load(usb.path()).unwrap();
     let path = usb.path().join(m.tracks[0].audio.trim_start_matches('/'));
     std::fs::write(&path, vec![9; 128]).unwrap();
@@ -290,7 +290,7 @@ fn unsupported_schema_is_left_untouched() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     edit(usb.path(), "UPDATE property SET dbVersion='9999'");
     let path = usb.path().join("PIONEER/rekordbox/exportLibrary.db");
     let bytes = std::fs::read(&path).unwrap();
@@ -303,7 +303,7 @@ fn legacy_only_conversion_preserves_history_and_master_identity() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[playlist(10, &[0])]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[playlist(10, &[0])]).unwrap();
     edit(
         usb.path(),
         "INSERT INTO history VALUES(7,1,'Tonight',0,0); INSERT INTO history_content VALUES(7,1,1)",
@@ -338,7 +338,7 @@ fn same_size_artwork_change_and_removed_analysis_extension_are_published() {
         "EXT".into(),
         rbl_anlz::AnlzBuilder::new().path("/original.mp3").finish(),
     ));
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let m = Manifest::load(usb.path()).unwrap();
     let image = usb.path().join(m.tracks[0].artwork.trim_start_matches('/'));
     let ext = usb
@@ -357,7 +357,7 @@ fn late_external_edit_aborts_publication() {
     let src = tempfile::tempdir().unwrap();
     let usb = tempfile::tempdir().unwrap();
     let t = track(src.path(), 1);
-    sync(usb.path(), &[t.clone()], &[]).unwrap();
+    sync(usb.path(), std::slice::from_ref(&t), &[]).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
     let result = export_full(
         usb.path(),

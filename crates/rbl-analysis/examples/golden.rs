@@ -273,6 +273,7 @@ impl Score {
 
 /// The options the gate scores: the defaults, or a placement named by
 /// `RB_LITE_PLACEMENT` (`envelope`, `attack`).
+#[allow(clippy::panic, reason = "a bad CLI flag should fail fast rather than be silently misread")]
 fn options_under_test() -> rbl_analysis::AnalysisOptions {
     let mut options = match std::env::var("RB_LITE_PRESET").as_deref() {
         Ok("baseline") => {

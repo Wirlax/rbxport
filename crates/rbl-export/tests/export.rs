@@ -500,7 +500,7 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
         (None, "flac", 0),
     ] {
         let report = export_with_options(dest.path(), &tracks, &playlists, &[],
-            ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+            &ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
         assert_eq!(report.tracks, 1);
         assert_eq!(report.reused, 0);
         let manifest = rbl_export::Manifest::load(dest.path()).unwrap();
@@ -522,7 +522,7 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
         assert_eq!(u64::from(rows[0].file_size), std::fs::metadata(&audio).unwrap().len());
         assert!(verify(dest.path()).unwrap().is_ok());
         let again = export_with_options(dest.path(), &tracks, &playlists, &[],
-            ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+            &ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
         assert_eq!((again.reused, again.bytes_copied, again.analysis_files), (1, 0, 0));
         if compatibility.is_some() {
             let valid = std::fs::read(&audio).unwrap();
@@ -530,7 +530,7 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
             *changed.last_mut().unwrap() ^= 1;
             std::fs::write(&audio, changed).unwrap();
             let repaired = export_with_options(dest.path(), &tracks, &playlists, &[],
-                ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
+                &ExportOptions { compatibility, ..Default::default() }, &mut |_| {}).unwrap();
             assert_eq!(repaired.reused, 0, "edited USB audio must not be reused");
             assert_eq!(std::fs::read(&audio).unwrap(), valid);
         }
@@ -541,7 +541,7 @@ fn compatibility_conversion_reuses_outputs_updates_paths_and_can_be_disabled() {
     let before = std::fs::read(&db).unwrap();
     std::fs::write(&source, b"broken flac").unwrap();
     assert!(export_with_options(dest.path(), &tracks, &playlists, &[],
-        ExportOptions { compatibility: Some(CompatibilityFormat::Wav), ..Default::default() }, &mut |_| {}).is_err());
+        &ExportOptions { compatibility: Some(CompatibilityFormat::Wav), ..Default::default() }, &mut |_| {}).is_err());
     assert_eq!(std::fs::read(db).unwrap(), before);
     assert!(previous_audio.unwrap().is_file());
 }
@@ -558,7 +558,7 @@ fn compatibility_does_not_reencode_already_compatible_audio() {
     let original = std::fs::read(&source).unwrap();
     let tracks = vec![SourceTrack { source_path: source, title: "Compatible".into(), ..Default::default() }];
     rbl_export::export_with_options(dest.path(), &tracks, &[], &[],
-        rbl_export::ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), ..Default::default() },
+        &rbl_export::ExportOptions { compatibility: Some(rbl_export::CompatibilityFormat::Mp3), ..Default::default() },
         &mut |_| {},
     ).unwrap();
     let manifest = rbl_export::Manifest::load(dest.path()).unwrap();

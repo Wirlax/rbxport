@@ -42,6 +42,7 @@ impl HealthMeter {
 mod tests {
     use super::*;
     #[test]
+    #[allow(clippy::float_cmp, reason = "load is clamped to exactly 1.0 and reset to exactly 0.0")]
     fn measures_the_deadline_smooths_and_counts_only_overruns() {
         let meter = HealthMeter::default();
         meter.record(Duration::from_millis(5), 480, 48_000);

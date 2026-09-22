@@ -17,17 +17,6 @@ pub fn eject(path: &Path) -> io::Result<()> {
     platform_eject(path)
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    #[allow(clippy::unwrap_used)]
-    fn a_directory_is_never_treated_as_a_volume_to_eject() {
-        let directory = tempfile::tempdir().unwrap();
-        assert_eq!(super::eject(directory.path()).unwrap_err().kind(), std::io::ErrorKind::NotFound);
-        assert!(directory.path().is_dir());
-    }
-}
-
 #[cfg(not(windows))]
 fn run(command: &mut std::process::Command) -> io::Result<std::process::Output> {
     let output = command.output()?;
@@ -151,4 +140,15 @@ fn platform_eject(_: &Path) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "Eject is not supported on this platform.",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_directory_is_never_treated_as_a_volume_to_eject() {
+        let directory = tempfile::tempdir().unwrap();
+        assert_eq!(super::eject(directory.path()).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        assert!(directory.path().is_dir());
+    }
 }

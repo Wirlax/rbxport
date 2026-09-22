@@ -74,239 +74,11 @@ impl Snapshot {
         let mut out = Self::default();
         let pdb = dir.join("export.pdb");
         if pdb.exists() {
-            let bytes = std::fs::read(pdb)?;
-            let parsed = rbl_pdb::Pdb::parse(&bytes)
-                .map_err(|e| ExportError::Conflict(format!("Cannot read Device Library: {e}")))?;
-            use rbl_pdb::PageType;
-            let tracks = parsed
-                .table(PageType::Tracks)
-                .map(|t| parsed.track_rows(t))
-                .unwrap_or_default();
-            let entries = parsed
-                .table(PageType::PlaylistEntries)
-                .map(|t| parsed.playlist_entries(t))
-                .unwrap_or_default();
-            let nodes = parsed
-                .table(PageType::PlaylistTree)
-                .map(|t| parsed.playlist_nodes(t))
-                .unwrap_or_default();
-            let names = |kind| -> BTreeMap<u32, String> {
-                parsed
-                    .table(kind)
-                    .map(|t| {
-                        parsed
-                            .named_rows(t)
-                            .into_iter()
-                            .map(|n| (n.id, n.name))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            let artists = names(PageType::Artists);
-            let albums = names(PageType::Albums);
-            let genres = names(PageType::Genres);
-            let labels = names(PageType::Labels);
-            let keys = names(PageType::Keys);
-            let mut library = Library {
-                tracks: tracks
-                    .into_iter()
-                    .map(|t| Track {
-                        artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
-                        album: albums.get(&t.album_id).cloned().unwrap_or_default(),
-                        genre: genres.get(&t.genre_id).cloned().unwrap_or_default(),
-                        label: labels.get(&t.label_id).cloned().unwrap_or_default(),
-                        key: keys.get(&t.key_id).cloned().unwrap_or_default(),
-                        id: t.id,
-                        title: t.title,
-                        path: t.file_path,
-                        analysis: t.analyze_path,
-                        bpm: t.tempo_x100,
-                        rating: u32::from(t.rating),
-                        color: u32::from(t.color_id),
-                        comment: t.comment,
-                    })
-                    .collect(),
-                playlists: nodes
-                    .into_iter()
-                    .map(|n| {
-                        let mut rows: Vec<_> =
-                            entries.iter().filter(|e| e.playlist_id == n.id).collect();
-                        rows.sort_by_key(|e| e.entry_index);
-                        Playlist {
-                            id: n.id,
-                            parent: n.parent_id,
-                            name: n.name,
-                            folder: n.is_folder,
-                            sequence: n.sort_order,
-                            tracks: rows.iter().map(|e| e.track_id).collect(),
-                        }
-                    })
-                    .collect(),
-            };
-            let entries = parsed.played_history_entries();
-            for h in parsed.played_histories() {
-                let mut rows: Vec<_> = entries.iter().filter(|e| e.playlist_id == h.id).collect();
-                rows.sort_by_key(|e| e.entry_index);
-                out.legacy_history.push(History {
-                    id: i64::from(h.id),
-                    name: h.name,
-                    parent: 0,
-                    folder: false,
-                    sequence: i64::from(h.id),
-                    tracks: rows.iter().map(|e| e.track_id).collect(),
-                });
-            }
-            library.normalize();
-            out.legacy = Some(library);
+            read_legacy_into(&mut out, &pdb)?;
         }
         let one = dir.join("exportLibrary.db");
         if one.exists() {
-            let db = rbl_onelibrary::ExportLibrary::open_read_only(&one).map_err(sql)?;
-            let conn = db.connection();
-            conn.execute_batch("BEGIN").map_err(sql)?;
-            let integrity: String = conn
-                .query_row("PRAGMA quick_check", [], |r| r.get(0))
-                .map_err(sql)?;
-            if integrity != "ok" {
-                return Err(ExportError::Conflict(format!(
-                    "OneLibrary integrity check failed: {integrity}"
-                )));
-            }
-            let version: String = conn
-                .query_row("SELECT dbVersion FROM property LIMIT 1", [], |r| r.get(0))
-                .map_err(sql)?;
-            if version != rbl_onelibrary::build::DB_VERSION {
-                return Err(ExportError::Conflict(format!(
-                    "Unsupported OneLibrary schema {version}; the device was left unchanged."
-                )));
-            }
-            let mut q = conn.prepare("SELECT content_id, COALESCE(title,''), COALESCE(path,''), COALESCE(analysisDataFilePath,''), COALESCE(bpmx100,0), COALESCE(rating,0), COALESCE(color_id,0), COALESCE(djComment,''), COALESCE(masterDbId,0), COALESCE(masterContentId,0), COALESCE((SELECT name FROM artist WHERE artist_id=content.artist_id_artist),''), COALESCE((SELECT name FROM album WHERE album_id=content.album_id),''), COALESCE((SELECT name FROM genre WHERE genre_id=content.genre_id),''), COALESCE((SELECT name FROM label WHERE label_id=content.label_id),''), COALESCE((SELECT name FROM key WHERE key_id=content.key_id),'') FROM content ORDER BY content_id").map_err(sql)?;
-            let rows = q
-                .query_map([], |r| {
-                    Ok((
-                        Track {
-                            artist: r.get(10)?,
-                            album: r.get(11)?,
-                            genre: r.get(12)?,
-                            label: r.get(13)?,
-                            key: r.get(14)?,
-                            id: r.get(0)?,
-                            title: r.get(1)?,
-                            path: r.get(2)?,
-                            analysis: r.get(3)?,
-                            bpm: r.get(4)?,
-                            rating: r.get::<_, u32>(5)? / 51,
-                            color: r.get(6)?,
-                            comment: r.get(7)?,
-                        },
-                        (
-                            u64::try_from(r.get::<_, i64>(8)?).unwrap_or(0),
-                            u64::try_from(r.get::<_, i64>(9)?).unwrap_or(0),
-                        ),
-                    ))
-                })
-                .map_err(sql)?;
-            let mut library = Library::default();
-            for row in rows {
-                let (track, identity) = row.map_err(sql)?;
-                out.identity.insert(track.id, identity);
-                library.tracks.push(track);
-            }
-            let mut q = conn.prepare("SELECT playlist_id, COALESCE(playlist_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM playlist ORDER BY sequenceNo, playlist_id").map_err(sql)?;
-            let nodes = q
-                .query_map([], |r| {
-                    Ok(Playlist {
-                        id: r.get(0)?,
-                        parent: r.get(1)?,
-                        name: r.get(2)?,
-                        folder: r.get::<_, i64>(3)? == 1,
-                        sequence: r.get(4)?,
-                        tracks: Vec::new(),
-                    })
-                })
-                .map_err(sql)?;
-            for node in nodes {
-                let mut node = node.map_err(sql)?;
-                let mut q = conn.prepare("SELECT content_id FROM playlist_content WHERE playlist_id=?1 ORDER BY sequenceNo").map_err(sql)?;
-                node.tracks = q
-                    .query_map([node.id], |r| r.get(0))
-                    .map_err(sql)?
-                    .collect::<std::result::Result<_, _>>()
-                    .map_err(sql)?;
-                library.playlists.push(node);
-            }
-            library.normalize();
-            out.one = Some(library);
-            let mut q = conn.prepare("SELECT history_id, COALESCE(history_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM history ORDER BY history_id").map_err(sql)?;
-            let histories = q
-                .query_map([], |r| {
-                    Ok(History {
-                        id: r.get(0)?,
-                        parent: r.get(1)?,
-                        name: r.get(2)?,
-                        folder: r.get::<_, i64>(3)? == 1,
-                        sequence: r.get(4)?,
-                        tracks: Vec::new(),
-                    })
-                })
-                .map_err(sql)?;
-            for h in histories {
-                let mut h = h.map_err(sql)?;
-                let mut q = conn.prepare("SELECT content_id FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(sql)?;
-                h.tracks = q
-                    .query_map([h.id], |r| r.get(0))
-                    .map_err(sql)?
-                    .collect::<std::result::Result<_, _>>()
-                    .map_err(sql)?;
-                out.history.push(h);
-            }
-            let mut tags=conn.prepare("SELECT myTag_id, COALESCE(sequenceNo,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(myTag_id_parent,0) FROM myTag ORDER BY myTag_id").map_err(sql)?;
-            out.my_tags = tags
-                .query_map([], |r| {
-                    Ok(crate::SourceMyTag {
-                        id: u64::try_from(r.get::<_, i64>(0)?).unwrap_or(0),
-                        seq: r.get(1)?,
-                        name: r.get(2)?,
-                        attribute: r.get(3)?,
-                        parent: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
-                    })
-                })
-                .map_err(sql)?
-                .collect::<std::result::Result<_, _>>()
-                .map_err(sql)?;
-            let mut tags = conn
-                .prepare(
-                    "SELECT content_id, myTag_id FROM myTag_content ORDER BY content_id, myTag_id",
-                )
-                .map_err(sql)?;
-            for row in tags
-                .query_map([], |r| {
-                    Ok((
-                        r.get::<_, u32>(0)?,
-                        u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
-                    ))
-                })
-                .map_err(sql)?
-            {
-                let (id, tag) = row.map_err(sql)?;
-                out.tag_memberships.entry(id).or_default().push(tag);
-            }
-            // Preserve a fingerprint of every cue column, including format-specific data.
-            let mut q = conn
-                .prepare("SELECT * FROM cue ORDER BY cue_id")
-                .map_err(sql)?;
-            let columns = q.column_count();
-            out.cues = q
-                .query_map([], |r| {
-                    let mut row = String::new();
-                    for i in 0..columns {
-                        row.push_str(&format!("{:?}|", r.get_ref(i)?));
-                    }
-                    Ok(row)
-                })
-                .map_err(sql)?
-                .collect::<std::result::Result<_, _>>()
-                .map_err(sql)?;
+            read_one_into(&mut out, &one)?;
         }
         // Merge histories by full session contents. Equal numeric IDs alone
         // are insufficient when the stick was used by both generations of player.
@@ -406,59 +178,7 @@ impl Snapshot {
                 let Some(target) = target else {
                     return Err(ExportError::Conflict(format!("Missing {label} output")));
                 };
-                for track in &current.tracks {
-                    let original =
-                        baseline.and_then(|b| b.tracks.iter().find(|t| t.id == track.id));
-                    let next = target.tracks.iter().find(|t| t.id == track.id);
-                    if original.is_some_and(|b| b != track) && next != Some(track) {
-                        return Err(ExportError::Conflict(format!(
-                            "{label}: '{}' changed on the USB. Import its changes before syncing.",
-                            track.title
-                        )));
-                    }
-                    if original.is_none() && next.is_none() {
-                        return Err(ExportError::Conflict(format!(
-                            "{label}: device-only track '{}' would be lost",
-                            track.title
-                        )));
-                    }
-                }
-                for playlist in &current.playlists {
-                    let original =
-                        baseline.and_then(|b| b.playlists.iter().find(|p| p.id == playlist.id));
-                    let next = target.playlists.iter().find(|p| p.id == playlist.id);
-                    // Position changes caused only by inserting/removing siblings are harmless.
-                    let same = |a: &Playlist, b: &Playlist| {
-                        a.id == b.id
-                            && a.parent == b.parent
-                            && a.name == b.name
-                            && a.folder == b.folder
-                            && a.tracks == b.tracks
-                    };
-                    if original.is_some_and(|b| !same(b, playlist))
-                        && !next.is_some_and(|n| same(n, playlist))
-                    {
-                        return Err(ExportError::Conflict(format!("{label}: playlist '{}' changed on the USB. Import or reconcile it before syncing.", playlist.name)));
-                    }
-                    if original.is_none() && next.is_none() {
-                        return Err(ExportError::Conflict(format!(
-                            "Device-only playlist '{}' would be lost",
-                            playlist.name
-                        )));
-                    }
-                }
-                // A deletion on the device is also an edit; don't silently resurrect it.
-                if let Some(baseline) = baseline {
-                    if baseline.tracks.iter().any(|t| {
-                        !current.tracks.iter().any(|c| c.id == t.id)
-                            && target.tracks.iter().any(|n| n.id == t.id)
-                    }) || baseline.playlists.iter().any(|p| {
-                        !current.playlists.iter().any(|c| c.id == p.id)
-                            && target.playlists.iter().any(|n| n.id == p.id)
-                    }) {
-                        return Err(ExportError::Conflict(format!("{label} contains device-side deletions. Reconcile them before syncing.")));
-                    }
-                }
+                check_database_changes(label, current, target, baseline)?;
             }
         }
         if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
@@ -509,6 +229,317 @@ impl Snapshot {
         Ok(())
     }
 }
+/// The legacy `export.pdb` side of [`Snapshot::read_at`].
+fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
+    use rbl_pdb::PageType;
+    let bytes = std::fs::read(pdb)?;
+    let parsed = rbl_pdb::Pdb::parse(&bytes)
+        .map_err(|e| ExportError::Conflict(format!("Cannot read Device Library: {e}")))?;
+    let tracks = parsed
+        .table(PageType::Tracks)
+        .map(|t| parsed.track_rows(t))
+        .unwrap_or_default();
+    let entries = parsed
+        .table(PageType::PlaylistEntries)
+        .map(|t| parsed.playlist_entries(t))
+        .unwrap_or_default();
+    let nodes = parsed
+        .table(PageType::PlaylistTree)
+        .map(|t| parsed.playlist_nodes(t))
+        .unwrap_or_default();
+    let names = |kind| -> BTreeMap<u32, String> {
+        parsed
+            .table(kind)
+            .map(|t| {
+                parsed
+                    .named_rows(t)
+                    .into_iter()
+                    .map(|n| (n.id, n.name))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let artists = names(PageType::Artists);
+    let albums = names(PageType::Albums);
+    let genres = names(PageType::Genres);
+    let labels = names(PageType::Labels);
+    let keys = names(PageType::Keys);
+    let mut library = Library {
+        tracks: tracks
+            .into_iter()
+            .map(|t| Track {
+                artist: artists.get(&t.artist_id).cloned().unwrap_or_default(),
+                album: albums.get(&t.album_id).cloned().unwrap_or_default(),
+                genre: genres.get(&t.genre_id).cloned().unwrap_or_default(),
+                label: labels.get(&t.label_id).cloned().unwrap_or_default(),
+                key: keys.get(&t.key_id).cloned().unwrap_or_default(),
+                id: t.id,
+                title: t.title,
+                path: t.file_path,
+                analysis: t.analyze_path,
+                bpm: t.tempo_x100,
+                rating: u32::from(t.rating),
+                color: u32::from(t.color_id),
+                comment: t.comment,
+            })
+            .collect(),
+        playlists: nodes
+            .into_iter()
+            .map(|n| {
+                let mut rows: Vec<_> =
+                    entries.iter().filter(|e| e.playlist_id == n.id).collect();
+                rows.sort_by_key(|e| e.entry_index);
+                Playlist {
+                    id: n.id,
+                    parent: n.parent_id,
+                    name: n.name,
+                    folder: n.is_folder,
+                    sequence: n.sort_order,
+                    tracks: rows.iter().map(|e| e.track_id).collect(),
+                }
+            })
+            .collect(),
+    };
+    let entries = parsed.played_history_entries();
+    for h in parsed.played_histories() {
+        let mut rows: Vec<_> = entries.iter().filter(|e| e.playlist_id == h.id).collect();
+        rows.sort_by_key(|e| e.entry_index);
+        out.legacy_history.push(History {
+            id: i64::from(h.id),
+            name: h.name,
+            parent: 0,
+            folder: false,
+            sequence: i64::from(h.id),
+            tracks: rows.iter().map(|e| e.track_id).collect(),
+        });
+    }
+    library.normalize();
+    out.legacy = Some(library);
+    Ok(())
+}
+/// The `OneLibrary` (`exportLibrary.db`) side of [`Snapshot::read_at`].
+fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(path).map_err(sql)?;
+    let conn = db.connection();
+    conn.execute_batch("BEGIN").map_err(sql)?;
+    let integrity: String = conn
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(sql)?;
+    if integrity != "ok" {
+        return Err(ExportError::Conflict(format!(
+            "OneLibrary integrity check failed: {integrity}"
+        )));
+    }
+    let version: String = conn
+        .query_row("SELECT dbVersion FROM property LIMIT 1", [], |r| r.get(0))
+        .map_err(sql)?;
+    if version != rbl_onelibrary::build::DB_VERSION {
+        return Err(ExportError::Conflict(format!(
+            "Unsupported OneLibrary schema {version}; the device was left unchanged."
+        )));
+    }
+    read_one_library(&db, out)?;
+    read_one_history_and_tags(&db, out)?;
+    Ok(())
+}
+
+/// The tracks and playlists half of [`read_one_into`].
+fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> Result<()> {
+    let conn = db.connection();
+    let mut q = conn.prepare("SELECT content_id, COALESCE(title,''), COALESCE(path,''), COALESCE(analysisDataFilePath,''), COALESCE(bpmx100,0), COALESCE(rating,0), COALESCE(color_id,0), COALESCE(djComment,''), COALESCE(masterDbId,0), COALESCE(masterContentId,0), COALESCE((SELECT name FROM artist WHERE artist_id=content.artist_id_artist),''), COALESCE((SELECT name FROM album WHERE album_id=content.album_id),''), COALESCE((SELECT name FROM genre WHERE genre_id=content.genre_id),''), COALESCE((SELECT name FROM label WHERE label_id=content.label_id),''), COALESCE((SELECT name FROM key WHERE key_id=content.key_id),'') FROM content ORDER BY content_id").map_err(sql)?;
+    let rows = q
+        .query_map([], |r| {
+            Ok((
+                Track {
+                    artist: r.get(10)?,
+                    album: r.get(11)?,
+                    genre: r.get(12)?,
+                    label: r.get(13)?,
+                    key: r.get(14)?,
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    path: r.get(2)?,
+                    analysis: r.get(3)?,
+                    bpm: r.get(4)?,
+                    rating: r.get::<_, u32>(5)? / 51,
+                    color: r.get(6)?,
+                    comment: r.get(7)?,
+                },
+                (
+                    u64::try_from(r.get::<_, i64>(8)?).unwrap_or(0),
+                    u64::try_from(r.get::<_, i64>(9)?).unwrap_or(0),
+                ),
+            ))
+        })
+        .map_err(sql)?;
+    let mut library = Library::default();
+    for row in rows {
+        let (track, identity) = row.map_err(sql)?;
+        out.identity.insert(track.id, identity);
+        library.tracks.push(track);
+    }
+    let mut q = conn.prepare("SELECT playlist_id, COALESCE(playlist_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM playlist ORDER BY sequenceNo, playlist_id").map_err(sql)?;
+    let nodes = q
+        .query_map([], |r| {
+            Ok(Playlist {
+                id: r.get(0)?,
+                parent: r.get(1)?,
+                name: r.get(2)?,
+                folder: r.get::<_, i64>(3)? == 1,
+                sequence: r.get(4)?,
+                tracks: Vec::new(),
+            })
+        })
+        .map_err(sql)?;
+    for node in nodes {
+        let mut node = node.map_err(sql)?;
+        let mut q = conn.prepare("SELECT content_id FROM playlist_content WHERE playlist_id=?1 ORDER BY sequenceNo").map_err(sql)?;
+        node.tracks = q
+            .query_map([node.id], |r| r.get(0))
+            .map_err(sql)?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(sql)?;
+        library.playlists.push(node);
+    }
+    library.normalize();
+    out.one = Some(library);
+    Ok(())
+}
+
+/// The play history, My Tags and cue fingerprints half of [`read_one_into`].
+fn read_one_history_and_tags(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> Result<()> {
+    use std::fmt::Write as _;
+    let conn = db.connection();
+    let mut q = conn.prepare("SELECT history_id, COALESCE(history_id_parent,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(sequenceNo,0) FROM history ORDER BY history_id").map_err(sql)?;
+    let histories = q
+        .query_map([], |r| {
+            Ok(History {
+                id: r.get(0)?,
+                parent: r.get(1)?,
+                name: r.get(2)?,
+                folder: r.get::<_, i64>(3)? == 1,
+                sequence: r.get(4)?,
+                tracks: Vec::new(),
+            })
+        })
+        .map_err(sql)?;
+    for h in histories {
+        let mut h = h.map_err(sql)?;
+        let mut q = conn.prepare("SELECT content_id FROM history_content WHERE history_id=?1 ORDER BY sequenceNo").map_err(sql)?;
+        h.tracks = q
+            .query_map([h.id], |r| r.get(0))
+            .map_err(sql)?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(sql)?;
+        out.history.push(h);
+    }
+    let mut tags=conn.prepare("SELECT myTag_id, COALESCE(sequenceNo,0), COALESCE(name,''), COALESCE(attribute,0), COALESCE(myTag_id_parent,0) FROM myTag ORDER BY myTag_id").map_err(sql)?;
+    out.my_tags = tags
+        .query_map([], |r| {
+            Ok(crate::SourceMyTag {
+                id: u64::try_from(r.get::<_, i64>(0)?).unwrap_or(0),
+                seq: r.get(1)?,
+                name: r.get(2)?,
+                attribute: r.get(3)?,
+                parent: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+            })
+        })
+        .map_err(sql)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(sql)?;
+    let mut tags = conn
+        .prepare(
+            "SELECT content_id, myTag_id FROM myTag_content ORDER BY content_id, myTag_id",
+        )
+        .map_err(sql)?;
+    for row in tags
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+            ))
+        })
+        .map_err(sql)?
+    {
+        let (id, tag) = row.map_err(sql)?;
+        out.tag_memberships.entry(id).or_default().push(tag);
+    }
+    // Preserve a fingerprint of every cue column, including format-specific data.
+    let mut q = conn
+        .prepare("SELECT * FROM cue ORDER BY cue_id")
+        .map_err(sql)?;
+    let columns = q.column_count();
+    out.cues = q
+        .query_map([], |r| {
+            let mut row = String::new();
+            for i in 0..columns {
+                let _ = write!(row, "{:?}|", r.get_ref(i)?);
+            }
+            Ok(row)
+        })
+        .map_err(sql)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(sql)?;
+    Ok(())
+}
+/// One database's (legacy or `OneLibrary`) tracks and playlists, checked for
+/// changes on the device that this sync would overwrite or lose — the part
+/// of [`Snapshot::check_changes`] repeated once per database.
+fn check_database_changes(
+    label: &str,
+    current: &Library,
+    target: &Library,
+    baseline: Option<&Library>,
+) -> Result<()> {
+    for track in &current.tracks {
+        let original = baseline.and_then(|b| b.tracks.iter().find(|t| t.id == track.id));
+        let next = target.tracks.iter().find(|t| t.id == track.id);
+        if original.is_some_and(|b| b != track) && next != Some(track) {
+            return Err(ExportError::Conflict(format!(
+                "{label}: '{}' changed on the USB. Import its changes before syncing.",
+                track.title
+            )));
+        }
+        if original.is_none() && next.is_none() {
+            return Err(ExportError::Conflict(format!(
+                "{label}: device-only track '{}' would be lost",
+                track.title
+            )));
+        }
+    }
+    for playlist in &current.playlists {
+        let original = baseline.and_then(|b| b.playlists.iter().find(|p| p.id == playlist.id));
+        let next = target.playlists.iter().find(|p| p.id == playlist.id);
+        // Position changes caused only by inserting/removing siblings are harmless.
+        let same = |a: &Playlist, b: &Playlist| {
+            a.id == b.id
+                && a.parent == b.parent
+                && a.name == b.name
+                && a.folder == b.folder
+                && a.tracks == b.tracks
+        };
+        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) {
+            return Err(ExportError::Conflict(format!("{label}: playlist '{}' changed on the USB. Import or reconcile it before syncing.", playlist.name)));
+        }
+        if original.is_none() && next.is_none() {
+            return Err(ExportError::Conflict(format!(
+                "Device-only playlist '{}' would be lost",
+                playlist.name
+            )));
+        }
+    }
+    // A deletion on the device is also an edit; don't silently resurrect it.
+    if let Some(baseline) = baseline {
+        if baseline.tracks.iter().any(|t| {
+            !current.tracks.iter().any(|c| c.id == t.id) && target.tracks.iter().any(|n| n.id == t.id)
+        }) || baseline.playlists.iter().any(|p| {
+            !current.playlists.iter().any(|c| c.id == p.id) && target.playlists.iter().any(|n| n.id == p.id)
+        }) {
+            return Err(ExportError::Conflict(format!("{label} contains device-side deletions. Reconcile them before syncing.")));
+        }
+    }
+    Ok(())
+}
 impl Library {
     fn normalize(&mut self) {
         self.tracks.sort_by_key(|t| t.id);
@@ -552,7 +583,7 @@ pub fn check_analysis(
                     a.sections
                         .into_iter()
                         .filter(|s| s.is_cue_list() || s.as_beat_grid().is_some())
-                        .map(|s| format!("{:?}", s))
+                        .map(|s| format!("{s:?}"))
                 })
                 .collect::<Vec<_>>()
         };

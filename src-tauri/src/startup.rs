@@ -8,6 +8,7 @@ static REPORTED: AtomicU8 = AtomicU8::new(0);
 pub fn begin() { let _ = START.set(Instant::now()); }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "a Tauri command's injected window and deserialized argument are owned")]
 pub fn startup_milestone(window: tauri::WebviewWindow, phase: String) {
     if window.label() != "main" { return; }
     let flag = match phase.as_str() {

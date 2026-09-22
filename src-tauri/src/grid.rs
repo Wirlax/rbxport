@@ -343,6 +343,36 @@ pub fn apply(
 }
 
 #[allow(clippy::too_many_arguments, reason = "shared command and fixture boundary")]
+/// Records what just happened in the track's undo/redo history — the part
+/// of [`apply_options`] after the write has already landed.
+fn record_history(editor: &GridEditor, track: &str, action: GridAction, beats: Vec<Beat>, options: &GridOptions) {
+    let mut histories = editor.histories.lock();
+    let history = histories.entry(track.to_owned()).or_default();
+    match action {
+        GridAction::Edit { edit, .. } => {
+            history.redo.clear();
+            let transaction = options.transaction.as_ref().filter(|_| matches!(edit, GridEdit::Tap { .. }));
+            if transaction.is_none() || history.transaction.as_ref() != transaction {
+                history.undo.push(HistoryEntry { beats, label: edit.label() });
+            }
+            history.transaction = transaction.cloned();
+            if history.undo.len() > HISTORY_CAP { history.undo.remove(0); }
+        }
+        GridAction::Undo => {
+            history.transaction = None;
+            if let Some(entry) = history.undo.pop() {
+                history.redo.push(HistoryEntry { beats, label: entry.label });
+            }
+        }
+        GridAction::Redo => {
+            history.transaction = None;
+            if let Some(entry) = history.redo.pop() {
+                history.undo.push(HistoryEntry { beats, label: entry.label });
+            }
+        }
+    }
+}
+
 fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::LibraryLocation,
     track: &str, action: GridAction, options: &GridOptions,
     set_bpm: &mut dyn FnMut(u32) -> AppResult<()>) -> AppResult<GridOutcome> {
@@ -423,33 +453,7 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     }
     journal.commit()?;
 
-    {
-        let mut histories = editor.histories.lock();
-        let history = histories.entry(track.to_owned()).or_default();
-        match action {
-            GridAction::Edit { edit, .. } => {
-                history.redo.clear();
-                let transaction = options.transaction.as_ref().filter(|_| matches!(edit, GridEdit::Tap { .. }));
-                if transaction.is_none() || history.transaction.as_ref() != transaction {
-                    history.undo.push(HistoryEntry { beats, label: edit.label() });
-                }
-                history.transaction = transaction.cloned();
-                if history.undo.len() > HISTORY_CAP { history.undo.remove(0); }
-            }
-            GridAction::Undo => {
-                history.transaction = None;
-                if let Some(entry) = history.undo.pop() {
-                    history.redo.push(HistoryEntry { beats, label: entry.label });
-                }
-            }
-            GridAction::Redo => {
-                history.transaction = None;
-                if let Some(entry) = history.redo.pop() {
-                    history.undo.push(HistoryEntry { beats, label: entry.label });
-                }
-            }
-        }
-    }
+    record_history(editor, track, action, beats, options);
 
     Ok(GridOutcome {
         state: GridStateDto { locked: editor.is_locked(track) || database_locked(location, track)?, ..editor.state_for(track, &next) },

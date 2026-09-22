@@ -409,6 +409,9 @@ pub async fn track_pcm_waveform(
     to_ms: f64,
     columns: u32,
 ) -> AppResult<tauri::ipc::Response> {
+    // The deck's streamer gives us the same frame-accurate seek path that
+    // playback uses, without sharing or disturbing the live deck decoder.
+    const RATE: u32 = 44_100;
     let library = state.library()?;
     // Eight bytes per point stays below Tauri's 64 KB IPC response cap while
     // still leaving thousands of peak buckets in the closest view, even after
@@ -423,12 +426,11 @@ pub async fn track_pcm_waveform(
         if !path.exists() || to_ms <= from_ms {
             return Ok(Vec::new());
         }
-        // The deck's streamer gives us the same frame-accurate seek path that
-        // playback uses, without sharing or disturbing the live deck decoder.
-        const RATE: u32 = 44_100;
         let mut stream = rbl_deck::decode::Streamer::open(&path, RATE)
             .map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a waveform span in frames, already clamped non-negative")]
         let first = (from_ms * f64::from(RATE) / 1000.0).round().max(0.0) as u64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a waveform span in frames, already clamped non-negative")]
         let frames = ((to_ms - from_ms) * f64::from(RATE) / 1000.0).ceil().max(1.0) as usize;
         stream.seek(first).map_err(|e| AppError::new(ErrorKind::Malformed, "That file could not be decoded.").with_detail(e.to_string()))?;
         let mut pcm = vec![0.0_f32; frames * 2];
@@ -450,7 +452,9 @@ pub async fn track_pcm_waveform(
             if !left.0.is_finite() { left = (0.0, 0.0); }
             if !right.0.is_finite() { right = (0.0, 0.0); }
             for sample in [left.0, left.1, right.0, right.1] {
-                out.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+                #[allow(clippy::cast_possible_truncation, reason = "clamped to [-1.0, 1.0] * i16::MAX, so it always fits")]
+                let pcm16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+                out.extend_from_slice(&pcm16.to_le_bytes());
             }
         }
         Ok(out)
@@ -754,6 +758,7 @@ pub async fn export_playlist<R: tauri::Runtime>(
 /// sticks is minutes long and a button that says nothing for minutes reads
 /// as a hang.
 #[tauri::command]
+#[allow(clippy::too_many_arguments, reason = "the Sync Manager's own settings, one per IPC field the frontend already sends")]
 pub async fn sync_devices<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -1211,7 +1216,7 @@ pub(crate) fn write_export(
         &selection.tracks,
         &selection.playlists,
         &selection.my_tags,
-        rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
+        &rbl_export::ExportOptions { defaults: library_defaults.as_ref(), sync: Some(&selection.sync), compatibility: compatibility_format },
         progress,
     )
     .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
@@ -2626,21 +2631,25 @@ pub async fn open_backup_directory<R: tauri::Runtime>(
 
 /// The configured destination, whether or not any backups exist yet.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
 pub fn backup_directory(state: State<'_, Arc<AppState>>) -> String {
     state.backup_destination().to_string_lossy().into_owned()
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
 pub fn backup_progress(state: State<'_, Arc<AppState>>) -> crate::backups::BackupProgress {
     state.backup_progress.lock().clone()
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
 pub fn cancel_backup(state: State<'_, Arc<AppState>>) {
     crate::backups::cancel(&state);
 }
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
 pub fn start_backup(state: State<'_, Arc<AppState>>) -> AppResult<()> {
     crate::backups::start(Arc::clone(&state))
 }

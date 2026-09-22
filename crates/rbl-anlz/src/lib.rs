@@ -455,7 +455,7 @@ impl Anlz {
     }
 
     /// Preserve extended payload only when its old-grid checksum, endpoints,
-    /// offset and every new time/tempo still agree (CAnalyzerIF's save path).
+    /// offset and every new time/tempo still agree (`CAnalyzerIF`'s save path).
     /// Beat-number-only edits refresh the header without inventing payload.
     #[must_use]
     pub fn with_extended_grid_edit(&self, old: &[Beat], new: &[Beat], offset: i16) -> Option<Vec<u8>> {

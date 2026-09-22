@@ -349,7 +349,7 @@ fn files_equal(a: &Path, b: &Path) -> std::io::Result<bool> {
     let mut a = std::fs::File::open(a)?;
     let mut b = match std::fs::File::open(b) { Ok(f) => f, Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false), Err(e) => return Err(e) };
     if a.metadata()?.len() != b.metadata()?.len() { return Ok(false); }
-    let mut left = [0_u8; 65536]; let mut right = [0_u8; 65536];
+    let mut left = vec![0_u8; 65536]; let mut right = vec![0_u8; 65536];
     loop {
         let n = a.read(&mut left)?;
         if n == 0 { return Ok(true); }
@@ -361,9 +361,9 @@ fn files_equal(a: &Path, b: &Path) -> std::io::Result<bool> {
 fn file_hash(path: &Path) -> std::io::Result<u64> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
-    let mut h = 0xcbf29ce484222325_u64;
-    let mut buffer = [0_u8; 65536];
-    loop { let n = f.read(&mut buffer)?; if n == 0 { break; } for b in &buffer[..n] { h = (h ^ u64::from(*b)).wrapping_mul(0x100000001b3); } }
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    let mut buffer = vec![0_u8; 65536];
+    loop { let n = f.read(&mut buffer)?; if n == 0 { break; } for b in &buffer[..n] { h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3); } }
     Ok(h)
 }
 
@@ -526,7 +526,7 @@ pub fn export_full(
     sync: Option<&SyncSource>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
-    export_with_options(destination, tracks, playlists, my_tags, ExportOptions { defaults, sync, compatibility: None }, progress)
+    export_with_options(destination, tracks, playlists, my_tags, &ExportOptions { defaults, sync, compatibility: None }, progress)
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
@@ -553,10 +553,10 @@ pub fn export_with_options(
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
     my_tags: &[SourceMyTag],
-    options: ExportOptions<'_>,
+    options: &ExportOptions<'_>,
     progress: &mut dyn FnMut(&ExportProgress),
 ) -> Result<ExportReport> {
-    let ExportOptions { defaults, sync, compatibility } = options;
+    let &ExportOptions { defaults, sync, compatibility } = options;
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
@@ -1246,7 +1246,7 @@ fn write_one_library(
     before: &snapshot::Snapshot,
     existing_database: Option<&Path>,
 ) -> Result<()> {
-    use rbl_onelibrary::build::{Builder, LookupTable, Track};
+    use rbl_onelibrary::build::Builder;
     use rbl_onelibrary::settings::StickSettings;
 
     let path = db_dir.join("exportLibrary.db");
@@ -1291,6 +1291,50 @@ fn write_one_library(
         known_tags.insert(tag.id);
     }
 
+    add_tracks(&mut builder, tracks, &known_tags)?;
+
+    for (i, playlist) in playlists.iter().enumerate() {
+        let playlist_id = i64::from(playlist_ids[i]);
+        let parent = playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id).map_or(0, |p| i64::from(playlist_ids[p]));
+        builder
+            .add_playlist_node(playlist_id, &playlist.name, parent, i64::try_from(i).unwrap_or(0), playlist.folder)
+            .map_err(|e| one_library_error(&e))?;
+        let mut position: i64 = 0;
+        for &track_index in &playlist.track_indices {
+            let Some(Some(export_id)) = export_ids.get(track_index).copied() else { continue };
+            position += 1;
+            builder
+                .add_to_playlist(playlist_id, i64::from(export_id), position)
+                .map_err(|e| one_library_error(&e))?;
+        }
+    }
+
+    // The date only, which is what rekordbox's own export carries. The
+    // device name is the one the stick has been given, and empty until
+    // then: rekordbox writes it empty on a fresh export [OBS 7.2.11].
+    if let Some(path) = existing_database.filter(|p| p.exists()) {
+        builder.preserve_cues(path).map_err(|e| one_library_error(&e))?;
+    }
+    for history in &before.history {
+        builder.add_history(history.id, &history.name, history.parent, history.sequence, history.folder).map_err(|e| one_library_error(&e))?;
+        for (position, id) in history.tracks.iter().enumerate() {
+            builder.add_history_track(history.id, i64::from(*id), i64::try_from(position + 1).unwrap_or(0)).map_err(|e| one_library_error(&e))?;
+        }
+    }
+    let created = rbl_core::time::local_date();
+    builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))?;
+    rbl_core::durable::replace(&staged, &path)?;
+    Ok(())
+}
+
+/// Interns each track's lookups, adds it, and tags it — the part of
+/// [`write_one_library`] with a body per track rather than per collection.
+fn add_tracks(
+    builder: &mut rbl_onelibrary::build::Builder,
+    tracks: &[OneLibraryTrack],
+    known_tags: &BTreeSet<u64>,
+) -> Result<()> {
+    use rbl_onelibrary::build::{LookupTable, Track};
     for track in tracks {
         let artist = builder.intern(LookupTable::Artist, &track.artist).map_err(|e| one_library_error(&e))?;
         let album = builder.intern(LookupTable::Album, &track.album).map_err(|e| one_library_error(&e))?;
@@ -1334,38 +1378,6 @@ fn write_one_library(
                 .map_err(|e| one_library_error(&e))?;
         }
     }
-
-    for (i, playlist) in playlists.iter().enumerate() {
-        let playlist_id = i64::from(playlist_ids[i]);
-        let parent = playlists.iter().position(|p| p.id != 0 && p.id == playlist.parent_id).map_or(0, |p| i64::from(playlist_ids[p]));
-        builder
-            .add_playlist_node(playlist_id, &playlist.name, parent, i64::try_from(i).unwrap_or(0), playlist.folder)
-            .map_err(|e| one_library_error(&e))?;
-        let mut position: i64 = 0;
-        for &track_index in &playlist.track_indices {
-            let Some(Some(export_id)) = export_ids.get(track_index).copied() else { continue };
-            position += 1;
-            builder
-                .add_to_playlist(playlist_id, i64::from(export_id), position)
-                .map_err(|e| one_library_error(&e))?;
-        }
-    }
-
-    // The date only, which is what rekordbox's own export carries. The
-    // device name is the one the stick has been given, and empty until
-    // then: rekordbox writes it empty on a fresh export [OBS 7.2.11].
-    if let Some(path) = existing_database.filter(|p| p.exists()) {
-        builder.preserve_cues(path).map_err(|e| one_library_error(&e))?;
-    }
-    for history in &before.history {
-        builder.add_history(history.id, &history.name, history.parent, history.sequence, history.folder).map_err(|e| one_library_error(&e))?;
-        for (position, id) in history.tracks.iter().enumerate() {
-            builder.add_history_track(history.id, i64::from(*id), i64::try_from(position + 1).unwrap_or(0)).map_err(|e| one_library_error(&e))?;
-        }
-    }
-    let created = rbl_core::time::local_date();
-    builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))?;
-    rbl_core::durable::replace(&staged, &path)?;
     Ok(())
 }
 

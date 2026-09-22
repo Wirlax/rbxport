@@ -1293,7 +1293,7 @@ impl Writer {
         Ok(())
     }
 
-    /// BeatGridAdjustment uses bit 7; preserve the other analysis flags.
+    /// `BeatGridAdjustment` uses bit 7; preserve the other analysis flags.
     pub fn set_analysis_lock(&mut self, content: &str, on: bool) -> Result<()> {
         self.prepare()?;
         let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;

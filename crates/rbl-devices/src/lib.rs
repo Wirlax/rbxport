@@ -227,6 +227,22 @@ fn count_playlists(pdb: &Path) -> usize {
         .map_or(0, |table| parsed.playlist_nodes(table).len())
 }
 
+fn filesystem_name(path: &Path, raw: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if matches!(raw.to_ascii_lowercase().as_str(), "msdos" | "fat") {
+        if let Ok(output) = std::process::Command::new("/usr/sbin/diskutil").args(["info", "-plist"]).arg(path).output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(value) = text.split("<key>FilesystemName</key>").nth(1)
+                .and_then(|v| v.split("<string>").nth(1)).and_then(|v| v.split("</string>").next()) {
+                return value.trim().trim_start_matches("MS-DOS ").to_owned();
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+    raw.to_owned()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -292,20 +308,4 @@ mod tests {
         };
         assert_eq!(device.used_bytes(), 0);
     }
-}
-
-fn filesystem_name(path: &Path, raw: &str) -> String {
-    #[cfg(target_os = "macos")]
-    if matches!(raw.to_ascii_lowercase().as_str(), "msdos" | "fat") {
-        if let Ok(output) = std::process::Command::new("/usr/sbin/diskutil").args(["info", "-plist"]).arg(path).output() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            if let Some(value) = text.split("<key>FilesystemName</key>").nth(1)
-                .and_then(|v| v.split("<string>").nth(1)).and_then(|v| v.split("</string>").next()) {
-                return value.trim().trim_start_matches("MS-DOS ").to_owned();
-            }
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = path;
-    raw.to_owned()
 }

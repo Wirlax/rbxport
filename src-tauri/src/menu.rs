@@ -41,6 +41,7 @@ fn label(key: &str) -> String {
 pub const EVENT: &str = "menu";
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's AppHandle extractor is injected by value")]
 pub fn set_history_menu<R: Runtime>(
     app: AppHandle<R>,
     undo: Option<String>,

@@ -79,7 +79,7 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
     let mut tracks: HashMap<u32, (String, String)> = HashMap::new();
     if let Some(db) = &one {
         let mut q = db.connection().prepare("SELECT content_id, masterContentId, COALESCE(analysisDataFilePath,'') FROM content WHERE masterDbId=?1 AND masterContentId>0").map_err(err)?;
-        for entry in q.query_map([db_id as i64], |r| Ok((r.get::<_,u32>(0)?, (r.get::<_,i64>(1)?.to_string(), r.get::<_,String>(2)?)))).map_err(err)? {
+        for entry in q.query_map([i64::try_from(db_id).unwrap_or(i64::MAX)], |r| Ok((r.get::<_,u32>(0)?, (r.get::<_,i64>(1)?.to_string(), r.get::<_,String>(2)?)))).map_err(err)? {
             let (id, value) = entry.map_err(err)?; tracks.insert(id, value);
         }
     }
@@ -151,8 +151,8 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             // writer rejects a changed prefix instead of silently duplicating it.
             let key = format!("{}:{}:{}", rbl_devices::volume_id(root), session.id, session.name);
             let hash = rbl_export::manifest::hash(key.as_bytes());
-            let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffffffffffff);
-            report.histories += state.write(|w| w.import_usb_history(&format!("{} (USB {:06x})", session.name, hash & 0xffffff), &uuid, &matched)).map_err(write_error)?;
+            let uuid = format!("00000000-0000-4000-8000-{:012x}", hash & 0xffff_ffff_ffff);
+            report.histories += state.write(|w| w.import_usb_history(&format!("{} (USB {:06x})", session.name, hash & 0x00ff_ffff), &uuid, &matched)).map_err(write_error)?;
         }
     }
     if settings {

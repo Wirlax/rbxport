@@ -1,7 +1,7 @@
 //! Regenerate RBX waveforms and import embedded covers in a named playlist.
 //! Preserves grids, cues, BPM, keys and all other analysis sections. Backs up
 //! every changed analysis file; Writer backs up the database before writing.
-//! cargo run --release -p rbl-analysis --example repair_waveforms -- RBX-BPM-MULTIBPM-RESULTS
+//! cargo run --release -p rbl-analysis --example `repair_waveforms` -- RBX-BPM-MULTIBPM-RESULTS
 #![allow(clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use rbl_anlz::Anlz;

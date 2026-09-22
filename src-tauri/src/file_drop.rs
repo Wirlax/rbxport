@@ -1,7 +1,8 @@
-//! WKWebView exposes dropped files but withholds their filesystem paths.
-//! Read AppKit's drag pasteboard while leaving HTML5 drag handling enabled.
+//! `WKWebView` exposes dropped files but withholds their filesystem paths.
+//! Read `AppKit`'s drag pasteboard while leaving HTML5 drag handling enabled.
 
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "a Tauri command argument is deserialized, so it must be owned")]
 pub fn dropped_file_paths(names: Vec<String>) -> Result<Vec<String>, String> {
     #[cfg(target_os = "macos")]
     {

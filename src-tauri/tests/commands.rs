@@ -792,7 +792,7 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
 
     // A seek lands where it was asked, in frames, whether paused or not.
     run(commands::deck_seek(s.handle(), s.player(), "a".into(), 500.0)).unwrap();
-    let sought = s.pull_until("the seek to land", |t| t.a.frames == u64::from(RATE) / 2);
+    let sought = s.pull_until("the seek to land", |t| t.a.frames == i64::from(RATE) / 2);
     assert!(sought.a.generation > loaded.a.generation, "the interface snaps rather than eases");
 
     // Unloaded: the deck is empty again.

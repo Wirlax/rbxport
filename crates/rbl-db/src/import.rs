@@ -83,7 +83,7 @@ pub fn read_artwork(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
             path: path.display().to_string(),
             reason: e.to_string(),
         })?;
-    let pictures = || tagged.tags().iter().flat_map(|tag| tag.pictures());
+    let pictures = || tagged.tags().iter().flat_map(lofty::tag::Tag::pictures);
     Ok(pictures()
         .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
         .or_else(|| pictures().next())
