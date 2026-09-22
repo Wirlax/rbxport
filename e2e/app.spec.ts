@@ -1280,15 +1280,15 @@ test("the player marks a track's cues on its waveforms", async ({ page }) => {
   // The overview spans the whole track, so it holds every cue. The detail is a
   // window and holds only what falls inside it.
   const overview = page.getByTestId("player-overview");
-  await expect.poll(async () => overview.locator('[title^="Hot cue"]').count()).toBe(4);
-  await expect(overview.locator('[title="Memory cue"]')).toHaveCount(1);
+  await expect.poll(async () => overview.locator('[data-cue]:not([data-cue=""])').count()).toBe(4);
+  await expect(overview.locator('[data-cue=""]')).toHaveCount(1);
   // The detail starts at the top of the track, spanning its first 8%. The
   // mock's memory cue sits at 2% and its first hot cue at 12%, so exactly one
   // marker belongs there — which is what makes it a window rather than a
   // second copy of the overview.
   const detail = page.getByTestId("player-detail");
-  await expect(detail.locator('[title="Memory cue"]')).toHaveCount(1);
-  await expect(detail.locator('[title^="Hot cue"]')).toHaveCount(0);
+  await expect(detail.locator('[data-cue=""]')).toHaveCount(1);
+  await expect(detail.locator('[data-cue]:not([data-cue=""])')).toHaveCount(0);
 });
 
 test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
@@ -1416,9 +1416,9 @@ test("the detail waveform shows a window, not the whole track again", async ({ p
 
   // The overview holds every cue; the detail holds only those inside its
   // window, which is a small slice of the track.
-  await expect.poll(async () => overview.locator('[title^="Hot cue"]').count()).toBe(4);
+  await expect.poll(async () => overview.locator('[data-cue]:not([data-cue=""])').count()).toBe(4);
   await expect
-    .poll(async () => detail.locator('[title^="Hot cue"], [title="Memory cue"]').count())
+    .poll(async () => detail.locator('[data-cue]').count())
     .toBeLessThan(5);
 });
 
@@ -2100,12 +2100,12 @@ test("the title bar reads out what the app is costing", async ({ page }) => {
   // zero — a zero would claim the app is resident in no memory at all.
   await page.goto("/");
   const cost = page.getByTestId("app-cost");
-  for (const label of ["AUDIO", "MEM", "FPS"]) {
+  for (const label of ["AUDIO", "RAM", "FPS"]) {
     await expect(cost).toContainText(label);
   }
   // GPU was always a dash: macOS accounts it per process only to root.
   await expect(cost).not.toContainText("GPU");
-  await expect(cost).toContainText("MEM —");
+  await expect(cost).toContainText("RAM —");
   // FPS is measured in the window itself, so it arrives even here.
   await expect(cost).not.toContainText("FPS —");
 });
