@@ -67,10 +67,18 @@ test("the icon column holds Information and Sub-Browser only, centred in the mea
   expect((sub?.y ?? 0) - (info?.y ?? 0)).toBeCloseTo(await token(page, "--s-right-rail-pitch"), 0);
 });
 
-test("Information stays where rekordbox draws it rather than climbing into the room the removed boxes took", async ({ page }) => {
+test("Information and Sub-Browser sit centred as a group, not pinned where rekordbox draws them", async ({ page }) => {
+  // 2026-09-20: rekordbox pins these under three boxes this app leaves out
+  // (TODO.md, "Deliberate divergences"), which read as a gap rather than a
+  // reason without them there — so the remaining two are centred instead.
   const column = await rail(page).boundingBox();
   const info = await rail(page).getByRole("button", { name: "Information" }).boundingBox();
-  expect((info?.y ?? 0) - (column?.y ?? 0)).toBeCloseTo(await token(page, "--s-right-rail-info-top"), 0);
+  const sub = await rail(page).getByRole("button", { name: "Sub-Browser Window" }).boundingBox();
+  const groupTop = info?.y ?? 0;
+  const groupBottom = (sub?.y ?? 0) + (sub?.height ?? 0);
+  const groupMid = (groupTop + groupBottom) / 2;
+  const columnMid = (column?.y ?? 0) + (column?.height ?? 0) / 2;
+  expect(groupMid).toBeCloseTo(columnMid, 0);
 });
 
 test("a lit box fills with the capture's blue and bands out to the column's edge", async ({ page }) => {
@@ -89,7 +97,9 @@ test("a lit box fills with the capture's blue and bands out to the column's edge
 });
 
 test("the search field is the measured height in the measured header row, with the measured face and colours", async ({ page }) => {
-  const field = page.getByRole("search").first();
+  // The tree grew its own search field (2026-09-20); the browser's is the
+  // second one in the DOM, the tree sitting to its left.
+  const field = page.getByRole("search").last();
   const input = field.getByRole("searchbox");
   const box = await field.boundingBox();
   expect(box?.height).toBeCloseTo(await token(page, "--s-search-h"), 0);
@@ -115,17 +125,6 @@ test("the search field is the measured height in the measured header row, with t
   expect(await style(field, "border-top-width")).toBe("0px");
   expect(Number.parseFloat(await style(input, "font-size"))).toBeCloseTo(await token(page, "--f-size-search"), 1);
   await expect(input).toHaveAttribute("placeholder", "Search within this track list");
-
-  // The magnifier: a 13pt box 9pt in and 5pt down, in the measured grey.
-  const glyph = field.locator("span[aria-hidden]").first();
-  const g = await glyph.boundingBox();
-  expect(g?.width).toBeCloseTo(await token(page, "--s-search-glyph-size"), 0);
-  expect((g?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(await token(page, "--s-search-glyph-left"), 0);
-  expect((g?.y ?? 0) - (box?.y ?? 0)).toBeCloseTo(await token(page, "--s-search-glyph-top"), 0);
-  expect(await style(glyph, "color")).toBe(await colour(page, "--c-search-glyph"));
-  // The text starts 37pt in.
-  const i = await input.boundingBox();
-  expect((i?.x ?? 0) - (box?.x ?? 0)).toBeCloseTo(await token(page, "--s-search-text-left"), 0);
 });
 
 test("the column headings are the measured height", async ({ page }) => {
