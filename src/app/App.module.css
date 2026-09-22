@@ -199,6 +199,8 @@
    is drawn, so narrowing it does not make it harder to catch. */
 .splitter {
   position: relative;
+  /* Keep the padded grab area above the browser's rows and sticky header (2). */
+  z-index: 3;
   background: var(--c-black);
   cursor: col-resize;
   touch-action: none;
