@@ -64,7 +64,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM1NzM4N0E0RTUwMEE2RTMKUldUanBnRGxwSWR6eFgyT1A3NTV0SHRMU0JDVkpEeTY0MHhHc0x4RUpxNnNBQmdBZVpmUzJueVkK",
       "endpoints": [
-        "https://pub-8a641d6e2afb49198292186d27dcc37e.r2.dev/latest.json"
+        "https://download.rbxport.com/latest.json"
       ],
       "windows": {
         "installMode": "quiet"
