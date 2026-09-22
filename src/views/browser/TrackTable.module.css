@@ -125,7 +125,9 @@
   height: var(--s-filter-toggle-glyph);
   color: var(--c-filter-text);
 }
-.search { flex: 0 1 var(--s-search-w); }
+/* The capture draws it black with no border of its own, sitting in the
+   header row rather than boxed like the tree's own search. */
+.search { flex: 0 1 var(--s-search-w); border: none; }
 
 .colHead {
   display: grid;
