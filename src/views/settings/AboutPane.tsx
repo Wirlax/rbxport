@@ -143,7 +143,7 @@ export function AboutPane() {
         <div className={styles.aboutUpdates}>
           <div className={styles.updateControls}>
             <Toggle
-              label="Automatic updates"
+              label="Download updates"
               checked={checkUpdates}
               onChange={(checkUpdates) => update("advanced", { checkUpdates })}
             />
@@ -159,7 +159,7 @@ export function AboutPane() {
               onChange={(updateFrequency) => update("advanced", { updateFrequency })}
             />
           </div>
-          <p className={layout.help}>Updates are downloaded in the background and applied after you exit.</p>
+          <p className={layout.help}>Updates download in the background and install after you quit.</p>
           {statusText ? <p className={styles.updateHint} aria-live="polite">{statusText}</p> : null}
           {downloading ? (
             <div className={styles.updateProgressRow}>
