@@ -8,7 +8,7 @@
  * automatic check is running silently elsewhere — are shown in place.
  */
 import { useEffect, useState, type SVGProps } from "react";
-import { Github, Globe, Instagram, Twitch } from "lucide-react";
+import { Github, Globe, Heart, Instagram, Twitch } from "lucide-react";
 
 import { getBackend } from "@/ipc/client";
 import type { UpdateProgress } from "@/ipc/types";
@@ -41,6 +41,8 @@ export const ABOUT_LINKS = [
   { label: "GitHub", Icon: Github, url: "https://github.com/chrisle" },
   { label: "Web", Icon: Globe, url: "https://triodeofficial.com" },
 ];
+
+const SUPPORT_URL = "https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE";
 
 export function AboutPane() {
   const { preferences, update } = usePreferencesContext();
@@ -190,6 +192,12 @@ export function AboutPane() {
           ) : null}
           {updateError ? <p className={styles.updateError} role="alert">{updateError}</p> : null}
         </div>
+        <div className={styles.aboutSupport}>
+          <h2>Support rbxport</h2>
+          <p>rbxport is independently developed and maintained by TRIODE.</p>
+          <p>If you find it useful, you can help support continued development, maintenance, and new features.</p>
+          <Button className={styles.supportButton} onClick={() => open(SUPPORT_URL)}><Heart size={16} aria-hidden="true" /> Support rbxport</Button>
+        </div>
       </section>
       <div className={styles.aboutLegal}>
         <details>
@@ -218,7 +226,7 @@ export function AboutPane() {
             </button>
           ))}
         </div>
-        <p className={styles.aboutMade}>Made by TRIODE with ❤️ in California</p>
+        <p className={styles.aboutMade}><span>Made by TRIODE with</span> <Heart size="1em" aria-hidden="true" /> <span>in California</span></p>
       </footer>
     </>
   );

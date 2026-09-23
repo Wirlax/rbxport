@@ -712,7 +712,7 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .aboutLegal summary:hover { color: var(--c-text); }
 .aboutLegal .aboutLine { font-size: var(--f-size-sm); color: var(--c-text-dim); }
 .aboutFoot { gap: 8px; padding-top: 24px; }
-.aboutMade { font-size: var(--f-size-sm); }
+.aboutMade { display: inline-flex; align-items: center; gap: 4px; font-size: var(--f-size-sm); }
 .updateControls { justify-content: space-between; }
 .updateControls .select { width: 160px; }
 
@@ -730,6 +730,10 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .aboutHeader .aboutVersion { margin: 6px 0 0; font-size: var(--f-size-sm); }
 .aboutUpdates { border-top: 1px solid var(--c-raised); padding-top: 20px; }
 .aboutUpdates > p:last-child { margin-bottom: 0; }
+.aboutSupport { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--c-raised); }
+.aboutSupport h2 { margin: 0 0 8px; font-size: var(--f-size-pref-sub); }
+.aboutSupport p { max-width: 540px; margin: 6px 0; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
+.supportButton { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; }
 
 .paneGroupHeading { margin: 16px 8px 8px; padding-top: 12px; border-top: 1px solid var(--c-raised); color: var(--c-text-dim); font-size: var(--f-size-sm); font-weight: 600; }
 

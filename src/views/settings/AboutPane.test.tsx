@@ -24,6 +24,7 @@ let root: Root;
 let update: ReturnType<typeof vi.fn>;
 let checkForUpdate: ReturnType<typeof vi.fn>;
 let downloadUpdate: ReturnType<typeof vi.fn>;
+let openUrl: ReturnType<typeof vi.fn>;
 let progressListeners: Set<(progress: UpdateProgress) => void>;
 
 function mount(preferences: Preferences = DEFAULT_PREFERENCES) {
@@ -63,6 +64,7 @@ beforeEach(() => {
   progressListeners = new Set();
   checkForUpdate = vi.fn<() => Promise<UpdateCheck>>();
   downloadUpdate = vi.fn().mockResolvedValue({ version: "0.5.0", installed: true });
+  openUrl = vi.fn().mockResolvedValue(undefined);
   __setBackend({
     appVersion: () => Promise.resolve("0.4.0"),
     checkForUpdate,
@@ -71,6 +73,7 @@ beforeEach(() => {
       progressListeners.add(listener);
       return () => progressListeners.delete(listener);
     },
+    openUrl,
   } as unknown as Backend);
   host = document.createElement("div");
   document.body.append(host);
@@ -84,6 +87,17 @@ afterEach(() => {
 });
 
 describe("AboutPane › Updates", () => {
+  it("offers a support link below automatic updates", async () => {
+    mount();
+    await settle();
+    const button = Array.from(section().querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Support rbxport"));
+    expect(section().textContent).toContain("rbxport is independently developed and maintained by TRIODE.");
+    expect(section().textContent).toContain("If you find it useful, you can help support continued development, maintenance, and new features.");
+    act(() => button?.click());
+    await settle();
+    expect(openUrl).toHaveBeenCalledWith("https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE");
+  });
+
   it("the switch shows the preference and writes its opposite", async () => {
     mount();
     await settle();
