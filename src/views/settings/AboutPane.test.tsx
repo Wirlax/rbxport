@@ -91,8 +91,8 @@ describe("AboutPane › Updates", () => {
     mount();
     await settle();
     const button = Array.from(section().querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Support rbxport"));
-    expect(section().textContent).toContain("rbxport is free to use and independently developed and maintained by TRIODE.");
-    expect(section().textContent).toContain("If you find it useful, you can help support continued development, maintenance, and new features.");
+    expect(section().textContent).toContain("rbxport is free to use and independently developed by TRIODE.");
+    expect(section().textContent).toContain("If it makes your DJ workflow easier, consider supporting continued development and future features.");
     act(() => button?.click());
     await settle();
     expect(openUrl).toHaveBeenCalledWith("https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE");

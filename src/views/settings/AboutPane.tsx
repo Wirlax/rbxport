@@ -194,8 +194,8 @@ export function AboutPane() {
         </div>
         <div className={styles.aboutSupport}>
           <h2>Support rbxport</h2>
-          <p>rbxport is free to use and independently developed and maintained by TRIODE.</p>
-          <p>If you find it useful, you can help support continued development, maintenance, and new features.</p>
+          <p>rbxport is free to use and independently developed by TRIODE.</p>
+          <p>If it makes your DJ workflow easier, consider supporting continued development and future features.</p>
           <Button className={styles.supportButton} onClick={() => open(SUPPORT_URL)}><Heart className={styles.supportHeart} size={16} aria-hidden="true" /> Support rbxport</Button>
         </div>
       </section>
