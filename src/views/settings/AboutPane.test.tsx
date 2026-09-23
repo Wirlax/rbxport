@@ -91,7 +91,7 @@ describe("AboutPane › Updates", () => {
     mount();
     await settle();
     const button = Array.from(section().querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Support rbxport"));
-    expect(section().textContent).toContain("rbxport is independently developed and maintained by TRIODE.");
+    expect(section().textContent).toContain("rbxport is free to use and independently developed and maintained by TRIODE.");
     expect(section().textContent).toContain("If you find it useful, you can help support continued development, maintenance, and new features.");
     act(() => button?.click());
     await settle();
