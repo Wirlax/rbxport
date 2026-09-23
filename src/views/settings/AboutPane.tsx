@@ -196,7 +196,7 @@ export function AboutPane() {
           <h2>Support rbxport</h2>
           <p>rbxport is independently developed and maintained by TRIODE.</p>
           <p>If you find it useful, you can help support continued development, maintenance, and new features.</p>
-          <Button className={styles.supportButton} onClick={() => open(SUPPORT_URL)}><Heart size={16} aria-hidden="true" /> Support rbxport</Button>
+          <Button className={styles.supportButton} onClick={() => open(SUPPORT_URL)}><Heart className={styles.supportHeart} size={16} aria-hidden="true" /> Support rbxport</Button>
         </div>
       </section>
       <div className={styles.aboutLegal}>
@@ -226,7 +226,7 @@ export function AboutPane() {
             </button>
           ))}
         </div>
-        <p className={styles.aboutMade}><span>Made by TRIODE with</span> <Heart size="1em" aria-hidden="true" /> <span>in California</span></p>
+        <p className={styles.aboutMade}><span>Made by TRIODE with</span> <Heart className={styles.supportHeart} size="1em" aria-hidden="true" /> <span>in California</span></p>
       </footer>
     </>
   );
