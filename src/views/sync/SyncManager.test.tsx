@@ -389,6 +389,14 @@ describe("SyncManager", () => {
 });
 
 it("imports cue/grid information from selected devices only", async () => {
+  const preferences = {
+    ...DEFAULT_PREFERENCES,
+    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false },
+  };
+  act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
+    <SyncManager onClose={onClose} />
+  </PreferencesProvider>));
+  await settle();
   const button = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("CUE GRID INFO"))!;
   expect(button.disabled).toBe(true);
   click(box("USB A"));
