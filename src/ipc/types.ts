@@ -62,7 +62,7 @@ export type RelatedCriterion = "bpmKey" | "genreRecent" | "artist" | "suggestion
 
 export type SortColumn =
   | "trackNo" | "title" | "artist" | "album" | "genre" | "label"
-  | "bpm" | "key" | "duration" | "rating" | "dateAdded" | "releaseDate";
+  | "comment" | "bpm" | "key" | "duration" | "rating" | "dateAdded" | "releaseDate";
 
 /**
  * What the backend sorts by. The columns, plus the key round the Camelot
@@ -871,9 +871,7 @@ export interface DeckEvent {
  * One cue point.
  *
  * The colour is what rekordbox paints for the cue's `ColorTableIndex`, from
- * the nine indices measured off the captures; an index outside those arrives
- * as `null` and draws the default green rather than a guess. A memory cue has
- * no colour of its own and is always `null`.
+ * the palette; a memory cue carries its named colour or `null` for No Color.
  */
 export interface Cue {
   /** Saved cue note; older backends may omit it. */
@@ -1291,6 +1289,8 @@ export interface Edits {
    */
   addLoop(track: string, kind: CueKind, inMs: number, outMs: number, beats?: number): Promise<string>;
   moveCue(cue: string, positionMs: number): Promise<void>;
+  /** Changes a cue's palette entry; null resets it to its default. */
+  setCueColour(cue: string, colour: number | null): Promise<void>;
   deleteCue(cue: string): Promise<void>;
   /**
    * Convert Memory Cues to Hot Cues: each memory cue, by position, into the

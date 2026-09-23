@@ -39,9 +39,9 @@
 //! measures exactly four beats at the track's own BPM. Zero means the length
 //! is implied by In/Out rather than stated.
 //!
-//! So a plain cue and a loop are both determined. Setting a *custom* colour
-//! still is not — what RGB an index past the default means is unknown — so
-//! that alone is refused.
+//! So a plain cue and a loop are both determined. The complete desktop
+//! `ColorTableIndex` palette has since been extracted, and memory cues use
+//! the eight-value `Color` field, so both kinds can be recoloured safely.
 //!
 //! # Analysis
 //!
@@ -63,9 +63,9 @@
 //!
 //! # What this deliberately will not do
 //!
-//! Custom cue colours and `contentCue`/`contentFile` are **not implemented**.
-//! Their values are still unexplained, and a wrong one in a 38,681-track
-//! collection is not recoverable by undo. See [`Unsupported`].
+//! `contentCue`/`contentFile` are **not implemented**. Their values are still
+//! unexplained, and a wrong one in a 38,681-track collection is not
+//! recoverable by undo. See [`Unsupported`].
 //! [`Writer::set_analysis`] registers an analysis this app made: the BPM,
 //! the key, where the files went, and the length. `Analysed` is a bitfield
 //! whose bits are not all explained (`analysed_bits`): 105 on 37,652 of the
@@ -78,9 +78,9 @@
 //!
 //! # What this deliberately will not do
 //!
-//! Custom cue colours and `contentCue`/`contentFile` are **not
-//! implemented**. Their values are still unexplained, and a wrong one in a
-//! 38,681-track collection is not recoverable by undo. See [`Unsupported`].
+//! `contentCue`/`contentFile` are **not implemented**. Their values are still
+//! unexplained, and a wrong one in a 38,681-track collection is not
+//! recoverable by undo. See [`Unsupported`].
 
 use std::path::{Path, PathBuf};
 
@@ -218,8 +218,6 @@ impl TrackField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Unsupported {
-    /// What RGB a `ColorTableIndex` past the default means is unknown.
-    CueColour,
     /// Nothing is known about what rekordbox does with these.
     ContentCueOrFile,
 }
@@ -228,8 +226,6 @@ impl Unsupported {
     #[must_use]
     pub const fn reason(self) -> &'static str {
         match self {
-            Self::CueColour =>
-                "setting a cue's colour needs the ColorTableIndex palette explained by a diff recording",
             Self::ContentCueOrFile =>
                 "contentCue and contentFile are not understood and must not be touched",
         }
@@ -1032,6 +1028,32 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Changes a cue's colour. Memory cues use rekordbox's eight-value
+    /// `Color` field (255 means no colour); hot cues use `ColorTableIndex`.
+    pub fn set_cue_colour(&mut self, cue: &str, colour: Option<u8>) -> Result<Changed> {
+        self.prepare()?;
+        let tx = self.library.connection_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let kind: i64 = tx.query_row(
+            "SELECT Kind FROM djmdCue WHERE ID=?1 AND rb_local_deleted=0", [cue], |row| row.get(0),
+        )?;
+        let maximum = if kind == 0 { 7 } else { 64 };
+        if colour.is_some_and(|value| value > maximum) {
+            return Err(DbError::WriteRefused("cue colour is outside rekordbox's palette".into()));
+        }
+        let usn = next_usn(&tx)?;
+        let stamp = time::now();
+        let rows = if kind == 0 {
+            let value = colour.map_or(255, i64::from);
+            tx.execute("UPDATE djmdCue SET Color=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![cue, value, usn, stamp])?
+        } else {
+            let value = colour.map_or(21, i64::from);
+            tx.execute("UPDATE djmdCue SET ColorTableIndex=?2, rb_local_usn=?3, updated_at=?4 WHERE ID=?1 AND rb_local_deleted=0", params![cue, value, usn, stamp])?
+        };
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok(Changed { rows, usn })
     }
 
     /// Adds a loop: a cue with an end as well as a start.

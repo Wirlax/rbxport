@@ -474,6 +474,7 @@ pub fn reload_metadata(db: &Db, library: &mut Library, ids: &[String]) -> rusqli
     if rating_changed { library.rebuild_ranks(&[crate::SortColumn::Rating]); }
     if !comments.is_empty() {
         library.comment.replace_rows(&comments);
+        library.rebuild_ranks(&[crate::SortColumn::Comment]);
         let search = comments.keys().map(|&row| (row, library.search_text(row))).collect();
         library.search.replace_rows(&search);
     }

@@ -437,6 +437,7 @@ async function realBackend(): Promise<Backend> {
       addLoop: (track, kind, inMs, outMs, beats) =>
         invoke<string>("add_loop", { track, kind, inMs, outMs, beats: beats ?? null }),
       moveCue: (cue, positionMs) => invoke<void>("move_cue", { cue, positionMs }),
+      setCueColour: (cue, colour) => invoke<void>("set_cue_colour", { cue, colour }),
       deleteCue: (cue) => invoke<void>("delete_cue", { cue }),
       gridEdit: (track, edit, options) =>
         invoke<GridState>("grid_edit", {

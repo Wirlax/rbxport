@@ -471,6 +471,7 @@ pub fn sort_from_wire(name: &str) -> SortColumn {
         "album" => SortColumn::Album,
         "genre" => SortColumn::Genre,
         "label" => SortColumn::Label,
+        "comment" => SortColumn::Comment,
         "key" => SortColumn::Key,
         "keyCamelot" => SortColumn::KeyCamelot,
         "bpm" => SortColumn::Bpm,

@@ -1104,6 +1104,17 @@ test("a comment commits on Enter", async ({ page }) => {
   await expect(page.getByRole("contentinfo")).toContainText("Comment saved");
 });
 
+test("a second single click edits a selected comment", async ({ page }) => {
+  await page.goto("/?writable=1");
+  const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
+  await cell.click();
+  await expect(cell.locator("input")).toHaveCount(0);
+  await cell.click();
+  // Non-title fields do not need to wait for the title's double-click-to-load
+  // grace period; the second click opens the field in the same event turn.
+  await expect(cell.locator("input")).toBeFocused({ timeout: 250 });
+});
+
 test("the metadata columns are typed over in the list, and Escape abandons", async ({ page }) => {
   await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");

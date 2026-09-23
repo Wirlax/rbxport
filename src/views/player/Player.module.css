@@ -1114,6 +1114,7 @@ button.pageNumber:disabled { color: var(--c-icon-off); }
 .cueChip[data-set] { background: var(--cue-colour, var(--c-pad-set)); color: var(--c-black); }
 
 .cueTime { color: var(--c-text); font-variant-numeric: tabular-nums; flex: none; }
+.memoryCueDot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .cueName { color: var(--c-text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .cueDelete { color: var(--c-cue-delete); flex: none; }
 /* The memory list's ✕ is a button of its own; the hot-cue list's is still a

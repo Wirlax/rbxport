@@ -837,7 +837,7 @@ fn a_refused_action_leaves_nothing_behind() {
 
 #[test]
 fn the_unsupported_edits_are_refused_with_a_reason() {
-    for action in [Unsupported::CueColour, Unsupported::ContentCueOrFile] {
+    for action in [Unsupported::ContentCueOrFile] {
         let error = Writer::refuse(action);
         let DbError::WriteRefused(reason) = error else {
             panic!("{action:?} should be a refusal");
@@ -1101,13 +1101,24 @@ fn a_cue_knows_its_track_until_it_is_deleted() {
 }
 
 #[test]
-fn a_custom_cue_colour_is_still_refused() {
-    // What RGB an index past the default means is unknown.
-    let DbError::WriteRefused(reason) = Writer::refuse(Unsupported::CueColour) else {
-        panic!("a custom cue colour should be a refusal");
-    };
-    // The reason has to say what would settle it, or it is just a "no".
-    assert!(reason.contains("recording"), "{reason}");
+fn cue_colours_use_the_field_rekordbox_assigns_to_each_kind() {
+    let mut f = fixture();
+    let memory = f.writer.add_cue(&track_id(0), 0, 1_000).unwrap();
+    let hot = f.writer.add_cue(&track_id(0), 1, 2_000).unwrap();
+    f.writer.set_cue_colour(&memory, Some(3)).unwrap();
+    f.writer.set_cue_colour(&hot, Some(46)).unwrap();
+    fn columns(writer: &Writer, id: &str) -> (i64, i64) {
+        writer.library().connection().query_row(
+            "SELECT Color, ColorTableIndex FROM djmdCue WHERE ID=?1", [id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        ).unwrap()
+    }
+    assert_eq!(columns(&f.writer, &memory), (3, 0));
+    assert_eq!(columns(&f.writer, &hot), (-1, 46));
+    f.writer.set_cue_colour(&memory, None).unwrap();
+    f.writer.set_cue_colour(&hot, None).unwrap();
+    assert_eq!(columns(&f.writer, &memory), (255, 0));
+    assert_eq!(columns(&f.writer, &hot), (-1, 21));
 }
 
 // ----------------------------------------------------------------- import

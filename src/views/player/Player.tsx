@@ -90,6 +90,8 @@ import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
 import { READ_ONLY_REASON, useMemoryCues } from "./useMemoryCues";
 import { useHotCues } from "./useHotCues";
+import { useCueWriter } from "./useCueWriter";
+import { CueColorMenu } from "./CueColorMenu";
 import styles from "./Player.module.css";
 
 export interface PlayerProps {
@@ -785,6 +787,8 @@ export const Player = memo(function Player({
   );
   const [padMode, setPadMode] = useState<PadMode>("cue");
   const [panel, setPanel] = useState<CuePanel>("memory");
+  const [cueColorMenu, setCueColorMenu] = useState<{x: number; y: number; cue: Cue} | null>(null);
+  const writeCue = useCueWriter(onError);
   /**
    * Where CUE returns to. A track opens on its first memory cue, which is
    * where rekordbox and a CDJ both put the playhead, and CUE moves it from
@@ -2383,6 +2387,10 @@ export const Player = memo(function Player({
                   aria-disabled={cue ? undefined : true}
                   data-empty={cue ? undefined : ""}
                   onClick={() => hot.press(letter)}
+                  onContextMenu={cue ? (event) => {
+                    event.preventDefault(); event.stopPropagation();
+                    setCueColorMenu({x: event.clientX, y: event.clientY, cue});
+                  } : undefined}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
@@ -2436,6 +2444,10 @@ export const Player = memo(function Player({
                 className={styles.cueRow}
                 data-loop={cue.outMs > 0 ? "" : undefined}
                 onClick={() => callCue(cue)}
+                onContextMenu={(event) => {
+                  event.preventDefault(); event.stopPropagation();
+                  setCueColorMenu({x: event.clientX, y: event.clientY, cue});
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -2443,6 +2455,7 @@ export const Player = memo(function Player({
                   }
                 }}
               >
+                {cue.colour ? <span className={styles.memoryCueDot} style={{background: cue.colour}} aria-hidden /> : null}
                 <span className={styles.cueTime}>{memoryTime(cue.positionMs)}</span>
                 <span className={styles.cueName}>{cue.comment || "CUE(Auto)"}</span>
                 <button
@@ -2488,6 +2501,16 @@ export const Player = memo(function Player({
           ))}
         </div>
       </aside>
+
+      {cueColorMenu ? <CueColorMenu
+        x={cueColorMenu.x} y={cueColorMenu.y} memory={cueColorMenu.cue.memory}
+        onClose={() => setCueColorMenu(null)}
+        onChoose={(colour) => {
+          if (!readOnly && cueColorMenu.cue.id !== "") {
+            writeCue((edits) => edits.setCueColour(cueColorMenu.cue.id, colour));
+          }
+        }}
+      /> : null}
 
       {jumpMenu ? (
         <JumpMenu

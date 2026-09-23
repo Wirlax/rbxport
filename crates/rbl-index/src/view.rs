@@ -14,6 +14,7 @@ pub enum SortColumn {
     Album,
     Genre,
     Label,
+    Comment,
     Key,
     Bpm,
     Duration,
@@ -26,9 +27,9 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
-    pub(crate) const ALL: [SortColumn; 13] = [
+    pub(crate) const ALL: [SortColumn; 14] = [
         SortColumn::TrackNo, SortColumn::Title, SortColumn::Artist, SortColumn::Album,
-        SortColumn::Genre, SortColumn::Label, SortColumn::Key, SortColumn::Bpm,
+        SortColumn::Genre, SortColumn::Label, SortColumn::Comment, SortColumn::Key, SortColumn::Bpm,
         SortColumn::Duration, SortColumn::Rating, SortColumn::DateAdded, SortColumn::ReleaseDate,
         SortColumn::KeyCamelot,
     ];
@@ -41,13 +42,14 @@ impl SortColumn {
             SortColumn::Album => 3,
             SortColumn::Genre => 4,
             SortColumn::Label => 5,
-            SortColumn::Key => 6,
-            SortColumn::Bpm => 7,
-            SortColumn::Duration => 8,
-            SortColumn::Rating => 9,
-            SortColumn::DateAdded => 10,
-            SortColumn::ReleaseDate => 11,
-            SortColumn::KeyCamelot => 12,
+            SortColumn::Comment => 6,
+            SortColumn::Key => 7,
+            SortColumn::Bpm => 8,
+            SortColumn::Duration => 9,
+            SortColumn::Rating => 10,
+            SortColumn::DateAdded => 11,
+            SortColumn::ReleaseDate => 12,
+            SortColumn::KeyCamelot => 13,
         }
     }
 }
@@ -288,6 +290,7 @@ impl Library {
                 SortColumn::Album => order.sort_by(|&a, &b| Self::folded_lookup(&self.albums, &self.album, a).cmp(Self::folded_lookup(&self.albums, &self.album, b))),
                 SortColumn::Genre => order.sort_by(|&a, &b| Self::folded_lookup(&self.genres, &self.genre, a).cmp(Self::folded_lookup(&self.genres, &self.genre, b))),
                 SortColumn::Label => order.sort_by(|&a, &b| Self::folded_lookup(&self.labels, &self.label, a).cmp(Self::folded_lookup(&self.labels, &self.label, b))),
+                SortColumn::Comment => order.sort_by_cached_key(|&r| fold(self.comment.get(r as usize))),
                 // By the key's own rule, not the fold: the fold drops `#`,
                 // which put F and F# on top of each other.
                 SortColumn::Key => order.sort_by(|&a, &b| crate::key::cmp_names(self.key_name(a), self.key_name(b))),

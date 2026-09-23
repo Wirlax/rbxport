@@ -214,9 +214,7 @@ pub struct CueDto {
     pub letter: String,
     pub memory: bool,
     /// What rekordbox paints for the cue's `ColorTableIndex`, as `#RRGGBB`,
-    /// or `None` for an index nobody has measured — the interface then draws
-    /// its one measured green rather than a guess. Always `None` on a memory
-    /// cue, which has no colour of its own.
+    /// or `None` when no colour is selected (or an index is invalid).
     pub colour: Option<String>,
 }
 

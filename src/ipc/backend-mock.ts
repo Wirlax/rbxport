@@ -300,6 +300,7 @@ function compare(a: RowDto, b: RowDto, col: SortKey): number {
     case "album": return collator.compare(a.album, b.album);
     case "genre": return collator.compare(a.genre, b.genre);
     case "label": return collator.compare(a.label, b.label);
+    case "comment": return collator.compare(a.comment, b.comment);
     case "key": return collator.compare(a.key, b.key);
     case "dateAdded": return collator.compare(a.dateAdded, b.dateAdded);
     case "releaseDate": return collator.compare(a.releaseDate, b.releaseDate);
@@ -918,6 +919,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         colour: kind === "memory" ? null : DEFAULT_CUE_COLOUR,
       });
       return cuesChanged(track, id);
+    },
+    setCueColour: (cueId, colour) => {
+      for (const [trackId, list] of cueStore) {
+        const cue = list.find((item) => item.id === cueId);
+        if (!cue) continue;
+        const palette = ["#000000", "#305AFF", "#5073FF", "#508CFF", "#50A0FF", "#50B4FF", "#50B0F2", "#50AEE8", "#45ACDB", "#00E0FF", "#19DAF0", "#32D2E6", "#21B4B9", "#20AAA0", "#1FA392", "#19A08C", "#14A584", "#14AA7D", "#10B176", "#30D26E", "#37DE5A", "#3CEB50", "#28E214", "#7DC13D", "#8CC832", "#9BD723", "#A5E116", "#A5DC0A", "#AAD208", "#B4C805", "#B4BE04", "#BAB404", "#C3AF04", "#E1AA00", "#FFA000", "#FF9600", "#FF8C00", "#FF7500", "#E0641B", "#E0461E", "#E0301E", "#E02823", "#E62828", "#FF376F", "#FF2D6F", "#FF127B", "#F51E8C", "#EB2DA0", "#E637B4", "#DE44CF", "#DE448D", "#E630B4", "#E619DC", "#E600FF", "#DC00FF", "#CC00FF", "#B432FF", "#B93CFF", "#C542FF", "#AA5AFF", "#AA72FF", "#8272FF", "#6473FF", "#000000", "#FFFFFF"];
+        const memoryPalette = ["#E778F1", "#E33122", "#EBA44A", "#F4E458", "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF"];
+        cue.colour = colour === null ? (cue.memory ? null : DEFAULT_CUE_COLOUR) : (cue.memory ? memoryPalette : palette)[colour] ?? null;
+        return cuesChanged(trackId, undefined);
+      }
+      return refuse(`no cue ${cueId}`);
     },
     convertMemoryCuesToHot: (track) => {
       const cues = cuesOf(track);

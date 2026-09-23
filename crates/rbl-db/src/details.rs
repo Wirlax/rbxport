@@ -102,6 +102,19 @@ pub fn cue_comments(conn: &Connection, id: &str) -> Result<std::collections::Has
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// The `Color` value of each live memory cue. Rekordbox stores 0..7 for the
+/// named palette and 255 for no colour.
+pub fn memory_cue_colours(conn: &Connection, id: &str) -> Result<std::collections::HashMap<String, u8>> {
+    let mut statement = conn.prepare(
+        "SELECT ID, Color FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0",
+    )?;
+    let rows = statement.query_map([id], |row| {
+        let value: i64 = row.get(1)?;
+        Ok((row.get(0)?, u8::try_from(value).unwrap_or(255)))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Reads one live track, or `None` when there is no such track.
 pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
     let Some(mut details) = track_row(conn, id)? else { return Ok(None) };

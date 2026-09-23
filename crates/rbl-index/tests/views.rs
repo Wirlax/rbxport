@@ -67,6 +67,24 @@ fn sorts_by_title_case_and_accent_insensitively() {
 }
 
 #[test]
+fn sorts_by_comment_case_and_accent_insensitively() {
+    let tracks = ["Zebra", "apple", "Ébano", "Banana"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, comment)| TestTrack {
+            id: index as u64 + 1,
+            title: "track",
+            comment,
+            ..TestTrack::default()
+        })
+        .collect::<Vec<_>>();
+    let lib = library_from(&tracks);
+    let view = lib.open_view(&spec(SortColumn::Comment, false, ""));
+    let comments: Vec<&str> = view.rows.iter().map(|&row| lib.comment.get(row as usize)).collect();
+    assert_eq!(comments, ["apple", "Banana", "Ébano", "Zebra"]);
+}
+
+#[test]
 fn descending_is_the_exact_reverse_of_ascending() {
     let lib = library_from(&sample());
     let asc = lib.open_view(&spec(SortColumn::Title, false, ""));

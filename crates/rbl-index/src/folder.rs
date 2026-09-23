@@ -332,6 +332,7 @@ impl Library {
             SortColumn::Album => self.albums.folded(id(&self.album)),
             SortColumn::Genre => self.genres.folded(id(&self.genre)),
             SortColumn::Label => self.labels.folded(id(&self.label)),
+            SortColumn::Comment => self.comment.get(row as usize),
             SortColumn::DateAdded => self.date_added.get(row as usize),
             SortColumn::ReleaseDate => self.release_date.get(row as usize),
             SortColumn::TrackNo | SortColumn::Bpm | SortColumn::Duration | SortColumn::Rating

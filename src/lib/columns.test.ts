@@ -62,6 +62,10 @@ describe("the catalogue", () => {
       expect(column.width, column.key).toBeLessThanOrEqual(MAX_COLUMN_WIDTH);
     }
   });
+
+  it("allows the Comments heading to sort the view", () => {
+    expect(specOf("comment")?.sortable).toBe(true);
+  });
 });
 
 describe("toggleColumn", () => {

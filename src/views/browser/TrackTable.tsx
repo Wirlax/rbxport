@@ -228,6 +228,15 @@ const EditableCell = memo(function EditableCell({
         onEditBlocked();
         return;
       }
+      // Only a title needs a grace period: its double click belongs to the
+      // row and loads the track. Every other field owns its double click, so
+      // deferring the editor only creates a window in which another pointer
+      // press can cancel a valid second-click edit.
+      if (!doubleClickLoads) {
+        setDraft(value);
+        setEditing(true);
+        return;
+      }
       document.addEventListener("pointerdown", cancelPendingEdit, true);
       document.addEventListener("keydown", cancelPendingEdit, true);
       document.addEventListener("dragstart", cancelPendingEdit, true);

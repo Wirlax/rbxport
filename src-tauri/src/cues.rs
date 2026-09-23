@@ -74,6 +74,7 @@ pub enum CueEdit {
     Add { track: String, kind: CueKind, position_ms: u32 },
     AddLoop { track: String, kind: CueKind, in_ms: u32, out_ms: u32, beats: u16 },
     Move { cue: String, position_ms: u32 },
+    Colour { cue: String, colour: Option<u8> },
     Delete { cue: String },
 }
 
@@ -104,6 +105,14 @@ pub fn apply(writer: &mut rbl_db::write::Writer, edit: CueEdit) -> AppResult<Cue
         CueEdit::Move { cue, position_ms } => {
             let track = owner_of(writer, &cue)?;
             let changed = writer.move_cue(&cue, position_ms).map_err(write_error)?;
+            if changed.rows == 0 {
+                return Err(AppError::new(ErrorKind::NotFound, format!("no cue {cue}")));
+            }
+            Ok(CueChange { track, cue })
+        }
+        CueEdit::Colour { cue, colour } => {
+            let track = owner_of(writer, &cue)?;
+            let changed = writer.set_cue_colour(&cue, colour).map_err(write_error)?;
             if changed.rows == 0 {
                 return Err(AppError::new(ErrorKind::NotFound, format!("no cue {cue}")));
             }
@@ -198,6 +207,13 @@ pub async fn move_cue<R: tauri::Runtime>(
     position_ms: u32,
 ) -> AppResult<()> {
     edit_cues(app, state, "move_cue", CueEdit::Move { cue, position_ms }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn set_cue_colour<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, cue: String, colour: Option<u8>,
+) -> AppResult<()> {
+    edit_cues(app, state, "set_cue_colour", CueEdit::Colour { cue, colour }).await.map(|_| ())
 }
 
 #[tauri::command]

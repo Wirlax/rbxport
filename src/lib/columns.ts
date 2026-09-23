@@ -64,7 +64,7 @@ export const CATALOGUE: readonly ColumnSpec[] = [
   { key: "duration", label: "Time", width: 80, align: "right", sortable: true },
   { key: "rating", label: "Rating", width: 101, sortable: true },
   { key: "artist", label: "Artist", width: 301, sortable: true },
-  { key: "comment", label: "Comments", width: 210, sortable: false },
+  { key: "comment", label: "Comments", width: 210, sortable: true },
   { key: "label", label: "Label", width: 128, sortable: true },
   // Unmeasured from here down: none of these has been visible in a capture.
   { key: "size", label: "Size", width: 90, align: "right", sortable: false },

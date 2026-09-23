@@ -92,7 +92,7 @@ export const DEFAULT_SESSION: Session = {
 };
 
 const SORT_COLUMNS: readonly string[] = [
-  "trackNo", "title", "artist", "album", "genre", "label",
+  "trackNo", "title", "artist", "album", "genre", "label", "comment",
   "bpm", "key", "duration", "rating", "dateAdded", "releaseDate",
 ];
 

@@ -2021,6 +2021,13 @@ pub async fn track_cues(
         let comments = cue_state
             .read_db(|db| rbl_db::details::cue_comments(db.connection(), &track))
             .map_err(write_error)?;
+        let memory_colours = cue_state
+            .read_db(|db| rbl_db::details::memory_cue_colours(db.connection(), &track))
+            .map_err(write_error)?;
+        const MEMORY_CSS: [&str; 8] = [
+            "#E778F1", "#E33122", "#EBA44A", "#F4E458",
+            "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
+        ];
         Ok(library
             .cues_of(row)
             .iter()
@@ -2031,7 +2038,9 @@ pub async fn track_cues(
                 out_ms: cue.out_ms,
                 letter: cue.hot_letter().map(String::from).unwrap_or_default(),
                 memory: cue.is_memory(),
-                colour: if cue.is_memory() { None } else { cue_colour_css(cue.colour) },
+                colour: if cue.is_memory() {
+                    memory_colours.get(&cue.id.to_string()).and_then(|value| MEMORY_CSS.get(usize::from(*value))).map(|value| (*value).to_owned())
+                } else { cue_colour_css(cue.colour) },
             })
             .collect())
     })
