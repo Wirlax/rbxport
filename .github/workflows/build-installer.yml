@@ -421,33 +421,16 @@ jobs:
             exit 1
           fi
 
-      - name: Build and sign the MSIX package
+      - name: Build the Microsoft Store MSIX package
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
-          AZURE_SIGNING_CERT_PROFILE: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           $bundle = "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/msix"
           $msix = "$bundle/rbxport_${env:RELEASE_VERSION}_x64.msix"
           .\scripts\package-msix.ps1 `
             -Executable "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/rbxport.exe" `
-            -PublisherArtifact "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/nsis/rbxport_${env:RELEASE_VERSION}_x64-setup.exe" `
             -Version $env:RELEASE_VERSION `
             -Output $msix
-
-          if ($env:HAVE_AZURE -eq 'true') {
-            artifact-signing-cli `
-              -e $env:AZURE_SIGNING_ENDPOINT `
-              -a $env:AZURE_SIGNING_ACCOUNT_NAME `
-              -c $env:AZURE_SIGNING_CERT_PROFILE `
-              $msix
-            if ($LASTEXITCODE -ne 0) { throw "MSIX signing failed with exit code $LASTEXITCODE" }
-          }
 
       - name: Collect the installers
         shell: bash
@@ -528,6 +511,25 @@ jobs:
           if ($name -ne "rbxport") { throw "Expected installer product name rbxport, got $name." }
           $packages = @(Get-ChildItem out\*.msix)
           if ($packages.Count -ne 1) { throw "Expected one MSIX package, found $($packages.Count)." }
+          $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-msix-verify"
+          Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
+          $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
+            Where-Object { $_.Directory.Name -eq "x64" } |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
+          & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
+          [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          if ($identity.Name -ne "TRIODE.rbxport") { throw "Unexpected MSIX identity name: $($identity.Name)" }
+          if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
+            throw "Unexpected MSIX publisher: $($identity.Publisher)"
+          }
+          if ($manifest.Package.Properties.PublisherDisplayName -ne "TRIODE") {
+            throw "Unexpected publisher display name: $($manifest.Package.Properties.PublisherDisplayName)"
+          }
 
       - name: The disk image is notarised too, not just the app inside it
         # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and
@@ -583,7 +585,10 @@ jobs:
         shell: pwsh
         run: |
           $bad = 0
-          Get-ChildItem out\*.exe, out\*.msix | ForEach-Object {
+          # Only the direct-download NSIS installer is Azure-signed here. The
+          # MSIX carries the Partner Center publisher identity and remains
+          # unsigned so the Microsoft Store can apply its own signature.
+          Get-ChildItem out\*.exe | ForEach-Object {
             $sig = Get-AuthenticodeSignature $_.FullName
             Write-Host "$($_.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
             if ($sig.Status -ne "Valid") { $bad = 1 }

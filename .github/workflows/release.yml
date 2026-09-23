@@ -417,6 +417,11 @@ jobs:
           # that has not finished uploading. Immutable caching is safe because
           # a name is never reused — a new version is a new key.
           for f in out/*; do
+            # The Partner Center MSIX deliberately has the Store publisher
+            # identity and no local signature. Keep it in the Actions
+            # artifact for submission; an unsigned package is not a usable
+            # direct download and must not be advertised from the CDN.
+            case "$f" in *.msix) continue ;; esac
             aws s3 cp "$f" "s3://$BUCKET/$(basename "$f")" \
               --endpoint-url "$ENDPOINT" --no-progress \
               --cache-control "public, max-age=31536000, immutable"
@@ -469,7 +474,6 @@ jobs:
               ["darwin-aarch64", (f) => f.endsWith("-darwin-aarch64.dmg")],
               ["darwin-x86_64", (f) => f.endsWith("-darwin-x86_64.dmg")],
               ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
-              ["windows-x86_64-msix", (f) => f.endsWith("-windows-x86_64.msix")],
               ["linux-x86_64", (f) => f.endsWith(".AppImage")],
               ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
             ]) {

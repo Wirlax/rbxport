@@ -3,9 +3,6 @@ param(
   [string]$Executable,
 
   [Parameter(Mandatory = $true)]
-  [string]$PublisherArtifact,
-
-  [Parameter(Mandatory = $true)]
   [string]$Version,
 
   [Parameter(Mandatory = $true)]
@@ -15,10 +12,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-foreach ($path in $Executable, $PublisherArtifact) {
-  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-    throw "Required packaging artifact does not exist: $path"
-  }
+if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+  throw "Application executable does not exist: $Executable"
 }
 
 # MSIX versions have exactly four numeric components. Release tags remain
@@ -27,6 +22,10 @@ foreach ($path in $Executable, $PublisherArtifact) {
 $match = [regex]::Match($Version, '^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$')
 if (-not $match.Success) {
   throw "Version must be SemVer: $Version"
+}
+$components = 1..3 | ForEach-Object { [uint32]$match.Groups[$_].Value }
+if ($components | Where-Object { $_ -gt 65535 }) {
+  throw "MSIX version components must be between 0 and 65535: $Version"
 }
 $msixVersion = '{0}.{1}.{2}.0' -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value
 
@@ -39,18 +38,8 @@ if (-not $makeAppx) {
   throw "makeappx.exe was not found under $windowsKits; install the Windows 10/11 SDK."
 }
 
-$signature = Get-AuthenticodeSignature -LiteralPath $PublisherArtifact
-if ($signature.SignerCertificate) {
-  $publisher = $signature.SignerCertificate.Subject
-} else {
-  # Useful for an explicitly unsigned development-preview build. Windows will
-  # not install it until it is signed by a certificate with this subject.
-  $publisher = 'CN=rbxport Development'
-  Write-Warning 'The publisher artifact is unsigned; the resulting MSIX will also require signing before installation.'
-}
-
-$xmlDocument = [System.Xml.XmlDocument]::new()
-$publisherXml = $xmlDocument.CreateTextNode($publisher).OuterXml
+$identityName = 'TRIODE.rbxport'
+$publisher = 'CN=1A596007-9476-4408-86AC-A8062FB89DF1'
 
 $staging = Join-Path $env:RUNNER_TEMP 'rbxport-msix'
 if (Test-Path -LiteralPath $staging) {
@@ -72,10 +61,10 @@ $manifest = @"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap rescap">
-  <Identity Name="com.rbxport.app" Publisher="$publisherXml" Version="$msixVersion" ProcessorArchitecture="x64" />
+  <Identity Name="$identityName" Publisher="$publisher" Version="$msixVersion" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>rbxport</DisplayName>
-    <PublisherDisplayName>rbxport</PublisherDisplayName>
+    <PublisherDisplayName>TRIODE</PublisherDisplayName>
     <Description>DJ library and USB export manager</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -109,4 +98,4 @@ if ($LASTEXITCODE -ne 0) {
   throw "MakeAppx failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Created $Output (identity version $msixVersion, publisher $publisher)"
+Write-Host "Created $Output (identity $identityName, version $msixVersion, publisher $publisher)"
