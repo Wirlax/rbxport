@@ -136,6 +136,6 @@
 .backupProgress:indeterminate { opacity: .65; background: var(--c-accent); }
 .backupProgress:indeterminate::-webkit-progress-bar { background: transparent; }
 
-.backupMeter { display: inline-flex; align-items: center; gap: 8px; margin-right: 12px; flex-shrink: 0; }
+.backupMeter { display: inline-flex; align-items: center; gap: 8px; margin-right: 12px; flex-shrink: 0; white-space: nowrap; }
 .analysisMeter { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .backupPercent { min-width: 5ch; font-variant-numeric: tabular-nums; }

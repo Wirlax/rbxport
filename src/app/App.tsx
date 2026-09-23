@@ -342,6 +342,8 @@ function AppBody() {
   // or Library Protection in Preferences, refuse the same way.
   const backupJob = useBackupProgress();
   const exportJobs = useExportProgress();
+  const exportBatch = [...exportJobs.values()];
+  const exportRunning = exportBatch.some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
   const readOnly = (summary?.readOnly ?? false) || advancedPrefs.protectLibrary;
   useEffect(() => {
     let live = true;
@@ -2197,7 +2199,7 @@ function AppBody() {
       </div>
 
       <StatusBar
-        exports={[...exportJobs.values()].filter(job => job.state === "writing").map(job => ({
+        exports={(exportRunning ? exportBatch : []).map(job => ({
           ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
         }))}
         onReportBug={openReport}

@@ -50,7 +50,7 @@ const STATES: Record<string, DeviceSyncState> = {
 
 const report = (path: string, tracks: number): SyncDeviceReport => ({
   path,
-  report: { tracks, playlists: 1, bytesCopied: 0, analysisFiles: 0, reused: 0, removed: 0, skipped: [], verified: true },
+  report: { tracks, playlists: 1, bytesCopied: 0, analysisFiles: 0, reused: 0, removed: 0, playlistsAdded: 1, playlistsRemoved: 0, skipped: [], verified: true },
 });
 
 let host: HTMLDivElement;
@@ -166,7 +166,7 @@ describe("SyncManager", () => {
     expect(status()).toContain("Quit rekordbox to enable synchronization.");
   });
   it("stops an export started outside Sync Manager", async () => {
-    const job: ExportProgress = { path: "/Volumes/USB B", state: "writing", done: 3, total: 10, title: "Track" };
+    const job: ExportProgress = { path: "/Volumes/USB B", state: "copying", done: 3, total: 10, title: "Track" };
     act(() => exportProgress?.(job));
     click(host.querySelector<HTMLButtonElement>('button[aria-label="Stop export to /Volumes/USB B"]'));
     await settle();
@@ -207,7 +207,7 @@ describe("SyncManager", () => {
   });
 
   it("prevents manual ejection while an export is running in the background", () => {
-    act(() => exportProgress?.({ path: "/Volumes/USB B", state: "writing", done: 1, total: 10, title: "Track" }));
+    act(() => exportProgress?.({ path: "/Volumes/USB B", state: "copying", done: 1, total: 10, title: "Track" }));
     const button = host.querySelector<HTMLButtonElement>('button[aria-label="Eject USB B"]');
     expect(button?.disabled).toBe(true);
     click(button);
@@ -215,11 +215,11 @@ describe("SyncManager", () => {
   });
 
   it("shows per-device progress and lets the window close while exporting", () => {
-    const job: ExportProgress = { path: "/Volumes/USB B", state: "writing", done: 3, total: 10, title: "Track" };
+    const job: ExportProgress = { path: "/Volumes/USB B", state: "copying", done: 3, total: 10, title: "Track" };
     act(() => exportProgress?.(job));
     const meter = host.querySelector<HTMLProgressElement>('progress[aria-label="Exporting USB B"]');
     expect(meter?.value).toBe(30);
-    expect(host.textContent).toContain("Exporting USB B (30%)");
+    expect(host.textContent).toContain("Exporting — Track (30%)");
     const background = [...host.querySelectorAll("button")].find(button => button.textContent === "Run in background");
     expect(background?.disabled).toBe(false);
     click(background ?? null);
@@ -276,9 +276,9 @@ describe("SyncManager", () => {
     expect(box("Eject after syncing")?.disabled).toBe(true);
     await settle();
     expect(syncDevices.mock.calls[0]?.[4]).toBe(true);
-    expect(status()).toContain("Exported 5 tracks to USB A");
+    expect(host.querySelector('[aria-label="USB A export report"]')?.textContent).toContain("5 updated");
     expect(status()).toContain("Safely ejected.");
-    expect(status()).toContain("Exported 5 tracks to USB B");
+    expect(host.querySelector('[aria-label="USB B export report"]')?.textContent).toContain("5 updated");
     expect(status()).toContain("Not ejected: Device is busy.");
   });
 
@@ -358,8 +358,8 @@ describe("SyncManager", () => {
     expect(syncDevices.mock.calls[0]?.[4]).toBe(false);
     expect(box("Automatic synchronization for USB A")).toBeNull();
     expect(box("Automatic synchronization for USB B")).toBeNull();
-    expect(status()).toContain("Exported 30 tracks to USB A");
-    expect(status()).toContain("Exported 30 tracks to USB B");
+    expect(host.querySelector('[aria-label="USB A export report"]')?.textContent).toContain("30 updated");
+    expect(host.querySelector('[aria-label="USB B export report"]')?.textContent).toContain("30 updated");
     expect(sync?.disabled).toBe(false);
   });
 
@@ -374,7 +374,7 @@ describe("SyncManager", () => {
     await settle();
     click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
     await settle();
-    expect(status()).toContain("Exported 5 tracks to USB A");
+    expect(host.querySelector('[aria-label="USB A export report"]')?.textContent).toContain("5 updated");
     expect(status()).toContain("USB B: That device is no longer connected.");
   });
 

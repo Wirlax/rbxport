@@ -56,6 +56,7 @@ fn a_second_export_of_the_same_tracks_copies_nothing() {
     assert_eq!(first.reused, 0);
     assert_eq!(first.bytes_copied, 4096);
     assert_eq!(first.analysis_files, 2);
+    assert_eq!((first.playlists_added, first.playlists_removed), (1, 0));
 
     let second = export(dest.path(), &tracks, &one_list(&tracks)).unwrap();
     assert_eq!(second.tracks, 2, "the stick still holds both");
@@ -64,6 +65,7 @@ fn a_second_export_of_the_same_tracks_copies_nothing() {
     assert_eq!(second.bytes_reused, 4096);
     assert_eq!(second.analysis_files, 0, "the analysis was already there");
     assert_eq!(second.removed, 0);
+    assert_eq!((second.playlists_added, second.playlists_removed), (0, 0));
 
     // And the stick is still a stick.
     let check = verify(dest.path()).unwrap();

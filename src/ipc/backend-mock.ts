@@ -603,13 +603,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
   const mockExport = async (path: string, write: () => ExportReport) => {
     cancelledExports.delete(path);
-    tellExport(path, "writing");
+    tellExport(path, "copying");
     await wait(undefined);
     if (cancelledExports.has(path)) {
       tellExport(path, "cancelled");
       throw new Error("Export stopped.");
     }
-    tellExport(path, "writing", 50);
+    tellExport(path, "copying", 50);
     try {
       const report = write();
       await wait(undefined);
@@ -637,6 +637,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const already = device.export;
     const reused = already?.ours === true ? Math.min(already.tracks, tracks) : 0;
     const removed = already?.ours === true ? Math.max(0, already.tracks - tracks) : 0;
+    const playlistsAdded = Math.max(0, playlistIds.length - (already?.ours === true ? already.playlists : 0));
+    const playlistsRemoved = Math.max(0, (already?.ours === true ? already.playlists : 0) - playlistIds.length);
     device.export = {
       tracks,
       playlists: playlistIds.length,
@@ -680,6 +682,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       analysisFiles: tracks - reused,
       reused,
       removed,
+      playlistsAdded,
+      playlistsRemoved,
       skipped: [],
       verified: true,
     };
@@ -1632,7 +1636,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         const tracks = playlistSize(playlistId);
         return wait({
           tracks, playlists: 1, bytesCopied: tracks * 8_000_000, analysisFiles: tracks,
-          reused: 0, removed: 0, skipped: [], verified: true,
+          reused: 0, removed: 0, playlistsAdded: 1, playlistsRemoved: 0, skipped: [], verified: true,
         });
       }
       return mockExport(destination, () => writeTo(device, [playlistId], defaults, deleteUnlistedMusic));
@@ -1663,9 +1667,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         };
         tell("writing");
         cancelledExports.delete(path);
-        tellExport(path, "writing");
+        tellExport(path, "copying");
         await wait(undefined);
-        tellExport(path, "writing", 50);
+        tellExport(path, "copying", 50);
         await wait(undefined);
         const device = devices.find((d) => d.path === path);
         if (cancelledExports.has(path)) {

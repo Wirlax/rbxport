@@ -3,8 +3,6 @@ import { Bug, Heart } from "lucide-react";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 import type { ExportProgress } from "@/ipc/types";
-import { exportPercent } from "@/store/useExportProgress";
-import { StopExport } from "@/components/StopExport";
 
 export interface StatusBarProps {
   exports?: readonly (ExportProgress & { name: string })[];
@@ -60,6 +58,21 @@ export function StatusBar({
     ? Math.min(100, Math.max(0, Math.floor(analysisProgress.completed / analysisProgress.total * 100))) : 0;
   const backupPercent = backupProgress && backupProgress.totalBytes > 0
     ? Math.min(100, Math.max(0, Math.floor(backupProgress.copiedBytes / backupProgress.totalBytes * 100))) : 0;
+  const exportTotal = exports.reduce((sum, job) => sum + job.total, 0);
+  const exportDone = exports.reduce((sum, job) => sum + job.done, 0);
+  const exportPercent = exportTotal > 0
+    ? Math.min(99, Math.max(0, Math.floor(exportDone / exportTotal * 100))) : 0;
+  const activeExportStates = new Set(exports.filter(job => job.state !== "done").map(job => job.state));
+  const exportNoun = `${exports.length} ${exports.length === 1 ? "USB" : "USBs"}`;
+  const exportLabel = activeExportStates.size !== 1 ? `Syncing ${exportNoun}`
+    : activeExportStates.has("preparing") ? `Preparing ${exportNoun}`
+    : activeExportStates.has("checking") ? `Checking ${exportNoun}`
+    : activeExportStates.has("copying") ? `Exporting ${exportNoun}`
+    : activeExportStates.has("database") ? `Building databases for ${exportNoun}`
+    : activeExportStates.has("verifying") ? `Verifying ${exportNoun}`
+    : activeExportStates.has("publishing") ? `Publishing ${exportNoun}`
+    : activeExportStates.has("ejecting") ? `Ejecting ${exportNoun}`
+    : `Syncing ${exportNoun}`;
   return (
     <footer className={styles.statusBar}>
       <span className={styles.logo}>
@@ -91,12 +104,11 @@ export function StatusBar({
           ) : null}
         </span>
       )}
-      {exports.map(job => <span key={job.path} className={styles.backupMeter} title={job.title}>
-        <span>Exporting {job.name}</span>
-        <progress className={styles.backupProgress} aria-label={`Exporting ${job.name}`} max={100} value={exportPercent(job)} />
-        <span className={styles.backupPercent}>({exportPercent(job)}%)</span>
-        <StopExport path={job.path} className={styles.stop} />
-      </span>)}
+      {exports.length > 0 ? <span className={styles.backupMeter}>
+        <span>{exportLabel}</span>
+        <progress className={styles.backupProgress} aria-label={`Exporting ${exports.length} ${exports.length === 1 ? "USB" : "USBs"}`} max={100} value={exportPercent} />
+        <span className={styles.backupPercent}>({exportPercent}%)</span>
+      </span> : null}
       {backupProgress ? <span className={styles.backupMeter} title={backupActivity}>
         <span>Backup</span>
         <progress className={styles.backupProgress} aria-label="Backup progress"

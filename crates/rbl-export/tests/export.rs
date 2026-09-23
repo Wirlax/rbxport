@@ -415,7 +415,9 @@ fn artwork_and_my_tags_go_to_the_stick_with_the_tracks() {
     let playlists = vec![SourcePlaylist { device_id: 0, device_only: false, parent_id: 0, folder: false, id: 0, name: "Set".into(), track_indices: vec![0, 1, 2] }];
 
     let mut seen: Vec<(usize, usize)> = Vec::new();
-    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |p| seen.push((p.done, p.total))).unwrap();
+    let report = export_full(dest.path(), &tracks, &playlists, &my_tags, None, None, &mut |p| {
+        if p.stage == "copying" { seen.push((p.done, p.total)); }
+    }).unwrap();
     assert_eq!(report.tracks, 3);
     assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)], "progress is reported per track");
     assert_eq!(report.artwork_files, 4, "one image, written under its four names");

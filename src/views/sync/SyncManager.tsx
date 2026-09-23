@@ -17,9 +17,8 @@ import { ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
 import { EjectIcon, FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
-import type { Device, DeviceSyncState, TreeNode } from "@/ipc/types";
+import type { Device, DeviceSyncState, ExportReport, TreeNode } from "@/ipc/types";
 import { formatSpace } from "@/lib/devices";
-import { exportSummary } from "@/lib/exportSummary";
 import { errorMessage } from "@/lib/errorMessage";
 import { nodesForSource, subtreeIds, toggle, visibleNodes } from "@/lib/tree";
 import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
@@ -109,10 +108,11 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [rekordboxOpen, setRekordboxOpen] = useState<boolean | null>(null);
   const [operation, setOperation] = useState<"sync" | "import" | "eject" | null>(null);
   const [ejectingPath, setEjectingPath] = useState<string | null>(null);
-  const busy = operation !== null || [...exportJobs.values()].some(job => job.state === "writing");
+  const busy = operation !== null || [...exportJobs.values()].some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
+  const [completedReports, setCompletedReports] = useState<ReadonlyMap<string, ExportReport>>(new Map());
   // DJ System in Preferences is what a stick with no settings of its own
   // gets, as it is on every export from the shell.
   const preferences = usePreferences();
@@ -294,7 +294,8 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     const destinations = devices.filter((d) => tickedDevices.has(d.path)).map((d) => d.path);
     const nameOf = (path: string) => devices.find((d) => d.path === path)?.name ?? path;
     setOperation("sync");
-    setStatus(["Preparing sync…"]);
+    setCompletedReports(new Map());
+    setStatus(["Preparing for export…"]);
     void (async () => {
       let stop = () => {};
       try {
@@ -312,10 +313,12 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           if (progress.state === "ejecting") setStatus([`Ejecting ${nameOf(progress.path)}…`]);
         });
         const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat);
-        setStatus(reports.map((r) => {
-          const summary = r.report ? exportSummary(nameOf(r.path), r.report) : `${nameOf(r.path)}: ${r.error ?? "The sync failed."}`;
-          return summary + (r.ejected ? " Safely ejected." : r.ejectError ? ` Not ejected: ${r.ejectError}` : "");
-        }));
+        setCompletedReports(new Map(reports.flatMap(r => r.report ? [[r.path, r.report] as const] : [])));
+        const outcomes = reports.flatMap(r => r.error
+          ? [`${nameOf(r.path)}: ${r.error}`]
+          : r.ejected ? [`${nameOf(r.path)}: Safely ejected.`]
+          : r.ejectError ? [`${nameOf(r.path)}: Not ejected: ${r.ejectError}`] : []);
+        setStatus(outcomes.length > 0 ? outcomes : ["Sync complete."]);
         // What the sticks hold now, without touching the ticks.
         await refreshDevices().catch(() => {});
         await Promise.all(reports.filter(r => !r.ejected).map(({ path }) => readDevice(path, false).catch(() => {})));
@@ -509,11 +512,21 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                   </div>
                   <div className={styles.storageLabels}>{usedPercent !== null ? <span><i aria-hidden="true" />{used} used</span> : null}<span>{free}</span></div>
                   {job ? <div className={styles.exportProgress}>
-                    <span>{job.state === "cancelled" ? "Export stopped" : job.state === "failed" ? "Export failed" : job.state === "done" ? "Export complete" : `Exporting ${device.name}`} ({exportPercent(job)}%)</span>
                     <progress aria-label={`Exporting ${device.name}`} max={100} value={exportPercent(job)} />
-                    {job.state === "writing" ? <StopExport path={job.path} className={styles.button} /> : null}
+                    <span>{job.state === "cancelled" ? "Export stopped" : job.state === "failed" ? "Export failed" : job.state === "done" ? "Export complete" : job.state === "preparing" ? "Preparing for export" : job.state === "checking" ? `Checking — ${job.title || device.name}` : job.state === "database" ? "Building databases" : job.state === "verifying" ? "Verifying databases" : job.state === "publishing" ? "Publishing safely" : job.state === "ejecting" ? `Ejecting ${device.name}` : `Exporting — ${job.title || device.name}`} ({exportPercent(job)}%)</span>
+                    {job.state === "preparing" || job.state === "checking" || job.state === "copying" || job.state === "database" ? <StopExport path={job.path} className={styles.button} /> : null}
                     {job.state === "failed" ? <span role="alert">{job.title}</span> : null}
                   </div> : null}
+                  {completedReports.has(device.path) ? (() => {
+                    const report = completedReports.get(device.path)!;
+                    return <div className={styles.exportReport} aria-label={`${device.name} export report`}>
+                      <span><strong>{Math.max(0, report.tracks - report.reused)}</strong> updated</span>
+                      <span><strong>{report.reused}</strong> unchanged</span>
+                      <span><strong>+{report.playlistsAdded}</strong> playlists</span>
+                      <span><strong>−{report.playlistsRemoved}</strong> playlists</span>
+                      {report.skipped.length > 0 ? <span className={styles.exportWarning}><strong>{report.skipped.length}</strong> missing</span> : null}
+                    </div>;
+                  })() : null}
                 </div>
                 {!expanded && deviceErrors.has(device.path) ? <p className={styles.capacity} role="alert">{deviceErrors.get(device.path)}</p> : null}
                 {expanded ? <div className={styles.library} role="group" aria-label={`${device.name} library`}>
@@ -530,9 +543,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         <div className={styles.status} role="status" aria-live="polite">
           {busy ? <LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> : null}
           <div>
-          {status.map((line) => (
-            <div key={line}>{line}</div>
-          ))}
+          {status.length > 0 ? status.join(" · ") : null}
           {status.length === 0 ? <span className={styles.selectionSummary}>{selectionSummary}</span> : null}
           {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{syncHint}</span> : null}
           </div>

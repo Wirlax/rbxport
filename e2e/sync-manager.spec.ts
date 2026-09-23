@@ -72,9 +72,8 @@ test("SYNC writes the ticked playlists to both sticks, reports on each, and Clos
   await expect(sync).toBeEnabled();
   await sync.click();
 
-  const status = dialog.getByRole("status");
-  await expect(status).toContainText(/Exported \d+ tracks to DJ STICK/);
-  await expect(status).toContainText(/Exported \d+ tracks to TEST/);
+  await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ updated/);
+  await expect(dialog.getByLabel("TEST export report")).toContainText(/\d+ updated/);
   // Selecting and syncing leaves the devices collapsed until explicitly opened.
   await dialog.getByRole("button", { name: "Expand DJ STICK", exact: true }).click();
   await dialog.getByRole("button", { name: "Expand TEST", exact: true }).click();
@@ -99,7 +98,7 @@ test("ticking a stick again brings back what it was last synced with", async ({ 
   await tree.getByRole("checkbox", { name: "Hardstyle" }).check();
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).check();
   await dialog.getByRole("button", { name: "SYNC" }).click();
-  await expect(dialog.getByRole("status")).toContainText(/DJ STICK/);
+  await expect(dialog.getByLabel("DJ STICK export report")).toContainText(/\d+ updated/);
 
   // Untick everything, tick the stick: its last selection comes back.
   await dialog.getByRole("checkbox", { name: "DJ STICK", exact: true }).uncheck();

@@ -937,6 +937,10 @@ export interface ExportReport {
   reused: number;
   /** Tracks taken off the stick because the playlist no longer holds them. */
   removed: number;
+  /** Playlists newly added to this USB during the export. */
+  playlistsAdded: number;
+  /** Playlists removed from this USB during the export. */
+  playlistsRemoved: number;
   /** Tracks left out because their audio was missing or unreadable. */
   skipped: string[];
   /** Whether the export read back correctly with the independent parser. */
@@ -1107,7 +1111,7 @@ export interface Backup {
 /** Per-device progress; done counts tracks processed before the current one. */
 export interface ExportProgress {
   path: string;
-  state: "writing" | "done" | "failed" | "cancelled";
+  state: "preparing" | "checking" | "copying" | "database" | "verifying" | "publishing" | "ejecting" | "done" | "failed" | "cancelled";
   done: number;
   total: number;
   title: string;

@@ -772,7 +772,7 @@ pub async fn sync_devices<R: tauri::Runtime>(
         // worker rather than rereading the library, then preserve the user's
         // device order when collecting reports.
         std::thread::scope(|scope| {
-            Ok(destinations.into_iter().map(|destination| {
+            let workers: Vec<_> = destinations.into_iter().map(|destination| {
                 let app = app.clone();
                 let state = Arc::clone(&state);
                 let library = Arc::clone(&library);
@@ -784,7 +784,8 @@ pub async fn sync_devices<R: tauri::Runtime>(
                     defaults.as_ref(), delete_unlisted_music.unwrap_or(false),
                     eject_after_sync.unwrap_or(false), compatibility_format,
                 ))
-            }).map(|worker| worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
+            }).collect();
+            Ok(workers.into_iter().map(|worker| worker.join().unwrap_or_else(|_| SyncDeviceReportDto {
                 path: "Unknown device".to_owned(), report: None,
                 error: Some("The sync worker stopped unexpectedly.".to_owned()),
                 ejected: false, eject_error: None,
@@ -814,6 +815,7 @@ fn sync_one_device<R: tauri::Runtime>(
             if eject_after_sync {
                 if result.report.as_ref().is_some_and(|report| report.verified && report.skipped.is_empty()) {
                     progress("ejecting");
+                    set_export_stage(app, stick, "ejecting");
                     match rbl_devices::eject::eject(stick) {
                         Ok(()) => result.ejected = true,
                         Err(e) => result.eject_error = Some(e.to_string()),
@@ -823,6 +825,7 @@ fn sync_one_device<R: tauri::Runtime>(
                 }
             }
             progress("done");
+            if eject_after_sync { set_export_stage(app, stick, "done"); }
             result
         },
         Err(e) => {
@@ -1208,6 +1211,20 @@ static EXPORT_PROGRESS: std::sync::LazyLock<std::sync::Mutex<std::collections::H
 static EXPORT_CANCEL: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &std::path::Path, state: &'static str) {
+    let path = destination.to_string_lossy().into_owned();
+    let progress = if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
+        if let Some(job) = jobs.get_mut(&path) {
+            job.state = state;
+            job.title.clear();
+            Some(job.clone())
+        } else {
+            None
+        }
+    } else { None };
+    if let Some(progress) = progress { let _ = tauri::Emitter::emit(app, "export:progress", progress); }
+}
+
 #[tauri::command]
 pub fn cancel_export(path: &str) {
     if let Ok(jobs) = EXPORT_CANCEL.lock() {
@@ -1252,6 +1269,14 @@ fn write_export_with_progress<R: tauri::Runtime>(
         if jobs.contains_key(&path) {
             return Err(AppError::internal("An export to this device is already running."));
         }
+        // A new batch replaces terminal progress from the previous one. When
+        // another job is active this export belongs to that same batch, so a
+        // stick that finishes early remains in the aggregate denominator.
+        if jobs.is_empty() {
+            if let Ok(mut progress) = EXPORT_PROGRESS.lock() {
+                progress.clear();
+            }
+        }
         jobs.insert(path.clone(), Arc::clone(&cancel));
     }
     let emit = |state, done, title: String| {
@@ -1263,25 +1288,31 @@ fn write_export_with_progress<R: tauri::Runtime>(
         }
         let _ = tauri::Emitter::emit(app, "export:progress", progress);
     };
-    emit("writing", 0, String::new());
-    let mut done = 0;
-    let result = write_export(destination, selection, defaults, compatibility_format, &mut |p| {
-        done = u32::try_from(p.done).unwrap_or(u32::MAX);
-        emit("writing", done, p.title.clone());
-    }, &|| cancel.load(std::sync::atomic::Ordering::Relaxed));
+    emit("preparing", 0, String::new());
+    let done = std::cell::Cell::new(0);
+    let result = write_export_with_phase(
+        destination, selection, defaults, compatibility_format,
+        &mut |p| {
+            done.set(u32::try_from(p.done).unwrap_or(u32::MAX));
+            emit(p.stage, done.get(), p.title.clone());
+        },
+        &mut |phase| emit(phase, if phase == "verifying" { total } else { done.get() }, String::new()),
+        &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
+    );
     let cancelled = result.as_ref().err().is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
-    emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done },
+    emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done.get() },
         result.as_ref().err().map_or_else(String::new, |e| e.message.clone()));
     if let Ok(mut jobs) = EXPORT_CANCEL.lock() { jobs.remove(&path); }
     result
 }
 
-pub(crate) fn write_export(
+fn write_export_with_phase(
     destination: &std::path::Path,
     selection: &ExportSelection,
     defaults: Option<&crate::device_settings::StickDefaultsDto>,
     compatibility_format: Option<rbl_export::CompatibilityFormat>,
     progress: &mut dyn FnMut(&rbl_export::ExportProgress),
+    phase: &mut dyn FnMut(&'static str),
     cancelled: &dyn Fn() -> bool,
 ) -> AppResult<ExportReportDto> {
     if !destination.is_dir() {
@@ -1318,7 +1349,8 @@ pub(crate) fn write_export(
     }
     // Re-read what was written with the independent parser: an export that
     // cannot be read back is not an export.
-    let check = rbl_export::verify(destination)
+    phase("verifying");
+    let check = rbl_export::verify_databases(destination)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
     if !check.is_ok() || check.tracks != report.tracks {
         return Err(AppError::internal(format!("USB verification failed: missing audio {:?}; {}", check.missing_audio, check.errors.join("; "))));
@@ -1331,6 +1363,8 @@ pub(crate) fn write_export(
         analysis_files: u32::try_from(report.analysis_files).unwrap_or(0),
         reused: u32::try_from(report.reused).unwrap_or(0),
         removed: u32::try_from(report.removed).unwrap_or(0),
+        playlists_added: u32::try_from(report.playlists_added).unwrap_or(0),
+        playlists_removed: u32::try_from(report.playlists_removed).unwrap_or(0),
         skipped: report.skipped,
         verified: check.is_ok() && check.tracks == report.tracks,
     })

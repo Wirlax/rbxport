@@ -36,6 +36,27 @@ pub fn verify(root: &Path) -> Result<VerifyReport> {
     }
     Ok(report)
 }
+
+/// Read the two published databases back independently after an already
+/// verified staged generation has been committed. Asset semantics were
+/// checked before publication; this second pass proves that publication left
+/// both database formats readable and equivalent without rereading every
+/// analysis file from slow removable media.
+pub fn verify_databases(root: &Path) -> Result<VerifyReport> {
+    let snapshot = Snapshot::read(root)?;
+    let mut report = VerifyReport::default();
+    let (Some(legacy), Some(one)) = (&snapshot.legacy, &snapshot.one) else {
+        report.errors.push("Both Device Library and OneLibrary must be present".into());
+        return Ok(report);
+    };
+    report.parsed = true;
+    verify_track_records(root, &mut report.errors)?;
+    if legacy != one { report.errors.push("Device Library and OneLibrary disagree".into()); }
+    report.tracks = legacy.tracks.len();
+    report.playlists = legacy.playlists.len();
+    report.playlist_entries = legacy.playlists.iter().map(|playlist| playlist.tracks.len()).sum();
+    Ok(report)
+}
 pub(crate) fn verify_staged(
     root: &Path,
     existing: &Path,

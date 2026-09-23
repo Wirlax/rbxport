@@ -154,18 +154,6 @@ impl Publication {
                 parent = dir.parent();
             }
         }
-        let mut required=0_u64;
-        let mut largest=0_u64;
-        for e in &entries {
-            if !e.present { continue; }
-            let size=std::fs::metadata(self.stage.path().join(&e.path))?.len();
-            let old=std::fs::metadata(self.root.join(&e.path)).map_or(0,|m|m.len());
-            required=required.saturating_add(size.saturating_sub(old));
-            largest=largest.max(size);
-        }
-        if fs2::available_space(&self.root)? < required.saturating_add(largest).saturating_add(1024*1024) {
-            return Err(std::io::Error::other("Insufficient free space to publish this export; the existing library was left intact"));
-        }
         // Flush each directory once, children before parents.
         for directory in directories.iter().rev() {
             sync_dir(directory)?;
@@ -201,12 +189,11 @@ impl Publication {
         )?;
         #[cfg(unix)]
         let root_handle = std::fs::File::open(root)?;
-        // Images remain in the journal until the full generation is published.
-        // Each replacement also needs room for its temporary copy.
-        let largest = entries.iter().filter(|e|e.present).map(|e|std::fs::metadata(journal.join(&e.path)).map(|m|m.len())).collect::<std::io::Result<Vec<_>>>()?.into_iter().max().unwrap_or(0);
-        if fs2::available_space(root)? < largest {
-            return Err(std::io::Error::other("Insufficient free space to publish the staged export; recovery data was retained"));
-        }
+        // The previous generation stays inside the journal until every new
+        // image is in place. All moves are within one filesystem, so a large
+        // audio file is published with atomic renames instead of being copied
+        // over the USB a second time. Every intermediate state is recognizable
+        // and recovery always rolls forward.
         for entry in entries {
             #[cfg(unix)] {
                 use std::os::unix::fs::MetadataExt;
@@ -215,18 +202,46 @@ impl Publication {
             }
             let image = journal.join(&entry.path);
             let target = root.join(&entry.path);
-            // A lost image is an error, never an instruction to delete data.
+            let previous = journal.join(".previous").join(&entry.path);
             if entry.present {
-                if let Some(parent) = target.parent() {
-                    create_dir_all(parent)?;
+                if image.try_exists()? {
+                    if target.try_exists()? {
+                        if target.is_dir() {
+                            return Err(std::io::Error::other(format!(
+                                "Publication target is a directory: {}",
+                                entry.path.display()
+                            )));
+                        }
+                        if previous.try_exists()? {
+                            return Err(std::io::Error::other(format!(
+                                "Publication conflict at {}; recovery data was retained",
+                                entry.path.display()
+                            )));
+                        }
+                        if let Some(parent) = previous.parent() { create_dir_all(parent)?; }
+                        std::fs::rename(&target, &previous)?;
+                        sync_dir(target.parent().unwrap_or(root))?;
+                    }
+                    if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+                    std::fs::rename(&image, &target)?;
+                    sync_dir(target.parent().unwrap_or(root))?;
+                } else if !target.try_exists()? {
+                    // A lost new image must never silently become a deletion.
+                    // Put the old generation back when possible, then stop.
+                    if previous.try_exists()? {
+                        if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+                        std::fs::rename(&previous, &target)?;
+                        sync_dir(target.parent().unwrap_or(root))?;
+                    }
+                    return Err(std::io::Error::other(format!(
+                        "Missing publication image {}; the previous file was restored",
+                        entry.path.display()
+                    )));
                 }
-                copy(&image, &target)?;
-            } else {
-                match std::fs::remove_file(&target) {
-                    Ok(()) => sync_dir(target.parent().unwrap_or(root))?,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e),
-                }
+            } else if target.try_exists()? && !previous.try_exists()? {
+                if let Some(parent) = previous.parent() { create_dir_all(parent)?; }
+                std::fs::rename(&target, &previous)?;
+                sync_dir(target.parent().unwrap_or(root))?;
             }
         }
         // Remove the commit intent atomically BEFORE deleting its images.
@@ -299,7 +314,7 @@ mod tests {
             b"new first"
         );
         assert!(Publication::recover(root.path(), ".journal").is_err());
-        assert!(root.path().join(".journal/first").is_file());
+        assert!(root.path().join(".journal/.previous/first").is_file());
         std::fs::remove_dir(root.path().join("second")).unwrap();
         Publication::recover(root.path(), ".journal").unwrap();
         Publication::recover(root.path(), ".journal").unwrap();

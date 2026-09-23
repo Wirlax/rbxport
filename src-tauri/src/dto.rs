@@ -290,6 +290,8 @@ pub struct ExportReportDto {
     pub reused: u32,
     /// Tracks taken off the stick because the playlist no longer holds them.
     pub removed: u32,
+    pub playlists_added: u32,
+    pub playlists_removed: u32,
     /// Tracks left out because their audio was missing or unreadable.
     pub skipped: Vec<String>,
     /// Whether the export read back correctly with the independent parser.

@@ -10,6 +10,8 @@ export interface ExportCounts {
   tracks: number;
   reused: number;
   removed: number;
+  playlistsAdded?: number;
+  playlistsRemoved?: number;
   skipped: string[];
   verified: boolean;
 }
@@ -20,23 +22,16 @@ function plural(count: number, noun: string): string {
 
 export function exportSummary(name: string, report: ExportCounts): string {
   const copied = Math.max(0, report.tracks - report.reused);
-  const parts: string[] = [];
-
-  // A first export has nothing to compare against, so the interesting number
-  // is simply how big it is.
-  if (report.reused === 0 && report.removed === 0) {
-    parts.push(`Exported ${plural(report.tracks, "track")} to ${name}`);
-  } else {
-    const changes: string[] = [];
-    if (copied > 0) changes.push(`${plural(copied, "track")} copied`);
-    if (report.reused > 0) changes.push(`${report.reused} unchanged`);
-    if (report.removed > 0) changes.push(`${plural(report.removed, "track")} removed`);
-    parts.push(`Synced ${name}: ${changes.join(", ")}`);
-  }
+  const parts = [
+    `${name}: Updated ${plural(copied, "track")}`,
+    `Skipped ${plural(report.reused, "track")} (no change)`,
+    `Added ${plural(report.playlistsAdded ?? 0, "playlist")}`,
+    `Removed ${plural(report.playlistsRemoved ?? 0, "playlist")}`,
+  ];
 
   if (report.skipped.length > 0) {
-    parts.push(`${plural(report.skipped.length, "track")} skipped — the audio was missing`);
+    parts.push(`${plural(report.skipped.length, "track")} missing`);
   }
-  parts.push(report.verified ? "read back and verified" : "but the result did not read back");
+  if (!report.verified) parts.push("but the result did not read back");
   return `${parts.join(". ")}.`;
 }

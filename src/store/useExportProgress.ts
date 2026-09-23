@@ -12,16 +12,26 @@ export function useExportProgress() {
   const [jobs, setJobs] = useState<ReadonlyMap<string, ExportProgress>>(new Map());
   useEffect(() => {
     let live = true;
+    let batchStarted = false;
     let stop: (() => void) | undefined;
     void getBackend().then(backend => {
       if (!live) return;
       const updated = new Set<string>();
       stop = backend.onExportProgress(progress => {
         updated.add(progress.path);
-        if (live) setJobs(current => new Map(current).set(progress.path, progress));
+        if (progress.state === "preparing") batchStarted = true;
+        if (live) setJobs(current => {
+          const active = [...current.values()].some(job => ["preparing", "checking", "copying", "database", "verifying", "publishing", "ejecting"].includes(job.state));
+          const next = progress.state === "preparing" && !active ? new Map<string, ExportProgress>() : new Map(current);
+          return next.set(progress.path, progress);
+        });
       });
       void backend.exportProgress().then(jobs => {
         if (live) setJobs(current => {
+          // A preparing event is newer than this startup snapshot. Merging
+          // the snapshot would resurrect terminal jobs from the prior batch
+          // and make one selected stick read as two in the aggregate meter.
+          if (batchStarted) return current;
           const next = new Map(current);
           for (const job of jobs) if (!updated.has(job.path)) next.set(job.path, job);
           return next;
