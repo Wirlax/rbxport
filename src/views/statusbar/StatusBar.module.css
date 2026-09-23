@@ -86,6 +86,7 @@
   cursor: pointer;
 }
 .reportBug:hover { background: var(--c-raised); }
+.support:hover svg { color: var(--c-error); }
 
 .warningAction {
   margin-left: 8px;
