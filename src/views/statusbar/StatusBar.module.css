@@ -73,6 +73,9 @@
 
 .reportBug {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   border: 1px solid var(--c-raised);
   border-radius: 3px;

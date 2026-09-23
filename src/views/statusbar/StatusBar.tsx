@@ -1,4 +1,5 @@
 import styles from "./StatusBar.module.css";
+import { Heart } from "lucide-react";
 import { useTooltip } from "@/store/usePreferences";
 import { refusal } from "@/lib/menu";
 import type { ExportProgress } from "@/ipc/types";
@@ -118,7 +119,7 @@ export function StatusBar({
         </span>
       ) : null}
       <span className={styles.selection}>{selection}</span>
-      {onSupport ? <button type="button" className={styles.reportBug} onClick={onSupport}>🤍 Support rbxport</button> : null}
+      {onSupport ? <button type="button" className={styles.reportBug} onClick={onSupport}><Heart size="1em" aria-hidden="true" /> Support rbxport</button> : null}
       {onReportBug ? <button type="button" className={styles.reportBug} onClick={onReportBug}>Report bug</button> : null}
     </footer>
   );
