@@ -70,6 +70,7 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ advanced: { checkUpdates: "no" } }).advanced.checkUpdates).toBe(true);
     expect(sanitisePreferences({ advanced: { checkUpdates: 0 } }).advanced.checkUpdates).toBe(true);
     expect(sanitisePreferences({ advanced: { checkUpdates: false } }).advanced.checkUpdates).toBe(false);
+    expect(sanitisePreferences({ advanced: {} }).advanced.updateFrequency).toBe("start");
   });
 
 

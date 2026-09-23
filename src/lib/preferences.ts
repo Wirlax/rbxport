@@ -277,7 +277,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     syncDoubleHalf: true,
     quantizeBeat: "1/1",
     checkUpdates: true,
-    updateFrequency: "weekly",
+    updateFrequency: "start",
     recordHistory: true,
   },
   keyboard: {
