@@ -428,11 +428,15 @@ jobs:
           AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
           AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
           AZURE_SIGNING_CERT_PROFILE: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           $bundle = "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/msix"
           $msix = "$bundle/rbxport_${env:RELEASE_VERSION}_x64.msix"
           .\scripts\package-msix.ps1 `
             -Executable "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/rbxport.exe" `
+            -PublisherArtifact "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/nsis/rbxport_${env:RELEASE_VERSION}_x64-setup.exe" `
             -Version $env:RELEASE_VERSION `
             -Output $msix
 

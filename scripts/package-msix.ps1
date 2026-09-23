@@ -3,6 +3,9 @@ param(
   [string]$Executable,
 
   [Parameter(Mandatory = $true)]
+  [string]$PublisherArtifact,
+
+  [Parameter(Mandatory = $true)]
   [string]$Version,
 
   [Parameter(Mandatory = $true)]
@@ -12,8 +15,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
-  throw "Application executable does not exist: $Executable"
+foreach ($path in $Executable, $PublisherArtifact) {
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    throw "Required packaging artifact does not exist: $path"
+  }
 }
 
 # MSIX versions have exactly four numeric components. Release tags remain
@@ -34,14 +39,14 @@ if (-not $makeAppx) {
   throw "makeappx.exe was not found under $windowsKits; install the Windows 10/11 SDK."
 }
 
-$signature = Get-AuthenticodeSignature -LiteralPath $Executable
+$signature = Get-AuthenticodeSignature -LiteralPath $PublisherArtifact
 if ($signature.SignerCertificate) {
   $publisher = $signature.SignerCertificate.Subject
 } else {
   # Useful for an explicitly unsigned development-preview build. Windows will
   # not install it until it is signed by a certificate with this subject.
   $publisher = 'CN=rbxport Development'
-  Write-Warning 'The executable is unsigned; the resulting MSIX will also require signing before installation.'
+  Write-Warning 'The publisher artifact is unsigned; the resulting MSIX will also require signing before installation.'
 }
 
 $xmlDocument = [System.Xml.XmlDocument]::new()
