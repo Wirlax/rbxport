@@ -38,6 +38,7 @@
 .toggle input { margin: 0; accent-color: var(--c-accent); }
 .form p { margin: 0; line-height: 1.5; }
 .attachments .hint { margin-top: 6px; }
+.turnstile { min-height: 65px; }
 .dialog button { border: 1px solid var(--c-raised); border-radius: 4px; padding: 7px 12px; background: var(--c-button); color: var(--c-text); font: inherit; cursor: pointer; }
 .dialog button:hover:not(:disabled) { border-color: var(--c-accent); }
 .dialog button:disabled { opacity: 0.45; cursor: default; }

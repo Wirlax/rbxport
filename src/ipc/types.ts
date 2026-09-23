@@ -624,7 +624,6 @@ export interface Backend {
   openReportWindow(): Promise<boolean>;
   reportAttachment(): Promise<string>;
   openReportAttachment(attachment: string): Promise<void>;
-  saveBugReport(email: string, description: string, attachment: string): Promise<boolean>;
 
   /**
    * Writes the same playlists to every destination, one after another, and

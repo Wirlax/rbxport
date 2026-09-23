@@ -507,7 +507,6 @@ pub fn run() {
             report::open_report_window,
             report::report_attachment,
             report::open_report_attachment,
-            report::save_bug_report,
             commands::sync_devices,
             commands::eject_device,
             commands::export_tracks_to_device,

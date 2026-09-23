@@ -1,6 +1,6 @@
-//! Local support reports. The attachment is captured once for preview and
-//! passed unchanged into the ZIP; saving never reads additional logs.
-use std::io::{Read, Seek, SeekFrom, Write};
+//! Local support report attachments. The attachment is captured once for
+//! preview before the user explicitly chooses whether to submit it.
+use std::io::{Read, Seek, SeekFrom};
 use std::fmt::Write as _;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::error::{AppError, AppResult};
@@ -77,56 +77,4 @@ pub async fn open_report_attachment(app: tauri::AppHandle, attachment: String) -
         app.opener().open_path(path.to_string_lossy(), None::<&str>)
             .map_err(|e| AppError::internal(format!("The text editor could not open: {e}")))
     }).await
-}
-
-/// The log is last, while system information precedes the user's report.
-fn report_text(email: &str, description: &str, attachment: &str) -> AppResult<String> {
-    if email.len() > 320 || description.trim().is_empty() || description.len() > 100_000 || attachment.len() > 2_000_000 {
-        return Err(AppError::internal("The report is empty or too large."));
-    }
-    let (system, log) = attachment.split_once("\nApplication log").unwrap_or((attachment, ""));
-    let date = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)
-        .map_err(|e| AppError::internal(e.to_string()))?;
-    let mut report = format!("{system}\nDate: {date}\nEmail: {}\n\nWhat happened\n{}\n", email.trim(), description.trim());
-    if !log.is_empty() { report.push_str("\nApplication log"); report.push_str(log); }
-    Ok(report)
-}
-
-fn zip_report(text: &str) -> AppResult<Vec<u8>> {
-    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    zip.start_file("report.txt", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated))
-        .map_err(|e| AppError::internal(e.to_string()))?;
-    zip.write_all(text.as_bytes()).map_err(|e| AppError::internal(e.to_string()))?;
-    Ok(zip.finish().map_err(|e| AppError::internal(e.to_string()))?.into_inner())
-}
-
-#[tauri::command]
-pub async fn save_bug_report(path: String, email: String, description: String, attachment: String) -> AppResult<()> {
-    crate::commands::blocking("save_bug_report", move || {
-        let text = report_text(&email, &description, &attachment)?;
-        let bytes = zip_report(&text)?;
-        crate::grid::write_atomically(std::path::Path::new(&path), &bytes)
-            .map_err(|e| AppError::internal(format!("The report could not be saved: {e}")))
-    }).await
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    #[test]
-    fn archive_contains_one_text_with_only_the_approved_attachment() {
-        let text = report_text("dj@example.com", "The deck stopped", "System information\nOS: test\nApplication log\napproved log").unwrap();
-        assert!(text.find("System information").unwrap() < text.find("Date:").unwrap());
-        assert!(text.ends_with("approved log"));
-        let bytes = zip_report(&text).unwrap();
-        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-        assert_eq!(archive.len(), 1);
-        let mut read = String::new();
-        archive.by_name("report.txt").unwrap().read_to_string(&mut read).unwrap();
-        assert_eq!(read, text);
-        let private = report_text("", "Problem", "").unwrap();
-        assert!(!private.contains("System information"));
-        assert!(!private.contains("Application log"));
-    }
 }
