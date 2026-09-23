@@ -1872,7 +1872,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait(undefined);
     },
     setMasterLevel: (level) => {
-      master = Math.min(Math.max(level, 0), 1);
+      master = Math.min(Math.max(level, 0), 10 ** (2 / 20));
       sendTick();
       return wait(undefined);
     },

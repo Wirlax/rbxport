@@ -1706,7 +1706,7 @@ pub async fn deck_clear_loop<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The master output level, 0 to 1.
+/// The master output level, 0 to +2 dB.
 ///
 /// It reaches the meters on the next tick rather than coming back from here:
 /// the level is the audio callback's to apply, and the interface reads what it
@@ -2006,9 +2006,9 @@ pub async fn deck_state(
 /// A track's cue points.
 ///
 /// A hot cue's colour is what rekordbox paints for its `ColorTableIndex`,
-/// from the nine indices measured in `rbl_anlz::DRAWN_CUE_COLOURS`; an index
-/// outside those is reported without a colour, and the interface draws its
-/// default green rather than a guess. A memory cue never carries one.
+/// from the complete `rbl_anlz::DRAWN_CUE_COLOURS` table extracted from
+/// rekordbox. An invalid index is reported without a colour. A memory cue
+/// never carries one.
 #[tauri::command]
 pub async fn track_cues(
     state: State<'_, Arc<AppState>>,

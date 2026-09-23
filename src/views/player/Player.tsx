@@ -253,7 +253,7 @@ export function cueStyle(
  * Cue points on a waveform.
  *
  * A hot cue is a lettered badge, not a line: measured off `docs/screenshots`,
- * 11pt square, `#77E866`, black letter, its left edge on the cue. The overview
+ * 11pt square, `#3CEB50`, black letter, its left edge on the cue. The overview
  * draws no line through the waveform at all — four hot cues, four badges, and
  * the waveform under them unbroken.
  *

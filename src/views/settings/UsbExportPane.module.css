@@ -3,6 +3,7 @@
 .details { flex: 1; min-width: 0; }
 .details strong { display: block; font-size: inherit; font-weight: 600; }
 .description { display: block; margin-top: 8px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
+.default { display: block; margin-top: 4px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
 .option input { cursor: pointer; }
 .option input:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 4px; }
 

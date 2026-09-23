@@ -1,6 +1,11 @@
 //! Container framing, tag decoding, and the malformed inputs that must degrade
 //! rather than panic.
-#![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::pedantic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use rbl_anlz::{parse, Anlz, AnlzBuilder, AnlzError, Beat, Section};
 use rbl_core::FourCc;
@@ -58,7 +63,10 @@ fn path_parts(text: &str) -> (Vec<u8>, Vec<u8>) {
 
 #[test]
 fn rejects_a_file_without_the_pmai_magic() {
-    assert!(matches!(parse(b"NOPE\0\0\0\0\0\0\0\0"), Err(AnlzError::NotAnlz)));
+    assert!(matches!(
+        parse(b"NOPE\0\0\0\0\0\0\0\0"),
+        Err(AnlzError::NotAnlz)
+    ));
 }
 
 #[test]
@@ -117,7 +125,11 @@ fn tag_header_fields_are_not_read_from_the_payload() {
     let anlz = parse(&build(&[(b"PWAV", header, payload.clone())])).unwrap();
     let (stride, data) = anlz.waveform(b"PWAV").unwrap();
     assert_eq!(stride, 1);
-    assert_eq!(data, payload.as_slice(), "no payload bytes may be consumed as header");
+    assert_eq!(
+        data,
+        payload.as_slice(),
+        "no payload bytes may be consumed as header"
+    );
 }
 
 #[test]
@@ -140,7 +152,10 @@ fn a_section_longer_than_the_file_is_reported() {
     let len = file.len();
     let at = 28 + 8;
     file[at..at + 4].copy_from_slice(&(len as u32 + 500).to_be_bytes());
-    assert!(matches!(parse(&file), Err(AnlzError::BadSectionLength { .. })));
+    assert!(matches!(
+        parse(&file),
+        Err(AnlzError::BadSectionLength { .. })
+    ));
 }
 
 #[test]
@@ -156,8 +171,12 @@ fn a_zero_length_section_does_not_loop_forever() {
 fn several_sections_are_all_read() {
     let (ph, pp) = path_parts("/a.mp3");
     let (bh, bp) = beat_grid_parts(&[(1, 12000, 0)]);
-    let anlz =
-        parse(&build(&[(b"PPTH", ph, pp), (b"PQTZ", bh, bp), (b"PZZZ", vec![], vec![9])])).unwrap();
+    let anlz = parse(&build(&[
+        (b"PPTH", ph, pp),
+        (b"PQTZ", bh, bp),
+        (b"PZZZ", vec![], vec![9]),
+    ]))
+    .unwrap();
     assert_eq!(anlz.sections.len(), 3);
     assert!(anlz.path().is_some());
     assert!(anlz.beat_grid().is_some());
@@ -199,7 +218,11 @@ fn parsing_then_re_emitting_reproduces_the_file_exactly() {
         (b"PVDI", vec![], vec![9, 8, 7]),
     ]);
     let parsed = parse(&original).unwrap();
-    assert_eq!(parsed.to_bytes(), original, "re-emission must be byte-identical");
+    assert_eq!(
+        parsed.to_bytes(),
+        original,
+        "re-emission must be byte-identical"
+    );
 }
 
 #[test]
@@ -222,7 +245,9 @@ fn a_written_beat_grid_reads_back_identically() {
 fn written_waveforms_read_back_identically() {
     let data: Vec<u8> = (0..600).map(|i| (i % 256) as u8).collect();
     let mut builder = AnlzBuilder::new();
-    builder.waveform_preview(b"PWAV", &data).waveform_scroll(b"PWV5", 2, &data);
+    builder
+        .waveform_preview(b"PWAV", &data)
+        .waveform_scroll(b"PWV5", 2, &data);
     let anlz = parse(&builder.finish()).unwrap();
 
     let (stride, read) = anlz.waveform(b"PWAV").unwrap();
@@ -256,9 +281,19 @@ fn tags_we_cannot_author_are_carried_through() {
     }
     let reparsed = parse(&builder.finish()).unwrap();
 
-    let tags: Vec<String> = reparsed.sections.iter().map(|s| s.tag.to_string()).collect();
-    assert!(tags.contains(&"PSSI".to_owned()), "phrases must survive: {tags:?}");
-    assert!(tags.contains(&"PVDI".to_owned()), "vocal data must survive: {tags:?}");
+    let tags: Vec<String> = reparsed
+        .sections
+        .iter()
+        .map(|s| s.tag.to_string())
+        .collect();
+    assert!(
+        tags.contains(&"PSSI".to_owned()),
+        "phrases must survive: {tags:?}"
+    );
+    assert!(
+        tags.contains(&"PVDI".to_owned()),
+        "vocal data must survive: {tags:?}"
+    );
     assert_eq!(reparsed.section(b"PSSI").unwrap().payload, vec![2, 3, 4, 5]);
 }
 
@@ -318,7 +353,11 @@ fn a_file_with_no_grid_gains_one_after_its_path() {
     let parsed = rbl_anlz::parse(&builder.finish()).unwrap();
     assert!(parsed.beat_grid().is_none());
 
-    let beat = rbl_anlz::Beat { beat_number: 1, tempo_x100: 12_000, time_ms: 500 };
+    let beat = rbl_anlz::Beat {
+        beat_number: 1,
+        tempo_x100: 12_000,
+        time_ms: 500,
+    };
     let grown = rbl_anlz::parse(&parsed.with_beat_grid(&[beat])).unwrap();
     assert_eq!(grown.beat_grid().unwrap(), vec![beat]);
     // PPTH first, then the grid — where every real .DAT carries it.
@@ -329,7 +368,13 @@ fn a_file_with_no_grid_gains_one_after_its_path() {
 
 /// One `PCP2` entry, built the way rekordbox writes it: the fixed part, a
 /// UTF-16BE comment with its length, then the colour index and its RGB.
-fn cue_entry(hot_cue: u32, kind: u8, time_ms: u32, comment: &str, colour: Option<(u8, [u8; 3])>) -> Vec<u8> {
+fn cue_entry(
+    hot_cue: u32,
+    kind: u8,
+    time_ms: u32,
+    comment: &str,
+    colour: Option<(u8, [u8; 3])>,
+) -> Vec<u8> {
     let mut comment_bytes = Vec::new();
     for unit in comment.encode_utf16() {
         comment_bytes.extend_from_slice(&unit.to_be_bytes());
@@ -402,29 +447,36 @@ fn a_truncated_cue_entry_does_not_run_off_the_end() {
     assert!(parse(&file).unwrap().cue_entries().is_empty());
 }
 
-/// The palette is a lookup of what has been read, and silent about what has
-/// not — an unread index must fall back, never take a neighbour's colour.
+/// The device palette is complete for every index rekordbox accepts.
 #[test]
-fn the_cue_palette_only_answers_for_measured_indices() {
+fn the_cue_palette_answers_for_every_valid_index() {
     assert_eq!(rbl_anlz::cue_colour(21), Some([0x00, 0xFF, 0x00]));
     assert_eq!(rbl_anlz::cue_colour(36), Some([0xFF, 0x8C, 0x00]));
-    assert_eq!(rbl_anlz::cue_colour(41), None);
-    assert_eq!(rbl_anlz::cue_colour(0), None);
+    assert_eq!(rbl_anlz::cue_colour(41), Some([0xFF, 0x1A, 0x00]));
+    assert_eq!(rbl_anlz::cue_colour(0), Some([0, 0, 0]));
+    assert_eq!(rbl_anlz::cue_colour(64), Some([0xFF, 0xFF, 0xFF]));
+    assert_eq!(rbl_anlz::cue_colour(65), None);
 }
 
-/// The drawn palette answers for exactly the indices the stored one does:
-/// both come from the same measured export, and an index one knows and the
-/// other does not would mean a badge painted from a guess.
+/// The desktop and device palettes cover the same complete index range while
+/// retaining rekordbox's intentionally different RGB values.
 #[test]
 fn the_drawn_palette_covers_the_same_indices_as_the_stored_one() {
-    let stored: Vec<u8> = rbl_anlz::MEASURED_CUE_COLOURS.iter().map(|&(i, _)| i).collect();
-    let drawn: Vec<u8> = rbl_anlz::DRAWN_CUE_COLOURS.iter().map(|&(i, _)| i).collect();
+    let stored: Vec<u8> = rbl_anlz::MEASURED_CUE_COLOURS
+        .iter()
+        .map(|&(i, _)| i)
+        .collect();
+    let drawn: Vec<u8> = rbl_anlz::DRAWN_CUE_COLOURS
+        .iter()
+        .map(|&(i, _)| i)
+        .collect();
     assert_eq!(stored, drawn);
-    // The one pair measured twice over — once here, once as the badge in
-    // `Player.module.css` — and the default index nearly every cue carries.
-    assert_eq!(rbl_anlz::cue_colour_drawn(21), Some([0x77, 0xE8, 0x66]));
-    assert_eq!(rbl_anlz::cue_colour_drawn(41), None);
-    assert_eq!(rbl_anlz::cue_colour_drawn(0), None);
+    assert_eq!(stored, (0_u8..=64).collect::<Vec<_>>());
+    assert_eq!(rbl_anlz::cue_colour_drawn(1), Some([0x30, 0x5A, 0xFF]));
+    assert_eq!(rbl_anlz::cue_colour_drawn(21), Some([0x3C, 0xEB, 0x50]));
+    assert_eq!(rbl_anlz::cue_colour_drawn(41), Some([0xE0, 0x28, 0x23]));
+    assert_eq!(rbl_anlz::cue_colour_drawn(64), Some([0xFF, 0xFF, 0xFF]));
+    assert_eq!(rbl_anlz::cue_colour_drawn(65), None);
 }
 
 /// A grid edit empties the `.EXT`'s extended grid rather than leaving one
@@ -438,10 +490,19 @@ fn a_grid_edit_empties_the_extended_grid_and_nothing_else() {
     let file = build(&[
         (b"PPTH", vec![0, 0, 0, 4], vec![0, b'a', 0, 0]),
         (b"PQT2", filled.clone(), vec![1, 2, 3, 4, 5, 6]),
-        (b"PWV3", vec![0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0], vec![7, 8, 9]),
+        (
+            b"PWV3",
+            vec![0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0],
+            vec![7, 8, 9],
+        ),
     ]);
     let parsed = parse(&file).unwrap();
-    let cleared = parse(&parsed.with_extended_grid_cleared().expect("a filled PQT2 is emptied")).unwrap();
+    let cleared = parse(
+        &parsed
+            .with_extended_grid_cleared()
+            .expect("a filled PQT2 is emptied"),
+    )
+    .unwrap();
     assert_eq!(cleared.sections.len(), 3);
     assert_eq!(cleared.sections[0], parsed.sections[0]);
     assert_eq!(cleared.sections[2], parsed.sections[2]);
@@ -450,9 +511,18 @@ fn a_grid_edit_empties_the_extended_grid_and_nothing_else() {
     assert!(grid.payload.is_empty());
     assert_eq!(grid.header.len(), 44);
     assert_eq!(&grid.header[4..8], &0x0100_0002_u32.to_be_bytes());
-    assert!(grid.header[8..].iter().all(|&b| b == 0), "no beat is described");
+    assert!(
+        grid.header[8..].iter().all(|&b| b == 0),
+        "no beat is described"
+    );
 
-    assert!(cleared.with_extended_grid_cleared().is_none(), "already empty");
+    assert!(
+        cleared.with_extended_grid_cleared().is_none(),
+        "already empty"
+    );
     let without = parse(&build(&[(b"PPTH", vec![0, 0, 0, 4], vec![0, b'a', 0, 0])])).unwrap();
-    assert!(without.with_extended_grid_cleared().is_none(), "nothing to empty");
+    assert!(
+        without.with_extended_grid_cleared().is_none(),
+        "nothing to empty"
+    );
 }

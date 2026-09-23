@@ -32,16 +32,20 @@ pub enum AnlzError {
     #[error("file is truncated: {0}")]
     Truncated(&'static str),
     #[error("section {tag} declares {declared} bytes but only {available} remain")]
-    BadSectionLength { tag: String, declared: u64, available: u64 },
+    BadSectionLength {
+        tag: String,
+        declared: u64,
+        available: u64,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AnlzError>;
 
+pub use encode::{author, author_with_overview, AnalysisFiles, BandColumn, Existing};
 pub use phrase::{Mood, Phrase, PhraseEdit, SongStructure};
 pub use vocal::{VOCAL_FRAME_MS, VOCAL_MAX};
-pub use encode::{author, author_with_overview, AnalysisFiles, BandColumn, Existing};
 pub use write::AnlzBuilder;
 
 /// Bytes of section framing before the tag-specific header fields.
@@ -71,7 +75,11 @@ pub struct Section {
 
 impl Section {
     pub fn new(tag: &[u8; 4], header: Vec<u8>, payload: Vec<u8>) -> Self {
-        Self { tag: FourCc::new(tag), header, payload }
+        Self {
+            tag: FourCc::new(tag),
+            header,
+            payload,
+        }
     }
 
     /// `len_header` as written: the frame plus the tag header.
@@ -196,76 +204,166 @@ pub struct CueEntry {
 /// row and its eleven trailing bytes: an entry cannot be shorter than this.
 const CUE_ENTRY_MIN: usize = 40;
 
-/// What `djmdCue.ColorTableIndex` paints, where it has been read.
+/// The complete CDJ/device RGB palette for `djmdCue.ColorTableIndex`.
 ///
-/// Measured, not guessed: rekordbox writes the index and the RGB side by side
-/// in the `PCO2` entries of an export, and these are the pairs a real export
-/// of 77 tracks carried. The same export cross-checks against `djmdCue` — 76
-/// of the 77 tracks store exactly the indices the export drew — which is what
-/// makes `color_code` and `ColorTableIndex` the same number rather than two
-/// that happen to look alike. `cargo run -p rbl-db --example cue_colours` is
-/// the probe.
-///
-/// **Incomplete, deliberately.** Eight more indices are in use in the
-/// reference library and are not here, because no exported track carried one;
-/// the probe names a track for each. An index that is not in this table has
-/// not been read, and must not be guessed — `cue_colour` returns `None` for it
-/// so a caller falls back rather than paints a wrong colour.
-///
-/// Note that this is what rekordbox *stores*, not always what it *draws*: the
-/// hot-cue badge measured off a screenshot for index 21 is `#77E866`, a
-/// lightened version of the `#00FF00` here.
+/// Extracted from rekordbox 7's `djplay::getDevicePadColor(int)` static table
+/// and cross-checked against the RGB bytes rekordbox writes to USB `PCO2`
+/// entries. Index 0 is the black sentinel; 63 and 64 are black and white.
 pub const MEASURED_CUE_COLOURS: &[(u8, [u8; 3])] = &[
+    (0, [0x00, 0x00, 0x00]),
     (1, [0x00, 0x00, 0xFF]),
+    (2, [0x00, 0x1C, 0xFF]),
+    (3, [0x00, 0x38, 0xFF]),
+    (4, [0x00, 0x54, 0xFF]),
+    (5, [0x00, 0x70, 0xFF]),
     (6, [0x00, 0x8C, 0xFF]),
+    (7, [0x00, 0xA8, 0xFF]),
+    (8, [0x00, 0xC4, 0xFF]),
+    (9, [0x00, 0xE0, 0xFF]),
+    (10, [0x00, 0xFF, 0xFF]),
+    (11, [0x00, 0xFF, 0xE8]),
+    (12, [0x00, 0xFF, 0xD1]),
+    (13, [0x00, 0xFF, 0xBA]),
+    (14, [0x00, 0xFF, 0xA3]),
+    (15, [0x00, 0xFF, 0x8C]),
+    (16, [0x00, 0xFF, 0x75]),
+    (17, [0x00, 0xFF, 0x5E]),
     (18, [0x00, 0xFF, 0x47]),
+    (19, [0x00, 0xFF, 0x30]),
+    (20, [0x00, 0xFF, 0x1A]),
     (21, [0x00, 0xFF, 0x00]),
+    (22, [0x1A, 0xFF, 0x00]),
+    (23, [0x33, 0xFF, 0x00]),
+    (24, [0x4D, 0xFF, 0x00]),
     (25, [0x66, 0xFF, 0x00]),
+    (26, [0x80, 0xFF, 0x00]),
+    (27, [0x99, 0xFF, 0x00]),
+    (28, [0xB3, 0xFF, 0x00]),
+    (29, [0xCC, 0xFF, 0x00]),
+    (30, [0xE6, 0xFF, 0x00]),
+    (31, [0xFF, 0xFF, 0x00]),
+    (32, [0xFF, 0xE8, 0x00]),
     (33, [0xFF, 0xD1, 0x00]),
+    (34, [0xFF, 0xBA, 0x00]),
+    (35, [0xFF, 0xA3, 0x00]),
     (36, [0xFF, 0x8C, 0x00]),
+    (37, [0xFF, 0x75, 0x00]),
+    (38, [0xFF, 0x5E, 0x00]),
+    (39, [0xFF, 0x47, 0x00]),
+    (40, [0xFF, 0x30, 0x00]),
+    (41, [0xFF, 0x1A, 0x00]),
+    (42, [0xFF, 0x00, 0x00]),
+    (43, [0xFF, 0x00, 0x17]),
+    (44, [0xFF, 0x00, 0x2E]),
+    (45, [0xFF, 0x00, 0x45]),
     (46, [0xFF, 0x00, 0x5C]),
+    (47, [0xFF, 0x00, 0x73]),
+    (48, [0xFF, 0x00, 0x8A]),
+    (49, [0xFF, 0x00, 0xA1]),
+    (50, [0xFF, 0x00, 0xB8]),
+    (51, [0xFF, 0x00, 0xCF]),
+    (52, [0xFF, 0x00, 0xE6]),
+    (53, [0xFF, 0x00, 0xFF]),
+    (54, [0xE6, 0x00, 0xFF]),
+    (55, [0xCC, 0x00, 0xFF]),
+    (56, [0xB3, 0x00, 0xFF]),
+    (57, [0x99, 0x00, 0xFF]),
+    (58, [0x80, 0x00, 0xFF]),
+    (59, [0x66, 0x00, 0xFF]),
     (60, [0x4D, 0x00, 0xFF]),
+    (61, [0x33, 0x00, 0xFF]),
+    (62, [0x1A, 0x00, 0xFF]),
+    (63, [0x00, 0x00, 0x00]),
+    (64, [0xFF, 0xFF, 0xFF]),
 ];
 
 /// The RGB for a `ColorTableIndex`, or `None` where it has not been read.
 pub fn cue_colour(index: u8) -> Option<[u8; 3]> {
-    MEASURED_CUE_COLOURS.iter().find(|&&(i, _)| i == index).map(|&(_, rgb)| rgb)
+    MEASURED_CUE_COLOURS
+        .iter()
+        .find(|&&(i, _)| i == index)
+        .map(|&(_, rgb)| rgb)
 }
 
-/// What rekordbox *paints* for a `ColorTableIndex` on screen, which is not
-/// what it stores.
+/// The complete RGB palette rekordbox paints on screen.
 ///
-/// `[OBS]` rekordbox 7.2.11, `design/reference/macos/playlist-player@2x.png`
-/// and `player-1p-hotcue@1x.png`. The stored values above are the saturated
-/// CDJ palette; the desktop draws each as a lighter, duller version, and
-/// there is no formula between the two — `#00FF00` becomes `#77E866` and
-/// `#0000FF` becomes `#3A59F6`, which is neither a blend with one colour nor
-/// a scale of one channel. So it is a second table, measured badge by badge.
-///
-/// Each entry is the modal pixel of a solid fill, and each was checked in
-/// more than one place: the four cues of the loaded track read the same in
-/// the overview badge, the HOT CUE panel chip and the pad row, and every
-/// index read the same across three rows of the track list's preview column,
-/// where the 2x capture draws the badges 14 px square. The nine here are the
-/// nine indices `MEASURED_CUE_COLOURS` has; the eight it lacks are unread in
-/// both tables, and `cue_colour_drawn` returns `None` for them so a caller
-/// falls back to one colour rather than painting a neighbour's.
+/// Extracted from rekordbox 7's `djplay::getPadColor(int)` static table. This
+/// intentionally differs from the saturated device/export palette above.
 pub const DRAWN_CUE_COLOURS: &[(u8, [u8; 3])] = &[
-    (1, [0x3A, 0x59, 0xF6]),
-    (6, [0x6A, 0xAE, 0xEC]),
-    (18, [0x51, 0xAE, 0x7B]),
-    (21, [0x77, 0xE8, 0x66]),
-    (25, [0xA8, 0xD5, 0x4B]),
-    (33, [0xD9, 0xAC, 0x3A]),
-    (36, [0xF0, 0x92, 0x35]),
-    (46, [0xE1, 0x3A, 0x8A]),
-    (60, [0xA2, 0x74, 0xF7]),
+    (0, [0x00, 0x00, 0x00]),
+    (1, [0x30, 0x5A, 0xFF]),
+    (2, [0x50, 0x73, 0xFF]),
+    (3, [0x50, 0x8C, 0xFF]),
+    (4, [0x50, 0xA0, 0xFF]),
+    (5, [0x50, 0xB4, 0xFF]),
+    (6, [0x50, 0xB0, 0xF2]),
+    (7, [0x50, 0xAE, 0xE8]),
+    (8, [0x45, 0xAC, 0xDB]),
+    (9, [0x00, 0xE0, 0xFF]),
+    (10, [0x19, 0xDA, 0xF0]),
+    (11, [0x32, 0xD2, 0xE6]),
+    (12, [0x21, 0xB4, 0xB9]),
+    (13, [0x20, 0xAA, 0xA0]),
+    (14, [0x1F, 0xA3, 0x92]),
+    (15, [0x19, 0xA0, 0x8C]),
+    (16, [0x14, 0xA5, 0x84]),
+    (17, [0x14, 0xAA, 0x7D]),
+    (18, [0x10, 0xB1, 0x76]),
+    (19, [0x30, 0xD2, 0x6E]),
+    (20, [0x37, 0xDE, 0x5A]),
+    (21, [0x3C, 0xEB, 0x50]),
+    (22, [0x28, 0xE2, 0x14]),
+    (23, [0x7D, 0xC1, 0x3D]),
+    (24, [0x8C, 0xC8, 0x32]),
+    (25, [0x9B, 0xD7, 0x23]),
+    (26, [0xA5, 0xE1, 0x16]),
+    (27, [0xA5, 0xDC, 0x0A]),
+    (28, [0xAA, 0xD2, 0x08]),
+    (29, [0xB4, 0xC8, 0x05]),
+    (30, [0xB4, 0xBE, 0x04]),
+    (31, [0xBA, 0xB4, 0x04]),
+    (32, [0xC3, 0xAF, 0x04]),
+    (33, [0xE1, 0xAA, 0x00]),
+    (34, [0xFF, 0xA0, 0x00]),
+    (35, [0xFF, 0x96, 0x00]),
+    (36, [0xFF, 0x8C, 0x00]),
+    (37, [0xFF, 0x75, 0x00]),
+    (38, [0xE0, 0x64, 0x1B]),
+    (39, [0xE0, 0x46, 0x1E]),
+    (40, [0xE0, 0x30, 0x1E]),
+    (41, [0xE0, 0x28, 0x23]),
+    (42, [0xE6, 0x28, 0x28]),
+    (43, [0xFF, 0x37, 0x6F]),
+    (44, [0xFF, 0x2D, 0x6F]),
+    (45, [0xFF, 0x12, 0x7B]),
+    (46, [0xF5, 0x1E, 0x8C]),
+    (47, [0xEB, 0x2D, 0xA0]),
+    (48, [0xE6, 0x37, 0xB4]),
+    (49, [0xDE, 0x44, 0xCF]),
+    (50, [0xDE, 0x44, 0x8D]),
+    (51, [0xE6, 0x30, 0xB4]),
+    (52, [0xE6, 0x19, 0xDC]),
+    (53, [0xE6, 0x00, 0xFF]),
+    (54, [0xDC, 0x00, 0xFF]),
+    (55, [0xCC, 0x00, 0xFF]),
+    (56, [0xB4, 0x32, 0xFF]),
+    (57, [0xB9, 0x3C, 0xFF]),
+    (58, [0xC5, 0x42, 0xFF]),
+    (59, [0xAA, 0x5A, 0xFF]),
+    (60, [0xAA, 0x72, 0xFF]),
+    (61, [0x82, 0x72, 0xFF]),
+    (62, [0x64, 0x73, 0xFF]),
+    (63, [0x00, 0x00, 0x00]),
+    (64, [0xFF, 0xFF, 0xFF]),
 ];
 
-/// The RGB rekordbox paints for a `ColorTableIndex`, or `None` where it has
-/// not been measured.
+/// The RGB rekordbox paints for a `ColorTableIndex`, or `None` if it is not a
+/// valid palette index.
 pub fn cue_colour_drawn(index: u8) -> Option<[u8; 3]> {
-    DRAWN_CUE_COLOURS.iter().find(|&&(i, _)| i == index).map(|&(_, rgb)| rgb)
+    DRAWN_CUE_COLOURS
+        .iter()
+        .find(|&&(i, _)| i == index)
+        .map(|&(_, rgb)| rgb)
 }
 
 fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
@@ -287,7 +385,10 @@ fn cue_entry(e: &[u8], len_entry: usize) -> CueEntry {
     }
     let len_comment = be32(e, CUE_ENTRY_MIN) as usize;
     let start = CUE_ENTRY_MIN + 4;
-    let Some(end) = start.checked_add(len_comment).filter(|&end| end <= len_entry) else {
+    let Some(end) = start
+        .checked_add(len_comment)
+        .filter(|&end| end <= len_entry)
+    else {
         return entry;
     };
     if len_comment > 0 {
@@ -357,13 +458,22 @@ pub fn parse(bytes: &[u8]) -> Result<Anlz> {
         let header_end = (at + section_header.max(SECTION_FRAME)).min(at + section_len);
         sections.push(Section {
             tag,
-            header: bytes.get(at + SECTION_FRAME..header_end).unwrap_or(&[]).to_vec(),
-            payload: bytes.get(header_end..at + section_len).unwrap_or(&[]).to_vec(),
+            header: bytes
+                .get(at + SECTION_FRAME..header_end)
+                .unwrap_or(&[])
+                .to_vec(),
+            payload: bytes
+                .get(header_end..at + section_len)
+                .unwrap_or(&[])
+                .to_vec(),
         });
         at += section_len;
     }
 
-    Ok(Anlz { header_extra, sections })
+    Ok(Anlz {
+        header_extra,
+        sections,
+    })
 }
 
 fn utf16be_to_string(raw: &[u8]) -> String {
@@ -398,14 +508,24 @@ impl Anlz {
 
     pub fn with_grid_offset(&self, offset_ms: i16) -> Option<Vec<u8>> {
         let mut next = self.clone();
-        let section = next.sections.iter_mut().find(|s| s.tag == FourCc::new(b"PQTZ"))?;
-        section.header.get_mut(6..8)?.copy_from_slice(&offset_ms.to_be_bytes());
+        let section = next
+            .sections
+            .iter_mut()
+            .find(|s| s.tag == FourCc::new(b"PQTZ"))?;
+        section
+            .header
+            .get_mut(6..8)?
+            .copy_from_slice(&offset_ms.to_be_bytes());
         Some(next.to_bytes())
     }
 
     /// Every extended cue entry in the file, across every `PCO2` section.
     pub fn cue_entries(&self) -> Vec<CueEntry> {
-        self.sections.iter().filter_map(Section::as_cue_entries).flatten().collect()
+        self.sections
+            .iter()
+            .filter_map(Section::as_cue_entries)
+            .flatten()
+            .collect()
     }
 
     pub fn path(&self) -> Option<String> {
@@ -444,7 +564,10 @@ impl Anlz {
     /// `rbl-db/src/write.rs`).
     #[must_use]
     pub fn with_extended_grid_cleared(&self) -> Option<Vec<u8>> {
-        let at = self.sections.iter().position(|s| s.tag == FourCc::new(b"PQT2"))?;
+        let at = self
+            .sections
+            .iter()
+            .position(|s| s.tag == FourCc::new(b"PQT2"))?;
         if self.sections.get(at).is_some_and(|s| s.payload.is_empty()) {
             return None;
         }
@@ -459,33 +582,71 @@ impl Anlz {
     /// offset and every new time/tempo still agree (`CAnalyzerIF`'s save path).
     /// Beat-number-only edits refresh the header without inventing payload.
     #[must_use]
-    pub fn with_extended_grid_edit(&self, old: &[Beat], new: &[Beat], offset: i16) -> Option<Vec<u8>> {
-        let at = self.sections.iter().position(|s| s.tag == FourCc::new(b"PQT2"))?;
+    pub fn with_extended_grid_edit(
+        &self,
+        old: &[Beat],
+        new: &[Beat],
+        offset: i16,
+    ) -> Option<Vec<u8>> {
+        let at = self
+            .sections
+            .iter()
+            .position(|s| s.tag == FourCc::new(b"PQT2"))?;
         let section = self.sections.get(at)?;
-        let word = |at: usize| section.header.get(at..at + 4)
-            .and_then(|b| <[u8; 4]>::try_from(b).ok()).map(u32::from_be_bytes);
+        let word = |at: usize| {
+            section
+                .header
+                .get(at..at + 4)
+                .and_then(|b| <[u8; 4]>::try_from(b).ok())
+                .map(u32::from_be_bytes)
+        };
         let packed = |b: &Beat| (u32::from(b.beat_number) << 16) | u32::from(b.tempo_x100);
-        let checksum = |beats: &[Beat]| beats.iter().fold(0_u32, |sum, b| sum.wrapping_add(b.time_ms).wrapping_add(u32::from(b.beat_number)).wrapping_add(u32::from(b.tempo_x100)));
-        let preserve = !old.is_empty() && old.len() == new.len()
-            && section.header.len() >= 36 && section.payload.len() == old.len() * 2
+        let checksum = |beats: &[Beat]| {
+            beats.iter().fold(0_u32, |sum, b| {
+                sum.wrapping_add(b.time_ms)
+                    .wrapping_add(u32::from(b.beat_number))
+                    .wrapping_add(u32::from(b.tempo_x100))
+            })
+        };
+        let preserve = !old.is_empty()
+            && old.len() == new.len()
+            && section.header.len() >= 36
+            && section.payload.len() == old.len() * 2
             && word(28) == u32::try_from(old.len()).ok()
-            && word(12) == old.first().map(packed) && word(16) == old.first().map(|b| b.time_ms)
-            && word(20) == old.last().map(packed) && word(24) == old.last().map(|b| b.time_ms)
+            && word(12) == old.first().map(packed)
+            && word(16) == old.first().map(|b| b.time_ms)
+            && word(20) == old.last().map(packed)
+            && word(24) == old.last().map(|b| b.time_ms)
             && word(32) == Some(checksum(old))
             && section.header.get(8..10) == Some(offset.to_be_bytes().as_slice())
-            && old.iter().zip(new).all(|(a,b)| i64::from(a.time_ms) + i64::from(offset) == i64::from(b.time_ms) && a.tempo_x100 == b.tempo_x100);
+            && old.iter().zip(new).all(|(a, b)| {
+                i64::from(a.time_ms) + i64::from(offset) == i64::from(b.time_ms)
+                    && a.tempo_x100 == b.tempo_x100
+            });
         let mut next = self.clone();
         let slot = next.sections.get_mut(at)?;
-        if slot.header.len() < 36 { *slot = write::extended_grid_empty_section(); }
-        else {
+        if slot.header.len() < 36 {
+            *slot = write::extended_grid_empty_section();
+        } else {
             slot.header.get_mut(8..36)?.fill(0);
             if preserve {
                 let first = new.first()?;
                 let last = new.last()?;
-                for (at, value) in [(12, packed(first)), (16, first.time_ms), (20, packed(last)), (24, last.time_ms), (28, u32::try_from(new.len()).ok()?), (32, checksum(new))] {
-                    slot.header.get_mut(at..at + 4)?.copy_from_slice(&value.to_be_bytes());
+                for (at, value) in [
+                    (12, packed(first)),
+                    (16, first.time_ms),
+                    (20, packed(last)),
+                    (24, last.time_ms),
+                    (28, u32::try_from(new.len()).ok()?),
+                    (32, checksum(new)),
+                ] {
+                    slot.header
+                        .get_mut(at..at + 4)?
+                        .copy_from_slice(&value.to_be_bytes());
                 }
-            } else { slot.payload.clear(); }
+            } else {
+                slot.payload.clear();
+            }
         }
         let bytes = next.to_bytes();
         (bytes != self.to_bytes()).then_some(bytes)
@@ -503,8 +664,11 @@ impl Anlz {
         if let Some(at) = sections.iter().position(|s| s.tag == FourCc::new(b"PQTZ")) {
             sections[at] = replacement;
         } else {
-            let after_path =
-                usize::from(sections.first().is_some_and(|s| s.tag == FourCc::new(b"PPTH")));
+            let after_path = usize::from(
+                sections
+                    .first()
+                    .is_some_and(|s| s.tag == FourCc::new(b"PPTH")),
+            );
             sections.insert(after_path, replacement);
         }
         write::render(&self.header_extra, &sections)
@@ -527,8 +691,15 @@ mod grid_offset_tests {
     use super::*;
     #[test]
     fn offset_edits_preserve_every_other_byte_and_the_original_beats() {
-        let beats = vec![Beat { beat_number: 1, tempo_x100: 12800, time_ms: 1000 }];
-        let original = Anlz { header_extra: vec![0; 16], sections: vec![write::beat_grid_section(&beats)] };
+        let beats = vec![Beat {
+            beat_number: 1,
+            tempo_x100: 12800,
+            time_ms: 1000,
+        }];
+        let original = Anlz {
+            header_extra: vec![0; 16],
+            sections: vec![write::beat_grid_section(&beats)],
+        };
         let before = original.to_bytes();
         for offset in [234, -467, i16::MIN, i16::MAX, 0] {
             let changed = original.with_grid_offset(offset).unwrap();

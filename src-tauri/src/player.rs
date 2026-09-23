@@ -69,7 +69,7 @@ pub struct TickDto {
     /// the meter reads what can be heard rather than what is in the file.
     pub peak_left: f32,
     pub peak_right: f32,
-    /// The master level, 0 to 1.
+    /// The master level, 0 to +2 dB.
     pub master: f32,
     /// How far the limiter turned the sum down since the last tick, in dB.
     pub reduction: f32,
@@ -250,7 +250,7 @@ impl Player {
     /// Retain the level when an output-device change rebuilds the engine.
     pub fn set_master_level(&self, level: f32) {
         let engine = self.engine.lock();
-        let safe = if level.is_finite() { level.clamp(0.0, 1.0) } else { 1.0 };
+        let safe = if level.is_finite() { level.clamp(0.0, rbl_deck::MAX_MASTER_GAIN) } else { 1.0 };
         *self.master_level.lock() = safe;
         if let Some(engine) = engine.as_ref() {
             engine.master().set_gain(safe);

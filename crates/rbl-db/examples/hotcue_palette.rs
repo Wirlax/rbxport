@@ -3,7 +3,7 @@
 //! `djmdCue.ColorTableIndex` decides it, and `rbl-anlz`'s `cue_colours` found
 //! the palette in neither the database, the skins nor the analysis files. One
 //! entry is nailed down: the track the overview was measured from paints all
-//! four of its hot cues `#77E866` and stores index 21 for each. This prints how
+//! four of its hot cues `#3CEB50` and stores index 21 for each. This prints how
 //! much of the library that one index covers, and shows the memory cue sitting
 //! at the same millisecond as each hot cue — which is what the small red head
 //! beside every badge in the capture turned out to be.

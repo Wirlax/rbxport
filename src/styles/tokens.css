@@ -23,7 +23,7 @@
   --c-wave-all: #F5EBD7; /* rekordbox's 3Band waveform where all three bands overlap, the cream core (mixxxdj/mixxx#12326); our capture measured #F5EAD6 */
   --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
-  --c-cue-hot: #77E866; /* docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry. The fallback for an index without a measured colour: the other eight measured indices come over the wire per cue from rbl_anlz::DRAWN_CUE_COLOURS */
+  --c-cue-hot: #3CEB50; /* rekordbox getPadColor(21), extracted from the desktop palette */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
   --c-error: #E23B2E; /* UNMEASURED — failures in the status bar; the same red the meter's clip band uses, so the app has one alarm colour */
@@ -56,7 +56,7 @@
   --c-play-glyph-on: #FFFFFF; /* sampled from the same capture: the triangle is a flat 255,255,255 while the deck runs, against #A0A0A0 at rest */
   --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
-  --c-pad-set: #77E866; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
+  --c-pad-set: #3CEB50; /* rekordbox getPadColor(21), the default populated hot-cue pad */
   --c-pad-well: #0F0F0F; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad's own background */
   --c-pad-label: #646464; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the text on an inactive button, e.g. MA */
   --c-tab-active: #457FE5; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the selected MEMORY/HOT CUE/INFO tab — a lighter blue than the pad buttons' #3571E3 */
@@ -167,14 +167,14 @@
   --c-pcm-blue: #5BA0FF; /* representative PCM trace for the blue waveform palette */
   --c-pcm3-band: #FFA600; /* representative PCM trace for the 3-band waveform palette */
   --c-pcm-rgb: #F266DC; /* representative PCM trace for the RGB waveform palette */
-  --c-cue-teal: #51AE7B; /* measured hot-cue colour used by the mock library */
-  --c-cue-orange: #F09235; /* measured hot-cue colour used by the mock library */
-  --c-cue-blue: #3A59F6; /* measured hot-cue colour used by the mock library */
-  --c-cue-yellow: #D9AC3A; /* measured hot-cue colour used by the mock library */
-  --c-cue-pink: #E13A8A; /* measured hot-cue colour used by the mock library */
-  --c-cue-aqua: #6AAEEC; /* measured hot-cue colour used by the mock library */
-  --c-cue-lime: #A8D54B; /* measured hot-cue colour used by the mock library */
-  --c-cue-purple: #A274F7; /* measured hot-cue colour used by the mock library */
+  --c-cue-teal: #10B176; /* rekordbox getPadColor(18) */
+  --c-cue-orange: #FF8C00; /* rekordbox getPadColor(36) */
+  --c-cue-blue: #305AFF; /* rekordbox getPadColor(1) */
+  --c-cue-yellow: #E1AA00; /* rekordbox getPadColor(33) */
+  --c-cue-pink: #F51E8C; /* rekordbox getPadColor(46) */
+  --c-cue-aqua: #50B0F2; /* rekordbox getPadColor(6) */
+  --c-cue-lime: #9BD723; /* rekordbox getPadColor(25) */
+  --c-cue-purple: #AA72FF; /* rekordbox getPadColor(60) */
 
   --s-row-height: 25px; /* measured row pitch */
   --s-col-header-h: 24px; /* docs/screenshots (rekordbox 7.2.11, 2x) 9.09.33 PM: the column heading row y 806..853, 48px, under the 1pt black line at 804..805; the same in 9.03.41 PM (y 366..413) */

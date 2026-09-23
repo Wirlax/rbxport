@@ -10,6 +10,11 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
+  it("protects the library for a new user", () => {
+    expect(sanitisePreferences({}).advanced.protectLibrary).toBe(true);
+    expect(sanitisePreferences({ advanced: { protectLibrary: false } }).advanced.protectLibrary).toBe(false);
+  });
+
   it("preserves the BPM-change visibility preference and enables it for older settings", () => {
     expect(sanitisePreferences({view: {showBpmChanges: false}}).view.showBpmChanges).toBe(false);
     expect(sanitisePreferences({view: {}}).view.showBpmChanges).toBe(true);

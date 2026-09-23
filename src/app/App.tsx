@@ -80,6 +80,10 @@ const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => 
 const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
 const SmartPlaylistEditor = lazy(() => import("@/views/tree/SmartPlaylistEditor").then(m => ({ default: m.SmartPlaylistEditor })));
 
+// Keep the main-page support affordance wired but hidden for now. Support
+// remains available from Preferences › About.
+const SHOW_MAIN_SUPPORT = false;
+
 function ConnectedPreferences(props: Omit<React.ComponentProps<typeof Preferences>, "reduction" | "vu" | "peakLeft" | "peakRight">) {
   const master = useMasterDisplay();
   return <Preferences {...props} reduction={master.reduction} vu={master.vu}
@@ -2028,8 +2032,6 @@ function AppBody() {
             onRefresh={refreshDevices}
             onError={refuse}
             busy={syncing}
-            createFrom={stickDefaults.createDatabaseFolders ? stickDefaults : undefined}
-            onCreated={refreshDevices}
           />
         ) : (
         <TrackTable
@@ -2199,7 +2201,7 @@ function AppBody() {
           ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
         }))}
         onReportBug={openReport}
-        onSupport={openSupport}
+        onSupport={SHOW_MAIN_SUPPORT ? openSupport : undefined}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}

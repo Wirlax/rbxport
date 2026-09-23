@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { Device, DeviceSettings, StickDefaults, TreeNode } from "@/ipc/types";
+import type { Device, DeviceSettings, TreeNode } from "@/ipc/types";
 import { usePreferences } from "@/store/usePreferences";
 import { ColorTab } from "./ColorTab";
 import { ColumnTab } from "./ColumnTab";
@@ -46,13 +46,6 @@ export interface DevicePanelProps {
   /** Something the stick refused; shown in the status bar. */
   onError?: (message: string) => void;
   busy?: boolean;
-  /**
-   * What a blank stick's database is created from when the panel opens one;
-   * undefined when the preference says not to create it.
-   */
-  createFrom?: StickDefaults | undefined;
-  /** Called when the panel gave the stick its database, so the list can be re-read. */
-  onCreated?: () => void;
 }
 
 export function DevicePanel({
@@ -62,8 +55,6 @@ export function DevicePanel({
   onRefresh,
   onError,
   busy = false,
-  createFrom,
-  onCreated,
 }: DevicePanelProps) {
   const [tab, setTab] = useState<DeviceTab>("general");
   const [settings, setSettings] = useState<DeviceSettings | null>(null);
@@ -82,13 +73,6 @@ export function DevicePanel({
     void getBackend()
       .then(async (backend) => {
         const read = await backend.deviceSettings(device.path);
-        // A blank stick gets its database folders here, as rekordbox
-        // creates them on connect, so the tabs have something to edit.
-        if (!read.hasDeviceLibrary && createFrom !== undefined) {
-          const created = await backend.ensureDeviceLibrary(device.path, createFrom);
-          if (!cancelled) onCreated?.();
-          return created;
-        }
         // A stick with an export but no DEVSETTING.DAT gets the defaults.
         if (read.hasDevSetting || !hasExport) return read;
         return backend.writeDeviceDefaults(device.path, stickDefaults);
@@ -102,10 +86,9 @@ export function DevicePanel({
     return () => {
       cancelled = true;
     };
-    // `createFrom` and the defaults change with every keystroke in
-    // Preferences; the stick is read again only when the device or its
-    // export changes. A preference changed while the panel is open is for
-    // the next stick.
+    // The defaults change with every keystroke in Preferences; the stick is
+    // read again only when the device or its export changes. A preference
+    // changed while the panel is open is for the next stick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.path, exportStamp, hasExport, onError]);
 

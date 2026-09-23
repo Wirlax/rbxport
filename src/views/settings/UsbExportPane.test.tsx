@@ -1,0 +1,61 @@
+/** @vitest-environment jsdom */
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import { DEFAULT_PREFERENCES } from "@/lib/preferences";
+import { PreferencesProvider } from "@/store/usePreferences";
+import { UsbExportPane } from "./UsbExportPane";
+import styles from "./UsbExportPane.module.css";
+
+declare global {
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+
+let host: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+});
+
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+});
+
+it("keeps the blank-drive database option in USB Export and updates its existing preference", () => {
+  const update = vi.fn();
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+
+  const option = host.querySelector<HTMLInputElement>('input[aria-labelledby$="-database-folders"]');
+  expect(host.textContent).toContain("Setup PIONEER folder on USB drives");
+  expect(host.textContent).toContain("when a new USB drive is synced for the first time");
+  expect(option?.checked).toBe(true);
+  act(() => option?.click());
+  expect(update).toHaveBeenCalledWith("djSystem", { createDatabaseFolders: false });
+});
+
+it("explains the sync options and shows their defaults", () => {
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update: vi.fn(), reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+
+  expect(host.textContent).toContain("Import CDJ Mixer Settings from USB drives");
+  expect(host.textContent).toContain("Import CDJ settings you stored on the USB stick to rbxport when you sync.");
+  expect(host.textContent).toContain("Import Play History");
+  expect(host.textContent).toContain("Import history from USB sticks to rbxport when you sync.");
+  expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
+  expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
+    "Default: Off", "Default: On", "Default: Off",
+  ]);
+});

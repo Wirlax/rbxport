@@ -161,9 +161,9 @@ export interface DjSystemPreferences {
   /** `menuItem` of the sort option shown beside the track name; null for none. */
   subColumn: number | null;
   /**
-   * Whether a drive with no database is given one when it is opened in
-   * Devices, as rekordbox does the moment a drive is connected. Off, the
-   * settings tabs stay disabled until something is exported to it.
+   * Whether a new USB drive gets its PIONEER folder structure when it is
+   * synced for the first time. Before that first sync its device settings
+   * remain read-only.
    */
   createDatabaseFolders: boolean;
   /**
@@ -271,7 +271,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   usbExport: { importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" },
   advanced: {
     relocateFolders: [],
-    protectLibrary: false,
+    protectLibrary: true,
     doubleClickToEdit: false,
     syncType: "beat",
     syncDoubleHalf: true,

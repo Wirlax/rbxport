@@ -103,6 +103,10 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [treeError, setTreeError] = useState("");
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [devicesError, setDevicesError] = useState("");
+  // This window may live in its own webview, so it keeps its own live view
+  // of rekordbox's process lock instead of relying on the main window.
+  // Unknown is locked: do not briefly enable SYNC before the first check.
+  const [rekordboxOpen, setRekordboxOpen] = useState<boolean | null>(null);
   const [operation, setOperation] = useState<"sync" | "import" | "eject" | null>(null);
   const [ejectingPath, setEjectingPath] = useState<string | null>(null);
   const busy = operation !== null || [...exportJobs.values()].some(job => job.state === "writing");
@@ -129,6 +133,32 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     : selectedCount === 0 ? "Select playlists to sync."
     : tickedDevices.size === 0 ? "Select a USB device to sync to."
     : "Selected playlists will sync to each selected device.";
+  const syncHint = rekordboxOpen
+    ? "Quit rekordbox to enable synchronization."
+    : rekordboxOpen === null
+      ? "Checking whether rekordbox is running…"
+      : selectionHint;
+
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const backend = await getBackend();
+        const summary = await backend.librarySummary();
+        if (live) setRekordboxOpen(summary.readOnly);
+      } catch {
+        // Preserve the last known state during a temporary backend failure.
+      } finally {
+        if (live) timer = setTimeout(() => void refresh(), 2000);
+      }
+    };
+    void refresh();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, []);
 
   // The same tree the shell fetches, once, on open. Its folders open one
   // level deep, as rekordbox's manager opens them: the top folders show,
@@ -232,7 +262,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     });
   }, [nodes, byId]);
 
-  const canSync = selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
+  const canSync = rekordboxOpen === false && selectedCount > 0 && tickedDevices.size > 0 && !busy && !loadingDevices;
 
   const ejectDevice = async (device: Device) => {
     if (busy || loadingDevices) return;
@@ -269,6 +299,14 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
       let stop = () => {};
       try {
         const backend = await getBackend();
+        // Close the interval between the last poll and the click: rekordbox
+        // may have launched while the button was still visibly enabled.
+        const summary = await backend.librarySummary();
+        setRekordboxOpen(summary.readOnly);
+        if (summary.readOnly) {
+          setStatus(["Quit rekordbox to enable synchronization."]);
+          return;
+        }
         stop = backend.onSyncProgress((progress) => {
           if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
           if (progress.state === "ejecting") setStatus([`Ejecting ${nameOf(progress.path)}…`]);
@@ -395,6 +433,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
             className={styles.sync}
             onClick={sync}
             disabled={!canSync}
+            title={rekordboxOpen ? "Quit rekordbox to enable synchronization." : undefined}
             aria-label="SYNC"
             aria-busy={busy || undefined}
             aria-describedby="sync-selection-hint"
@@ -495,10 +534,10 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
             <div key={line}>{line}</div>
           ))}
           {status.length === 0 ? <span className={styles.selectionSummary}>{selectionSummary}</span> : null}
-          {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{selectionHint}</span> : null}
+          {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{syncHint}</span> : null}
           </div>
         </div>
-        {status.length > 0 ? <span id="sync-selection-hint" hidden>{selectionHint}</span> : null}
+        {status.length > 0 ? <span id="sync-selection-hint" hidden>{syncHint}</span> : null}
         <button type="button" className={styles.button} onClick={onClose}>
           {busy ? "Run in background" : "Close"}
         </button>

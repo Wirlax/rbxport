@@ -92,8 +92,8 @@
       "source": "docs/screenshots at 2x: the position bar left of the playhead is solid"
     },
     "cueHot": {
-      "value": "#77E866",
-      "source": "docs/screenshots at 2x: the hot cue badge in the overview, 22x22px at y 244..265; djmdCue.ColorTableIndex 21, which 735,427 of the library's 850,000 hot cues carry. The fallback for an index without a measured colour: the other eight measured indices come over the wire per cue from rbl_anlz::DRAWN_CUE_COLOURS"
+      "value": "#3CEB50",
+      "source": "rekordbox 7 static getPadColor(21) desktop palette"
     },
     "cueHotText": {
       "value": "#000000",
@@ -224,7 +224,7 @@
       "source": "measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on"
     },
     "padSet": {
-      "value": "#77E866",
+      "value": "#3CEB50",
       "source": "measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue"
     },
     "padWell": {
@@ -667,14 +667,14 @@
       "value": "#F266DC",
       "source": "representative PCM trace for the RGB waveform palette"
     },
-    "cueTeal": { "value": "#51AE7B", "source": "measured hot-cue colour used by the mock library" },
-    "cueOrange": { "value": "#F09235", "source": "measured hot-cue colour used by the mock library" },
-    "cueBlue": { "value": "#3A59F6", "source": "measured hot-cue colour used by the mock library" },
-    "cueYellow": { "value": "#D9AC3A", "source": "measured hot-cue colour used by the mock library" },
-    "cuePink": { "value": "#E13A8A", "source": "measured hot-cue colour used by the mock library" },
-    "cueAqua": { "value": "#6AAEEC", "source": "measured hot-cue colour used by the mock library" },
-    "cueLime": { "value": "#A8D54B", "source": "measured hot-cue colour used by the mock library" },
-    "cuePurple": { "value": "#A274F7", "source": "measured hot-cue colour used by the mock library" }
+    "cueTeal": { "value": "#10B176", "source": "rekordbox getPadColor(18)" },
+    "cueOrange": { "value": "#FF8C00", "source": "rekordbox getPadColor(36)" },
+    "cueBlue": { "value": "#305AFF", "source": "rekordbox getPadColor(1)" },
+    "cueYellow": { "value": "#E1AA00", "source": "rekordbox getPadColor(33)" },
+    "cuePink": { "value": "#F51E8C", "source": "rekordbox getPadColor(46)" },
+    "cueAqua": { "value": "#50B0F2", "source": "rekordbox getPadColor(6)" },
+    "cueLime": { "value": "#9BD723", "source": "rekordbox getPadColor(25)" },
+    "cuePurple": { "value": "#AA72FF", "source": "rekordbox getPadColor(60)" }
   },
   "size": {
     "rowHeight": {

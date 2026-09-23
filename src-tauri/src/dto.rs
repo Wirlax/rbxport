@@ -26,7 +26,7 @@ pub struct RowDto {
     pub release_date: String,
     /// The track's hot cues, for the badges on the row's preview waveform.
     ///
-    /// A tuple per cue rather than an object: `["A",46,"#77E866"]` is 18
+    /// A tuple per cue rather than an object: `["A",46,"#3CEB50"]` is 18
     /// bytes against 45 with field names, and rekordbox 7 allows sixteen a
     /// track, so a page of 64 rows stays inside the 64 KB response cap even
     /// when every row is full.

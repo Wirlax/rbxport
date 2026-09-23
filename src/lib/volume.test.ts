@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { gainToKnob, knobLabel, knobToDb, knobToGain } from "./volume";
 
 describe("the master knob's scale", () => {
-  it("puts 10 a decibel under full and 11 at full", () => {
+  it("puts 10 at -1 dB and 11 at +2 dB", () => {
     expect(knobToDb(10)).toBeCloseTo(-1, 6);
-    expect(knobToDb(11)).toBe(0);
-    expect(knobToGain(11)).toBe(1);
+    expect(knobToDb(11)).toBe(2);
+    expect(knobToGain(11)).toBeCloseTo(1.259, 3);
     expect(knobToGain(10)).toBeCloseTo(0.891, 3);
     expect(knobToGain(0)).toBe(0);
     expect(knobToDb(0)).toBe(Number.NEGATIVE_INFINITY);

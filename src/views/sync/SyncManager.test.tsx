@@ -60,6 +60,7 @@ let syncDevices: ReturnType<typeof vi.fn>;
 let ejectDevice: ReturnType<typeof vi.fn>;
 let progress: ((p: SyncProgress) => void) | null;
 let onClose: ReturnType<typeof vi.fn>;
+let rekordboxOpen: boolean;
 
 const settle = () =>
   act(async () => {
@@ -79,6 +80,7 @@ beforeEach(async () => {
   cancelExport.mockClear();
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
+  rekordboxOpen = false;
   onClose = vi.fn();
   importUsb = vi.fn(() => Promise.resolve({ tracks: 2, histories: 0, settings: 0, skipped: 0 }));
   ejectDevice = vi.fn(() => Promise.resolve());
@@ -86,6 +88,7 @@ beforeEach(async () => {
     Promise.resolve(destinations.map((path) => report(path, playlists.length * 10))),
   );
   __setBackend({
+    librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
     playlistTree: () => Promise.resolve(TREE.map((n) => ({ ...n }))),
     listDevices: () => Promise.resolve(DEVICES.map((d) => ({ ...d }))),
     deviceSyncState: (path: string) => {
@@ -119,12 +122,49 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => root.unmount());
   host.remove();
   __setBackend(null);
 });
 
 describe("SyncManager", () => {
+  it("disables sync while rekordbox is open and enables it after rekordbox closes", async () => {
+    act(() => root.unmount());
+    vi.useFakeTimers();
+    rekordboxOpen = true;
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+    click(box("Closing"));
+    click(box("USB B"));
+    await settle();
+    const sync = host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]');
+    expect(sync?.disabled).toBe(true);
+    expect(sync?.title).toBe("Quit rekordbox to enable synchronization.");
+    expect(status()).toContain("Quit rekordbox to enable synchronization.");
+
+    rekordboxOpen = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await settle();
+    expect(sync?.disabled).toBe(false);
+  });
+  it("rechecks rekordbox when sync is clicked", async () => {
+    click(box("Closing"));
+    click(box("USB B"));
+    await settle();
+    const sync = host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]');
+    expect(sync?.disabled).toBe(false);
+
+    // rekordbox launches after the most recent background check but before
+    // the user clicks the still-enabled button.
+    rekordboxOpen = true;
+    click(sync);
+    await settle();
+    expect(syncDevices).not.toHaveBeenCalled();
+    expect(sync?.disabled).toBe(true);
+    expect(status()).toContain("Quit rekordbox to enable synchronization.");
+  });
   it("stops an export started outside Sync Manager", async () => {
     const job: ExportProgress = { path: "/Volumes/USB B", state: "writing", done: 3, total: 10, title: "Track" };
     act(() => exportProgress?.(job));

@@ -177,14 +177,12 @@ test("hot cues are badges on the overview, and the same badge centred lower on t
 });
 
 test("a hot cue's badge, pad and panel chip all take the colour rekordbox draws for it", async ({ page }) => {
-  // Measured off design/reference/macos/playlist-player@2x.png: the four cues
-  // of the loaded track read the same colour in the overview badge, the pad
-  // row and the HOT CUE chip, and each is one of the nine drawn colours
-  // rbl_anlz::DRAWN_CUE_COLOURS carries.
+  // Extracted from rekordbox's getPadColor table: the four cues of the loaded
+  // track read the same colour in the overview badge, pad row and HOT CUE chip.
   const drawn = [
-    "rgb(58, 89, 246)", "rgb(106, 174, 236)", "rgb(81, 174, 123)", "rgb(119, 232, 102)",
-    "rgb(168, 213, 75)", "rgb(217, 172, 58)", "rgb(240, 146, 53)", "rgb(225, 58, 138)",
-    "rgb(162, 116, 247)",
+    "rgb(48, 90, 255)", "rgb(80, 176, 242)", "rgb(16, 177, 118)", "rgb(60, 235, 80)",
+    "rgb(155, 215, 35)", "rgb(225, 170, 0)", "rgb(255, 140, 0)", "rgb(245, 30, 140)",
+    "rgb(170, 114, 255)",
   ];
   const player = page.getByRole("region", { name: "Preview player" });
   const overview = page.getByTestId("player-overview");
@@ -193,7 +191,7 @@ test("a hot cue's badge, pad and panel chip all take the colour rekordbox draws 
 
   // A track whose cues are not all the default green, or the badge and the
   // pad's own fallback would agree without a colour ever having been sent.
-  const green = "rgb(119, 232, 102)";
+  const green = "rgb(60, 235, 80)";
   let markers: string[] = [];
   for (let row = 0; row < 8 && markers.length === 0; row++) {
     // An unanalysed row has no preview and no cues; the canvas is the tell.

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, Meters, Tick } from "@/ipc/types";
+import { FULL_GAIN } from "@/lib/volume";
 import { useMaster, type Master } from "./useMaster";
 
 declare global {
@@ -194,7 +195,7 @@ describe("the master meters when the readings stop", () => {
 });
 
 
-it.each([0, 0.37, 1])("restores master volume %s after a fresh session", async (level) => {
+it.each([0, 0.37, 1, FULL_GAIN])("restores master volume %s after a fresh session", async (level) => {
   await act(async () => { master.setLevel(level); await Promise.resolve(); });
   expect(JSON.parse(localStorage.getItem("rbl.master-level.v1")!)).toBe(level);
   act(() => root.unmount());

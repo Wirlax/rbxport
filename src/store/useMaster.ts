@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
 import type { VuMeterMode } from "@/lib/preferences";
 import { emptyVu, VuMeter, type VuDisplay } from "@/lib/vuMeter";
+import { FULL_GAIN } from "@/lib/volume";
 
 /**
  * How fast a meter falls, in decibels a second.
@@ -80,7 +81,7 @@ const SILENT_AFTER_MS = 100;
 
 export interface Master {
   vu: VuDisplay;
-  /** 0 to 1. */
+  /** 0 to +2 dB. */
   level: number;
   peakLeft: number;
   peakRight: number;
@@ -97,7 +98,7 @@ function loadLevel(): number | null {
     const raw = localStorage.getItem(LEVEL_STORAGE_KEY);
     if (raw === null) return null;
     const value: unknown = JSON.parse(raw);
-    return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+    return typeof value === "number" && Number.isFinite(value) ? Math.min(FULL_GAIN, Math.max(0, value)) : null;
   } catch {
     return null;
   }
@@ -237,7 +238,7 @@ export function useMaster(mode: VuMeterMode = "normal"): Master {
   }, [mode]);
 
   const setLevel = useCallback((value: number) => {
-    const level = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+    const level = Number.isFinite(value) ? Math.min(FULL_GAIN, Math.max(0, value)) : 1;
     wantedLevel.current = level;
     try {
       localStorage.setItem(LEVEL_STORAGE_KEY, JSON.stringify(level));

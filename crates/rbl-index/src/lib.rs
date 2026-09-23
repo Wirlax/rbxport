@@ -13,29 +13,32 @@
 //!   into `sort_unstable_by_key` over `u32`s.
 
 pub mod cache;
+mod filter;
 pub mod folder;
 pub mod key;
+mod load;
+mod related;
 pub mod smart;
 pub mod strings;
 pub mod testing;
-pub mod xml_export;
-mod filter;
-mod load;
-mod related;
 mod view;
+pub mod xml_export;
 
 pub use filter::{
     whole_bpm, BpmFilter, Counted, FilterValues, TagCategory, TrackFilter, COLOR_NAMES,
 };
-pub use load::{content_version, load, load_with_cue_reader, reload_cues_of, reload_playlists, reload_tag_list, reload_histories, reload_metadata, LoadStats};
+pub use load::{
+    content_version, load, load_with_cue_reader, reload_cues_of, reload_histories, reload_metadata,
+    reload_playlists, reload_tag_list, LoadStats,
+};
 pub use smart::SmartRule;
+pub use view::{RelatedCriterion, SearchField, SortColumn, TrackSource, View, ViewSpec};
 pub use xml_export::export_xml;
-pub use view::{SearchField, RelatedCriterion, SortColumn, TrackSource, View, ViewSpec};
 
-use strings::{Interner, StrColumn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use strings::{Interner, StrColumn};
 
 /// Row index within a snapshot. Not stable across reloads.
 pub type Row = u32;
@@ -207,8 +210,8 @@ pub struct Cue {
     /// `djmdCue.Kind`, raw. Use [`Cue::hot_letter`] to read it.
     pub kind: u8,
     /// `djmdCue.ColorTableIndex`, raw; 0 where the column is NULL. What it
-    /// paints is `rbl_anlz::cue_colour_drawn`, which knows only the indices
-    /// that have been measured — this stores the number, not a guess at it.
+    /// paints is the complete `rbl_anlz::cue_colour_drawn` desktop palette;
+    /// this field stores the raw number so export retains the device colour.
     pub colour: u8,
 }
 
@@ -272,8 +275,12 @@ impl Cues {
             let end = u32::try_from(self.cues.len()).unwrap_or(u32::MAX);
             self.index.resize(tracks + 1, end);
         }
-        let Some(&start) = self.index.get(row as usize) else { return };
-        let Some(&end) = self.index.get(row as usize + 1) else { return };
+        let Some(&start) = self.index.get(row as usize) else {
+            return;
+        };
+        let Some(&end) = self.index.get(row as usize + 1) else {
+            return;
+        };
         let (start, end) = (start as usize, end as usize);
         if end < start || end > self.cues.len() {
             return;
@@ -332,7 +339,9 @@ impl Cue {
     /// [`Cue::hot_letter`]. `None` for anything past `P`, or not a letter.
     #[must_use]
     pub fn kind_of_letter(letter: char) -> Option<u8> {
-        let slot = u8::try_from(u32::from(letter.to_ascii_uppercase()).checked_sub(u32::from(b'A'))?).ok()?;
+        let slot =
+            u8::try_from(u32::from(letter.to_ascii_uppercase()).checked_sub(u32::from(b'A'))?)
+                .ok()?;
         match slot {
             // A to C are 1 to 3; 4 is unused, so D and everything after it
             // sit one higher.
@@ -543,42 +552,66 @@ impl Library {
 
     #[inline]
     pub fn artist_name(&self, row: Row) -> &str {
-        self.artists.name(self.artist.get(row as usize).copied().unwrap_or(NO_ID))
+        self.artists
+            .name(self.artist.get(row as usize).copied().unwrap_or(NO_ID))
     }
     #[inline]
     pub fn album_name(&self, row: Row) -> &str {
-        self.albums.name(self.album.get(row as usize).copied().unwrap_or(NO_ID))
+        self.albums
+            .name(self.album.get(row as usize).copied().unwrap_or(NO_ID))
     }
     #[inline]
     pub fn genre_name(&self, row: Row) -> &str {
-        self.genres.name(self.genre.get(row as usize).copied().unwrap_or(NO_ID))
+        self.genres
+            .name(self.genre.get(row as usize).copied().unwrap_or(NO_ID))
     }
     #[inline]
     pub fn label_name(&self, row: Row) -> &str {
-        self.labels.name(self.label.get(row as usize).copied().unwrap_or(NO_ID))
+        self.labels
+            .name(self.label.get(row as usize).copied().unwrap_or(NO_ID))
     }
     #[inline]
     pub fn key_name(&self, row: Row) -> &str {
-        self.keys.name(self.key.get(row as usize).copied().unwrap_or(NO_ID))
+        self.keys
+            .name(self.key.get(row as usize).copied().unwrap_or(NO_ID))
     }
 
     /// Approximate heap footprint, for the memory budget.
     pub fn heap_bytes(&self) -> usize {
         let vecs = self.ids.capacity() * 8
-            + (self.artist.capacity() + self.album.capacity() + self.genre.capacity()
-                + self.label.capacity() + self.key.capacity()
-                + self.bpm_x100.capacity() + self.length_sec.capacity()
-                + self.play_count.capacity()) * 4
+            + (self.artist.capacity()
+                + self.album.capacity()
+                + self.genre.capacity()
+                + self.label.capacity()
+                + self.key.capacity()
+                + self.bpm_x100.capacity()
+                + self.length_sec.capacity()
+                + self.play_count.capacity())
+                * 4
             + self.year.capacity() * 2
-            + self.rating.capacity() + self.color.capacity() + self.analysed.capacity();
-        let strings = self.title.heap_bytes() + self.title_folded.heap_bytes()
-            + self.comment.heap_bytes() + self.folder_path.heap_bytes()
-            + self.file_name.heap_bytes() + self.analysis_path.heap_bytes()
+            + self.rating.capacity()
+            + self.color.capacity()
+            + self.analysed.capacity();
+        let strings = self.title.heap_bytes()
+            + self.title_folded.heap_bytes()
+            + self.comment.heap_bytes()
+            + self.folder_path.heap_bytes()
+            + self.file_name.heap_bytes()
+            + self.analysis_path.heap_bytes()
             + self.artwork_path.heap_bytes()
-            + self.date_added.heap_bytes() + self.release_date.heap_bytes()
-            + self.search.heap_bytes() + self.search_extra.iter().map(StrColumn::heap_bytes).sum::<usize>();
-        let interners = self.artists.heap_bytes() + self.albums.heap_bytes()
-            + self.genres.heap_bytes() + self.labels.heap_bytes() + self.keys.heap_bytes();
+            + self.date_added.heap_bytes()
+            + self.release_date.heap_bytes()
+            + self.search.heap_bytes()
+            + self
+                .search_extra
+                .iter()
+                .map(StrColumn::heap_bytes)
+                .sum::<usize>();
+        let interners = self.artists.heap_bytes()
+            + self.albums.heap_bytes()
+            + self.genres.heap_bytes()
+            + self.labels.heap_bytes()
+            + self.keys.heap_bytes();
         let ranks: usize = self.ranks.iter().map(|r| r.capacity() * 4).sum();
         let cues = {
             let table = self.cues();
@@ -593,7 +626,12 @@ impl Library {
             + self.playlists().names.heap_bytes()
             + self.playlists().smart.heap_bytes()
             + self.playlists().attribute.capacity()
-            + self.playlists().members.iter().map(|m| m.capacity() * 4).sum::<usize>();
+            + self
+                .playlists()
+                .members
+                .iter()
+                .map(|m| m.capacity() * 4)
+                .sum::<usize>();
         vecs + strings + interners + ranks + cues + tags + playlists
     }
 }

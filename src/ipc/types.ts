@@ -474,7 +474,7 @@ export interface Backend {
   deckScrubBegin(deck: DeckId): Promise<void>;
   deckScrubTo(deck: DeckId, positionMs: number): Promise<void>;
   deckScrubEnd(deck: DeckId): Promise<void>;
-  /** The master output level, 0 to 1. It arrives back on the next tick. */
+  /** The master output level, 0 to +2 dB. It arrives back on the next tick. */
   setMasterLevel(level: number): Promise<void>;
   /**
    * The outputs the audio could go to, and which is in use.
@@ -834,7 +834,7 @@ export interface Tick {
   /** The loudest sample the device was given last callback, per channel. */
   peakLeft: number;
   peakRight: number;
-  /** The master level, 0 to 1. */
+  /** The master level, 0 to +2 dB. */
   master: number;
   /** How far the limiter turned the sum down since the last tick, in dB. */
   reduction: number;

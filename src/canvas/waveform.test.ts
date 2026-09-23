@@ -331,10 +331,10 @@ describe("the hot cue badges on a row preview", () => {
     expect(ctx.textBaseline).toBe("middle");
   });
 
-  it("falls back to the one measured green for an index without a colour", () => {
+  it("falls back to rekordbox's default green without a colour", () => {
     const { ctx, ops } = recorder();
     drawPreviewCues(ctx, [["A", 0, null]], 300_000, 200, 1);
-    expect(ops[0]).toMatchObject({ kind: "rect", style: "#77E866" });
+    expect(ops[0]).toMatchObject({ kind: "rect", style: "#3CEB50" });
   });
 
   it("keeps a badge at the very end inside the strip rather than cutting it off", () => {

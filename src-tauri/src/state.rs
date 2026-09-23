@@ -650,7 +650,7 @@ mod tests {
         // there is one and `null` — not a guess — where there is not.
         assert_eq!(
             json["hotCues"],
-            serde_json::json!([["A", 46, "#77E866"], ["B", 165_046, null], ["E", 24, "#51AE7B"]])
+            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, null], ["E", 24, "#10B176"]])
         );
     }
 

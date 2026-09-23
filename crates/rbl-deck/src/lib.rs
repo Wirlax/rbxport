@@ -182,16 +182,18 @@ impl Default for Master {
 
 /// The master level the engine starts at: −1 dB, which is the knob at 10.
 pub const DEFAULT_MASTER_GAIN: f32 = 0.891_250_9;
+/// The master knob at 11: +2 dB.
+pub const MAX_MASTER_GAIN: f32 = 1.258_925_4;
 
 impl Master {
     pub fn gain(&self) -> f32 {
         f32::from_bits(self.gain.load(Ordering::Relaxed))
     }
 
-    /// Sets the level, 0 to 1. Anything outside is clamped rather than refused:
+    /// Sets the level, 0 to +2 dB. Anything outside is clamped rather than refused:
     /// a knob dragged past its end is a knob at its end.
     pub fn set_gain(&self, gain: f32) {
-        let safe = if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 1.0 };
+        let safe = if gain.is_finite() { gain.clamp(0.0, MAX_MASTER_GAIN) } else { 1.0 };
         self.gain.store(safe.to_bits(), Ordering::Relaxed);
     }
 
@@ -1062,7 +1064,7 @@ mod master_tests {
     fn a_knob_dragged_past_its_end_is_a_knob_at_its_end() {
         let master = Master::default();
         master.set_gain(2.5);
-        assert_eq!(master.gain(), 1.0);
+        assert_eq!(master.gain(), MAX_MASTER_GAIN);
         master.set_gain(-1.0);
         assert_eq!(master.gain(), 0.0);
         master.set_gain(f32::NAN);
