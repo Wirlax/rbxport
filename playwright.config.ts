@@ -27,6 +27,19 @@ export default defineConfig({
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
     baseURL: `http://localhost:${port}`,
+    // Editing-focused scenarios represent an existing user. Fresh installs
+    // still exercise the product default through unit tests and explicitly
+    // enable protection in the dedicated E2E scenario.
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: `http://localhost:${port}`,
+        localStorage: [{
+          name: "rbl.preferences",
+          value: JSON.stringify({ advanced: { protectLibrary: false } }),
+        }],
+      }],
+    },
     trace: "on-first-retry",
     deviceScaleFactor: 2,
   },

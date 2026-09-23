@@ -366,6 +366,9 @@ function part<T>(value: unknown): Raw<T> {
 /** Turns whatever was stored into a set the application can run on. */
 export function sanitisePreferences(value: unknown): Preferences {
   const raw = part<Preferences>(value);
+  const hasStoredSection = Object.values(raw).some(section =>
+    typeof section === "object" && section !== null && !Array.isArray(section)
+  );
   const view = part<ViewPreferences>(raw.view);
   const audio = part<AudioPreferences>(raw.audio);
   const analysis = part<AnalysisPreferences>(raw.analysis);
@@ -428,7 +431,9 @@ export function sanitisePreferences(value: unknown): Preferences {
     advanced: {
       relocateFolders: strings(advanced.relocateFolders),
       recordHistory: bool(advanced.recordHistory, d.advanced.recordHistory),
-      protectLibrary: bool(advanced.protectLibrary, d.advanced.protectLibrary),
+      // A stored object predates this switch when the key is absent. Preserve
+      // that user's writable library; only a truly empty store gets defaults.
+      protectLibrary: bool(advanced.protectLibrary, hasStoredSection ? false : d.advanced.protectLibrary),
       doubleClickToEdit: bool(advanced.doubleClickToEdit, d.advanced.doubleClickToEdit),
       syncType: oneOf(advanced.syncType, SYNC_TYPES, d.advanced.syncType),
       syncDoubleHalf: bool(advanced.syncDoubleHalf, d.advanced.syncDoubleHalf),

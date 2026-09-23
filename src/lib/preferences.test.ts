@@ -10,9 +10,11 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
-  it("protects the library for a new user", () => {
-    expect(sanitisePreferences({}).advanced.protectLibrary).toBe(true);
+  it("protects a new library without making existing users read-only", () => {
+    expect(DEFAULT_PREFERENCES.advanced.protectLibrary).toBe(true);
+    expect(sanitisePreferences({ view: { tooltips: true } }).advanced.protectLibrary).toBe(false);
     expect(sanitisePreferences({ advanced: { protectLibrary: false } }).advanced.protectLibrary).toBe(false);
+    expect(sanitisePreferences({ advanced: { protectLibrary: true } }).advanced.protectLibrary).toBe(true);
   });
 
   it("preserves the BPM-change visibility preference and enables it for older settings", () => {
