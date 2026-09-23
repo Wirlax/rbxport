@@ -37,7 +37,7 @@ function DiscordIcon({ size = 19, ...props }: SVGProps<SVGSVGElement> & { size?:
 export const ABOUT_LINKS = [
   { label: "Instagram", Icon: Instagram, url: "https://instagram.com/triodeofficial" },
   { label: "Twitch", Icon: Twitch, url: "https://twitch.tv/triodeofficial" },
-  { label: "Discord", Icon: DiscordIcon, url: "https://discord.gg/72jpY49tNU" },
+  { label: "Discord", Icon: DiscordIcon, url: "https://discord.gg/vUkcYZhwuR" },
   { label: "GitHub", Icon: Github, url: "https://github.com/chrisle" },
   { label: "Web", Icon: Globe, url: "https://triodeofficial.com" },
 ];
