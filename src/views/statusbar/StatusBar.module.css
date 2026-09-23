@@ -26,8 +26,8 @@
   padding: 2px 6px;
   border: 0;
   border-radius: 2px;
-  background: var(--c-pad-active);
-  color: var(--c-icon-on);
+  background: var(--c-meter-yellow);
+  color: var(--c-black);
   font: inherit;
   font-size: var(--f-size-xs);
   cursor: pointer;
