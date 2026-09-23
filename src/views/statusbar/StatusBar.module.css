@@ -87,6 +87,7 @@
 }
 .reportBug:hover { background: var(--c-raised); }
 .support:hover svg { color: var(--c-error); }
+.report:hover svg { color: var(--c-green); }
 
 .warningAction {
   margin-left: 8px;
