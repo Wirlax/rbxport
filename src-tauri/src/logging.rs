@@ -4,7 +4,7 @@
 //! The file is what a bug report can carry — a shipped app has no terminal,
 //! and LINK's conversation with a player is only worth anything read back
 //! after the fact. One file a day under the app's data directory, the
-//! last seven kept. Writes go through a background thread, so a log line
+//! last five kept. Writes go through a background thread, so a log line
 //! never waits on the disk from the thread that has a player waiting on it.
 //!
 //! The level is `debug` for every crate of ours unless `LOG_LEVEL` says
@@ -30,7 +30,7 @@ const LOG_DIR: &str = "rbxport/logs";
 /// Names the log directory, for a test or a support case.
 pub const LOG_DIR_ENV: &str = "RBXPORT_LOG_DIR";
 /// Daily files older than the newest this many are removed.
-const KEEP_FILES: usize = 7;
+const KEEP_FILES: usize = 5;
 
 /// The crates the level applies to: ours, and nothing pulled in.
 const OUR_CRATES: [&str; 18] = [

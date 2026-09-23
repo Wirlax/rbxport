@@ -413,7 +413,6 @@ const TrackRow = memo(function TrackRow({
         if (nativeTrackDragging() && e.button === 0 &&
             !(e.target as HTMLElement).closest("input, button, [contenteditable=true]")) {
           nativePress.current = { x: e.clientX, y: e.clientY };
-          e.currentTarget.setPointerCapture(e.pointerId);
         }
       }}
       onPointerMove={(e) => {
@@ -422,7 +421,6 @@ const TrackRow = memo(function TrackRow({
         if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
         nativePress.current = null;
         suppressClick.current = true;
-        e.currentTarget.releasePointerCapture(e.pointerId);
         e.preventDefault();
         onDragStart(row);
       }}

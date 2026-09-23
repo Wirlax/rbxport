@@ -34,6 +34,10 @@ name: Release
 # The macOS host being a real person's Mac is why the signing identity is
 # imported into a throwaway keychain under RUNNER_TEMP and removed again on the
 # way out, rather than being left in a login keychain.
+#
+# Discord release announcements use the channel-bound
+# `DISCORD_RELEASE_WEBHOOK_URL` repository secret. Its source of truth is the
+# `rbxport release webhook` item in the NowPlaying 1Password vault.
 on:
   push:
     tags: ["v*"]
@@ -465,6 +469,7 @@ jobs:
               ["darwin-aarch64", (f) => f.endsWith("-darwin-aarch64.dmg")],
               ["darwin-x86_64", (f) => f.endsWith("-darwin-x86_64.dmg")],
               ["windows-x86_64", (f) => f.endsWith("-setup.exe")],
+              ["windows-x86_64-msix", (f) => f.endsWith("-windows-x86_64.msix")],
               ["linux-x86_64", (f) => f.endsWith(".AppImage")],
               ["linux-x86_64-deb", (f) => f.endsWith(".deb")],
             ]) {
@@ -558,3 +563,52 @@ jobs:
             aws s3api delete-objects --bucket "$BUCKET" --endpoint-url "$ENDPOINT" \
               --delete file:///tmp/delete.json
           fi
+
+      # Last on purpose: the release has passed every build, signing, upload,
+      # and public-download check before Discord hears about it.
+      - name: Send release notes to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$DISCORD_WEBHOOK_URL"
+          version="${RELEASE_TAG#v}"
+
+          VERSION="$version" node <<'NODE'
+          const fs = require("fs");
+          const version = process.env.VERSION;
+          const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+          const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const heading = new RegExp(`^## \\[${escaped}\\].*$`, "m").exec(changelog);
+          const remainder = heading ? changelog.slice(heading.index + heading[0].length) : "";
+          const nextHeading = remainder.search(/^## \[/m);
+          let notes = (nextHeading < 0 ? remainder : remainder.slice(0, nextHeading)).trim()
+            || "Release notes are available in the app.";
+          // Discord embed descriptions are capped at 4096 characters.
+          if (notes.length > 3900) notes = notes.slice(0, 3897).trimEnd() + "…";
+          const base = (process.env.CDN_BASE_URL || "").replace(/\/$/, "");
+          const payload = {
+            username: "rbxport releases",
+            embeds: [{
+              title: `rbxport ${version} released`,
+              description: notes,
+              color: 0x3571E3,
+              url: base ? `${base}/latest.json` : undefined,
+              footer: { text: `Release ${process.env.RELEASE_TAG}` },
+              timestamp: new Date().toISOString(),
+            }],
+          };
+          fs.writeFileSync("/tmp/discord-release.json", JSON.stringify(payload));
+          NODE
+
+          status="$(curl -sS -o /tmp/discord-response.txt -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/discord-release.json \
+            "$DISCORD_WEBHOOK_URL?wait=true")"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "Discord webhook failed with HTTP $status"
+            sed -n '1,10p' /tmp/discord-response.txt
+            exit 1
+          fi
+          echo "Release notes sent to Discord channel 1552182049832439838"

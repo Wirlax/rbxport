@@ -175,10 +175,10 @@ export const SubBrowser = memo(function SubBrowser({
   // to share the main table's widths would make it useless.
   const cols = useColumns("subBrowser");
 
-  const keyDisplay = usePreferences().view.keyDisplay;
+  const { keyDisplay, keySort } = usePreferences().view;
   const spec: ViewSpec = useMemo(
-    () => ({ ...specForNode(selected, query, sort, keyDisplay), searchField }),
-    [selected, query, sort, keyDisplay, searchField],
+    () => ({ ...specForNode(selected, query, sort, keyDisplay, keySort), searchField }),
+    [selected, query, sort, keyDisplay, keySort, searchField],
   );
 
   const onSortChange = useCallback((column: SortColumn) => {

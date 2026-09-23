@@ -45,6 +45,7 @@
 .dialog .previewToggle { font-size: var(--f-size-sm); background: transparent; padding: 5px 8px; }
 .form footer { display: flex; flex: none; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--c-raised); }
 .form footer .hint { margin-right: auto; }
+.form footer button { flex: 0 0 96px; width: 96px; height: 40px; padding: 0; white-space: nowrap; }
 .dialog .save { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-icon-on); }
 .form .error { color: var(--c-error); }
 @media (max-width: 480px) {

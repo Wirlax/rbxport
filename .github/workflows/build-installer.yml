@@ -421,6 +421,30 @@ jobs:
             exit 1
           fi
 
+      - name: Build and sign the MSIX package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ secrets.AZURE_SIGNING_CERT_PROFILE }}
+        run: |
+          $bundle = "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/bundle/msix"
+          $msix = "$bundle/rbxport_${env:RELEASE_VERSION}_x64.msix"
+          .\scripts\package-msix.ps1 `
+            -Executable "$env:CARGO_TARGET_DIR/${{ inputs.target }}/release/rbxport.exe" `
+            -Version $env:RELEASE_VERSION `
+            -Output $msix
+
+          if ($env:HAVE_AZURE -eq 'true') {
+            artifact-signing-cli `
+              -e $env:AZURE_SIGNING_ENDPOINT `
+              -a $env:AZURE_SIGNING_ACCOUNT_NAME `
+              -c $env:AZURE_SIGNING_CERT_PROFILE `
+              $msix
+            if ($LASTEXITCODE -ne 0) { throw "MSIX signing failed with exit code $LASTEXITCODE" }
+          }
+
       - name: Collect the installers
         shell: bash
         run: |
@@ -436,10 +460,12 @@ jobs:
           # tarball (the DMG is for people, the tarball is what the app
           # swaps itself for), on Windows the same setup .exe, on Linux the
           # AppImage (the .deb is for people) — and the `.sig` the bundler
-          # wrote beside each.
+          # wrote beside each. The MSIX is an additional human-facing Windows
+          # package; the NSIS installer remains the Tauri updater payload.
           find "${CARGO_TARGET_DIR:-target}/${{ inputs.target }}/release/bundle" -type f ! -name 'rw.*' \
             \( -path '*/bundle/dmg/*.dmg' -o -path '*/bundle/nsis/*-setup.exe' \
                -o -path '*/bundle/nsis/*-setup.exe.sig' \
+               -o -path '*/bundle/msix/*.msix' \
                -o -path '*/bundle/macos/*.app.tar.gz' -o -path '*/bundle/macos/*.app.tar.gz.sig' \
                -o -path '*/bundle/appimage/*.AppImage' -o -path '*/bundle/appimage/*.AppImage.sig' \
                -o -path '*/bundle/deb/*.deb' -o -path '*/bundle/deb/*.deb.sig' \) \
@@ -459,6 +485,7 @@ jobs:
               *.app.tar.gz.sig) want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.app.tar.gz.sig" ;;
               *-setup.exe)      want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}-setup.exe" ;;
               *-setup.exe.sig)  want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}-setup.exe.sig" ;;
+              *.msix)           want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.msix" ;;
               *.AppImage)       want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.AppImage" ;;
               *.AppImage.sig)   want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.AppImage.sig" ;;
               *.deb)            want="out/rbxport-${RELEASE_VERSION}-${{ inputs.slug }}.deb" ;;
@@ -495,6 +522,8 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected one Windows installer, found $($installers.Count)." }
           $name = $installers[0].VersionInfo.ProductName
           if ($name -ne "rbxport") { throw "Expected installer product name rbxport, got $name." }
+          $packages = @(Get-ChildItem out\*.msix)
+          if ($packages.Count -ne 1) { throw "Expected one MSIX package, found $($packages.Count)." }
 
       - name: The disk image is notarised too, not just the app inside it
         # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and
@@ -550,7 +579,7 @@ jobs:
         shell: pwsh
         run: |
           $bad = 0
-          Get-ChildItem out\*.exe | ForEach-Object {
+          Get-ChildItem out\*.exe, out\*.msix | ForEach-Object {
             $sig = Get-AuthenticodeSignature $_.FullName
             Write-Host "$($_.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
             if ($sig.Status -ne "Valid") { $bad = 1 }

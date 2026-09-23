@@ -615,12 +615,12 @@ function AppBody() {
   // Related Tracks relate to the track on Player 1, as rekordbox's do.
   const relatedTo = playerTrack?.id ?? null;
   const spec: ViewSpec = useMemo(() => {
-    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, relatedTo), searchField };
+    const base = { ...specForNode(selectedNode, query, sortState, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo), searchField };
     // Only while the bar is showing: hiding it puts the whole list back,
     // so a closed bar can never be silently narrowing the library.
     const filter = filterOpen ? toSpecFilter(filterState, masterBpmX100) : undefined;
     return filter ? { ...base, filter } : base;
-  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, relatedTo]);
+  }, [selectedNode, sortState, query, searchField, filterOpen, filterState, masterBpmX100, viewPrefs.keyDisplay, viewPrefs.keySort, relatedTo]);
 
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
@@ -631,7 +631,7 @@ function AppBody() {
     void (async () => {
       const backend = await getBackend();
       try {
-        const values = await backend.filterValues({ ...specForNode(selectedNode, query, null, "classic", relatedTo), searchField });
+        const values = await backend.filterValues({ ...specForNode(selectedNode, query, null, "classic", "alphabetical", relatedTo), searchField });
         if (live) setFilterValues(values);
       } catch {
         // The library is not up yet; the ready event re-runs this through

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("bug reports include diagnostics only when selected and open the attachment externally", async ({ page }) => {
+test("bug reports include diagnostics by default and open the attachment externally", async ({ page }) => {
   await page.addInitScript(() => {
     const turnstile = {
       render: (_container: HTMLElement, options: { callback: (token: string) => void }) => {
@@ -17,15 +17,15 @@ test("bug reports include diagnostics only when selected and open the attachment
   await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
   const report = page.getByRole("dialog", { name: "Report bug", exact: true });
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __turnstileOptions?: { size?: string } }).__turnstileOptions?.size)).toBe("invisible");
-  await expect(report.getByRole("checkbox")).not.toBeChecked();
+  await expect(report.getByRole("checkbox")).toBeChecked();
+  await expect(report).toContainText("Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.");
   await expect(report.getByRole("button", { name: "Send report" })).toBeDisabled();
   await report.getByLabel("What happened?").fill("Playback stopped after loading a track.");
   await expect(report.getByRole("button", { name: "Send report" })).toBeEnabled();
-  await report.getByRole("checkbox").check();
-  await report.getByRole("button", { name: "Open attachment" }).click();
+  await report.getByRole("button", { name: "Show log" }).click();
   await expect(report.getByRole("alert")).toHaveText("Opening the text editor requires the desktop app.");
   await report.getByRole("checkbox").uncheck();
-  await expect(report.getByRole("button", { name: "Open attachment" })).toBeDisabled();
+  await expect(report.getByRole("button", { name: "Show log" })).toBeDisabled();
   await report.getByRole("button", { name: "Close", exact: true }).click();
   await expect(report).toHaveCount(0);
 });

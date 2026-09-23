@@ -25,6 +25,12 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({djSystem: {linkKeySort: "alphabetical"}}).djSystem.linkKeySort).toBe("alphabetical");
     expect(sanitisePreferences({djSystem: {linkKeySort: "invalid"}}).djSystem.linkKeySort).toBe("musical");
   });
+  it("keeps the browser key-sort choice and preserves the old display-based ordering", () => {
+    expect(sanitisePreferences({view: {keySort: "musical"}}).view.keySort).toBe("musical");
+    expect(sanitisePreferences({view: {keySort: "invalid"}}).view.keySort).toBe("alphabetical");
+    expect(sanitisePreferences({view: {keyDisplay: "classic"}}).view.keySort).toBe("alphabetical");
+    expect(sanitisePreferences({view: {keyDisplay: "alphanumeric"}}).view.keySort).toBe("musical");
+  });
   it("gives the defaults for nothing, garbage, and a wrong shape", () => {
     expect(sanitisePreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
     expect(sanitisePreferences("view")).toEqual(DEFAULT_PREFERENCES);
@@ -38,6 +44,7 @@ describe("sanitisePreferences", () => {
         browseFontSize: 4,
         browseLineSpace: 9,
         keyDisplay: "alphanumeric",
+        keySort: "alphabetical",
         overviewWaveform: "full",
         explorer: "yes",
       },
@@ -55,6 +62,7 @@ describe("sanitisePreferences", () => {
     expect(out.view.browseFontSize).toBe(4);
     expect(out.view.browseLineSpace).toBe(BROWSE_SCALE_DEFAULT);
     expect(out.view.keyDisplay).toBe("alphanumeric");
+    expect(out.view.keySort).toBe("alphabetical");
     expect(out.view.overviewWaveform).toBe("full");
     expect(out.view.explorer).toBe(true);
     expect(out.analysis.auto).toBe(false);

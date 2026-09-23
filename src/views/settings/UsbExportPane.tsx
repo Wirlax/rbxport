@@ -57,7 +57,7 @@ export function UsbExportPane() {
       <label className={styles.conversionToggle}>
         <span className={styles.details}>
           <strong id={`${id}-compatibility`}>Maximum CDJ compatibility</strong>
-          <span id={`${id}-compatibility-help`} className={styles.description}>Save formats like FLAC and M4A as WAV or MP3 on your USB stick for wider CDJ compatibility. Originals stay untouched.</span>
+          <span id={`${id}-compatibility-help`} className={styles.description}>Save formats like FLAC and M4A as WAV or MP3 on your USB stick for older CDJ models. Originals stay untouched.</span>
         </span>
         <input type="checkbox" role="switch" className={controls.toggle}
           aria-labelledby={`${id}-compatibility`} aria-describedby={`${id}-compatibility-help`}

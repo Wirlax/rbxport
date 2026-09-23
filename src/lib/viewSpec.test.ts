@@ -71,15 +71,17 @@ describe("the Explorer's views", () => {
   });
 });
 
-describe("the Key column sorts by what it shows", () => {
+describe("the Key column's sort order", () => {
   const node = { id: "all", name: "All Tracks", kind: "allTracks" as const, depth: 0 };
-  it("classic names alphabetically", () => {
-    expect(specForNode(node, "", { column: "key", descending: false }, "classic").sort).toBe("key");
+  it("sorts alphabetically independently of display format", () => {
+    expect(specForNode(node, "", { column: "key", descending: false }, "classic", "alphabetical").sort).toBe("key");
+    expect(specForNode(node, "", { column: "key", descending: false }, "alphanumeric", "alphabetical").sort).toBe("key");
   });
-  it("Camelot codes round the wheel", () => {
-    expect(specForNode(node, "", { column: "key", descending: true }, "alphanumeric").sort).toBe("keyCamelot");
+  it("sorts musically independently of display format", () => {
+    expect(specForNode(node, "", { column: "key", descending: true }, "classic", "musical").sort).toBe("keyCamelot");
+    expect(specForNode(node, "", { column: "key", descending: true }, "alphanumeric", "musical").sort).toBe("keyCamelot");
   });
   it("only the key column changes with the display", () => {
-    expect(specForNode(node, "", { column: "bpm", descending: false }, "alphanumeric").sort).toBe("bpm");
+    expect(specForNode(node, "", { column: "bpm", descending: false }, "alphanumeric", "musical").sort).toBe("bpm");
   });
 });

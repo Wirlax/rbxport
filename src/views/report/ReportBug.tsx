@@ -73,7 +73,7 @@ function Turnstile({ onToken, onError, resetCount }: { onToken: (token: string) 
 export function ReportBug({ onClose, windowed = false }: { onClose: () => void; windowed?: boolean }) {
   const [email, setEmail] = useState("");
   const [description, setDescription] = useState("");
-  const [include, setInclude] = useState(false);
+  const [include, setInclude] = useState(true);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -124,7 +124,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
                   .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
                   .finally(() => setOpening(false));
               }}>
-                {opening ? "Opening…" : "Open attachment"}
+                {opening ? "Opening…" : "Show log"}
               </button>
             </div>
             <p className={styles.hint}>The log may include library paths and track titles.</p>
@@ -134,7 +134,7 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
           {receipt ? <p role="status">Report {receipt.key} submitted.{receipt.attachmentAdded ? "" : " The log attachment could not be added."}</p> : null}
         </div>
         <footer>
-          <span className={styles.hint}>Reports are sent to the Rbxport support team.</span>
+          <span className={styles.hint}>Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.</span>
           <button type="button" onClick={onClose}>Close</button>
           <button className={styles.save} type="submit" disabled={busy || !TURNSTILE_SITE_KEY || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
         </footer>

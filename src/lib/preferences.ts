@@ -88,6 +88,8 @@ export interface ViewPreferences {
   browseLineSpace: number;
   /** Key display format: `Ebm` or `2A`. */
   keyDisplay: KeyDisplay;
+  /** How the browser's Key column is ordered. */
+  keySort: "alphabetical" | "musical";
   /** Full/Preview Waveform: the deck's overview, single-sided or mirrored. */
   overviewWaveform: OverviewWaveform;
   /** Media Browser › Explorer: the folders on disk in the tree. */
@@ -228,6 +230,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     browseBold: false,
     browseLineSpace: BROWSE_SCALE_DEFAULT,
     keyDisplay: "classic",
+    keySort: "alphabetical",
     overviewWaveform: "half",
     explorer: true,
     previewCueMarkers: true,
@@ -388,6 +391,11 @@ export function sanitisePreferences(value: unknown): Preferences {
       browseBold: bool(view.browseBold, d.view.browseBold),
       browseLineSpace: step(view.browseLineSpace, d.view.browseLineSpace),
       keyDisplay: oneOf(view.keyDisplay, KEY_DISPLAYS, d.view.keyDisplay),
+      keySort: oneOf(
+        view.keySort,
+        ["alphabetical", "musical"] as const,
+        view.keyDisplay === "alphanumeric" ? "musical" : d.view.keySort,
+      ),
       overviewWaveform: oneOf(view.overviewWaveform, OVERVIEWS, d.view.overviewWaveform),
       explorer: bool(view.explorer, d.view.explorer),
       previewCueMarkers: bool(view.previewCueMarkers, d.view.previewCueMarkers),

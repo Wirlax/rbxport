@@ -32,13 +32,10 @@ export function specForNode(
   node: TreeNode | null,
   query: string,
   sort: SortState | null,
-  /**
-   * How the Key column is shown. The column sorts by what it shows, as
-   * rekordbox's does: classic names alphabetically, Camelot codes round the
-   * wheel — `Abm` is `1A`, and alphabetical on the names it would come
-   * after `A` and `Ab`.
-   */
+  /** How the Key column is shown: classic names or Camelot codes. */
   keyDisplay: KeyDisplay = "classic",
+  /** Alphabetical key names, or their order around the Camelot wheel. */
+  keySort: "alphabetical" | "musical" = keyDisplay === "alphanumeric" ? "musical" : "alphabetical",
   /**
    * The track Related Tracks relates to: the one on the player. None, and
    * the section's criteria open empty, as rekordbox's do with no track
@@ -70,7 +67,7 @@ export function specForNode(
                 : node?.kind === "tagList"
                   ? { kind: "tagList" }
                   : { kind: "collection" },
-    sort: order.column === "key" && keyDisplay === "alphanumeric" ? "keyCamelot" : order.column,
+    sort: order.column === "key" && keySort === "musical" ? "keyCamelot" : order.column,
     descending: order.descending,
     query,
   };

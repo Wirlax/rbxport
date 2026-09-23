@@ -37,6 +37,20 @@ test("View VU Meter switches modes and persists the selection", async ({ page })
   await expect(page.getByRole("banner").getByTestId("vu-rms")).toHaveCount(0);
 });
 
+test("View › Key display format offers and saves the browser key sort", async ({ page }) => {
+  await open(page);
+  const dialog = await prefs(page);
+  const section = dialog.getByRole("region", { name: "Key display format" });
+  const sort = section.getByRole("radiogroup", { name: "Sort keys" });
+  await expect(sort.getByRole("radio", { name: "Alphabetically — A, Ab, B, …" })).toBeChecked();
+  await sort.getByRole("radio", { name: "Musically — Abm, B, Ebm, F#, Bbm, …" }).click();
+
+  await page.reload();
+  const again = await prefs(page);
+  await expect(again.getByRole("radiogroup", { name: "Sort keys" })
+    .getByRole("radio", { name: "Musically — Abm, B, Ebm, F#, Bbm, …" })).toBeChecked();
+});
+
 /** Loads the fourth row — analysed, with the mock's four hot cues and a memory cue. */
 async function load(page: Page) {
   await page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();

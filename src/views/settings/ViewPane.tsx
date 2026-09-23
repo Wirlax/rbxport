@@ -195,6 +195,18 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
           ]}
           onChange={(keyDisplay) => set({ keyDisplay })}
         />
+        <Separator />
+        <Sub>Sort keys</Sub>
+        <Radios
+          label="Sort keys"
+          nested
+          value={view.keySort}
+          choices={[
+            { value: "alphabetical", label: "Alphabetically — A, Ab, B, …" },
+            { value: "musical", label: "Musically — Abm, B, Ebm, F#, Bbm, …" },
+          ]}
+          onChange={(keySort) => set({ keySort })}
+        />
       </Section>
       <Section title="Waveform">
         <Sub>Full/Preview Waveform</Sub>
