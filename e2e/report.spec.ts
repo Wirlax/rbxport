@@ -4,6 +4,7 @@ test("bug reports include diagnostics only when selected and open the attachment
   await page.addInitScript(() => {
     const turnstile = {
       render: (_container: HTMLElement, options: { callback: (token: string) => void }) => {
+        (window as typeof window & { __turnstileOptions?: unknown }).__turnstileOptions = options;
         queueMicrotask(() => options.callback("test-turnstile-token"));
         return "test-widget";
       },
@@ -15,6 +16,7 @@ test("bug reports include diagnostics only when selected and open the attachment
   await page.goto("/");
   await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
   const report = page.getByRole("dialog", { name: "Report bug", exact: true });
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __turnstileOptions?: { size?: string } }).__turnstileOptions?.size)).toBe("invisible");
   await expect(report.getByRole("checkbox")).not.toBeChecked();
   await expect(report.getByRole("button", { name: "Send report" })).toBeDisabled();
   await report.getByLabel("What happened?").fill("Playback stopped after loading a track.");

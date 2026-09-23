@@ -14,6 +14,7 @@ interface TurnstileApi {
     "expired-callback": () => void;
     "error-callback": () => void;
     theme: "dark";
+    size: "invisible";
     action: "bug_report";
   }): string;
   remove(widgetId: string): void;
@@ -39,6 +40,7 @@ function Turnstile({ onToken, onError, resetCount }: { onToken: (token: string) 
         "expired-callback": () => onToken(""),
         "error-callback": onError,
         theme: "dark",
+        size: "invisible",
         action: "bug_report",
       });
       widgetIdRef.current = widgetId;
