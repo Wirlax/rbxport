@@ -579,12 +579,12 @@ test("a device shows what is on it, and a second write only syncs the difference
   // First write: everything goes.
   await expect(panel.getByRole("button", { name: "Export" })).toBeVisible();
   await panel.getByRole("button", { name: "Export" }).click();
-  await expect(page.getByRole("contentinfo")).toContainText(/Exported \d+ tracks to DJ STICK/);
+  await expect(page.getByRole("contentinfo")).toContainText(/DJ STICK: Updated \d+ tracks/);
   await expect(panel).toContainText("Only what changed will be copied.");
 
   // Second write to the same stick: nothing changed, so nothing is copied.
   await panel.getByRole("button", { name: "Sync" }).click();
-  await expect(page.getByRole("contentinfo")).toContainText(/Synced DJ STICK: \d+ unchanged/);
+  await expect(page.getByRole("contentinfo")).toContainText(/DJ STICK: Updated 0 tracks\. Skipped \d+ tracks \(no change\)/);
 });
 
 test("a track loads into the player on a double-click, not a click", async ({ page }) => {

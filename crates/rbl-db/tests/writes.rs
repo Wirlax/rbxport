@@ -837,18 +837,17 @@ fn a_refused_action_leaves_nothing_behind() {
 
 #[test]
 fn the_unsupported_edits_are_refused_with_a_reason() {
-    for action in [Unsupported::ContentCueOrFile] {
-        let error = Writer::refuse(action);
-        let DbError::WriteRefused(reason) = error else {
-            panic!("{action:?} should be a refusal");
-        };
-        assert!(!reason.is_empty());
-        // The reason has to say what would settle it, or it is just a "no".
-        assert!(
-            reason.contains("recording") || reason.contains("not understood"),
-            "{reason}"
-        );
-    }
+    let action = Unsupported::ContentCueOrFile;
+    let error = Writer::refuse(action);
+    let DbError::WriteRefused(reason) = error else {
+        panic!("{action:?} should be a refusal");
+    };
+    assert!(!reason.is_empty());
+    // The reason has to say what would settle it, or it is just a "no".
+    assert!(
+        reason.contains("recording") || reason.contains("not understood"),
+        "{reason}"
+    );
 }
 
 #[test]
