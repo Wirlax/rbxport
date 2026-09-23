@@ -1,13 +1,24 @@
 import { expect, test } from "@playwright/test";
 
 test("bug reports include diagnostics only when selected and open the attachment externally", async ({ page }) => {
+  await page.addInitScript(() => {
+    const turnstile = {
+      render: (_container: HTMLElement, options: { callback: (token: string) => void }) => {
+        queueMicrotask(() => options.callback("test-turnstile-token"));
+        return "test-widget";
+      },
+      remove: () => {},
+      reset: () => {},
+    };
+    Object.defineProperty(window, "turnstile", { value: turnstile, configurable: true });
+  });
   await page.goto("/");
   await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
   const report = page.getByRole("dialog", { name: "Report bug", exact: true });
   await expect(report.getByRole("checkbox")).not.toBeChecked();
-  await expect(report.getByRole("button", { name: "Save report ZIP…" })).toBeDisabled();
+  await expect(report.getByRole("button", { name: "Send report" })).toBeDisabled();
   await report.getByLabel("What happened?").fill("Playback stopped after loading a track.");
-  await expect(report.getByRole("button", { name: "Save report ZIP…" })).toBeEnabled();
+  await expect(report.getByRole("button", { name: "Send report" })).toBeEnabled();
   await report.getByRole("checkbox").check();
   await report.getByRole("button", { name: "Open attachment" }).click();
   await expect(report.getByRole("alert")).toHaveText("Opening the text editor requires the desktop app.");

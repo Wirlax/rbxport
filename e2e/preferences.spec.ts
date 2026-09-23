@@ -249,16 +249,18 @@ test("About groups version and update controls", async ({ page }) => {
   const dialog = await prefs(page);
   await dialog.getByRole("tab", { name: "About" }).click();
   await expect(dialog.getByRole("heading", { name: "About" })).toHaveCount(0);
-  await expect(dialog.getByText("Made by TRIODE with ❤️ in California")).toBeVisible();
-  await expect(dialog.getByRole("region", { name: "Support", exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("Made by TRIODE with")).toBeVisible();
+  await expect(dialog.getByText("in California", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Support rbxport" })).toBeVisible();
+  await expect(dialog.getByText("rbxport is free to use and independently developed by TRIODE.")).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "rbxport", exact: true })).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Author links" })).toBeVisible();
   const updates = dialog.getByRole("region", { name: "About", exact: true });
   await expect(dialog.getByTestId("about-version")).toHaveText("v0.4.0");
   await expect(updates.getByRole("button", { name: "Check for updates" })).toBeVisible();
-  const auto = dialog.getByRole("switch", { name: "Automatic updates" });
+  const auto = dialog.getByRole("switch", { name: "Download updates" });
   await expect(auto).toBeChecked();
-  await expect(dialog.getByRole("combobox", { name: "Update frequency" })).toHaveValue("weekly");
+  await expect(dialog.getByRole("combobox", { name: "Update frequency" })).toHaveValue("start");
   await auto.click();
   await expect(auto).not.toBeChecked();
   await expect(dialog.getByRole("combobox", { name: "Update frequency" })).toBeDisabled();
@@ -268,7 +270,7 @@ test("About groups version and update controls", async ({ page }) => {
   await expect(advancedItem.locator("+ li").getByRole("tab")).toHaveAccessibleName("PRO DJ LINK");
   await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
   await dialog.getByRole("tab", { name: "Others" }).click();
-  await expect(dialog.getByRole("switch", { name: "Automatic updates" })).toHaveCount(0);
+  await expect(dialog.getByRole("switch", { name: "Download updates" })).toHaveCount(0);
 });
 
 test("the player's ≡ opens rekordbox's own menu, and its choices are the View preferences", async ({ page }) => {
