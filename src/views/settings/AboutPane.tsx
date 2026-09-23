@@ -152,7 +152,7 @@ export function AboutPane() {
               disabled={!checkUpdates}
               value={updateFrequency}
               choices={[
-                { value: "start", label: "Every launch" },
+                { value: "start", label: "After startup" },
                 { value: "daily", label: "Daily" },
                 { value: "weekly", label: "Weekly" },
               ]}
