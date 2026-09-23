@@ -1354,7 +1354,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const createdAt = Date.now();
     const date = new Date(createdAt);
     const pad = (value: number) => String(value).padStart(2, "0");
-    const name = `rbxport-backup-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}.zip`;
+    const name = `rbexport-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}.zip`;
     const path = `${backupDirectory}/${name}`;
     if (backups.has(path)) throw new Error("A backup for this minute already exists. Try again in the next minute.");
     const saved = snapshot();
@@ -1727,7 +1727,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 2 * 1024 ** 2 };
       return wait({ ...backupSizes });
     },
-    listBackups: () => wait([...backups.values()].filter(({ backup }) => backup.path.startsWith(`${backupDirectory}/`)).map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
+    listBackups: () => wait([...backups.values()].filter(({ backup }) => backup.path.startsWith(`${backupDirectory}/rbexport-`) && backup.name.endsWith(".zip")).map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
     backUpLibrary: () => wait(saveBackup()),
     backupProgress: () => wait({ ...backupProgress }),
     cancelBackup: () => {

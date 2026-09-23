@@ -188,7 +188,8 @@ fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
-    if !(name.starts_with("rbxport-backup-") && meta.is_file() && is_zip(&path)
+    if !(name.starts_with("rbexport-") && meta.is_file() && is_zip(&path)
+        || name.starts_with("rbxport-backup-") && meta.is_file() && is_zip(&path)
         || name.starts_with("library-") && (meta.is_dir() || (meta.is_file() && path.extension().is_some_and(|e| e == "zip")))
         || name.starts_with("master-")
             && path.extension().is_some_and(|e| e == "db")
@@ -215,6 +216,14 @@ fn manifest(path: &Path, location: &rbl_db::LibraryLocation) -> AppResult<Manife
 
 fn is_zip(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+}
+
+/// The Backups preference shows only snapshots created under the current
+/// naming scheme. Older formats remain available through Restore from ZIP.
+fn is_listed_backup(path: &Path) -> bool {
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    let Ok(meta) = fs::symlink_metadata(path) else { return false; };
+    name.starts_with("rbexport-") && meta.is_file() && !meta.file_type().is_symlink() && is_zip(path)
 }
 
 fn checked_archive(path: &Path) -> AppResult<PathBuf> {
@@ -252,32 +261,19 @@ pub fn list(state: &AppState) -> AppResult<Vec<BackupDto>> {
     };
     for entry in entries {
         let path = entry.map_err(error)?.path();
+        if !is_listed_backup(&path) {
+            continue;
+        }
         let Ok(path) = checked(&state.backup_destination(), &path) else {
             continue;
         };
-        let (created_at, bytes, includes_analysis, includes_artwork) = if path.is_dir() || path.extension().is_some_and(|e| e == "zip") {
-            let Ok(saved) = manifest(&path, &location) else {
-                continue;
-            };
-            (saved.created_at, if path.is_file() { fs::metadata(&path).map_err(error)?.len() } else { saved.bytes }, true, saved.includes_artwork)
-        } else {
-            let meta = fs::metadata(&path).map_err(error)?;
-            let created = meta
-                .modified()
-                .map_err(error)?
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                .try_into()
-                .unwrap_or(0);
-            let bytes = meta.len()
-                + ["-wal", "-shm"]
-                    .iter()
-                    .filter_map(|suffix| fs::metadata(sidecar(&path, suffix)).ok())
-                    .map(|m| m.len())
-                    .sum::<u64>();
-            (created, bytes, false, false)
+        let Ok(saved) = manifest(&path, &location) else {
+            continue;
         };
+        let created_at = saved.created_at;
+        let bytes = fs::metadata(&path).map_err(error)?.len();
+        let includes_analysis = true;
+        let includes_artwork = saved.includes_artwork;
         result.push(BackupDto {
             name: path
                 .file_name()
@@ -332,7 +328,7 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     let created_at = millis();
     let id = uuid::Uuid::new_v4();
     let partial = root.join(format!(".partial-{id}"));
-    let target = root.join(format!("rbxport-backup-{}.zip", rbl_core::time::local_backup_stamp()));
+    let target = root.join(format!("rbexport-{}.zip", rbl_core::time::local_backup_stamp()));
     if target.try_exists().map_err(error)? {
         return Err(error("A backup for this minute already exists. Try again in the next minute."));
     }
@@ -763,14 +759,30 @@ mod tests {
         let first = PathBuf::from(create(&state).unwrap());
         let after = rbl_core::time::local_backup_stamp();
         let name = first.file_name().unwrap().to_string_lossy();
-        assert!(name == format!("rbxport-backup-{before}.zip") || name == format!("rbxport-backup-{after}.zip"));
+        assert!(name == format!("rbexport-{before}.zip") || name == format!("rbexport-{after}.zip"));
         let bytes = fs::read(&first).unwrap();
         // Reserve the current minute, including if the first copy crossed a boundary.
-        let reserved = state.backup_destination().join(format!("rbxport-backup-{after}.zip"));
+        let reserved = state.backup_destination().join(format!("rbexport-{after}.zip"));
         if reserved != first { fs::copy(&first, &reserved).unwrap(); }
         assert!(create(&state).is_err());
         assert_eq!(fs::read(first).unwrap(), bytes);
         assert_eq!(fs::read(reserved).unwrap(), bytes);
+    }
+
+    #[test]
+    fn list_shows_only_current_rbexport_archives() {
+        let (_dir, state, _location) = fixture();
+        let current = PathBuf::from(create(&state).unwrap());
+        let root = state.backup_destination();
+        fs::copy(&current, root.join("rbxport-backup-legacy.zip")).unwrap();
+        fs::copy(&current, root.join("library-legacy.zip")).unwrap();
+        fs::write(root.join("rbexport-not-a-backup.zip"), b"not a ZIP").unwrap();
+        fs::write(root.join("notes.zip"), b"not a ZIP").unwrap();
+
+        let listed = list(&state).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, current.canonicalize().unwrap().to_string_lossy());
+        assert!(listed[0].name.starts_with("rbexport-"));
     }
 
     #[test]
@@ -892,8 +904,7 @@ mod tests {
         });
         assert_eq!(result.unwrap_err().kind, crate::error::ErrorKind::Cancelled);
         assert_eq!(rating(&state), before);
-        assert_eq!(list(&state).unwrap().len(), 1);
-        assert_eq!(PathBuf::from(&list(&state).unwrap()[0].path), previous.canonicalize().unwrap());
+        assert!(list(&state).unwrap().is_empty());
         assert!(fs::read_dir(state.backup_dir()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".partial-")));
         assert_eq!(fs::metadata(file).unwrap().len(), 3 * 1024 * 1024);
     }
@@ -979,7 +990,7 @@ mod tests {
         fs::write(snapshot.join("manifest.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
         restore(&state, &snapshot).unwrap();
         assert_eq!(fs::read(&art).unwrap(), b"keep artwork");
-        assert!(!list(&state).unwrap().iter().find(|entry| entry.name == "library-missing-artwork").unwrap().includes_artwork);
+        assert!(list(&state).unwrap().iter().all(|entry| entry.name != "library-missing-artwork"));
     }
 
     #[test]
@@ -1034,9 +1045,7 @@ mod tests {
         let file = analysis(&location).join("current.DAT");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, b"current analysis").unwrap();
-        let entries = list(&state).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert!(!entries[0].includes_analysis);
+        assert!(list(&state).unwrap().is_empty());
         restore(&state, &backup).unwrap();
         assert_eq!(rating(&state), before);
         assert_eq!(fs::read(&file).unwrap(), b"current analysis");
