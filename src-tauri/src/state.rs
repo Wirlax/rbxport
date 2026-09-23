@@ -646,11 +646,10 @@ mod tests {
         let rows = rows_to_dto(&library, &[0], 0);
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(json["memoryCues"], serde_json::json!([46, 1000]));
-        // In slot order, letters from `Kind`, the measured drawn colour where
-        // there is one and `null` — not a guess — where there is not.
+        // In slot order, letters from `Kind` and rekordbox's resolved colour.
         assert_eq!(
             json["hotCues"],
-            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, null], ["E", 24, "#10B176"]])
+            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, "#E02823"], ["E", 24, "#10B176"]])
         );
     }
 
