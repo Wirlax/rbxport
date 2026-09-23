@@ -329,6 +329,9 @@ function AppBody() {
   const openReport = useCallback(() => {
     void getBackend().then(backend => backend.openReportWindow()).then(opened => { if (!opened) setReportOpen(true); });
   }, []);
+  const openSupport = useCallback(() => {
+    void getBackend().then(backend => backend.openUrl("https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE")).catch(() => {});
+  }, []);
   const prefs = usePreferencesStore();
   const { view: viewPrefs, advanced: advancedPrefs, analysis: analysisPrefs } = prefs.preferences;
   // Every write path reads this one flag: rekordbox holding the database,
@@ -2196,6 +2199,7 @@ function AppBody() {
           ...job, name: devices.find(device => device.path === job.path)?.name ?? job.path.split(/[\\/]/).filter(Boolean).at(-1) ?? job.path,
         }))}
         onReportBug={openReport}
+        onSupport={openSupport}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}

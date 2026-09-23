@@ -29,6 +29,7 @@ export interface StatusBarProps {
   onExplainReadOnly?: (() => void) | undefined;
   onOpenProtection?: (() => void) | undefined;
   onReportBug?: (() => void) | undefined;
+  onSupport?: (() => void) | undefined;
   /** Present only while analysis is running, so it can be stopped. */
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
@@ -49,6 +50,7 @@ export function StatusBar({
   onExplainReadOnly,
   onOpenProtection,
   onReportBug,
+  onSupport,
   onCancelAnalysis,
   analysisFailures = 0,
 }: StatusBarProps) {
@@ -116,6 +118,7 @@ export function StatusBar({
         </span>
       ) : null}
       <span className={styles.selection}>{selection}</span>
+      {onSupport ? <button type="button" className={styles.reportBug} onClick={onSupport}>🤍 Support rbxport</button> : null}
       {onReportBug ? <button type="button" className={styles.reportBug} onClick={onReportBug}>Report bug</button> : null}
     </footer>
   );
