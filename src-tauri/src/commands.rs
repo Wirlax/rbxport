@@ -2051,6 +2051,10 @@ pub async fn track_cues(
     let library = state.library()?;
     let cue_state = Arc::clone(&state);
     blocking("track_cues", move || {
+        const MEMORY_CSS: [&str; 8] = [
+            "#E778F1", "#E33122", "#EBA44A", "#F4E458",
+            "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
+        ];
         let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
         let comments = cue_state
             .read_db(|db| rbl_db::details::cue_comments(db.connection(), &track))
@@ -2058,10 +2062,6 @@ pub async fn track_cues(
         let memory_colours = cue_state
             .read_db(|db| rbl_db::details::memory_cue_colours(db.connection(), &track))
             .map_err(write_error)?;
-        const MEMORY_CSS: [&str; 8] = [
-            "#E778F1", "#E33122", "#EBA44A", "#F4E458",
-            "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
-        ];
         Ok(library
             .cues_of(row)
             .iter()
