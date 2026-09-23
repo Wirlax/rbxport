@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
  * both and reports on each, and Close puts it away.
  */
 async function openManager(page: Page) {
-  await page.goto("/");
+  await page.goto("/?writable=1");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("button", { name: "Sync Manager" }).click();
   const dialog = page.getByRole("dialog", { name: "Sync Manager" });

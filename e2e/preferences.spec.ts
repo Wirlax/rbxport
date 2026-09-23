@@ -343,7 +343,11 @@ test("a BPM's key can be shifted a semitone either way, independent of tempo", a
 
 test("the deck tempo slider cycles ranges, resets, and can be hidden", async ({ page }) => {
   await page.addInitScript(() => {
-    if (!localStorage.getItem("rbl.preferences")) localStorage.setItem("rbl.preferences", JSON.stringify({ view: { tempoSlider: true } }));
+    if (sessionStorage.getItem("e2e.tempoSliderSeeded")) return;
+    const preferences = JSON.parse(localStorage.getItem("rbl.preferences") ?? "{}");
+    preferences.view = { ...preferences.view, tempoSlider: true };
+    localStorage.setItem("rbl.preferences", JSON.stringify(preferences));
+    sessionStorage.setItem("e2e.tempoSliderSeeded", "1");
   });
   await page.goto("/");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
