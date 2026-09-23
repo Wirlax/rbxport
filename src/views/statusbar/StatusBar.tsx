@@ -119,8 +119,10 @@ export function StatusBar({
         </span>
       ) : null}
       <span className={styles.selection}>{selection}</span>
-      {onSupport ? <button type="button" className={`${styles.reportBug} ${styles.support}`} onClick={onSupport}><Heart size="1em" aria-hidden="true" /> Support rbxport</button> : null}
-      {onReportBug ? <button type="button" className={`${styles.reportBug} ${styles.report}`} onClick={onReportBug}><Bug size="1em" aria-hidden="true" /> Report bug</button> : null}
+      <span className={styles.actions}>
+        {onSupport ? <button type="button" className={`${styles.reportBug} ${styles.support}`} onClick={onSupport}><Heart size="1em" aria-hidden="true" /> Support rbxport</button> : null}
+        {onReportBug ? <button type="button" className={`${styles.reportBug} ${styles.report}`} onClick={onReportBug}><Bug size="1em" aria-hidden="true" /> Report bug</button> : null}
+      </span>
     </footer>
   );
 }

@@ -70,6 +70,11 @@
 }
 
 .selection { margin-left: auto; }
+.actions {
+  display: flex;
+  gap: 16px;
+  margin-right: calc(12px - var(--s-status-inset-right));
+}
 
 .reportBug {
   flex: none;
