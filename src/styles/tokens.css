@@ -23,7 +23,7 @@
   --c-wave-all: #F5EBD7; /* rekordbox's 3Band waveform where all three bands overlap, the cream core (mixxxdj/mixxx#12326); our capture measured #F5EAD6 */
   --c-scrub: #6B6B6B; /* docs/screenshots at 2x: the unplayed position bar, y 310..315 outline only */
   --c-scrub-played: #C8C8C8; /* docs/screenshots at 2x: the position bar left of the playhead is solid */
-  --c-cue-hot: #3CEB50; /* rekordbox getPadColor(21), extracted from the desktop palette */
+  --c-cue-hot: #3CEB50; /* rekordbox 7 static getPadColor(21) desktop palette */
   --c-cue-hot-text: #000000; /* docs/screenshots at 2x: the letter inside that badge, cap height 14px */
   --c-meter-track: #323232; /* capture of rekordbox's top bar: the unlit part of both meters */
   --c-error: #E23B2E; /* UNMEASURED — failures in the status bar; the same red the meter's clip band uses, so the app has one alarm colour */
@@ -56,7 +56,7 @@
   --c-play-glyph-on: #FFFFFF; /* sampled from the same capture: the triangle is a flat 255,255,255 while the deck runs, against #A0A0A0 at rest */
   --c-beat: #4C4C4C; /* measured from docs/screenshots; the detail band runs y 358..650: a beat marker's line */
   --c-pad-active: #3571E3; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the AU and Q buttons when on */
-  --c-pad-set: #3CEB50; /* rekordbox getPadColor(21), the default populated hot-cue pad */
+  --c-pad-set: #3CEB50; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the square inside a hot-cue pad that holds a cue */
   --c-pad-well: #0F0F0F; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: a hot-cue pad's own background */
   --c-pad-label: #646464; /* measured from the pad row in a 2x capture of rekordbox 7.2.11: the text on an inactive button, e.g. MA */
   --c-tab-active: #457FE5; /* measured from docs/screenshots (rekordbox 7.2.11, 2x): the selected MEMORY/HOT CUE/INFO tab — a lighter blue than the pad buttons' #3571E3 */
