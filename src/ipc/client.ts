@@ -231,13 +231,6 @@ async function realBackend(): Promise<Backend> {
     backupProgress: () => invoke<BackupProgress>("backup_progress"),
     openUrl: (url) => invoke<void>("open_url", { url }),
     backUpLibrary: () => invoke<string>("back_up_library"),
-    restoreBackup: (path) => invoke<number>("restore_backup", { path }),
-    pickBackupZip: async () => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const path = await open({ title: "Restore from a backup ZIP", multiple: false, directory: false,
-        filters: [{ name: "RBXport backup ZIP", extensions: ["zip"] }] });
-      return typeof path === "string" ? invoke<Backup>("inspect_backup", { path }) : null;
-    },
     setBackupDirectory: (directory) => invoke<string>("set_backup_directory", { directory }),
     deleteBackup: (path) => invoke<void>("delete_backup", { path }),
     confirm: async (message, labels) => {

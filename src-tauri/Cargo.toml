@@ -42,6 +42,9 @@ rbl-export = { path = "../crates/rbl-export" }
 rbl-devices = { path = "../crates/rbl-devices" }
 rbl-pdb = { path = "../crates/rbl-pdb" }
 rbl-onelibrary = { path = "../crates/rbl-onelibrary" }
+# Backup archives' manifest, summary and sizes, and the restore journal
+# RBXport Restore shares.
+rbl-backup = { path = "../crates/rbl-backup" }
 # The diagnostics readout in the title bar: this process's CPU and memory.
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 parking_lot = "0.12"

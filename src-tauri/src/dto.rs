@@ -263,11 +263,6 @@ pub struct DeviceDto {
     pub removable: bool,
     /// Names the medium across a rename; `rbl_devices::volume_id`.
     pub volume_id: String,
-    /// Connect-time imports available without guessing from the volume name.
-    pub importable_history: bool,
-    pub importable_settings: bool,
-    /// Why the device could not be inspected, shown once rather than retried.
-    pub import_error: Option<String>,
     /// What is already on it, absent when it holds no export.
     pub export: Option<DeviceExportDto>,
 }

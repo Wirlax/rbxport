@@ -62,7 +62,6 @@ import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
 import { EMPTY_FILTER, toSpecFilter, type FilterState } from "@/lib/trackFilter";
 import type { AnalysisResult, FilterValues, LinkPeerSeen, LinkStatus, SmartRule } from "@/ipc/types";
-import { useUsbImports } from "@/store/useUsbImports";
 import { useTooltip } from "@/store/usePreferences";
 
 /**
@@ -468,7 +467,6 @@ function AppBody() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
-  useUsbImports(devices, prefs.preferences.usbExport, readOnly || summary === null, exportRunning, report, refuse);
   useEffect(() => {
     setNote((current) => {
       if (!current?.failed) return current;

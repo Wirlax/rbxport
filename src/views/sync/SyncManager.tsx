@@ -122,6 +122,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   // gets, as it is on every export from the shell.
   const preferences = usePreferences();
   const stickDefaults = preferences.djSystem;
+  const { importHistory, importSettings } = preferences.usbExport;
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
   const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
 
@@ -206,6 +207,18 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     void refreshDevices().catch(() => {
       // No devices to list: the column says so.
     });
+  }, [refreshDevices]);
+
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | undefined;
+    void getBackend().then(backend => {
+      if (!live) return;
+      stop = backend.onDevicesChanged(() => {
+        if (live) void refreshDevices().catch(() => {});
+      });
+    });
+    return () => { live = false; stop?.(); };
   }, [refreshDevices]);
 
   useEffect(() => {
@@ -326,6 +339,22 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
             return;
           }
         }
+        // Import only after SYNC is clicked and preflight is accepted, before
+        // exporting can replace the selected devices' history/settings.
+        const importNotes: string[] = [];
+        if (importHistory || importSettings) {
+          for (const path of destinations) {
+            setStatus([`${nameOf(path)}: Importing USB history/settings…`]);
+            try {
+              const imported = await backend.importUsb(path, false, importHistory, importSettings);
+              if (imported.histories) importNotes.push(`${nameOf(path)}: imported ${imported.histories} play-history entries.`);
+              if (imported.settings) importNotes.push(`${nameOf(path)}: imported ${imported.settings} CDJ/mixer settings files.`);
+              importNotes.push(...(imported.warnings ?? []).map(warning => `${nameOf(path)}: ${warning}`));
+            } catch (e) {
+              throw new Error(`${nameOf(path)}: Couldn’t import before syncing. ${errorMessage(e)}`, { cause: e });
+            }
+          }
+        }
         stop = backend.onSyncProgress((progress) => {
           if (progress.state === "writing") setStatus([t("Writing to {device}…", { device: nameOf(progress.path) })]);
           if (progress.state === "ejecting") setStatus([t("Ejecting {device}…", { device: nameOf(progress.path) })]);
@@ -336,7 +365,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           ? [`${nameOf(r.path)}: ${r.error}`]
           : r.ejected ? [`${nameOf(r.path)}: Safely ejected.`]
           : r.ejectError ? [`${nameOf(r.path)}: Not ejected: ${r.ejectError}`] : []);
-        setStatus(outcomes.length > 0 ? outcomes : [t("Sync complete.")]);
+        setStatus([...importNotes, ...(outcomes.length > 0 ? outcomes : [t("Sync complete.")])]);
         // What the sticks hold now, without touching the ticks.
         await refreshDevices().catch(() => {});
         await Promise.all(reports.filter(r => !r.ejected).map(({ path }) => readDevice(path, false).catch(() => {})));
@@ -348,7 +377,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
+  }, [canSync, nodes, ticked, devices, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
   const runUsbImport = (kind: "cues" | "history" | "settings") => {
     if (busy || tickedDevices.size === 0) return;

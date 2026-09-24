@@ -55,6 +55,8 @@ const report = (path: string, tracks: number): SyncDeviceReport => ({
 
 let host: HTMLDivElement;
 let root: Root;
+let devicesChanged: (() => void) | undefined;
+let listDevices: ReturnType<typeof vi.fn>;
 let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
 let validateExportFiles: ReturnType<typeof vi.fn>;
@@ -80,6 +82,8 @@ const status = () => host.querySelector('[role="status"]')?.textContent ?? "";
 
 beforeEach(async () => {
   cancelExport.mockClear();
+  devicesChanged = undefined;
+  listDevices = vi.fn(() => Promise.resolve(DEVICES.map(d => ({ ...d }))));
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   progress = null;
   rekordboxOpen = false;
@@ -94,7 +98,11 @@ beforeEach(async () => {
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
     playlistTree: () => Promise.resolve(TREE.map((n) => ({ ...n }))),
-    listDevices: () => Promise.resolve(DEVICES.map((d) => ({ ...d }))),
+    listDevices,
+    onDevicesChanged: (listener: () => void) => {
+      devicesChanged = listener;
+      return () => { devicesChanged = undefined; };
+    },
     deviceSyncState: (path: string) => {
       const state = STATES[path];
       return state ? Promise.resolve(state) : Promise.reject(new Error("gone"));
@@ -464,4 +472,70 @@ it("expanding a USB does not select it for synchronization", async () => {
   await settle();
   expect(box("USB A")?.checked).toBe(false);
   expect(host.querySelector('[aria-label="USB A library"]')?.textContent).toContain("Closing");
+});
+
+
+it("connection changes refresh only the device list; imports wait for SYNC", async () => {
+  expect(importUsb).not.toHaveBeenCalled();
+  listDevices.mockResolvedValueOnce([...DEVICES, stick("USB C")]);
+  act(() => { devicesChanged?.(); });
+  await settle();
+  expect(box("USB C")).not.toBeNull();
+  expect(importUsb).not.toHaveBeenCalled();
+  expect(syncDevices).not.toHaveBeenCalled();
+  click(box("Closing"));
+  click(box("USB C"));
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB C", false, true, false);
+  expect(importUsb.mock.invocationCallOrder[0]).toBeLessThan(syncDevices.mock.invocationCallOrder[0]!);
+});
+
+it("does not export when the pre-sync import fails", async () => {
+  importUsb.mockRejectedValueOnce(new Error("Missing recovery file"));
+  click(box("Closing"));
+  click(box("USB B"));
+  await settle();
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(syncDevices).not.toHaveBeenCalled();
+  expect(status()).toContain("USB B: Couldn’t import before syncing. Missing recovery file");
+});
+
+it("honors disabled imports when syncing", async () => {
+  const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
+    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: false,
+  } };
+  act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
+    <SyncManager onClose={onClose} />
+  </PreferencesProvider>));
+  await settle();
+  click(box("Closing"));
+  click(box("USB B"));
+  await settle();
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  expect(syncDevices).toHaveBeenCalledTimes(1);
+});
+
+
+it("imports settings during SYNC only when enabled", async () => {
+  const preferences = { ...DEFAULT_PREFERENCES, usbExport: {
+    ...DEFAULT_PREFERENCES.usbExport, importHistory: false, importSettings: true,
+  } };
+  act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
+    <SyncManager onClose={onClose} />
+  </PreferencesProvider>));
+  await settle();
+  expect(importUsb).not.toHaveBeenCalled();
+  click(box("Closing"));
+  click(box("USB B"));
+  await settle();
+  click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+  await settle();
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB B", false, false, true);
+  expect(importUsb.mock.invocationCallOrder[0]).toBeLessThan(syncDevices.mock.invocationCallOrder[0]!);
 });

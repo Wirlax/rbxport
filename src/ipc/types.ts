@@ -381,10 +381,6 @@ export interface Backend {
   backupProgress(): Promise<BackupProgress>;
   /** Copies the library aside now; resolves to where the copy went. */
   backUpLibrary(): Promise<string>;
-  /** Puts a backup back as the library and re-reads it. Refused while rekordbox runs. */
-  restoreBackup(path: string): Promise<number>;
-  /** Pick and inspect an RBXport ZIP anywhere on disk; null on cancellation. */
-  pickBackupZip(): Promise<Backup | null>;
   /** Persist the default folder used for future backups. Existing files stay where they are. */
   setBackupDirectory(directory: string): Promise<string>;
   deleteBackup(path: string): Promise<void>;
@@ -916,11 +912,6 @@ export interface Device {
    * point, so `path` goes stale while this stays the same.
    */
   volumeId: string;
-  /** Connect-time imports that are actually present on this volume. */
-  importableHistory?: boolean;
-  importableSettings?: boolean;
-  /** Inspection or interrupted-export recovery failure. */
-  importError?: string;
   /** What is already on it, null when it holds no export. */
   export: DeviceExport | null;
 }

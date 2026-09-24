@@ -45,35 +45,7 @@ pub struct ImportReport {
     #[serde(skip)] changed: Vec<String>,
 }
 
-#[derive(Debug, Default)]
-pub struct ImportAvailability {
-    pub history: bool,
-    pub settings: bool,
-}
-
-/// What an automatic connect-time import could actually read.
-pub fn availability(root: &Path) -> AppResult<ImportAvailability> {
-    rbl_devices::settings::recover(root)
-        .map_err(|e| err(format!("Could not recover an interrupted export before importing: {e}")))?;
-    let export = rbl_devices::settings::export_root(root);
-    let settings = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"]
-        .iter()
-        .any(|name| export.join(name).is_file());
-    let has_database = export.join("rekordbox/export.pdb").is_file()
-        || export.join("rekordbox/exportLibrary.db").is_file();
-    let history = if has_database {
-        rbl_export::snapshot::Snapshot::read(root)
-            .map_err(|e| err(format!("Could not inspect play history: {e}")))?
-            .history
-            .iter()
-            .any(|session| !session.folder && !session.tracks.is_empty())
-    } else {
-        false
-    };
-    Ok(ImportAvailability { history, settings })
-}
-
-/// Explicit cue/grid imports and connect-time history/settings imports share identity checks.
+/// Explicit imports and Sync Manager imports share identity checks.
 #[tauri::command]
 pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: State<'_, Arc<AppState>>, path: String, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
     let state = Arc::clone(&state);

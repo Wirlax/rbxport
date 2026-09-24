@@ -1348,21 +1348,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return linkOff();
   };
 
-  const ancillary = () => ({ tree, membership: [...membership], tagList, smartRules: [...smartRules],
-    details: [...details], cues: [...cueStore], grids: [...gridStore], colors: Array.from(colors), nextId, nextCueId });
-  const snapshot = () => ({ rows: all.map(row => JSON.stringify(row)), data: JSON.stringify(ancillary()) });
-  type Snapshot = ReturnType<typeof snapshot>;
-  const restoreMap = <K, V>(map: Map<K, V>, values: [K, V][]) => { map.clear(); for (const [key, value] of values) map.set(key, value); };
-  const restore = (saved: Snapshot) => {
-    const before = JSON.parse(saved.data) as ReturnType<typeof ancillary>;
-    all.splice(0, all.length, ...saved.rows.map(row => JSON.parse(row) as RowDto));
-    tree.splice(0, tree.length, ...before.tree);
-    tagList.splice(0, tagList.length, ...before.tagList); colors.set(before.colors);
-    restoreMap(membership, before.membership); restoreMap(smartRules, before.smartRules);
-    restoreMap(details, before.details); restoreMap(cueStore, before.cues); restoreMap(gridStore, before.grids);
-    nextId = before.nextId; nextCueId = before.nextCueId;
-  };
-  const backups = new Map<string, { backup: Backup; saved: Snapshot }>();
+  const backups = new Map<string, Backup>();
   let backupDirectory = "/mock/backups";
   let backupSizes: BackupSizes | null = null;
   let backupProgress: BackupProgress = { running: false, phase: "", copiedBytes: 0, totalBytes: 0, error: null, path: null };
@@ -1373,8 +1359,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     const name = `rbexport-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}.zip`;
     const path = `${backupDirectory}/${name}`;
     if (backups.has(path)) throw new Error("A backup for this minute already exists. Try again in the next minute.");
-    const saved = snapshot();
-    backups.set(path, { saved, backup: { path, name, createdAt, includesAnalysis: true, includesArtwork: true, bytes: new Blob([JSON.stringify(saved)]).size } });
+    backups.set(path, { path, name, createdAt, includesAnalysis: true, includesArtwork: true, bytes: new Blob([JSON.stringify(all)]).size });
     return path;
   };
 
@@ -1743,7 +1728,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         cues: 8 * 1024 ** 2, beatGrids: 16 * 1024 ** 2, phrases: 4 * 1024 ** 2, other: 2 * 1024 ** 2 };
       return wait({ ...backupSizes });
     },
-    listBackups: () => wait([...backups.values()].filter(({ backup }) => backup.path.startsWith(`${backupDirectory}/rbexport-`) && backup.name.endsWith(".zip")).map(({ backup }) => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
+    listBackups: () => wait([...backups.values()].filter(backup => backup.path.startsWith(`${backupDirectory}/rbexport-`) && backup.name.endsWith(".zip")).map(backup => ({ ...backup })).sort((a, b) => b.createdAt - a.createdAt)),
     backUpLibrary: () => wait(saveBackup()),
     backupProgress: () => wait({ ...backupProgress }),
     cancelBackup: () => {
@@ -1768,14 +1753,6 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }, 1000);
       return wait(undefined);
     },
-    restoreBackup: async (path) => {
-      if (!(options.writable ?? readFlagFromUrl("writable"))) return refuse("Quit rekordbox before restoring a backup.");
-      const entry = backups.get(path);
-      if (!entry) return notFound("Backup not found.");
-      restore(entry.saved);
-      return bump();
-    },
-    pickBackupZip: () => wait([...backups.values()].find(({ backup }) => !backup.path.startsWith(`${backupDirectory}/`))?.backup ?? null),
     setBackupDirectory: (directory) => {
       if (backupProgress.running) return refuse("Wait for the current backup to finish.");
       backupDirectory = directory;

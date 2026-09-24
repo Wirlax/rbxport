@@ -20,6 +20,7 @@ mod backups;
 mod backup_copy;
 mod backup_zip;
 mod backup_sizes;
+mod backup_restore_scripts;
 mod file_journal;
 mod diagnostics;
 mod explorer;
@@ -541,9 +542,7 @@ pub fn run() {
             commands::start_backup,
             commands::cancel_backup,
             commands::back_up_library,
-            commands::restore_backup,
             commands::delete_backup,
-            commands::inspect_backup,
             commands::set_backup_directory,
             commands::open_url,
             commands::reset_play_count,

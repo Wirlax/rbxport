@@ -22,8 +22,8 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-settings`}>Automatically import CDJ/mixer settings when a USB is connected</strong>
-        <span id={`${id}-settings-help`} className={styles.description}>Copy valid CDJ and mixer settings from a connected USB stick into rbxport.</span>
+        <strong id={`${id}-settings`}>Automatically import CDJ/mixer settings when syncing</strong>
+        <span id={`${id}-settings-help`} className={styles.description}>Copy valid CDJ and mixer settings from selected USB devices into rbxport when you click SYNC in Sync Manager.</span>
         <span className={styles.default}>Default: Off</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}
@@ -33,8 +33,8 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
-        <strong id={`${id}-history`}>Automatically import play history when a USB is connected</strong>
-        <span id={`${id}-history-help`} className={styles.description}>Add new play-history entries from a connected USB stick to your library.</span>
+        <strong id={`${id}-history`}>Automatically import play history when syncing</strong>
+        <span id={`${id}-history-help`} className={styles.description}>Add new play-history entries from selected USB devices to your library when you click SYNC in Sync Manager.</span>
         <span className={styles.default}>Default: On</span>
       </span>
       <input type="checkbox" role="switch" className={controls.toggle}

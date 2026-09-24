@@ -7,6 +7,22 @@ the version numbers [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Connecting a USB only refreshes the device list. Automatic history and
+  settings imports now wait until SYNC is clicked in Sync Manager, before
+  exporting to the selected devices. Device discovery no longer runs export
+  recovery.
+
+### Added
+- New backups record what they hold: the number of tracks, playlists, hot
+  cues and memory cues, and the size of each part. RBXport Restore shows this
+  before restoring, so the right backup is easy to pick.
+
+### Changed
+- Restoring a backup moved to the separate RBXport Restore app, which can put
+  back the whole backup or only some of it. Preferences › Backups creates and
+  deletes backups, and says where to restore them.
+
 ## [0.9.1] — 2026-09-22
 
 ### Fixed

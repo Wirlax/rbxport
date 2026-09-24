@@ -1,44 +1,17 @@
-//! Logical bytes in the next library backup. Read only ANLZ section headers,
-//! seeking over waveform payloads rather than loading every analysis file.
+//! The Rekordbox Data estimate: logical bytes in the next library backup,
+//! measured by [`rbl_backup::sizes`] and kept for a week.
 use crate::{
     error::{AppError, AppResult},
     state::AppState,
 };
+pub use rbl_backup::sizes::BackupSizes;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
 const WEEK_MS: u64 = 7 * 24 * 60 * 60 * 1000;
-
-#[derive(Clone, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BackupSizes {
-    pub updated_at: u64,
-    pub track_count: u32,
-    pub artwork: u64,
-    pub vocals: u64,
-    pub database: u64,
-    pub waveforms: u64,
-    pub cues: u64,
-    pub beat_grids: u64,
-    pub phrases: u64,
-    pub other: u64,
-}
-impl BackupSizes {
-    fn add(&mut self, other: &Self) {
-        self.database += other.database;
-        self.artwork += other.artwork;
-        self.vocals += other.vocals;
-        self.waveforms += other.waveforms;
-        self.cues += other.cues;
-        self.beat_grids += other.beat_grids;
-        self.phrases += other.phrases;
-        self.other += other.other;
-    }
-}
 
 /// Shared in memory across windows and persisted across application restarts.
 #[derive(Default)]
@@ -142,12 +115,13 @@ pub fn cached(state: &AppState, refresh: bool) -> AppResult<BackupSizes> {
 fn measure(state: &AppState) -> AppResult<BackupSizes> {
     let location = state.location()?;
     let track_count = state.read_db(rbl_db::Library::live_track_count).map_err(|e| AppError::internal(e.to_string()))?;
-    measure_paths(
+    rbl_backup::sizes::measure_paths(
         &location.master_db,
-        &location.share_root.join("PIONEER/USBANLZ"),
-        &location.share_root.join("PIONEER/Artwork"),
+        &rbl_backup::analysis_dir(&location),
+        &rbl_backup::artwork_dir(&location),
     )
-    .map(|mut sizes| {
+    .map(|measured| {
+        let mut sizes = measured.sizes;
         sizes.track_count = track_count;
         sizes.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -158,118 +132,6 @@ fn measure(state: &AppState) -> AppResult<BackupSizes> {
         sizes
     })
     .map_err(|e| AppError::internal(format!("Could not measure backup contents: {e}")))
-}
-
-fn regular_size(path: &Path) -> io::Result<u64> {
-    let meta = fs::symlink_metadata(path)?;
-    if !meta.is_file() || meta.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Expected a regular backup file",
-        ));
-    }
-    Ok(meta.len())
-}
-fn measure_paths(database: &Path, analysis: &Path, artwork: &Path) -> io::Result<BackupSizes> {
-    let mut sizes = BackupSizes {
-        database: regular_size(database)?,
-        ..Default::default()
-    };
-    if let Some(root) = database.parent() {
-        for name in crate::backups::LIBRARY_FILES {
-            match regular_size(&root.join(name)) {
-                Ok(bytes) => sizes.database += bytes,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e),
-            }
-        }
-    }
-    let mut wal = database.as_os_str().to_os_string();
-    wal.push("-wal");
-    match regular_size(Path::new(&wal)) {
-        Ok(bytes) => sizes.database += bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    for (path, is_artwork) in [(analysis, false), (artwork, true)] {
-        match walk(path, &mut sizes, is_artwork) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound && !path.exists() => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(sizes)
-}
-fn walk(path: &Path, sizes: &mut BackupSizes, is_artwork: bool) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
-    if meta.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Symbolic links are not supported in backups",
-        ));
-    }
-    if meta.is_dir() {
-        for entry in fs::read_dir(path)? {
-            walk(&entry?.path(), sizes, is_artwork)?;
-        }
-    } else if meta.is_file() {
-        if is_artwork {
-            sizes.artwork += meta.len();
-        } else {
-            sizes.add(&analysis_sizes(path, meta.len())?);
-        }
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Unsupported backup file",
-        ));
-    }
-    Ok(())
-}
-
-fn analysis_sizes(path: &Path, length: u64) -> io::Result<BackupSizes> {
-    let unknown = || BackupSizes {
-        other: length,
-        ..Default::default()
-    };
-    if length < 12 {
-        return Ok(unknown());
-    }
-    let mut file = fs::File::open(path)?;
-    let mut header = [0; 12];
-    file.read_exact(&mut header)?;
-    let number =
-        |bytes: &[u8]| u64::from(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
-    let mut at = number(&header[4..8]);
-    if &header[..4] != b"PMAI" || at < 12 || at > length {
-        return Ok(unknown());
-    }
-    let mut sizes = BackupSizes {
-        other: at,
-        ..Default::default()
-    };
-    while length - at >= 12 {
-        file.seek(SeekFrom::Start(at))?;
-        file.read_exact(&mut header)?;
-        let header_len = number(&header[4..8]);
-        let section_len = number(&header[8..12]);
-        if header_len < 12 || section_len < header_len || section_len > length - at {
-            return Ok(unknown());
-        }
-        match &header[..4] {
-            b"PWAV" | b"PWV2" | b"PWV3" | b"PWV4" | b"PWV5" | b"PWV6" | b"PWV7" => {
-                sizes.waveforms += section_len;
-            }
-            b"PCOB" | b"PCO2" => sizes.cues += section_len,
-            b"PQTZ" | b"PQT2" => sizes.beat_grids += section_len,
-            b"PSSI" => sizes.phrases += section_len,
-            b"PVDI" => sizes.vocals += section_len,
-            _ => sizes.other += section_len,
-        }
-        at += section_len;
-    }
-    sizes.other += length - at;
-    Ok(sizes)
 }
 
 #[cfg(test)]
@@ -451,62 +313,5 @@ mod tests {
                 .updated_at,
             42
         );
-    }
-
-    #[test]
-    fn accounts_for_every_byte_in_database_wal_and_analysis_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("master.db");
-        fs::write(&db, [0; 100]).unwrap();
-        fs::write(dir.path().join("master.db-wal"), [0; 20]).unwrap();
-        fs::write(dir.path().join("masterPlaylists6.xml"), [0; 10]).unwrap();
-        fs::write(dir.path().join("music.mp3"), [0; 99]).unwrap();
-        let anlz = dir.path().join("analysis");
-        fs::create_dir(&anlz).unwrap();
-        let mut bytes = b"PMAI".to_vec();
-        bytes.extend(12u32.to_be_bytes());
-        bytes.extend(0u32.to_be_bytes());
-        for tag in [b"PWV7", b"PCOB", b"PQTZ", b"PSSI", b"PVDI", b"PPTH"] {
-            bytes.extend(tag);
-            bytes.extend(12u32.to_be_bytes());
-            bytes.extend(16u32.to_be_bytes());
-            bytes.extend([0; 4]);
-        }
-        fs::write(anlz.join("ANLZ.2EX"), &bytes).unwrap();
-        fs::write(anlz.join("unknown"), [0; 7]).unwrap();
-        let artwork = dir.path().join("artwork");
-        fs::create_dir_all(artwork.join("abc")).unwrap();
-        fs::write(artwork.join("abc/artwork_m.jpg"), [0; 31]).unwrap();
-        let sizes = measure_paths(&db, &anlz, &artwork).unwrap();
-        assert_eq!(sizes.artwork, 31);
-        assert_eq!(sizes.vocals, 16);
-        assert_eq!(sizes.database, 130);
-        assert_eq!(
-            (sizes.waveforms, sizes.cues, sizes.beat_grids, sizes.phrases),
-            (16, 16, 16, 16)
-        );
-        assert_eq!(sizes.other, 12 + 16 + 7);
-        assert_eq!(
-            sizes.waveforms + sizes.cues + sizes.beat_grids + sizes.phrases + sizes.vocals + sizes.other,
-            bytes.len() as u64 + 7
-        );
-    }
-    #[test]
-    fn malformed_analysis_is_counted_as_other_and_missing_analysis_is_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("master.db");
-        fs::write(&db, [0; 8]).unwrap();
-        assert_eq!(
-            measure_paths(&db, &dir.path().join("absent"), &dir.path().join("no-artwork"))
-                .unwrap()
-                .database,
-            8
-        );
-        let file = dir.path().join("bad.dat");
-        let bytes = b"PMAI\x00\x00\x00\x0c\x00\x00\x00\x18PWAV\x00\x00\x00\x0c\xff\xff\xff\xff";
-        fs::write(&file, bytes).unwrap();
-        let sizes = analysis_sizes(&file, bytes.len() as u64).unwrap();
-        assert_eq!(sizes.other, bytes.len() as u64);
-        assert_eq!(sizes.waveforms, 0);
     }
 }

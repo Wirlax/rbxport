@@ -187,7 +187,7 @@ fn is_drive_root(text: &str) -> bool {
 /// megabytes, and it is the thing that says whether a sync can be incremental.
 #[must_use]
 pub fn inspect(mount_point: &Path) -> Option<DeviceExport> {
-    settings::recover(mount_point).ok()?;
+    // Discovery is read-only. Recover pending publications only during an explicit operation.
     // `PIONEER` or `.PIONEER`: rekordbox 7 can write the export hidden.
     let pdb = settings::export_root(mount_point).join("rekordbox/export.pdb");
     if !pdb.is_file() {
@@ -277,6 +277,19 @@ mod tests {
     fn a_volume_with_nothing_on_it_holds_no_export() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(inspect(dir.path()), None);
+    }
+
+    #[test]
+    fn inspecting_a_device_does_not_recover_a_pending_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join(".rbxport-publication");
+        std::fs::create_dir(&journal).unwrap();
+        std::fs::write(journal.join("publication.json"), br#"[{"path":"track.wav","present":true}]"#).unwrap();
+        std::fs::write(journal.join("track.wav"), b"staged audio").unwrap();
+        assert_eq!(inspect(dir.path()), None);
+        assert!(!dir.path().join("track.wav").exists());
+        assert!(journal.join("track.wav").exists());
+        assert!(!dir.path().join(".rbxport-write.lock").exists());
     }
 
     #[test]

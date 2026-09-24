@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("Preferences creates, restores, and deletes a library backup", async ({ page }) => {
+test("Preferences creates and deletes a library backup, and points restores to RBXport Restore", async ({ page }) => {
   await page.goto("/?writable=1");
   const settings = page.getByRole("banner").getByRole("button", { name: "Settings" });
   const preferences = page.getByRole("dialog", { name: "Preferences", exact: true });
@@ -18,19 +18,9 @@ test("Preferences creates, restores, and deletes a library backup", async ({ pag
   await expect(table.locator("tbody tr")).toHaveCount(1);
   await expect(table.getByRole("columnheader")).toHaveText(["Date", "Time", "Size", "Actions"]);
   await expect(table.locator("time").first()).toHaveAttribute("datetime", /^\d{4}-/);
-  await page.keyboard.press("Escape");
-  const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
-  const original = await title.innerText();
-  await title.click();
-  await title.click();
-  await title.locator("input").fill("Changed since backup");
-  await title.locator("input").press("Enter");
-  await expect(title).toHaveText("Changed since backup");
-  await settings.click();
-  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
-  await table.getByRole("button", { name: "Restore", exact: true }).click();
-  await expect(preferences.getByText("Backup restored.")).toBeVisible();
-  await expect(title).toHaveText(original);
+  await expect(table.getByRole("button", { name: "Restore", exact: true })).toHaveCount(0);
+  await expect(preferences.getByRole("button", { name: "Restore from ZIP…", exact: true })).toHaveCount(0);
+  await expect(preferences.getByRole("region", { name: "Restore a backup" })).toContainText("open RBXport Restore");
   await table.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(preferences.getByText("Backup deleted.")).toBeVisible();
   await expect(preferences.getByText("No backups yet.")).toBeVisible();
@@ -86,7 +76,7 @@ test("library editing is available before creating any backups", async ({ page }
   await expect(title).toHaveText("Edited without a backup");
 });
 
-test("changing the default folder keeps old ZIPs restorable and saves new backups there", async ({ page }) => {
+test("changing the default folder keeps old ZIPs in place and saves new backups there", async ({ page }) => {
   await page.goto("/?writable=1");
   const settings = page.getByRole("banner").getByRole("button", { name: "Settings" });
   const preferences = page.getByRole("dialog", { name: "Preferences", exact: true });
@@ -97,20 +87,6 @@ test("changing the default folder keeps old ZIPs restorable and saves new backup
   await expect(table.locator("tbody tr")).toHaveCount(1);
   await preferences.getByRole("button", { name: "Change folder…", exact: true }).click();
   await expect(preferences.getByText("Default backup folder updated.")).toBeVisible();
-  await expect(table).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  const title = page.locator('[role="gridcell"][data-col="title"]').nth(3);
-  const original = await title.innerText();
-  await title.click();
-  await title.click();
-  await title.locator("input").fill("Changed after changing folder");
-  await title.locator("input").press("Enter");
-  await expect(title).toHaveText("Changed after changing folder");
-  await settings.click();
-  await preferences.getByRole("tab", { name: "Backups", exact: true }).click();
-  await preferences.getByRole("button", { name: "Restore from ZIP…", exact: true }).click();
-  await expect(preferences.getByText("Backup restored.")).toBeVisible();
-  await expect(title).toHaveText(original);
   await expect(table).toHaveCount(0);
   await expect(preferences.getByRole("link", { name: "/Users/mock/Music/Moved", exact: true })).toBeVisible();
   await preferences.getByRole("button", { name: "Create backup", exact: true }).click();

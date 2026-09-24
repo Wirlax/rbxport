@@ -5,11 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BackupsPane } from "./BackupsPane";
 
 const held = vi.hoisted(() => ({
-  preferences: { advanced: { protectLibrary: false } },
-  backend: { backupSizes: vi.fn(), startBackup: vi.fn(), cancelBackup: vi.fn(), backupProgress: vi.fn(), backupDirectory: vi.fn(), listBackups: vi.fn(), backUpLibrary: vi.fn(), restoreBackup: vi.fn(), pickBackupZip: vi.fn(), setBackupDirectory: vi.fn(), pickFolder: vi.fn(), deleteBackup: vi.fn(), confirm: vi.fn() },
+  backend: { backupSizes: vi.fn(), startBackup: vi.fn(), cancelBackup: vi.fn(), backupProgress: vi.fn(), backupDirectory: vi.fn(), listBackups: vi.fn(), backUpLibrary: vi.fn(), setBackupDirectory: vi.fn(), pickFolder: vi.fn(), deleteBackup: vi.fn(), confirm: vi.fn() },
 }));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
-vi.mock("@/store/usePreferences", () => ({ usePreferences: () => held.preferences }));
 let host: HTMLDivElement;
 let root: Root;
 const entry = { path: "/backups/library-test.zip", name: "library-test.zip", bytes: 1048576, createdAt: 1700000000000, includesAnalysis: true };
@@ -17,7 +15,6 @@ const button = (name: string) => [...host.querySelectorAll("button")].find(b => 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.resetAllMocks();
-  held.preferences.advanced.protectLibrary = false;
   held.backend.listBackups.mockResolvedValue([entry]);
   held.backend.backupDirectory.mockResolvedValue("/backups");
   held.backend.confirm.mockResolvedValue(false);
@@ -26,31 +23,29 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
-it("cancelling restore or delete leaves the backup and library untouched", async () => {
+it("cancelling delete leaves the backup untouched", async () => {
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  await act(async () => { button("Restore").click(); await Promise.resolve(); });
   await act(async () => { button("Delete").click(); await Promise.resolve(); });
-  expect(held.backend.confirm).toHaveBeenCalledTimes(2);
-  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
+  expect(held.backend.confirm).toHaveBeenCalledTimes(1);
   expect(held.backend.deleteBackup).not.toHaveBeenCalled();
   expect(host.querySelectorAll("tbody tr")).toHaveLength(1);
 });
-it("library protection disables restore, but allows creating and deleting backups", async () => {
-  held.preferences.advanced.protectLibrary = true;
+it("offers no restore here and points to RBXport Restore instead", async () => {
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  expect(button("Restore").disabled).toBe(true);
-  expect(button("Restore from ZIP…").disabled).toBe(true);
-  expect(button("Change folder…").disabled).toBe(false);
+  expect(button("Restore")).toBeUndefined();
+  expect(button("Restore from ZIP…")).toBeUndefined();
+  const guidance = host.querySelector('[aria-label="Restore a backup"]');
+  expect(guidance?.querySelector("h4")?.textContent).toBe("Restore a backup");
+  expect(guidance?.textContent).toContain("open RBXport Restore");
+  expect(guidance?.querySelector("button")).toBeNull();
   expect(button("Create backup").disabled).toBe(false);
+  expect(button("Change folder…").disabled).toBe(false);
   expect(button("Delete").disabled).toBe(false);
 });
-it("shows a restore error and re-enables the controls", async () => {
-  held.backend.confirm.mockResolvedValue(true);
-  held.backend.restoreBackup.mockRejectedValue(new Error("Backup is damaged"));
-  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  await act(async () => { button("Restore").click(); await Promise.resolve(); });
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Backup is damaged");
-  expect(button("Restore").disabled).toBe(false);
+it("tells the user to quit rekordbox before creating a backup when read-only", async () => {
+  await act(async () => { root.render(<BackupsPane readOnly />); await Promise.resolve(); });
+  expect(host.textContent).toContain("Quit rekordbox before creating a backup.");
+  expect(button("Create backup").disabled).toBe(true);
 });
 it("reconnects to a background job after reopening Preferences and can stop it", async () => {
   vi.useFakeTimers();
@@ -62,7 +57,7 @@ it("reconnects to a background job after reopening Preferences and can stop it",
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
   await act(async () => { button("Create backup").click(); await Promise.resolve(); });
   expect(button("Create backup")).toBeUndefined();
-  expect(button("Restore").disabled).toBe(true);
+  expect(button("Delete").disabled).toBe(true);
   expect(host.querySelector('[role="status"]')?.textContent).toContain("50%");
   expect(host.querySelector('[aria-label="Current backup item"]')?.textContent).toBe("Database · master.db");
   held.backend.backupProgress.mockResolvedValue({ ...progress, currentItem: "Analysis files · USBANLZ/001/ANLZ0000.DAT" });
@@ -182,47 +177,16 @@ it("changes the default folder and refreshes the list without moving or deleting
   expect(held.backend.deleteBackup).not.toHaveBeenCalled();
   expect(host.querySelectorAll("tbody tr")).toHaveLength(0);
   expect(host.textContent).toContain("Default backup folder updated.");
-  expect(button("Restore from ZIP…").disabled).toBe(false);
   expect(host.querySelector('[role="link"]')?.textContent).toBe("/Volumes/Archive");
 });
 
-it("cancelling either picker does not change the destination or restore anything", async () => {
+it("cancelling the folder picker does not change the destination", async () => {
   held.backend.pickFolder.mockResolvedValue(null);
-  held.backend.pickBackupZip.mockResolvedValue(null);
   await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
   await act(async () => { button("Change folder…").click(); await Promise.resolve(); });
-  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
   expect(held.backend.setBackupDirectory).not.toHaveBeenCalled();
-  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
   expect(held.backend.confirm).not.toHaveBeenCalled();
-});
-
-it("restores an external ZIP from an empty list only after confirmation", async () => {
-  const external = { ...entry, path: "/Volumes/Archive/renamed.zip" };
-  held.backend.listBackups.mockResolvedValue([]);
-  held.backend.pickBackupZip.mockResolvedValue(external);
-  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
-  expect(held.backend.confirm).toHaveBeenCalledWith(expect.stringContaining(external.path));
-  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
-  held.backend.confirm.mockResolvedValue(true);
-  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
-  expect(held.backend.restoreBackup).toHaveBeenCalledWith(external.path);
-  expect(host.textContent).toContain("Backup restored.");
-});
-
-it("rechecks Library Protection after choosing a ZIP", async () => {
-  held.backend.confirm.mockResolvedValue(true);
-  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  // The preference changes in another window while the native picker is open.
-  let resolvePicker!: (value: typeof entry) => void;
-  held.backend.pickBackupZip.mockReturnValue(new Promise(resolve => { resolvePicker = resolve; }));
-  await act(async () => { button("Restore from ZIP…").click(); await Promise.resolve(); });
-  held.preferences.advanced.protectLibrary = true;
-  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
-  await act(async () => { resolvePicker(entry); await Promise.resolve(); });
-  expect(held.backend.restoreBackup).not.toHaveBeenCalled();
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Turn off Library Protection");
+  expect(host.querySelector('[role="link"]')?.textContent).toBe("/backups");
 });
 
 it("a destination failure keeps the previous folder and makes actions available again", async () => {

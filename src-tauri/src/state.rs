@@ -80,11 +80,7 @@ impl AppState {
     /// not chosen here: it arrives with the library, in [`Self::set_library`].
     pub fn with_backups(backup_dir: impl Into<std::path::PathBuf>) -> Self {
         let backup_dir = backup_dir.into();
-        let backup_destination = match std::fs::read(backup_dir.join("backup-destination.json")) {
-            Ok(bytes) => serde_json::from_slice::<std::path::PathBuf>(&bytes)
-                .ok().filter(|path| path.is_absolute()).unwrap_or_else(|| backup_dir.clone()),
-            Err(_) => backup_dir.clone(),
-        };
+        let backup_destination = rbl_backup::default_destination(&backup_dir);
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
             analysis_write: parking_lot::Mutex::new(()),
@@ -127,7 +123,7 @@ impl AppState {
         check().map_err(|e| AppError::internal(format!("The backup folder is not writable: {e}")))?;
         crate::durable::create_dir_all(&self.backup_dir).map_err(|e| AppError::internal(e.to_string()))?;
         let bytes = serde_json::to_vec(&directory).map_err(|e| AppError::internal(e.to_string()))?;
-        crate::durable::write(&self.backup_dir.join("backup-destination.json"), &bytes)
+        crate::durable::write(&self.backup_dir.join(rbl_backup::DESTINATION_FILE), &bytes)
             .map_err(|e| AppError::internal(format!("The backup folder setting could not be saved: {e}")))?;
         self.backup_destination.write().clone_from(&directory);
         Ok(directory.to_string_lossy().into_owned())
@@ -425,11 +421,10 @@ impl AppState {
     }
 }
 
-/// Where manual backups of the installed library go.
+/// Where manual backups of the installed library go, and the recovery
+/// state RBXport Restore shares.
 fn default_backup_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("rbxport/backups")
+    rbl_backup::state_dir()
 }
 
 /// A view of either kind, on its way into the table.

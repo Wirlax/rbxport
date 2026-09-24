@@ -3588,6 +3588,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-backup"
+version = "0.15.1"
+dependencies = [
+ "crc32fast",
+ "dirs 5.0.1",
+ "flate2",
+ "fs2",
+ "rbl-core",
+ "rbl-db",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "rbl-core"
 version = "0.15.1"
 dependencies = [
@@ -3821,6 +3841,7 @@ dependencies = [
  "rbl-analysis",
  "rbl-anlz",
  "rbl-audio",
+ "rbl-backup",
  "rbl-core",
  "rbl-db",
  "rbl-deck",

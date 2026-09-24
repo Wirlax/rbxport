@@ -4,7 +4,6 @@ import { getBackend } from "@/ipc/client";
 import type { Backend, Backup } from "@/ipc/types";
 import { formatBytes } from "@/lib/format";
 import { useBackupProgress } from "@/store/useBackupProgress";
-import { usePreferences } from "@/store/usePreferences";
 import { Button, Section } from "./controls";
 import styles from "./BackupsPane.module.css";
 import { BackupSizeChart } from "./BackupSizeChart";
@@ -18,9 +17,6 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const preferences = usePreferences();
-  const protectedLibrary = useRef(preferences.advanced.protectLibrary);
-  protectedLibrary.current = preferences.advanced.protectLibrary;
   const running = useRef(false);
   useEffect(() => {
     let live = true;
@@ -51,21 +47,11 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     finally { running.current = false; setBusy(""); }
   };
   const unavailable = loading || busy !== "" || job.progress.running;
-  const restoreUnavailable = unavailable || readOnly || preferences.advanced.protectLibrary;
-  const restore = async (b: Backend, backup: Backup) => {
-    if (protectedLibrary.current) throw new Error("Turn off Library Protection before restoring.");
-    const date = new Date(backup.createdAt).toLocaleString();
-    if (!await b.confirm(`Restore the backup from ${date}?\n\n${backup.path}\n\nThis replaces your current library${backup.includesArtwork ? ", analysis, and artwork" : backup.includesAnalysis ? " and cue/grid analysis" : " database"}. Changes made since this backup will be lost.`)) return "";
-    if (protectedLibrary.current) throw new Error("Turn off Library Protection before restoring.");
-    await b.restoreBackup(backup.path);
-    return "Backup restored.";
-  };
   const copying = job.progress.phase === "copying" && job.progress.totalBytes > 0;
   const percent = Math.min(100, Math.max(0, Math.floor(job.progress.copiedBytes / (job.progress.totalBytes || 1) * 100)));
   const stopping = job.progress.phase === "stopping";
   return <Section title="Backups">
-    {readOnly ? <p className={styles.blockedNotice}>Quit rekordbox before creating or restoring a backup.</p> : null}
-    {preferences.advanced.protectLibrary ? <p className={layout.notice}>Library Protection is on. Turn it off in Advanced to restore a backup.</p> : null}
+    {readOnly ? <p className={styles.blockedNotice}>Quit rekordbox before creating a backup.</p> : null}
     {error || job.error ? <p role="alert" className={styles.error}>{error || job.error}</p> : null}
 
     <BackupSizeChart />
@@ -123,7 +109,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
     {loading ? <p className={styles.status} role="status">Loading backups…</p> : null}
     {!loading && backups.length === 0 ? <div className={layout.empty}>
       <strong>{error ? "Backups unavailable" : "No backups yet."}</strong>
-      <p>{error ? "Reopen this page to try again." : "Create a backup, or restore from a ZIP you’ve saved elsewhere."}</p>
+      <p>{error ? "Reopen this page to try again." : "Create a backup to see it here."}</p>
     </div> : null}
     {backups.length > 0 ? <div className={styles.tableScroll}><table className={styles.table} aria-label="Library backups">
       <thead><tr><th>Date</th><th>Time</th><th>Size</th><th>Actions</th></tr></thead>
@@ -135,7 +121,6 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
           <td><time dateTime={created.toISOString()}>{created.toLocaleTimeString()}</time></td>
           <td className={styles.size}>{formatBytes(backup.bytes)}</td>
           <td><div className={styles.actions}>
-            <Button className={styles.backupButton} disabled={restoreUnavailable} onClick={() => void run("Restoring backup…", b => restore(b, backup))}>Restore</Button>
             <Button className={`${styles.backupButton} ${styles.deleteButton}`} disabled={unavailable} onClick={() => void run("Deleting backup…", async b => {
               if (!await b.confirm(`Delete the backup from ${date}? This cannot be undone.`)) return "";
               await b.deleteBackup(backup.path); return "Backup deleted.";
@@ -144,17 +129,11 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
         </tr>;
       })}</tbody>
     </table></div> : null}
-    <section className={`${styles.destination} ${styles.restoreFile}`} aria-label="Restore RBXport backup file">
+    <section className={`${styles.destination} ${styles.restoreFile}`} aria-label="Restore a backup">
       <div>
-        <h4 className={styles.sectionHeading}>Restore RBXport backup file</h4>
-        <p className={layout.help}>Choose a backup ZIP saved anywhere on your computer or an external drive.</p>
+        <h4 className={styles.sectionHeading}>Restore a backup</h4>
+        <p className={layout.help}>To restore, quit RBXport and open RBXport Restore. It shows what each backup holds and lets you restore all of it or only some parts.</p>
       </div>
-      <Button className={styles.backupButton} disabled={restoreUnavailable} onClick={() => void run("Choosing a backup ZIP…", async b => {
-        const backup = await b.pickBackupZip();
-        if (!backup) return "";
-        setBusy("Restoring backup…");
-        return restore(b, backup);
-      })}>Restore from ZIP…</Button>
     </section>
   </Section>;
 }

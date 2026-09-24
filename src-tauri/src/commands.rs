@@ -1438,13 +1438,6 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
             .into_iter()
             .map(|device| {
                 let found = rbl_devices::inspect(&device.mount_point);
-                let (availability, import_error) = match crate::usb_import::availability(&device.mount_point) {
-                    Ok(available) => (available, None),
-                    Err(error) => {
-                        tracing::warn!(path = %device.mount_point.display(), error = %error, "USB import inspection failed");
-                        (crate::usb_import::ImportAvailability::default(), Some(error.message))
-                    }
-                };
                 DeviceDto {
                     name: device.name,
                     path: device.mount_point.to_string_lossy().into_owned(),
@@ -1453,9 +1446,6 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
                     file_system: device.file_system,
                     removable: device.removable,
                     volume_id: device.volume_id,
-                    importable_history: availability.history,
-                    importable_settings: availability.settings,
-                    import_error,
                     export: found.map(|export| DeviceExportDto {
                         tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
                         playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),
@@ -2874,41 +2864,9 @@ pub async fn delete_backup(state: State<'_, Arc<AppState>>, path: String) -> App
 }
 
 #[tauri::command]
-pub async fn inspect_backup(state: State<'_, Arc<AppState>>, path: String) -> AppResult<BackupDto> {
-    let state = Arc::clone(&state);
-    blocking("inspect_backup", move || crate::backups::inspect_archive(&state, std::path::Path::new(&path))).await
-}
-
-#[tauri::command]
 pub async fn set_backup_directory(state: State<'_, Arc<AppState>>, directory: String) -> AppResult<String> {
     let state = Arc::clone(&state);
     blocking("set_backup_directory", move || state.set_backup_destination(std::path::Path::new(&directory))).await
-}
-
-#[tauri::command]
-pub async fn restore_backup<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    state: State<'_, Arc<AppState>>,
-    editor: State<'_, Arc<crate::grid::GridEditor>>,
-    player: State<'_, Arc<crate::player::Player>>,
-    path: String,
-) -> AppResult<u32> {
-    let state = Arc::clone(&state);
-    let restoring = Arc::clone(&state);
-    let generation = blocking("restore_backup", move || {
-        let _gate = restoring.edit_gate.lock();
-        crate::backups::restore(&restoring, std::path::Path::new(&path))?;
-        let db = restoring.open_read_only().map_err(write_error)?;
-        refresh_after_edit(&restoring, &db, Touched::Tracks).map_err(write_error)
-    }).await?;
-    editor.clear_history();
-    if let Some(engine) = player.opened() {
-        engine.unload(crate::player::deck_of("A"));
-        engine.unload(crate::player::deck_of("B"));
-    }
-    player.loaded_tracks.lock().clear();
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(generation)
 }
 
 /// A play: the track goes on today's history session and its play count
