@@ -526,7 +526,7 @@ mod tests {
             entry.unix_mode()
         };
         assert!(shell.starts_with("#!/usr/bin/env bash"));
-        assert!(shell.contains(&location.master_db.to_string_lossy().as_ref()));
+        assert!(shell.contains(location.master_db.to_string_lossy().as_ref()));
         assert_eq!(shell_mode.unwrap() & 0o111, 0o111);
         let mut powershell = String::new();
         archive

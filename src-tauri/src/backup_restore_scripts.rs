@@ -225,6 +225,7 @@ Write-Host "The previous files are saved at: $Rollback"
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
