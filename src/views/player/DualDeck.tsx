@@ -33,6 +33,8 @@ export interface DualHeadProps {
   sleeve: ReactNode;
   keyControl: ReactNode;
   bpmX100: number;
+  baseBpmX100: number;
+  onBpmChange: (bpm: number) => void;
   /** BEAT SYNC: pull this deck to the master. Disabled while this deck is it. */
   onBeatSync: () => void;
   /** BEAT SYNC is lit: the deck is following the master's tempo. */
@@ -50,7 +52,7 @@ export interface DualHeadProps {
  * it there, and the row itself is the same either way up.
  */
 export const DualHead = memo(function DualHead({
-  track, positionSource, total, sleeve, keyControl, bpmX100, onBeatSync, synced, isMaster, onMaster,
+  track, positionSource, total, sleeve, keyControl, bpmX100, baseBpmX100, onBpmChange, onBeatSync, synced, isMaster, onMaster,
 }: DualHeadProps) {
   const tip = useTooltip();
   return (
@@ -74,7 +76,7 @@ export const DualHead = memo(function DualHead({
               <span className={styles.cell}>
                 <TimeReadouts source={positionSource} total={total} classes={styles} />
               </span>
-              <TempoToggle className={styles.cell} bpmX100={bpmX100} />
+              <TempoToggle className={styles.cell} bpmX100={bpmX100} baseBpmX100={baseBpmX100} onBpmChange={onBpmChange} />
             </>
           ) : null}
         </div>

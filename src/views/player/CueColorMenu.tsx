@@ -37,7 +37,7 @@ export function CueColorMenu({ x, y, memory, onChoose, onClose }: {
   }, [x, y, memory]);
   const choose = (value: number | null) => { onChoose(value); onClose(); };
   return createPortal(
-    <div ref={menu} className={styles.menu} role="menu" aria-label={`${memory ? "Memory" : "Hot"} cue color`} style={{left: x, top: y}}>
+    <div ref={menu} className={`${styles.menu} ${memory ? "" : styles.hotMenu}`} role="menu" aria-label={`${memory ? "Memory" : "Hot"} cue color`} style={{left: x, top: y}}>
       {memory ? MEMORY.map(([name, color], index) => (
         <button key={name} role="menuitem" className={styles.memory} onClick={() => choose(index)}>
           <span className={styles.dot} style={{background: color}} />{name}

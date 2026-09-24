@@ -254,6 +254,8 @@
   border-color: var(--c-pad-active);
   color: var(--c-icon-on);
 }
+.controls button:hover:not(:disabled) { background: #383838; color: #fff; }
+.controls button[data-on]:hover:not(:disabled) { background: #4a82ed; border-color: #4a82ed; }
 
 /* The two fields print their number in a regular face a size up. */
 .loopField,

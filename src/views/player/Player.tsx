@@ -1406,6 +1406,14 @@ export const Player = memo(function Player({
     playback.setTempo(1);
   }, [synced, onSyncToggle, playback]);
 
+  /** The readout edits the deck's playing BPM, leaving the track's beat grid alone. */
+  const setDisplayedBpm = useCallback((bpm: number) => {
+    if (bpmX100 <= 0) return;
+    if (synced) onSyncToggle?.();
+    setTempoResetLocked(false);
+    playback.setTempo(bpm * 100 / bpmX100);
+  }, [bpmX100, synced, onSyncToggle, playback]);
+
   /*
    * The deck's keys, from rekordbox's own Export key map — see `shortcuts.ts`.
    *
@@ -1631,6 +1639,9 @@ export const Player = memo(function Player({
         onToggle={togglePlay}
         positionSource={playback}
         total={total}
+        bpmX100={Math.round(bpmX100 * playback.tempo)}
+        baseBpmX100={bpmX100}
+        onBpmChange={setDisplayedBpm}
         cues={cues}
         grid={grid}
         cuePoint={cuePoint}
@@ -1896,6 +1907,8 @@ export const Player = memo(function Player({
             keyControl={<KeyShift musicalKey={track ? formatKey(track.key, viewPrefs.keyDisplay) : ""}
               shift={playback.keyShift} disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />}
             bpmX100={Math.round(bpmX100 * playback.tempo)}
+            baseBpmX100={bpmX100}
+            onBpmChange={setDisplayedBpm}
             onBeatSync={beatSync}
             synced={synced}
             isMaster={isMaster}
@@ -1914,7 +1927,7 @@ export const Player = memo(function Player({
                 <KeyShift musicalKey={formatKey(track.key, viewPrefs.keyDisplay)} shift={playback.keyShift}
                   disabled={playback.idle || !playback.shiftsKey} onChange={playback.setKeyShift} />
               </div>
-              <TempoToggle className={styles.readout} bpmX100={Math.round(bpmX100 * playback.tempo)} />
+              <TempoToggle className={styles.readout} bpmX100={Math.round(bpmX100 * playback.tempo)} baseBpmX100={bpmX100} onBpmChange={setDisplayedBpm} />
             </>
           ) : null}
           {/* Sync belongs to the two-deck layouts and to nothing else: one

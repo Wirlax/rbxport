@@ -637,6 +637,22 @@ fn a_cue_added_through_the_command_is_read_back_and_announced() {
     assert!(announced.iter().all(|t| *t == track));
 }
 
+#[test]
+fn a_cue_added_outside_the_app_appears_without_reloading_the_library() {
+    let s = shell();
+    let track = track_id(4);
+    assert!(run(commands::track_cues(s.state(), track.clone())).unwrap().is_empty());
+
+    // Rekordbox can write a cue while RBX still holds its startup snapshot.
+    let mut external = rbl_db::write::Writer::open(s.state().location().unwrap(), s._dir.path().join("external-backups")).unwrap();
+    external.add_cue(&track, 7, 61).unwrap(); // Hot Cue F
+    drop(external);
+
+    let cues = run(commands::track_cues(s.state(), track)).unwrap();
+    assert_eq!(cues.len(), 1);
+    assert_eq!((cues[0].letter.as_str(), cues[0].position_ms), ("F", 61));
+}
+
 /// Collects every `cues:changed` the command emits, and waits for them: the
 /// emit is the last thing each edit does and the listener runs off-thread.
 fn cue_announcements(s: &Shell) -> impl Fn(usize) -> Vec<String> {

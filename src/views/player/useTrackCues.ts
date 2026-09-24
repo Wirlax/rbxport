@@ -50,6 +50,9 @@ export function useTrackCues(
         loaded.current?.(found);
       }
     };
+    // Returning from rekordbox is when its cue edits become visible here.
+    const onFocus = () => { void fetch(); };
+    window.addEventListener("focus", onFocus);
 
     void (async () => {
       const backend = await getBackend();
@@ -67,6 +70,7 @@ export function useTrackCues(
 
     return () => {
       live = false;
+      window.removeEventListener("focus", onFocus);
       stopCues?.();
       stopLibrary?.();
     };

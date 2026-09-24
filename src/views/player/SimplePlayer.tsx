@@ -19,8 +19,8 @@ import { memo } from "react";
 import type { Cue, DeckId, RowDto } from "@/ipc/types";
 import { Artwork } from "@/components/Artwork";
 import { EjectIcon, RecordIcon } from "@/components/icons";
-import { formatBpm } from "@/lib/format";
 import type { BeatGrid } from "@/lib/player";
+import { TempoToggle } from "./TempoToggle";
 import { TimeReadouts, type PositionSource } from "./TimeReadouts";
 import { CueMarkers, OverviewTempoMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
@@ -45,6 +45,9 @@ export interface SimplePlayerProps {
   positionSource: PositionSource;
   /** Seconds in the track, or 0 while nothing is loaded. */
   total: number;
+  bpmX100: number;
+  baseBpmX100: number;
+  onBpmChange: (bpm: number) => void;
   cues: readonly Cue[];
   grid: BeatGrid;
   /** Where CUE returns to, in seconds: the amber triangle under the overview. */
@@ -64,7 +67,7 @@ export interface SimplePlayerProps {
 
 export const SimplePlayer = memo(function SimplePlayer({
   track, deck, shell, armed, droppable, onDragOver, onDrop,
-  playing, idle, onToggle, positionSource, total, cues, grid, cuePoint,
+  playing, idle, onToggle, positionSource, total, bpmX100, baseBpmX100, onBpmChange, cues, grid, cuePoint,
   overviewRef, overview, overviewHead, scrubFill, onScrubStart, onScrubMove, onScrubEnd,
   onEject, onLoadSelected,
 }: SimplePlayerProps) {
@@ -131,7 +134,9 @@ export const SimplePlayer = memo(function SimplePlayer({
                 <TimeReadouts source={positionSource} total={total} classes={styles} testId="simple-player-time" />
               </span>
               <span className={styles.key} data-testid="simple-player-key">{formatKey(track.key, keyDisplay)}</span>
-              <span className={styles.bpm} data-testid="simple-player-bpm">{formatBpm(track.bpmX100)}</span>
+              <span className={styles.bpm} data-testid="simple-player-bpm">
+                <TempoToggle bpmX100={bpmX100} baseBpmX100={baseBpmX100} onBpmChange={onBpmChange} />
+              </span>
             </>
           ) : null}
         </div>

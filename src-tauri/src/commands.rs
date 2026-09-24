@@ -2112,12 +2112,16 @@ pub async fn track_cues(
             "#66DD42", "#56BDF3", "#204FEF", "#8B1EEF",
         ];
         let Some(row) = library.row_of(&track) else { return Ok(Vec::new()) };
-        let comments = cue_state
-            .read_db(|db| rbl_db::details::cue_comments(db.connection(), &track))
-            .map_err(write_error)?;
-        let memory_colours = cue_state
-            .read_db(|db| rbl_db::details::memory_cue_colours(db.connection(), &track))
-            .map_err(write_error)?;
+        // Rekordbox may have added cues since the library snapshot was built.
+        // Refresh this track before reading its comments and colours so the
+        // panel and waveform see the same current set of cues.
+        let (comments, memory_colours) = cue_state.read_db(|db| {
+            rbl_index::reload_cues_of(db, &library, &track)?;
+            Ok((
+                rbl_db::details::cue_comments(db.connection(), &track)?,
+                rbl_db::details::memory_cue_colours(db.connection(), &track)?,
+            ))
+        }).map_err(write_error)?;
         Ok(library
             .cues_of(row)
             .iter()

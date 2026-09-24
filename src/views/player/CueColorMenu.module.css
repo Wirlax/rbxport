@@ -1,6 +1,7 @@
 .menu {
   position: fixed;
   z-index: 60;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-width: 214px;
@@ -11,13 +12,15 @@
   color: var(--c-context-menu-text);
   font: 400 var(--f-size-menu) var(--f-ui);
 }
+.hotMenu { width: 142px; min-width: 0; padding: 0; }
 .menu button { border: 0; color: inherit; font: inherit; cursor: default; }
 .memory, .reset, .comments { height: 25px; padding: 0 20px; background: transparent; text-align: left; }
 .memory:hover, .reset:hover { background: var(--c-accent); }
 .dot { display: inline-block; width: 9px; height: 9px; margin-right: 14px; border-radius: 50%; box-shadow: 0 0 3px currentColor; }
-.comments { margin: -5px 8px 8px; height: 32px; border-bottom: 1px solid var(--c-context-menu-separator) !important; text-align: center; }
+.comments { margin: 0 5px 8px; height: 32px; border-bottom: 1px solid var(--c-context-menu-separator) !important; text-align: center; }
 .comments:disabled { color: inherit; opacity: 1; }
-.grid { display: grid; grid-template-columns: repeat(4, 36px); gap: 9px 12px; padding: 8px 50px 12px; }
-.grid button { width: 36px; height: 36px; padding: 0; }
+.grid { display: grid; grid-template-columns: repeat(4, 18px); gap: 6px; padding: 0 25px 8px; }
+.grid button { width: 18px; height: 18px; padding: 0; }
 .grid button:hover { outline: 2px solid white; outline-offset: 1px; }
-.reset { height: 40px; padding-left: 50px; }
+.reset { height: 40px; padding-left: 20px; }
+.hotMenu .reset { height: 24px; padding-left: 25px; }
