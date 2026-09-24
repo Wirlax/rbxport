@@ -80,6 +80,8 @@ pub fn copy(source: &Path, target: &Path) -> std::io::Result<u64> {
 struct PublicationEntry {
     path: std::path::PathBuf,
     present: bool,
+    #[serde(default)]
+    had_target: Option<bool>,
 }
 
 /// Durable commit intent for a set of files. Recovery rolls publication forward
@@ -152,9 +154,12 @@ impl Publication {
                     .open(&image)?
                     .sync_all()?;
             }
+            let target = self.root.join(path);
+            let had_target = target.try_exists()? && std::fs::metadata(&target)?.is_file();
             entries.push(PublicationEntry {
                 path: path.clone(),
                 present,
+                had_target: Some(had_target),
             });
             let mut parent = image.parent();
             while let Some(dir) = parent.filter(|p| p.starts_with(self.stage.path())) {
@@ -204,37 +209,7 @@ impl Publication {
                 String::from_utf8_lossy(&std::fs::read(incomplete)?)
             )));
         }
-        // Recovery may run long after a failed publication. If another writer
-        // changed a real file in the meantime, do not replay an older image
-        // over it. Check the whole set before moving any more real files.
-        let published_at = std::fs::metadata(journal.join("publication.json"))?
-            .modified()?
-            .checked_add(Duration::from_secs(2))
-            .ok_or_else(|| std::io::Error::other("Invalid publication timestamp"))?;
-        for entry in &entries {
-            if is_appledouble(&entry.path) {
-                continue;
-            }
-            let target = root.join(&entry.path);
-            if !target.try_exists()? || std::fs::metadata(&target)?.modified()? <= published_at {
-                continue;
-            }
-            let image = journal.join(&entry.path);
-            let previous = journal.join(".previous").join(&entry.path);
-            let expected = if entry.present && image.try_exists()? {
-                Some(image.as_path())
-            } else if previous.try_exists()? {
-                Some(previous.as_path())
-            } else {
-                None
-            };
-            if !expected.is_some_and(|path| same_file_contents(&target, path).unwrap_or(false)) {
-                return Err(std::io::Error::other(format!(
-                    "Publication conflict at {}; the device changed after sync failed and recovery data was retained",
-                    entry.path.display()
-                )));
-            }
-        }
+        check_external_changes(root, journal, &entries)?;
         #[cfg(unix)]
         let root_handle = std::fs::File::open(root)?;
         // The previous generation stays inside the journal until every new
@@ -272,6 +247,15 @@ impl Publication {
             }
             if entry.present {
                 if image.try_exists()? {
+                    if entry.had_target == Some(true)
+                        && !target.try_exists()?
+                        && !previous.try_exists()?
+                    {
+                        return Err(std::io::Error::other(format!(
+                            "Publication target vanished at {}; recovery data was retained",
+                            entry.path.display()
+                        )));
+                    }
                     if target.try_exists()? {
                         if target.is_dir() {
                             return Err(std::io::Error::other(format!(
@@ -282,6 +266,12 @@ impl Publication {
                         if previous.try_exists()? {
                             return Err(std::io::Error::other(format!(
                                 "Publication conflict at {}; recovery data was retained",
+                                entry.path.display()
+                            )));
+                        }
+                        if entry.had_target == Some(false) {
+                            return Err(std::io::Error::other(format!(
+                                "Publication target appeared at {}; recovery data was retained",
                                 entry.path.display()
                             )));
                         }
@@ -296,13 +286,15 @@ impl Publication {
                     }
                     std::fs::rename(&image, &target)?;
                     sync_dir(target.parent().unwrap_or(root))?;
-                } else if !target.try_exists()? {
+                } else if !target.try_exists()?
+                    || (entry.had_target == Some(true) && !previous.try_exists()?)
+                {
                     // A lost new image must never silently become a deletion.
                     // Mark this journal before restoring the old file, so a
                     // later recovery cannot mistake that old file for a
                     // successfully published new image.
                     write(&incomplete, entry.path.to_string_lossy().as_bytes())?;
-                    if previous.try_exists()? {
+                    if previous.try_exists()? && !target.try_exists()? {
                         if let Some(parent) = target.parent() {
                             create_dir_all(parent)?;
                         }
@@ -314,6 +306,12 @@ impl Publication {
                     )));
                 }
             } else if target.try_exists()? {
+                if entry.had_target == Some(false) {
+                    return Err(std::io::Error::other(format!(
+                        "Publication target appeared at {}; recovery data was retained",
+                        entry.path.display()
+                    )));
+                }
                 if previous.try_exists()? {
                     return Err(std::io::Error::other(format!(
                         "Publication conflict at {}; recovery data was retained",
@@ -345,6 +343,44 @@ fn is_appledouble(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with("._"))
+}
+
+/// Check all real paths before replay so a late conflict cannot cause another
+/// partially applied pass over a device that has changed since publication.
+fn check_external_changes(
+    root: &Path,
+    journal: &Path,
+    entries: &[PublicationEntry],
+) -> std::io::Result<()> {
+    let published_at = std::fs::metadata(journal.join("publication.json"))?
+        .modified()?
+        .checked_add(Duration::from_secs(2))
+        .ok_or_else(|| std::io::Error::other("Invalid publication timestamp"))?;
+    for entry in entries {
+        if is_appledouble(&entry.path) {
+            continue;
+        }
+        let target = root.join(&entry.path);
+        if !target.try_exists()? || std::fs::metadata(&target)?.modified()? <= published_at {
+            continue;
+        }
+        let image = journal.join(&entry.path);
+        let previous = journal.join(".previous").join(&entry.path);
+        let expected = if entry.present && image.try_exists()? {
+            Some(image.as_path())
+        } else if previous.try_exists()? {
+            Some(previous.as_path())
+        } else {
+            None
+        };
+        if !expected.is_some_and(|path| same_file_contents(&target, path).unwrap_or(false)) {
+            return Err(std::io::Error::other(format!(
+                "Publication conflict at {}; the device changed after sync failed and recovery data was retained",
+                entry.path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn same_file_contents(left: &Path, right: &Path) -> std::io::Result<bool> {
@@ -520,18 +556,22 @@ mod tests {
             PublicationEntry {
                 path: "PIONEER/._rekordbox".into(),
                 present: true,
+                had_target: None,
             },
             PublicationEntry {
                 path: "Contents/._01".into(),
                 present: true,
+                had_target: None,
             },
             PublicationEntry {
                 path: "Contents/01/._missing.wav".into(),
                 present: true,
+                had_target: None,
             },
             PublicationEntry {
                 path: "PIONEER/rekordbox/exportLibrary.db".into(),
                 present: true,
+                had_target: None,
             },
         ];
         write_file(
@@ -567,6 +607,7 @@ mod tests {
             &serde_json::to_vec(&[PublicationEntry {
                 path: path.into(),
                 present: true,
+                had_target: None,
             }])
             .unwrap(),
         );
@@ -593,6 +634,7 @@ mod tests {
             &serde_json::to_vec(&[PublicationEntry {
                 path: path.into(),
                 present: true,
+                had_target: None,
             }])
             .unwrap(),
         );
@@ -616,6 +658,7 @@ mod tests {
             &serde_json::to_vec(&[PublicationEntry {
                 path: path.into(),
                 present: true,
+                had_target: None,
             }])
             .unwrap(),
         );
@@ -647,10 +690,12 @@ mod tests {
                 PublicationEntry {
                     path: "PIONEER/first.pdb".into(),
                     present: true,
+                    had_target: None,
                 },
                 PublicationEntry {
                     path: db.into(),
                     present: true,
+                    had_target: None,
                 },
             ])
             .unwrap(),
@@ -681,6 +726,7 @@ mod tests {
             &serde_json::to_vec(&[PublicationEntry {
                 path: path.into(),
                 present: true,
+                had_target: None,
             }])
             .unwrap(),
         );
@@ -703,6 +749,7 @@ mod tests {
             &serde_json::to_vec(&[PublicationEntry {
                 path: path.into(),
                 present: false,
+                had_target: None,
             }])
             .unwrap(),
         );
@@ -715,5 +762,52 @@ mod tests {
             std::fs::read(journal.join(".previous").join(path)).unwrap(),
             b"old sqlite writes"
         );
+    }
+
+    #[test]
+    fn vanished_image_cannot_masquerade_as_an_old_database() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&root.path().join(path), b"old db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+                had_target: Some(true),
+            }])
+            .unwrap(),
+        );
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(std::fs::read(root.path().join(path)).unwrap(), b"old db");
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert!(journal.join(".incomplete").exists());
+    }
+
+    #[test]
+    fn newly_appeared_real_target_is_not_overwritten() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&root.path().join(path), b"external db");
+        write_file(&journal.join(path), b"staged db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+                had_target: Some(false),
+            }])
+            .unwrap(),
+        );
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(
+            std::fs::read(root.path().join(path)).unwrap(),
+            b"external db"
+        );
+        assert_eq!(std::fs::read(journal.join(path)).unwrap(), b"staged db");
     }
 }
