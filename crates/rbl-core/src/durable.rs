@@ -1,7 +1,8 @@
 //! Durable replacement through a unique sibling, with data flushed before
 //! rename and the containing directory flushed afterwards on Unix.
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::time::Duration;
 
 pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -112,12 +113,15 @@ impl Publication {
     }
 
     pub fn check_root(&self) -> std::io::Result<()> {
-        #[cfg(unix)] {
+        #[cfg(unix)]
+        {
             use std::os::unix::fs::MetadataExt;
-            let held=self.root_handle.metadata()?;
-            let current=std::fs::metadata(&self.root)?;
-            if held.dev()!=current.dev() || held.ino()!=current.ino() {
-                return Err(std::io::Error::other("The destination volume changed during publication"));
+            let held = self.root_handle.metadata()?;
+            let current = std::fs::metadata(&self.root)?;
+            if held.dev() != current.dev() || held.ino() != current.ino() {
+                return Err(std::io::Error::other(
+                    "The destination volume changed during publication",
+                ));
             }
         }
         Ok(())
@@ -134,6 +138,12 @@ impl Publication {
         let mut entries = Vec::with_capacity(paths.len());
         let mut directories = std::collections::BTreeSet::new();
         for path in paths {
+            // macOS creates AppleDouble companions on removable filesystems.
+            // They are metadata, not part of the exported library, and can
+            // disappear independently while publication is in progress.
+            if is_appledouble(path) {
+                continue;
+            }
             let image = self.stage.path().join(path);
             let present = image.try_exists()?;
             if present {
@@ -187,6 +197,44 @@ impl Publication {
                 .map(|entry| entry.path.clone())
                 .collect::<Vec<_>>(),
         )?;
+        let incomplete = journal.join(".incomplete");
+        if incomplete.try_exists()? {
+            return Err(std::io::Error::other(format!(
+                "Publication image was lost for {}; recovery data was retained",
+                String::from_utf8_lossy(&std::fs::read(incomplete)?)
+            )));
+        }
+        // Recovery may run long after a failed publication. If another writer
+        // changed a real file in the meantime, do not replay an older image
+        // over it. Check the whole set before moving any more real files.
+        let published_at = std::fs::metadata(journal.join("publication.json"))?
+            .modified()?
+            .checked_add(Duration::from_secs(2))
+            .ok_or_else(|| std::io::Error::other("Invalid publication timestamp"))?;
+        for entry in &entries {
+            if is_appledouble(&entry.path) {
+                continue;
+            }
+            let target = root.join(&entry.path);
+            if !target.try_exists()? || std::fs::metadata(&target)?.modified()? <= published_at {
+                continue;
+            }
+            let image = journal.join(&entry.path);
+            let previous = journal.join(".previous").join(&entry.path);
+            let expected = if entry.present && image.try_exists()? {
+                Some(image.as_path())
+            } else if previous.try_exists()? {
+                Some(previous.as_path())
+            } else {
+                None
+            };
+            if !expected.is_some_and(|path| same_file_contents(&target, path).unwrap_or(false)) {
+                return Err(std::io::Error::other(format!(
+                    "Publication conflict at {}; the device changed after sync failed and recovery data was retained",
+                    entry.path.display()
+                )));
+            }
+        }
         #[cfg(unix)]
         let root_handle = std::fs::File::open(root)?;
         // The previous generation stays inside the journal until every new
@@ -195,14 +243,33 @@ impl Publication {
         // over the USB a second time. Every intermediate state is recognizable
         // and recovery always rolls forward.
         for entry in entries {
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::MetadataExt;
-                let held=root_handle.metadata()?; let current=std::fs::metadata(root)?;
-                if held.dev()!=current.dev() || held.ino()!=current.ino() { return Err(std::io::Error::other("Destination volume changed during publication")); }
+                let held = root_handle.metadata()?;
+                let current = std::fs::metadata(root)?;
+                if held.dev() != current.dev() || held.ino() != current.ino() {
+                    return Err(std::io::Error::other(
+                        "Destination volume changed during publication",
+                    ));
+                }
             }
             let image = journal.join(&entry.path);
             let target = root.join(&entry.path);
             let previous = journal.join(".previous").join(&entry.path);
+            if is_appledouble(&entry.path) {
+                // Older journals included these transient files. Preserve an
+                // existing target; if it was moved aside before a crash,
+                // restore it. Never let a sidecar block real library recovery.
+                if !target.try_exists()? && previous.try_exists()? {
+                    if let Some(parent) = target.parent() {
+                        create_dir_all(parent)?;
+                    }
+                    std::fs::rename(&previous, &target)?;
+                    sync_dir(target.parent().unwrap_or(root))?;
+                }
+                continue;
+            }
             if entry.present {
                 if image.try_exists()? {
                     if target.try_exists()? {
@@ -218,20 +285,28 @@ impl Publication {
                                 entry.path.display()
                             )));
                         }
-                        if let Some(parent) = previous.parent() { create_dir_all(parent)?; }
+                        if let Some(parent) = previous.parent() {
+                            create_dir_all(parent)?;
+                        }
                         std::fs::rename(&target, &previous)?;
                         sync_dir(target.parent().unwrap_or(root))?;
                     }
-                    if let Some(parent) = target.parent() { create_dir_all(parent)?; }
+                    if let Some(parent) = target.parent() {
+                        create_dir_all(parent)?;
+                    }
                     std::fs::rename(&image, &target)?;
                     sync_dir(target.parent().unwrap_or(root))?;
                 } else if !target.try_exists()? {
                     // A lost new image must never silently become a deletion.
-                    // Put the old generation back when possible, then stop.
+                    // Mark this journal before restoring the old file, so a
+                    // later recovery cannot mistake that old file for a
+                    // successfully published new image.
+                    write(&incomplete, entry.path.to_string_lossy().as_bytes())?;
                     if previous.try_exists()? {
-                        if let Some(parent) = target.parent() { create_dir_all(parent)?; }
-                        std::fs::rename(&previous, &target)?;
-                        sync_dir(target.parent().unwrap_or(root))?;
+                        if let Some(parent) = target.parent() {
+                            create_dir_all(parent)?;
+                        }
+                        copy(&previous, &target)?;
                     }
                     return Err(std::io::Error::other(format!(
                         "Missing publication image {}; the previous file was restored",
@@ -239,7 +314,9 @@ impl Publication {
                     )));
                 }
             } else if target.try_exists()? && !previous.try_exists()? {
-                if let Some(parent) = previous.parent() { create_dir_all(parent)?; }
+                if let Some(parent) = previous.parent() {
+                    create_dir_all(parent)?;
+                }
                 std::fs::rename(&target, &previous)?;
                 sync_dir(target.parent().unwrap_or(root))?;
             }
@@ -255,6 +332,32 @@ impl Publication {
             return Err(error);
         }
         Ok(())
+    }
+}
+
+fn is_appledouble(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("._"))
+}
+
+fn same_file_contents(left: &Path, right: &Path) -> std::io::Result<bool> {
+    let mut left = std::fs::File::open(left)?;
+    let mut right = std::fs::File::open(right)?;
+    if left.metadata()?.len() != right.metadata()?.len() {
+        return Ok(false);
+    }
+    let mut left_buffer = [0; 16 * 1024];
+    let mut right_buffer = [0; 16 * 1024];
+    loop {
+        let count = left.read(&mut left_buffer)?;
+        if count == 0 {
+            return Ok(true);
+        }
+        right.read_exact(&mut right_buffer[..count])?;
+        if left_buffer[..count] != right_buffer[..count] {
+            return Ok(false);
+        }
     }
 }
 
@@ -275,7 +378,12 @@ fn validate_paths(paths: &[std::path::PathBuf]) -> std::io::Result<()> {
 /// Hold after recovery while inspecting/importing a device. Export publishers
 /// use the matching exclusive lock for the whole operation.
 pub fn read_lock(root: &Path) -> std::io::Result<std::fs::File> {
-    let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(root.join(".rbxport-write.lock"))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join(".rbxport-write.lock"))?;
     fs2::FileExt::lock_shared(&file)?;
     Ok(file)
 }
@@ -295,6 +403,15 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    fn write_file(path: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write(path, bytes).unwrap();
+    }
+    fn mark_newer(path: &Path) {
+        let times = std::fs::FileTimes::new()
+            .set_modified(std::time::SystemTime::now() + Duration::from_secs(10));
+        std::fs::File::open(path).unwrap().set_times(times).unwrap();
+    }
     #[test]
     fn failed_publication_replays_retained_images_and_deletions() {
         let root = tempfile::tempdir().unwrap();
@@ -334,5 +451,265 @@ mod tests {
         drop(publication);
         Publication::recover(root.path(), ".journal").unwrap();
         assert_eq!(std::fs::read(root.path().join("db")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn publication_ignores_appledouble_companions() {
+        let root = tempfile::tempdir().unwrap();
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        write_file(
+            &publication
+                .stage()
+                .join("PIONEER/rekordbox/exportLibrary.db"),
+            b"new db",
+        );
+        write_file(
+            &publication
+                .stage()
+                .join("PIONEER/rekordbox/._exportLibrary.db"),
+            b"metadata",
+        );
+        publication
+            .commit(&[
+                "PIONEER/rekordbox/exportLibrary.db".into(),
+                "PIONEER/rekordbox/._exportLibrary.db".into(),
+            ])
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap(),
+            b"new db"
+        );
+        assert!(!root
+            .path()
+            .join("PIONEER/rekordbox/._exportLibrary.db")
+            .exists());
+    }
+
+    #[test]
+    fn old_sidecar_entries_do_not_block_real_database_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        write_file(
+            &root.path().join("PIONEER/._rekordbox"),
+            b"current metadata",
+        );
+        write_file(&journal.join("PIONEER/._rekordbox"), b"staged metadata");
+        write_file(
+            &journal.join(".previous/PIONEER/._rekordbox"),
+            b"old metadata",
+        );
+        write_file(
+            &journal.join(".previous/Contents/._01"),
+            b"restore metadata",
+        );
+        write_file(
+            &root.path().join("PIONEER/rekordbox/exportLibrary.db"),
+            b"old db",
+        );
+        write_file(
+            &journal.join("PIONEER/rekordbox/exportLibrary.db"),
+            b"new db",
+        );
+        let entries = [
+            PublicationEntry {
+                path: "PIONEER/._rekordbox".into(),
+                present: true,
+            },
+            PublicationEntry {
+                path: "Contents/._01".into(),
+                present: true,
+            },
+            PublicationEntry {
+                path: "Contents/01/._missing.wav".into(),
+                present: true,
+            },
+            PublicationEntry {
+                path: "PIONEER/rekordbox/exportLibrary.db".into(),
+                present: true,
+            },
+        ];
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&entries).unwrap(),
+        );
+
+        Publication::recover(root.path(), ".journal").unwrap();
+
+        assert_eq!(
+            std::fs::read(root.path().join("PIONEER/._rekordbox")).unwrap(),
+            b"current metadata"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("Contents/._01")).unwrap(),
+            b"restore metadata"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap(),
+            b"new db"
+        );
+        assert!(!journal.exists());
+    }
+
+    #[test]
+    fn missing_real_database_image_still_retains_recovery_data() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&journal.join(".previous").join(path), b"old db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+            }])
+            .unwrap(),
+        );
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(std::fs::read(root.path().join(path)).unwrap(), b"old db");
+        assert_eq!(
+            std::fs::read(journal.join(".previous").join(path)).unwrap(),
+            b"old db"
+        );
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert!(journal.exists());
+    }
+
+    #[test]
+    fn interrupted_replacement_finishes_from_retained_image() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&journal.join(path), b"new db");
+        write_file(&journal.join(".previous").join(path), b"old db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+            }])
+            .unwrap(),
+        );
+
+        Publication::recover(root.path(), ".journal").unwrap();
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert_eq!(std::fs::read(root.path().join(path)).unwrap(), b"new db");
+        assert!(!journal.exists());
+    }
+
+    #[test]
+    fn conflicting_real_target_keeps_both_versions_for_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&root.path().join(path), b"external db");
+        write_file(&journal.join(path), b"new db");
+        write_file(&journal.join(".previous").join(path), b"old db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+            }])
+            .unwrap(),
+        );
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(
+            std::fs::read(root.path().join(path)).unwrap(),
+            b"external db"
+        );
+        assert_eq!(std::fs::read(journal.join(path)).unwrap(), b"new db");
+        assert_eq!(
+            std::fs::read(journal.join(".previous").join(path)).unwrap(),
+            b"old db"
+        );
+    }
+
+    #[test]
+    fn newer_external_database_edit_stops_before_replaying_other_files() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let db = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&root.path().join(db), b"external edit");
+        write_file(&journal.join(db), b"staged db");
+        write_file(&root.path().join("PIONEER/first.pdb"), b"old first");
+        write_file(&journal.join("PIONEER/first.pdb"), b"new first");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[
+                PublicationEntry {
+                    path: "PIONEER/first.pdb".into(),
+                    present: true,
+                },
+                PublicationEntry {
+                    path: db.into(),
+                    present: true,
+                },
+            ])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join(db));
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(
+            std::fs::read(root.path().join(db)).unwrap(),
+            b"external edit"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("PIONEER/first.pdb")).unwrap(),
+            b"old first"
+        );
+        assert!(journal.exists());
+    }
+
+    #[test]
+    fn newer_timestamp_with_identical_bytes_can_recover() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db";
+        write_file(&root.path().join(path), b"staged db");
+        write_file(&journal.join(path), b"staged db");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: true,
+            }])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join(path));
+
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert_eq!(std::fs::read(root.path().join(path)).unwrap(), b"staged db");
+        assert!(!journal.exists());
+    }
+
+    #[test]
+    fn recreated_database_wal_is_not_deleted_during_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let path = "PIONEER/rekordbox/exportLibrary.db-wal";
+        write_file(&root.path().join(path), b"new sqlite writes");
+        write_file(&journal.join(".previous").join(path), b"old sqlite writes");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry {
+                path: path.into(),
+                present: false,
+            }])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join(path));
+
+        assert!(Publication::recover(root.path(), ".journal").is_err());
+        assert_eq!(
+            std::fs::read(root.path().join(path)).unwrap(),
+            b"new sqlite writes"
+        );
+        assert_eq!(
+            std::fs::read(journal.join(".previous").join(path)).unwrap(),
+            b"old sqlite writes"
+        );
     }
 }
