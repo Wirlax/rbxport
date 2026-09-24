@@ -1116,6 +1116,12 @@ export const Player = memo(function Player({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, quantiseTo: quantize ? quantizeGrid : null, readOnly, onError,
   });
+  // The hooks own editability, so the disabled state and its explanation
+  // must come from that same result. Keeping a second readOnly-only branch
+  // let a cached WebKit render show an enabled-action tooltip on a control
+  // that the hook had already disabled.
+  const hotCueEditReason = hot.canEdit ? undefined : READ_ONLY_REASON;
+  const memoryCueEditReason = memory.canEdit ? undefined : READ_ONLY_REASON;
   // The GRID EDIT cluster. The playhead it reads is the extrapolated one:
   // a beat is a few frames, and the frame loop's copy can be a frame behind.
   const positionMs = useCallback(() => positionNow() * 1000, [positionNow]);
@@ -2143,7 +2149,7 @@ export const Player = memo(function Player({
                     aria-pressed={cue !== null}
                     title={cue
                       ? undefined
-                      : tip(readOnly ? READ_ONLY_REASON : `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`)}
+                      : tip(hotCueEditReason ?? `Set Hot Cue ${letter}${key ? ` (${key})` : ""}`)}
                     disabled={!cue && !hot.canEdit}
                     onClick={() => hot.press(letter)}
                   >
@@ -2164,7 +2170,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.memoryLabel}
                 aria-label="Set memory cue"
-                title={tip(readOnly ? READ_ONLY_REASON : "Set Memory Cue (M)")}
+                title={tip(memoryCueEditReason ?? "Set Memory Cue (M)")}
                 disabled={!memory.canEdit}
                 onClick={memory.store}
               >
@@ -2194,7 +2200,7 @@ export const Player = memo(function Player({
                 type="button"
                 className={styles.step}
                 aria-label="Delete memory cue"
-                title={tip(readOnly ? READ_ONLY_REASON : "Delete Memory Cue (X)")}
+                title={tip(memoryCueEditReason ?? "Delete Memory Cue (X)")}
                 disabled={!memory.canEdit}
                 onClick={memory.deleteAtHead}
               >
@@ -2413,7 +2419,7 @@ export const Player = memo(function Player({
                         type="button"
                         className={styles.cueDelete}
                         aria-label={`Clear hot cue ${letter}`}
-                        title={readOnly ? READ_ONLY_REASON : `Clear Hot Cue ${letter}`}
+                        title={hot.canEdit ? `Clear Hot Cue ${letter}` : READ_ONLY_REASON}
                         disabled={!hot.canEdit || cue.id === ""}
                         onClick={(event) => {
                           // The row underneath calls the cue; a clear is not
@@ -2462,7 +2468,7 @@ export const Player = memo(function Player({
                   type="button"
                   className={styles.cueDelete}
                   aria-label={`Delete memory cue ${memoryTime(cue.positionMs)}`}
-                  title={tip(readOnly ? READ_ONLY_REASON : "Delete Memory Cue")}
+                  title={tip(memoryCueEditReason ?? "Delete Memory Cue")}
                   disabled={!memory.canEdit || cue.id === ""}
                   onClick={(event) => {
                     // The row underneath seeks; a delete is not also a jump.

@@ -158,8 +158,18 @@ function AppBody() {
   // which is a lie once the load has failed.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
+  // Do not write the empty bootstrap selection over the session while the
+  // backend is still restoring the node that was open at exit. WebKit gets
+  // to the effect before the mock backend answers, which exposed the same
+  // race a slower real library can hit.
+  const [sessionReady, setSessionReady] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  // Seed the selected node along with the cached tree. Besides avoiding an
+  // unnecessary blank title, this keeps the restored view coherent until the
+  // backend replaces both with current data.
+  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(() =>
+    restored.tree.find((node) => node.id === restored.selectedNodeId) ?? null,
+  );
   // One piece of state, not two: updating `descending` from inside a `setSort`
   // updater made the toggle a side effect, and StrictMode's double invocation
   // cancelled it out.
@@ -507,6 +517,7 @@ function AppBody() {
         // have been deleted between runs, so this is a lookup, not a promise.
         const remembered = nodes.find((n) => n.id === restored.selectedNodeId);
         setSelectedNode(remembered ?? nodes.find((n) => n.kind === "playlist") ?? nodes[0] ?? null);
+        setSessionReady(true);
         void backend
           .listDevices()
           .then((volumes) => {
@@ -1804,6 +1815,7 @@ function AppBody() {
   // or a machine that loses power, still comes back where it was. It is a few
   // hundred bytes to localStorage, not something worth batching.
   useEffect(() => {
+    if (!sessionReady) return;
     saveSession({
       treeWidth,
       selectedNodeId: selectedNode?.id ?? null,
@@ -1821,7 +1833,7 @@ function AppBody() {
       subTreeWidth,
       trafficLight,
     });
-  }, [treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight]);
+  }, [sessionReady, treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -2037,6 +2049,10 @@ function AppBody() {
           />
         ) : (
         <TrackTable
+          // The cached screen may mount before the backend exists. Remount
+          // once restoration completes so a cancelled bootstrap view cannot
+          // leave the real source permanently in its loading state.
+          key={sessionReady ? "library-ready" : "library-loading"}
           spec={spec}
           onSortChange={handleSort}
           onSelectionChange={setSelectedCount}
