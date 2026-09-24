@@ -605,7 +605,10 @@ jobs:
         with:
           name: installers-${{ inputs.target }}
           path: out/
-          retention-days: 14
+          # The Store MSIX is deliberately not published to R2. Keep enough
+          # history here to stage a submission or recover a prior package
+          # without rebuilding a release tag.
+          retention-days: 90
 
       - name: Tear down the signing keychain
         # Always, and last: the search list is machine-wide state on a Mac

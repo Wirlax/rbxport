@@ -1,0 +1,98 @@
+name: Stage Microsoft Store draft
+
+# Store releases are intentionally separate from the public R2 release:
+# - the Azure-signed NSIS installer remains the direct-download/updater build;
+# - the unsigned MSIX carries the Partner Center identity and Microsoft signs
+#   it after certification.
+#
+# This workflow is manual and uses --noCommit. It uploads a package into the
+# Partner Center draft but cannot submit it for certification or publish it.
+# A manual dispatch is the approval boundary; the `microsoft-store` GitHub
+# environment keeps the Store variables and credentials separate from normal
+# release secrets. (This repository plan does not support required reviewers.)
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: "Successful Release workflow run ID containing the Windows MSIX"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: microsoft-store-draft
+  cancel-in-progress: false
+
+jobs:
+  stage-draft:
+    name: Upload MSIX to Partner Center draft
+    runs-on: [self-hosted, windows, x64]
+    environment: microsoft-store
+    steps:
+      - name: Download the Windows release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: installers-x86_64-pc-windows-msvc
+          path: out
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify the Store package identity
+        id: package
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem out\*.msix)
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one MSIX package, found $($packages.Count)."
+          }
+
+          $windowsKits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $makeAppx = Get-ChildItem -LiteralPath $windowsKits -Filter makeappx.exe -Recurse -File |
+            Where-Object { $_.Directory.Name -eq "x64" } |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) { throw "makeappx.exe was not found under $windowsKits." }
+
+          $unpacked = Join-Path $env:RUNNER_TEMP "rbxport-store-verify"
+          Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
+          & $makeAppx.FullName unpack /o /p $packages[0].FullName /d $unpacked
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx could not unpack the MSIX." }
+
+          [xml]$manifest = Get-Content (Join-Path $unpacked "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          if ($identity.Name -ne "TRIODE.rbxport") {
+            throw "Unexpected MSIX identity name: $($identity.Name)"
+          }
+          if ($identity.Publisher -ne "CN=1A596007-9476-4408-86AC-A8062FB89DF1") {
+            throw "Unexpected MSIX publisher: $($identity.Publisher)"
+          }
+          if ($identity.ProcessorArchitecture -ne "x64") {
+            throw "Unexpected MSIX architecture: $($identity.ProcessorArchitecture)"
+          }
+
+          "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Staging $($packages[0].Name), version $($identity.Version)"
+
+      - name: Install Microsoft Store Developer CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Configure Partner Center credentials
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId '${{ secrets.PARTNER_CENTER_TENANT_ID }}' `
+            --sellerId '${{ secrets.PARTNER_CENTER_SELLER_ID }}' `
+            --clientId '${{ secrets.PARTNER_CENTER_CLIENT_ID }}' `
+            --clientSecret '${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}'
+
+      - name: Upload package without submitting
+        shell: pwsh
+        run: |
+          msstore publish '${{ steps.package.outputs.path }}' `
+            --appId '${{ vars.MS_STORE_PRODUCT_ID }}' `
+            --noCommit
+
+          Write-Host "The package is staged in Partner Center. Review and submit it there manually."
