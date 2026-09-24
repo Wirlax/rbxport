@@ -313,7 +313,13 @@ impl Publication {
                         entry.path.display()
                     )));
                 }
-            } else if target.try_exists()? && !previous.try_exists()? {
+            } else if target.try_exists()? {
+                if previous.try_exists()? {
+                    return Err(std::io::Error::other(format!(
+                        "Publication conflict at {}; recovery data was retained",
+                        entry.path.display()
+                    )));
+                }
                 if let Some(parent) = previous.parent() {
                     create_dir_all(parent)?;
                 }
@@ -700,8 +706,6 @@ mod tests {
             }])
             .unwrap(),
         );
-        mark_newer(&root.path().join(path));
-
         assert!(Publication::recover(root.path(), ".journal").is_err());
         assert_eq!(
             std::fs::read(root.path().join(path)).unwrap(),
