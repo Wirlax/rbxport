@@ -21,6 +21,10 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({view: {showBpmChanges: false}}).view.showBpmChanges).toBe(false);
     expect(sanitisePreferences({view: {}}).view.showBpmChanges).toBe(true);
   });
+  it("keeps a supported locale and rejects unknown ones", () => {
+    expect(sanitisePreferences({ view: { locale: "ja" } }).view.locale).toBe("ja");
+    expect(sanitisePreferences({ view: { locale: "xx" } }).view.locale).toBe("en");
+  });
   it("keeps the LINK key-sort choice and defaults invalid or older settings to musical", () => {
     expect(sanitisePreferences({djSystem: {linkKeySort: "alphabetical"}}).djSystem.linkKeySort).toBe("alphabetical");
     expect(sanitisePreferences({djSystem: {linkKeySort: "invalid"}}).djSystem.linkKeySort).toBe("musical");

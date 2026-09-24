@@ -41,6 +41,7 @@ export function usePreferencesStore(initial?: Preferences): PreferencesStore {
       setPreferences((current) => {
         const next = { ...current, [pane]: { ...current[pane], ...patch } };
         savePreferences(next);
+        window.dispatchEvent(new CustomEvent("rbl-preferences"));
         return next;
       });
     },

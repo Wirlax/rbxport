@@ -120,7 +120,7 @@ export function Radios<T extends string>({ label, value, choices, onChange, nest
 }
 
 export function Select<T extends string>({
-  label, value, choices, onChange, nested, disabled, plain, caption,
+  label, value, choices, onChange, nested, disabled, plain, caption, preserveChoiceLabels,
 }: {
   label: string;
   value: T;
@@ -132,6 +132,8 @@ export function Select<T extends string>({
   plain?: boolean;
   /** A caption to the left, as "Analysis Mode" sits beside its dropdown. */
   caption?: string;
+  /** Keep choices in their own language, as in the language picker. */
+  preserveChoiceLabels?: boolean;
 }) {
   return (
     <div className={styles.selectRow} data-nested={nested || undefined}>
@@ -145,7 +147,9 @@ export function Select<T extends string>({
         onChange={(e) => onChange(e.target.value as T)}
       >
         {choices.map((choice) => (
-          <option key={choice.value} value={choice.value}>{choice.label}</option>
+          <option key={choice.value} value={choice.value} data-i18n-ignore={preserveChoiceLabels || undefined}>
+            {choice.label}
+          </option>
         ))}
       </select>
     </div>

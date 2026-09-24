@@ -5,6 +5,7 @@ const PreferencesWindow = lazy(() => import("./views/settings/PreferencesWindow"
 const ReportWindow = lazy(() => import("./views/report/ReportBug").then(m => ({ default: m.ReportWindow })));
 const SyncWindow = lazy(() => import("./views/sync/SyncWindow").then(m => ({ default: m.SyncWindow })));
 import "./styles/base.css";
+import { Localization } from "./i18n";
 
 // Suppress the webview's Reload/Inspect menu in every app window. Leave
 // propagation intact so the app's context-menu handlers still receive it.
@@ -21,8 +22,10 @@ const sync = window.location.hash.startsWith("#sync");
 
 createRoot(el).render(
   <StrictMode>
+    <Localization>
     <Suspense fallback={null}>
     {window.location.hash.startsWith("#report") ? <ReportWindow /> : preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
     </Suspense>
+    </Localization>
   </StrictMode>,
 );

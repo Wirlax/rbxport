@@ -72,7 +72,15 @@ export function browseScale(step: number): number {
 
 export type VuMeterMode = "normal" | "fabulous";
 
+export const LOCALES = [
+  "en", "fr", "de", "es", "it", "nl", "ru", "pt", "sv", "da", "tr", "el", "hu", "cs",
+  "zh-CN", "zh-TW", "ko", "ja",
+] as const;
+export type Locale = (typeof LOCALES)[number];
+
 export interface ViewPreferences {
+  /** Language used by the application UI. */
+  locale: Locale;
   /** Show BPM-change labels and ramps on player waveforms. */
   showBpmChanges: boolean;
   vuMeter: VuMeterMode;
@@ -222,6 +230,7 @@ export type PreferencePane = keyof Preferences;
  */
 export const DEFAULT_PREFERENCES: Preferences = {
   view: {
+    locale: "en",
     showBpmChanges: true,
     vuMeter: "normal",
     tempoSlider: false,
@@ -383,6 +392,7 @@ export function sanitisePreferences(value: unknown): Preferences {
   return {
     usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: usb.conversionFormat === "mp3" ? "mp3" : "wav" },
     view: {
+      locale: oneOf(view.locale, LOCALES, d.view.locale),
       showBpmChanges: bool(view.showBpmChanges, d.view.showBpmChanges),
       vuMeter: oneOf(view.vuMeter, ["normal", "fabulous"] as const, d.view.vuMeter),
       tempoSlider: bool(view.tempoSlider, d.view.tempoSlider),

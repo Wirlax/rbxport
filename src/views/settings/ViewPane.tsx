@@ -6,6 +6,7 @@
  * and a radio that cannot be chosen still says the choice exists.
  */
 import { BROWSE_SCALE_STEPS } from "@/lib/preferences";
+import { LANGUAGE_CHOICES } from "@/i18n";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import {
@@ -155,9 +156,8 @@ export function ViewPane({ tab, onResetColumns, onResetLayout }: ViewPaneProps) 
   return (
     <>
       <Section title="Language">
-        {/* The strings are rekordbox's own English ones; no other language
-            has been transcribed, so there is nothing else to pick. */}
-        <Select label="Language" value="en" choices={[{ value: "en", label: "English" }]} onChange={() => {}} />
+        <Select label="Language" value={view.locale} choices={LANGUAGE_CHOICES}
+          preserveChoiceLabels onChange={(locale) => set({ locale })} />
       </Section>
       <Section title="Tooltips">
         <Toggle label="Show Tooltips" checked={view.tooltips} onChange={(tooltips) => set({ tooltips })} />

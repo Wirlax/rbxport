@@ -25,7 +25,8 @@
     "tokens": "tsx scripts/build-tokens.ts",
     "measure": "tsx design/measure/measure.ts",
     "budget": "tsx scripts/check-bundle-size.ts",
-    "icons": "tsx scripts/build-ui-icons.ts"
+    "icons": "tsx scripts/build-ui-icons.ts",
+    "locales": "node scripts/build-locales.mjs"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
