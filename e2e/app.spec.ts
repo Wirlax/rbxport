@@ -409,10 +409,40 @@ test("the header menu lists every column and toggles one on", async ({ page }) =
   await expect(menu.getByRole("menuitem", { name: "Auto-size all columns" })).toBeVisible();
   // Transcribed from rekordbox's own menu.
   await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(39);
+  await expect(menu.getByRole("menuitemcheckbox", { name: "Track Title" })).toBeDisabled();
+  await expect(menu.getByRole("menuitemcheckbox", { name: "Size", exact: true })).toBeEnabled();
+  await expect(menu.getByRole("menuitemcheckbox", { name: "Cloud" })).toBeEnabled();
+  await expect(menu.getByRole("menuitemcheckbox", { name: "Album", exact: true })).toBeEnabled();
+  await expect(menu.locator('[role="menuitemcheckbox"]:disabled')).toHaveCount(1);
 
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toHaveCount(0);
   await menu.getByRole("menuitemcheckbox", { name: "Genre" }).click();
   await expect(page.getByRole("columnheader", { name: /^Genre/ })).toBeVisible();
+});
+
+test("detail columns display row metadata after being enabled", async ({ page }) => {
+  const show = async (name: string) => {
+    await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+    await page.getByRole("menu", { name: "Columns" }).getByRole("menuitemcheckbox", { name, exact: true }).click();
+  };
+  await show("Size");
+  await expect(page.locator('[role="gridcell"][data-col="size"]').first()).toContainText("MB");
+  await show("File Type");
+  await expect(page.locator('[role="gridcell"][data-col="fileType"]').first()).toHaveText("MP3");
+  await show("Album Artist");
+  await expect(page.locator('[role="gridcell"][data-col="albumArtist"]').first()).not.toBeEmpty();
+});
+
+test("column menu highlights each field as the pointer moves", async ({ page }) => {
+  await page.getByRole("columnheader", { name: "Track Title" }).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Columns" });
+  const size = menu.getByRole("menuitemcheckbox", { name: "Size", exact: true });
+  const disc = menu.getByRole("menuitemcheckbox", { name: "Disc number" });
+  await size.hover();
+  await expect(size).toHaveCSS("background-color", "rgb(19, 115, 235)");
+  await disc.hover();
+  await expect(disc).toHaveCSS("background-color", "rgb(19, 115, 235)");
+  await expect(size).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 });
 
 test("a column can be dragged wider", async ({ page }) => {

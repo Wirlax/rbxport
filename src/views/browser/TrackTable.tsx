@@ -18,7 +18,7 @@ import type { DeckId, RowDto, SortColumn, TrackField, ViewSpec } from "@/ipc/typ
 import { useTrackView, type PendingEdits, type Seed } from "@/store/useTrackView";
 import { PAGE_SIZE } from "@/lib/rowCache";
 import { SEEDED_ROWS } from "@/lib/session";
-import { formatBpm, formatDuration, formatShortDate } from "@/lib/format";
+import { formatBpm, formatBytes, formatDuration, formatShortDate } from "@/lib/format";
 import {
   applyClick, clickSettles, emptySelection, modifierFor, pressSelects, type SelectionState,
 } from "@/lib/selection";
@@ -29,7 +29,8 @@ import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
 import { RecordIcon } from "@/components/icons";
-import type { ColumnKey, ColumnSpec } from "@/lib/columns";
+import { EXTRA_COLUMNS, type ColumnKey, type ColumnSpec } from "@/lib/columns";
+import { COLOR_NAMES } from "@/lib/trackFilter";
 import { browseScale, formatKey } from "@/lib/preferences";
 import { trafficLightLit, type TrafficLightReach } from "@/lib/camelot";
 import { TickIcon } from "@/components/icons";
@@ -88,7 +89,9 @@ function columnAt(head: HTMLElement | null, x: number): number | null {
   return cells.length > 0 ? cells.length - 1 : null;
 }
 
-function cellText(row: RowDto, key: Column["key"]): string {
+export function cellText(row: RowDto, key: Column["key"]): string {
+  const extra = row.extra ?? {};
+  const value = extra[key];
   switch (key) {
     case "trackNo": return String(row.trackNo);
     case "title": return row.title;
@@ -104,6 +107,24 @@ function cellText(row: RowDto, key: Column["key"]): string {
     case "releaseDate": return formatShortDate(row.releaseDate);
     case "rating": return "";
     case "fileName": return row.fileName ?? "";
+    case "hotCue": return row.hotCues.map(([letter]) => letter).join(", ");
+    case "size": return typeof value === "number" && value > 0 ? formatBytes(value) : "";
+    case "dateCreated": return typeof value === "string" ? formatShortDate(value) : "";
+    case "fileType": {
+      const types: Record<number, string> = { 1: "MP3", 4: "M4A", 5: "FLAC", 6: "M4A", 11: "WAV", 12: "AIFF" };
+      return typeof value === "number" ? types[value] ?? (value ? String(value) : "") : "";
+    }
+    case "color": return typeof value === "number" && value > 0 ? COLOR_NAMES[value - 1] ?? "" : "";
+    case "publishTrackInfo": return value === true ? "On" : value === false ? "Off" : "";
+    case "cloud": return value === true ? "Cloud" : "";
+    case "sampleRate": return typeof value === "number" && value > 0 ? `${value / 1000} kHz` : "";
+    case "bitrate": return typeof value === "number" && value > 0 ? `${value} kbps` : "";
+    case "bitDepth": return typeof value === "number" && value > 0 ? `${value} bit` : "";
+    case "year": case "discNo": case "djPlayCount": case "trackNumber":
+      return typeof value === "number" && value > 0 ? String(value) : "";
+    case "albumArtist": case "composer": case "lyricist": case "mixName": case "remixer":
+    case "originalArtist": case "location": case "message": case "myTag":
+      return typeof value === "string" ? value : "";
     default: return "";
   }
 }
@@ -325,7 +346,7 @@ const EditableCell = memo(function EditableCell({
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditBlocked, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
-  reorderable, dropEdge, onReorderOver, onReorderDrop,
+  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -357,6 +378,8 @@ const TrackRow = memo(function TrackRow({
   onDragEnd: () => void;
   /** The list can be reordered by hand, so a drop here means something. */
   reorderable: boolean;
+  /** A drag from the other browser copies into this playlist, never reorders it. */
+  isLocalDrag: () => boolean;
   /** Which edge the line is drawn on, or null for a row that is not the target. */
   dropEdge: "above" | "below" | null;
   onReorderOver: (index: number, below: boolean) => void;
@@ -461,7 +484,7 @@ const TrackRow = memo(function TrackRow({
       // kept offering its playlists as targets afterwards.
       onDragEnd={() => onDragEnd()}
       onDragOver={(e) => {
-        if (!reorderable) return;
+        if (!reorderable || !isLocalDrag()) return;
         // Taking the event is what lets the drop happen at all; the browser
         // refuses one over an element that did not ask for it.
         e.preventDefault();
@@ -471,7 +494,7 @@ const TrackRow = memo(function TrackRow({
       }}
       onDrop={(e) => {
         // External files must bubble to the playlist's import target.
-        if (!reorderable || dropEdge === null) return;
+        if (!reorderable || !isLocalDrag() || dropEdge === null) return;
         e.preventDefault();
         e.stopPropagation();
         onReorderDrop();
@@ -652,6 +675,9 @@ export interface TrackTableProps {
   onSelectedRow?: (row: RowDto | null) => void;
   /** What is being dragged, so a drop target knows what it would get. */
   onDragTracks?: (drag: TrackDrag | null) => void;
+  /** Accept tracks dragged from the other browser into this playlist. */
+  dragging?: boolean;
+  onDropTracks?: ((playlistId: string) => void) | undefined;
   /**
    * Files dragged in from outside the app (Finder, Explorer) and dropped
    * anywhere in the list. Absent unless the open view is a playlist tracks
@@ -758,7 +784,7 @@ const TRAFFIC_SOURCES: readonly { id: TrafficLightSource; label: string; short: 
 export const TrackTable = memo(function TrackTable({
   spec, onSortChange, onSelectionChange, title, query, onQueryChange, searchRef, searchField = "all", onSearchFieldChange,
   columns, onColumnMove, onColumnResize, onColumnToggle, onColumnAutoSize,
-  onColumnAutoSizeAll, onFocusedRow, onDragTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
+  onColumnAutoSizeAll, onFocusedRow, onDragTracks, dragging = false, onDropTracks, onDropFiles, onDragError, onRate, onComment, onReorder, onEditField, onEditBlocked, seed, onFirstRows,
   libraryGeneration, pendingEdits, onSelectedTracks, onAnalyse,
   onShowInformation, onShowInFinder, onRemoveFromPlaylist, onRemoveFromHistory, onResetPlayCount,
   onRemoveFromCollection, onConvertMemoryCues, readOnly = false,
@@ -767,7 +793,8 @@ export const TrackTable = memo(function TrackTable({
   players = 0, onLoadTrack, onSelectedRow, filterOpen = false, onToggleFilter, filterBar,
   trafficLight, onTrafficLight, trafficKey = null,
 }: TrackTableProps) {
-  const view = useTrackView(spec, libraryGeneration, pendingEdits, seed);
+  const extraColumns = useMemo(() => EXTRA_COLUMNS.filter((key) => columns.some((column) => column.key === key)), [columns]);
+  const view = useTrackView(spec, libraryGeneration, pendingEdits, seed, extraColumns);
   const preferences = usePreferences();
   const { keyDisplay, previewCueMarkers, tooltips } = preferences.view;
   const tip = useTooltip();
@@ -1017,6 +1044,12 @@ export const TrackTable = memo(function TrackTable({
   // its payload up during `dragover`, only on the drop.
   const carrying = useRef<readonly string[] | null>(null);
   const [dropAt, setDropAt] = useState<{ index: number; below: boolean } | null>(null);
+  // A library refresh can replace the source row before the browser sends
+  // dragend. The shell clears its drag on a successful drop, so clear this
+  // table's local payload at the same point as well.
+  useEffect(() => {
+    if (!dragging) carrying.current = null;
+  }, [dragging]);
 
   const nativeDrag = useRef(false);
   const dragGeneration = useRef(0);
@@ -1273,6 +1306,12 @@ export const TrackTable = memo(function TrackTable({
           }
           return;
         }
+        if (dragging && onDropTracks && spec.source.kind === "playlist") {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setFileOver(true);
+          return;
+        }
         if (!onDropFiles || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
@@ -1289,6 +1328,11 @@ export const TrackTable = memo(function TrackTable({
           if (onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
             reorderDrop({ index: view.count - 1, below: true });
           }
+          return;
+        }
+        if (dragging && onDropTracks && spec.source.kind === "playlist") {
+          e.preventDefault();
+          onDropTracks(spec.source.id);
           return;
         }
         if (!e.dataTransfer.types.includes("Files") && e.dataTransfer.files.length === 0) return;
@@ -1416,6 +1460,7 @@ export const TrackTable = memo(function TrackTable({
                 onOpen={handleOpen}
                 onMenu={openTrackMenu}
                 reorderable={Boolean(onReorder)}
+                isLocalDrag={() => carrying.current !== null}
                 dropEdge={
                   dropAt?.index === item.index ? (dropAt.below ? "below" : "above") : null
                 }

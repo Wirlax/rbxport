@@ -99,6 +99,27 @@ test("a track dropped on a new playlist is in it, and its menu takes it out agai
   await expect(page.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
 });
 
+test("Tag List stays available after a library write", async ({ page }) => {
+  await open(page);
+  await chooseFromTreeMenu(page, item(page, "Hardstyle"), "Create New Playlist");
+  await page.getByRole("tab", { name: "Tag List" }).click();
+  await expect(page.getByRole("tab", { name: "Tag List" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("browser-title")).toHaveText("Tag List (0 Tracks)");
+});
+
+test("a playlist folder shows its child tracks instead of the collection", async ({ page }) => {
+  await open(page);
+  const source = rows(page).first();
+  const title = (await source.locator('[data-col="title"]').innerText()).trim();
+  const current = item(page, "CURRENT");
+  await chooseFromTreeMenu(page, current, "Create New Playlist");
+  await source.dragTo(item(page, "New playlist"));
+  await current.click();
+  await expect(page.getByTestId("browser-title")).toContainText("CURRENT (");
+  await expect(rows(page).filter({ hasText: title }).first()).toBeVisible();
+  await expect(page.getByTestId("browser-title")).not.toContainText("2000 Tracks");
+});
+
 test("dragging a selection drops every row in it, not just the one under the hand", async ({ page }) => {
   await open(page);
   await chooseFromTreeMenu(page, item(page, "Hardstyle"), "Create New Playlist");

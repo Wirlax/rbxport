@@ -52,7 +52,9 @@ export function useTrackView(
   libraryGeneration = 0,
   pending?: PendingEdits,
   seed?: Seed,
+  extraColumns: readonly string[] = [],
 ): TrackView {
+  const extraKey = extraColumns.join(",");
   // `specKey` records which spec this state describes. Loading is derived from
   // comparing it against the current spec rather than set by an effect: an
   // effect runs *after* the render that changed the spec, so for one frame the
@@ -78,9 +80,9 @@ export function useTrackView(
   const specKey = useMemo(
     () =>
       JSON.stringify([
-        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration,
+        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration, extraKey,
       ]),
-    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration],
+    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, extraKey],
   );
 
   // View identity for the cache: a new view id, or a library change, invalidates pages.
@@ -201,7 +203,7 @@ export function useTrackView(
         void (async () => {
           try {
             const backend = await getBackend();
-            const rows = await backend.fetchRows(viewId, page * PAGE_SIZE, PAGE_SIZE);
+            const rows = await backend.fetchRows(viewId, page * PAGE_SIZE, PAGE_SIZE, extraColumns);
             // A view swap between request and response makes this page stale.
             if (cache.current.hasPage(page, token)) return;
             cache.current.setPage(page, token, rows);
@@ -217,7 +219,9 @@ export function useTrackView(
     // `specKey` matters as much as `state`: between a spec change and its
     // fetch resolving, only `specKey` has moved, and a stale one here reads as
     // "not loading" and fills the cache from the outgoing view.
-    [state, token, specKey],
+    // extraKey changes only with visible extra columns, not on width drags.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, token, specKey, extraKey],
   );
 
   const rowAt = useCallback(

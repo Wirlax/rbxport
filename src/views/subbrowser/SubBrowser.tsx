@@ -49,7 +49,7 @@ export type SubTreeProps = Pick<
 export type SubListProps = Pick<
   TrackTableProps,
   "onDragTracks" | "onDragError" | "players" | "onLoadTrack" | "onShowInFinder" | "onRate" | "onComment"
-  | "pendingEdits" | "readOnly"
+  | "pendingEdits" | "readOnly" | "dragging" | "onDropTracks"
 >;
 
 export interface SubBrowserProps {
@@ -246,6 +246,7 @@ export const SubBrowser = memo(function SubBrowser({
         onColumnAutoSizeAll={cols.autoSizeEvery}
         libraryGeneration={libraryGeneration}
         {...list}
+        onDropTracks={selected?.kind === "playlist" ? list.onDropTracks : undefined}
       />
     </section>
   );

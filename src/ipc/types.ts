@@ -44,11 +44,14 @@ export interface RowDto {
    * the backend always sends it.
    */
   fileName?: string;
+  /** Extra database fields requested for visible browser columns. */
+  extra?: Record<string, string | number | boolean>;
 }
 
 export type TrackSource =
   | { kind: "collection" }
   | { kind: "playlist"; id: string }
+  | { kind: "playlistFolder"; id: string }
   | { kind: "history"; id: string }
   /** A folder on disk, for the Explorer. An empty path is the heading, which lists nothing. */
   | { kind: "folder"; path: string }
@@ -169,10 +172,12 @@ export type WaveformKind = "bands" | "bandsDetail" | "mono" | "monoDetail" | "co
 
 
 export interface Backend {
+  /** The installed rekordbox browseSetting.xml, when present. Read-only. */
+  rekordboxBrowseSettings(): Promise<string | null>;
   librarySummary(): Promise<LibrarySummary>;
   playlistTree(): Promise<TreeNode[]>;
   openView(spec: ViewSpec): Promise<ViewHandle>;
-  fetchRows(viewId: number, offset: number, len: number): Promise<RowDto[]>;
+  fetchRows(viewId: number, offset: number, len: number, extraColumns?: readonly string[]): Promise<RowDto[]>;
   /** Ids between two row indices inclusive; used for shift-click across unfetched rows. */
   viewIdsInRange(viewId: number, from: number, to: number): Promise<string[]>;
   /**

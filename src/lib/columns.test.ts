@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   autoSizeAll,
   autoSizeColumn,
+  AVAILABLE_COLUMNS,
   CATALOGUE,
   DEFAULT_VISIBLE,
   FIXED,
   FOLDER_VISIBLE,
   MENU_COLUMNS,
+  REQUIRED_COLUMNS,
   defaultLayout,
   folderLayout,
   MAX_COLUMN_WIDTH,
@@ -30,7 +32,10 @@ describe("the catalogue", () => {
     // german.lang's column names has it.
     expect(MENU_COLUMNS).toHaveLength(39);
     expect(MENU_COLUMNS[0]?.label).toBe("Attribute");
-    expect(MENU_COLUMNS.at(-1)?.label).toBe("File Name");
+    expect(MENU_COLUMNS.at(-1)?.label).toBe("Cloud");
+    expect(MENU_COLUMNS.slice(3, 8).map((column) => column.label)).toEqual([
+      "Track Title", "Release Date", "Artist", "Genre", "Comments",
+    ]);
     expect(MENU_COLUMNS.some((c) => c.key === "trackNo")).toBe(false);
   });
 
@@ -42,6 +47,13 @@ describe("the catalogue", () => {
     expect(resolve(hidden).map((c) => c.key)).toContain("trackNo");
     // And it leads, wherever a move tries to put it.
     expect(resolve(moveColumn(defaultLayout(), "trackNo", 5))[0]?.key).toBe("trackNo");
+  });
+
+  it("keeps Track Title checked and non-hideable while allowing it to move", () => {
+    expect(REQUIRED_COLUMNS).toEqual(["trackNo", "title"]);
+    const layout = defaultLayout();
+    expect(toggleColumn(layout, "title")).toBe(layout);
+    expect(moveColumn(layout, "title", 8).order.indexOf("title")).toBe(7);
   });
 
   it("has no duplicate keys or labels", () => {
@@ -74,14 +86,12 @@ describe("toggleColumn", () => {
     expect(after.order).not.toContain("bpm");
   });
 
-  it("shows a hidden one at its place in the catalogue, not at the end", () => {
-    // Size sits between Label and Date Added in the menu, and both are
-    // visible by default, so it has to land between them.
-    const after = toggleColumn(defaultLayout(), "size");
-    expect(after.order).toContain("size");
-    const at = after.order.indexOf("size");
-    expect(after.order[at - 1]).toBe("label");
-    expect(after.order[at + 1]).toBe("dateAdded");
+  it("enables columns backed by the requested detail fields", () => {
+    const layout = defaultLayout();
+    expect(AVAILABLE_COLUMNS).toContain("size");
+    expect(toggleColumn(layout, "size").order).toContain("size");
+    expect(moveColumn({ order: ["title", "size"], widths: {} }, "size", 1).order)
+      .toEqual(["size", "title"]);
   });
 
   it("appends one that belongs after everything visible", () => {
@@ -200,6 +210,16 @@ describe("resolve", () => {
     expect(columns.map((c) => c.key)).toEqual([...FIXED, ...layout.order]);
     expect(columns.find((c) => c.key === "bpm")?.width).toBe(200);
   });
+
+  it("restores Track Title even when a caller supplies a layout without it", () => {
+    expect(resolve({ order: ["preview", "artwork", "bpm"], widths: {} }).map((column) => column.key))
+      .toEqual(["trackNo", "preview", "artwork", "title", "bpm"]);
+  });
+
+  it("renders detail columns from a saved layout", () => {
+    expect(resolve({ order: ["title", "size", "cloud", "artist"], widths: {} }).map((column) => column.key))
+      .toEqual(["trackNo", "title", "size", "cloud", "artist"]);
+  });
 });
 
 describe("sanitise", () => {
@@ -223,6 +243,17 @@ describe("sanitise", () => {
   it("drops a repeated column", () => {
     expect(sanitise({ order: ["title", "title", "bpm"], widths: {} }).order)
       .toEqual(["title", "bpm"]);
+  });
+
+  it("repairs a saved layout that hid Track Title", () => {
+    expect(sanitise({ order: ["preview", "artwork", "bpm"], widths: {} }).order)
+      .toEqual(["preview", "artwork", "title", "bpm"]);
+  });
+
+  it("preserves saved detail columns and their widths", () => {
+    expect(sanitise({ order: ["title", "size", "artist", "cloud"], widths: { size: 100, artist: 250 } }))
+      .toEqual({ order: ["title", "size", "artist", "cloud"], widths: { size: 100, artist: 250 } });
+    expect(sanitise({ order: ["size", "cloud"], widths: {} }).order).toContain("size");
   });
 
   it("drops widths that are not usable numbers", () => {

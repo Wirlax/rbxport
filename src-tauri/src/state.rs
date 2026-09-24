@@ -508,6 +508,15 @@ pub fn spec_from_wire(library: &Library, dto: &ViewSpecDto) -> ViewSpec {
                 })
             })
             .unwrap_or(TrackSource::Collection),
+        TrackSourceDto::PlaylistFolder { id } => id
+            .parse::<u64>()
+            .ok()
+            .and_then(|numeric| {
+                let playlists = library.playlists();
+                let index = playlists.index_of(numeric)?;
+                playlists.is_folder(index).then_some(TrackSource::PlaylistFolder(index))
+            })
+            .unwrap_or(TrackSource::Collection),
         TrackSourceDto::TagList => TrackSource::TagList,
         TrackSourceDto::Related { track, criterion } => TrackSource::Related {
             // No such track, or none: past the end, which relates to nothing.
@@ -612,6 +621,7 @@ pub fn rows_to_dto(library: &Library, rows: &[rbl_index::Row], first_position: u
                 )
                 .unwrap_or(0),
                 file_name: library.file_name.get(index).to_owned(),
+                extra: None,
             }
         })
         .collect()

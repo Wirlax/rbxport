@@ -940,7 +940,7 @@ function AppBody() {
       // could land on the number the backend announces for the next edit,
       // and a generation that does not change is a page that is not
       // refetched — a rating lit for a moment and went out.
-      setTree(await backend.playlistTree());
+      setTree(withSources(await backend.playlistTree()));
       report(said);
     },
     [report],
@@ -1868,7 +1868,8 @@ function AppBody() {
   const subList = useMemo(() => ({
     onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
     onShowInFinder: revealTrack, onRate: rateTrack, onComment: commentTrack, pendingEdits, readOnly,
-  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly, refuse]);
+    dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
+  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly, refuse, draggedTracks, addDraggedTo]);
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
@@ -2079,6 +2080,8 @@ function AppBody() {
           onFocusedRow={setPlayerTrack}
           onSelectedRow={setSelectedRow}
           onDragTracks={setDraggedTracks}
+          dragging={draggedTracks !== null}
+          onDropTracks={selectedNode?.kind === "playlist" ? addDraggedTo : undefined}
           onDragError={refuse}
           onDropFiles={importDroppedFilesIntoOpen}
           players={deckCount(layout)}

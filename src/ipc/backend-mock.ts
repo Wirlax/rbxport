@@ -171,6 +171,30 @@ function makeRows(count: number): RowDto[] {
       // The mock has no files to serve, so every row falls back to the tint.
       hasArtwork: false,
       fileName: `${String(i + 1).padStart(2, "0")} ${artist} - track.mp3`,
+      extra: {
+        size: 8_000_000 + i * 1000,
+        discNo: 1,
+        albumArtist: artist,
+        trackNumber: i % 12 + 1,
+        composer: artist,
+        lyricist: "",
+        fileType: 1,
+        year: 2026,
+        mixName: MIXES[i % MIXES.length] ?? "",
+        remixer: "",
+        originalArtist: artist,
+        sampleRate: 44100,
+        bitrate: 320,
+        bitDepth: 16,
+        location: `/Users/mock/Music/${artist}/${i + 1}.mp3`,
+        dateCreated: dateAdded,
+        publishTrackInfo: false,
+        message: "",
+        color: i % 9,
+        djPlayCount: i % 7,
+        myTag: i % 3 === 0 ? "Peak Time" : "",
+        cloud: false,
+      },
     };
   }
   return rows;
@@ -421,6 +445,23 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       candidates = held
         ? held.map((id) => indexOfId.get(id)).filter((i): i is number => i !== undefined)
         : seededMembers(spec.source.id);
+    } else if (spec.source.kind === "playlistFolder") {
+      const folderId = spec.source.id;
+      const at = tree.findIndex((node) => node.id === folderId && node.kind === "folder");
+      const depth = tree[at]?.depth ?? 0;
+      const seen = new Set<number>();
+      candidates = [];
+      for (let i = at + 1; at >= 0 && i < tree.length && (tree[i]?.depth ?? 0) > depth; i += 1) {
+        const node = tree[i];
+        if (node?.kind !== "playlist" && node?.kind !== "smartPlaylist") continue;
+        for (const id of membersOf(node.id)) {
+          const row = indexOfId.get(id);
+          if (row !== undefined && !seen.has(row)) {
+            seen.add(row);
+            candidates.push(row);
+          }
+        }
+      }
     } else if (spec.source.kind === "history") {
       candidates = seededMembers(spec.source.id);
     } else if (spec.source.kind === "tagList") {
@@ -1364,6 +1405,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   return {
+    rekordboxBrowseSettings: () => Promise.resolve(null),
     librarySummary: () =>
       ready
         ? wait<LibrarySummary>({
@@ -1438,9 +1480,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return wait<ViewHandle>({ viewId, len: sorted.length, gen: 1 });
     },
 
-    fetchRows: (viewId, offset, len) => {
+    fetchRows: (viewId, offset, len, extraColumns = []) => {
+      const project = (row: RowDto): RowDto => {
+        const { extra, ...base } = row;
+        if (extraColumns.length === 0) return base;
+        return {
+          ...base,
+          extra: Object.fromEntries(extraColumns.flatMap((key) =>
+            extra?.[key] === undefined ? [] : [[key, extra[key]]])),
+        };
+      };
       const folder = folderViews.get(viewId);
-      if (folder) return wait(folder.slice(Math.max(0, offset), Math.max(0, offset) + len));
+      if (folder) return wait(folder.slice(Math.max(0, offset), Math.max(0, offset) + len).map(project));
       const view = views.get(viewId);
       if (!view) return Promise.reject(new Error(`unknown view ${viewId}`));
       const out: RowDto[] = [];
@@ -1451,7 +1502,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         // what the real backend computes in `rows_to_dto`. Handing back the
         // row's stored number would show the collection's order inside a
         // playlist.
-        if (row) out.push({ ...row, trackNo: i + 1 });
+        if (row) out.push(project({ ...row, trackNo: i + 1 }));
       }
       return wait(out);
     },

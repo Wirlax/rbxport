@@ -78,10 +78,11 @@ function subscribe<T>(event: string, listener: (payload: T) => void): () => void
 async function realBackend(): Promise<Backend> {
   const { invoke } = await import("@tauri-apps/api/core");
   return {
+    rekordboxBrowseSettings: () => invoke<string | null>("rekordbox_browse_settings"),
     librarySummary: () => invoke<LibrarySummary>("library_summary"),
     playlistTree: () => invoke<TreeNode[]>("playlist_tree"),
     openView: (spec) => invoke<ViewHandle>("open_view", { spec }),
-    fetchRows: (viewId, offset, len) => invoke<RowDto[]>("fetch_rows", { viewId, offset, len }),
+    fetchRows: (viewId, offset, len, extraColumns) => invoke<RowDto[]>("fetch_rows", { viewId, offset, len, extraColumns }),
     viewIdsInRange: (viewId, from, to) => invoke<string[]>("view_ids_in_range", { viewId, from, to }),
     trackWaveform: async (trackId, kind, window) => {
       // Raw bytes rather than a JSON number array: the three-band detail tag

@@ -45,10 +45,9 @@ export function specForNode(
 ): ViewSpec {
   const order = sort ?? DEFAULT_SORT;
   return {
-    // A playlist or a history session narrows the view. A folder holds lists
-    // rather than tracks — including a history year or month, which opens
-    // empty because that is what it holds — and a device is not a track source
-    // at all.
+    // A playlist, its parent folder, or a history session narrows the view.
+    // History folders still have no members of their own; a device is not a
+    // track source here.
     // The Explorer's folders open as themselves, and its heading as an empty
     // folder: rekordbox shows an Explorer with nothing in it there.
     // An intelligent playlist is asked for as a playlist: the backend knows
@@ -56,6 +55,8 @@ export function specForNode(
     source:
       node?.kind === "playlist" || node?.kind === "smartPlaylist"
         ? { kind: "playlist", id: node.id }
+        : node?.kind === "folder"
+          ? { kind: "playlistFolder", id: node.id }
         : node?.kind === "history"
           ? { kind: "history", id: node.id }
           : node?.kind === "directory"

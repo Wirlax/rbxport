@@ -212,6 +212,7 @@ export interface KeyboardPreferences {
 }
 
 export interface Preferences {
+  rekordbox: { syncBrowseSettings: boolean };
   view: ViewPreferences;
   audio: AudioPreferences;
   analysis: AnalysisPreferences;
@@ -229,6 +230,7 @@ export type PreferencePane = keyof Preferences;
  * is the measured size, and a stick's rows default to the reference rows.
  */
 export const DEFAULT_PREFERENCES: Preferences = {
+  rekordbox: { syncBrowseSettings: true },
   view: {
     locale: "en",
     showBpmChanges: true,
@@ -388,8 +390,10 @@ export function sanitisePreferences(value: unknown): Preferences {
   const advanced = part<AdvancedPreferences>(raw.advanced);
   const keyboard = part<KeyboardPreferences>(raw.keyboard);
   const usb = part<Preferences["usbExport"]>(raw.usbExport);
+  const rekordbox = part<Preferences["rekordbox"]>(raw.rekordbox);
   const d = DEFAULT_PREFERENCES;
   return {
+    rekordbox: { syncBrowseSettings: bool(rekordbox.syncBrowseSettings, true) },
     usbExport: { importSettings: bool(usb.importSettings, false), importHistory: bool(usb.importHistory, true), deleteUnlistedMusic: bool(usb.deleteUnlistedMusic, false), maximumCompatibility: bool(usb.maximumCompatibility, false), conversionFormat: usb.conversionFormat === "mp3" ? "mp3" : "wav" },
     view: {
       locale: oneOf(view.locale, LOCALES, d.view.locale),

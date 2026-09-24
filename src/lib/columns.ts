@@ -1,8 +1,8 @@
 /**
  * The browser's column catalogue, and the pure rules for arranging it.
  *
- * The catalogue and its order come from rekordbox's own header menu — the
- * capture recorded in TODO.md — so it is transcribed rather than invented.
+ * The catalogue describes the table; the header menu has its own order,
+ * transcribed from the supplied capture.
  * Twelve are shown by default; the rest are available.
  *
  * Everything here is a pure function over a layout so the rules are testable
@@ -45,7 +45,8 @@ export const MIN_COLUMN_WIDTH = 32;
 export const MAX_COLUMN_WIDTH = 1200;
 
 /**
- * Every column the header menu offers, in the menu's order.
+ * Every column the header menu offers. The table's default order differs
+ * from the menu shown in the capture.
  *
  * Widths for the twelve shown by default are rekordbox's own, from
  * `TableHeader-PlaylistTracks`. The rest have no measured width — they have
@@ -106,8 +107,32 @@ export const DEFAULT_VISIBLE: readonly ColumnKey[] = [
 /** Columns that are always present, whatever the saved layout says. */
 export const FIXED: readonly ColumnKey[] = CATALOGUE.filter((c) => c.fixed).map((c) => c.key);
 
-/** The columns the header menu offers, which is everything but the fixed ones. */
-export const MENU_COLUMNS: readonly ColumnSpec[] = CATALOGUE.filter((c) => !c.fixed);
+/** Columns the header menu cannot hide. Track Title may still be moved. */
+export const REQUIRED_COLUMNS: readonly ColumnKey[] = [...FIXED, "title"];
+
+/** Every menu column is backed by a browser row or a requested detail field. */
+export const AVAILABLE_COLUMNS: readonly ColumnKey[] = CATALOGUE.map((column) => column.key);
+
+/** Fields read from the database only when a table shows one of them. */
+export const EXTRA_COLUMNS: readonly ColumnKey[] = [
+  "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
+  "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
+  "location", "dateCreated", "publishTrackInfo", "message", "color",
+  "djPlayCount", "myTag", "trackNumber", "cloud",
+];
+
+/** The header menu's order in the supplied rekordbox capture. */
+const MENU_ORDER: readonly ColumnKey[] = [
+  "attr", "preview", "artwork", "title", "releaseDate", "artist", "genre", "comment",
+  "size", "discNo", "albumArtist", "trackNumber", "bpm", "rating", "composer",
+  "lyricist", "duration", "fileType", "year", "mixName", "remixer", "label",
+  "originalArtist", "key", "sampleRate", "bitrate", "bitDepth", "fileName",
+  "location", "dateAdded", "dateCreated", "hotCue", "publishTrackInfo", "message",
+  "color", "djPlayCount", "myTag", "album", "cloud",
+];
+export const MENU_COLUMNS: readonly ColumnSpec[] = MENU_ORDER
+  .map((key) => CATALOGUE.find((column) => column.key === key))
+  .filter((column): column is ColumnSpec => column !== undefined);
 
 /** A column's place in the table: which, in what order, how wide. */
 export interface Layout {
@@ -153,6 +178,16 @@ export function widthOf(layout: Layout, key: ColumnKey): number {
   return layout.widths[key] ?? specOf(key)?.width ?? 120;
 }
 
+/** Restore a required title at its catalogue position in an older layout. */
+function withTitle(order: readonly ColumnKey[]): ColumnKey[] {
+  if (order.includes("title")) return [...order];
+  const titleRank = CATALOGUE.findIndex((column) => column.key === "title");
+  const at = order.findIndex((key) => CATALOGUE.findIndex((column) => column.key === key) > titleRank);
+  const restored = [...order];
+  restored.splice(at === -1 ? restored.length : at, 0, "title");
+  return restored;
+}
+
 /**
  * The visible columns as full specs, at their current widths.
  *
@@ -160,7 +195,7 @@ export function widthOf(layout: Layout, key: ColumnKey): number {
  * saved before they existed, which is every layout already on disk.
  */
 export function resolve(layout: Layout): ColumnSpec[] {
-  const chosen = layout.order.filter((key) => !FIXED.includes(key));
+  const chosen = withTitle(layout.order.filter((key) => AVAILABLE_COLUMNS.includes(key) && !FIXED.includes(key)));
   return [...FIXED, ...chosen]
     .map((key) => specOf(key))
     .filter((spec): spec is ColumnSpec => spec !== undefined)
@@ -175,7 +210,7 @@ export function resolve(layout: Layout): ColumnSpec[] {
  * menu implies it will be.
  */
 export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
-  if (!BY_KEY.has(key) || FIXED.includes(key)) return layout;
+  if (!AVAILABLE_COLUMNS.includes(key) || REQUIRED_COLUMNS.includes(key)) return layout;
   if (layout.order.includes(key)) {
     return { ...layout, order: layout.order.filter((k) => k !== key) };
   }
@@ -197,7 +232,7 @@ export function toggleColumn(layout: Layout, key: ColumnKey): Layout {
  * detail with the code that knows about fixed columns at all.
  */
 export function moveColumn(layout: Layout, key: ColumnKey, to: number): Layout {
-  if (FIXED.includes(key)) return layout;
+  if (!AVAILABLE_COLUMNS.includes(key) || FIXED.includes(key)) return layout;
   const from = layout.order.indexOf(key);
   if (from === -1) return layout;
   const target = to - FIXED.length;
@@ -243,7 +278,7 @@ export function sanitise(value: unknown, fallback: () => Layout = defaultLayout)
   const seen = new Set<ColumnKey>();
   const order = (Array.isArray(raw.order) ? raw.order : []).filter(
     (key): key is ColumnKey => {
-      if (typeof key !== "string" || !BY_KEY.has(key)) return false;
+      if (typeof key !== "string" || !AVAILABLE_COLUMNS.includes(key)) return false;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -254,11 +289,11 @@ export function sanitise(value: unknown, fallback: () => Layout = defaultLayout)
   const widths: Partial<Record<ColumnKey, number>> = {};
   const rawWidths = typeof raw.widths === "object" && raw.widths !== null ? raw.widths : {};
   for (const [key, width] of Object.entries(rawWidths)) {
-    if (!BY_KEY.has(key as ColumnKey)) continue;
+    if (!AVAILABLE_COLUMNS.includes(key as ColumnKey)) continue;
     if (typeof width !== "number" || !Number.isFinite(width)) continue;
     widths[key as ColumnKey] = Math.round(
       Math.min(Math.max(width, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH),
     );
   }
-  return { order, widths };
+  return { order: withTitle(order), widths };
 }

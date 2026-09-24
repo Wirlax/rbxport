@@ -30,6 +30,7 @@ pub mod logging;
 pub mod menu;
 pub mod player;
 mod preferences;
+mod browse_settings;
 mod protocol;
 mod relocate;
 mod sync_window;
@@ -421,6 +422,7 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            browse_settings::rekordbox_browse_settings,
             startup::startup_milestone,
             file_drop::dropped_file_paths,
             file_drag::drag_tracks,

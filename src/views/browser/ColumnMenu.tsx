@@ -6,14 +6,15 @@
  * the two auto-size actions sit above a separator at the top.
  */
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
-import { MENU_COLUMNS, type ColumnKey } from "@/lib/columns";
+import { MENU_COLUMNS, REQUIRED_COLUMNS, type ColumnKey } from "@/lib/columns";
 import styles from "./ColumnMenu.module.css";
 
-/** Matches `.menu`'s min-width, for keeping the menu inside the window. */
-const MENU_WIDTH = 240;
-/** Never squeezed below this; past it the menu is placed higher instead. */
-const MIN_HEIGHT = 220;
+/** Matches `.menu`'s width, for keeping the menu inside the window. */
+const MENU_WIDTH = 190;
+/** Two commands, a divider and the compact column rows. */
+const FULL_HEIGHT = 2 * 25 + MENU_COLUMNS.length * 20 + 16;
 
 export interface ColumnMenuProps {
   x: number;
@@ -52,21 +53,16 @@ export function ColumnMenu({
   }, [onClose]);
 
   const shown = new Set(visible);
+  const top = Math.max(8, Math.min(y, window.innerHeight - FULL_HEIGHT - 8));
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       className={styles.menu}
-      /*
-        Thirty-nine items is taller than most windows, so the menu is placed
-        and then capped to the room below it — the list inside scrolls. A plain
-        clamp on `top` put the menu's *bottom* off screen and left the columns
-        near the end unreachable.
-      */
       style={{
-        left: Math.min(x, window.innerWidth - MENU_WIDTH - 8),
-        top: Math.min(y, Math.max(8, window.innerHeight - MIN_HEIGHT)),
-        maxHeight: window.innerHeight - Math.min(y, Math.max(8, window.innerHeight - MIN_HEIGHT)) - 8,
+        left: Math.max(8, Math.min(x, window.innerWidth - MENU_WIDTH - 8)),
+        top,
+        maxHeight: window.innerHeight - top - 8,
       }}
       role="menu"
       aria-label="Columns"
@@ -103,6 +99,7 @@ export function ColumnMenu({
             className={styles.item}
             role="menuitemcheckbox"
             aria-checked={shown.has(column.key)}
+            disabled={REQUIRED_COLUMNS.includes(column.key)}
             onClick={() => onToggle(column.key)}
           >
             <span className={styles.tick} aria-hidden>
@@ -112,6 +109,7 @@ export function ColumnMenu({
           </button>
         ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

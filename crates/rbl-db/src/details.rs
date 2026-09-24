@@ -122,6 +122,12 @@ pub fn track_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>
     Ok(Some(details))
 }
 
+/// Browser page enrichment omits the separate My Tag id query. Its names are
+/// read only when that column is visible.
+pub fn browser_details(conn: &Connection, id: &str) -> Result<Option<TrackDetails>> {
+    track_row(conn, id)
+}
+
 /// The My Tags on a track, by id; none on a library without the table.
 fn my_tags_of(conn: &Connection, id: &str) -> Vec<String> {
     let Ok(mut stmt) = conn.prepare(
@@ -131,6 +137,19 @@ fn my_tags_of(conn: &Connection, id: &str) -> Vec<String> {
     };
     stmt.query_map([id], |r| r.get::<_, Option<String>>(0))
         .map(|rows| rows.filter_map(std::result::Result::ok).flatten().collect())
+        .unwrap_or_default()
+}
+
+/// The browser's My Tag column uses names, not opaque tag ids.
+pub fn my_tag_names(conn: &Connection, id: &str) -> Vec<String> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT COALESCE(t.Name, '') FROM djmdSongMyTag s
+         JOIN djmdMyTag t ON t.ID = s.MyTagID AND t.rb_local_deleted = 0
+         WHERE s.ContentID = ?1 AND s.rb_local_deleted = 0
+         ORDER BY s.TrackNo, s.MyTagID",
+    ) else { return Vec::new() };
+    stmt.query_map([id], |row| row.get::<_, String>(0))
+        .map(|rows| rows.filter_map(std::result::Result::ok).filter(|name| !name.is_empty()).collect())
         .unwrap_or_default()
 }
 
@@ -283,6 +302,26 @@ mod tests {
         assert_eq!(details.file_size, 0);
         assert!(!details.hot_cue_auto_load);
         assert!(!details.publish);
+    }
+
+    #[test]
+    fn my_tag_column_reads_names_in_track_order() {
+        let (_dir, library) = open();
+        let conn = library.connection();
+        let track = track_id(1);
+        let stamp = rbl_core::time::now();
+        for (id, tag, order) in [
+            ("song-tag-warm", fixture::MY_TAG_WARM_UP, 1),
+            ("song-tag-peak", fixture::MY_TAG_PEAK, 2),
+        ] {
+            conn.execute(
+                "INSERT INTO djmdSongMyTag
+                 (ID, MyTagID, ContentID, TrackNo, rb_local_deleted, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
+                params![id, tag, track, order, stamp],
+            ).unwrap();
+        }
+        assert_eq!(my_tag_names(conn, &track), ["Warm-up", "Peak"]);
     }
 
     #[test]

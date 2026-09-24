@@ -34,8 +34,9 @@ import { DjSystemPane, DJ_SYSTEM_TABS, type DjSystemTab } from "./DjSystemPane";
 import { KeyboardPane } from "./KeyboardPane";
 import { UsbExportPane } from "./UsbExportPane";
 import { BackupsPane } from "./BackupsPane";
-import { ArchiveRestore } from "lucide-react";
+import { ArchiveRestore, RefreshCw } from "lucide-react";
 import { LinkPane } from "./LinkPane";
+import { RekordboxPane } from "./RekordboxPane";
 import styles from "./Preferences.module.css";
 import { Button } from "./controls";
 import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
@@ -44,7 +45,7 @@ import { ViewPane, VIEW_TABS, type ViewTab } from "./ViewPane";
  * The sidebar, in the capture's order and wording, less PLAN and CLOUD, and
  * with About at the end — ours, for the version and the update check.
  */
-export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "usbExport" | "about";
+export type Pane = "view" | "audio" | "analysis" | "djSystem" | "link" | "keyboard" | "advanced" | "backups" | "usbExport" | "rekordbox" | "about";
 
 export type PreferencesTarget = Pane | "libraryProtection";
 
@@ -63,6 +64,7 @@ const PANES: readonly { id: Pane; label: string; Icon: ComponentType<SVGProps<SV
   { id: "djSystem", label: "DJ System", Icon: PrefDjSystemIcon },
   { id: "keyboard", label: "Keyboard", Icon: PrefKeyboardIcon },
   { id: "advanced", label: "Advanced", Icon: PrefAdvancedIcon },
+  { id: "rekordbox", label: "Rekordbox", Icon: RefreshCw },
   { id: "link", label: "PRO DJ LINK", Icon: LinkIcon },
   { id: "usbExport", label: "USB Export", Icon: UsbStickIcon },
   { id: "backups", label: "Backups", Icon: ArchiveRestore },
@@ -77,6 +79,7 @@ const RESETS: Partial<Record<Pane, PreferencePane>> = {
   djSystem: "djSystem",
   advanced: "advanced",
   usbExport: "usbExport",
+  rekordbox: "rekordbox",
 };
 
 export interface PreferencesProps {
@@ -241,7 +244,7 @@ export function Preferences({
             <ul className={styles.panes} role="tablist" aria-orientation="vertical">
               {PANES.map(({ id, label, Icon }) => (
                 <li key={id}>
-                  {id === "link" ? <h4 className={styles.paneGroupHeading}>RBExport</h4> : null}
+                  {id === "rekordbox" ? <h4 className={styles.paneGroupHeading}>RBXport</h4> : null}
                   <button
                     type="button"
                     role="tab"
@@ -296,6 +299,8 @@ export function Preferences({
                   <UsbExportPane />
                 ) : pane === "backups" ? (
                   <BackupsPane readOnly={summary?.readOnly ?? false} />
+                ) : pane === "rekordbox" ? (
+                  <RekordboxPane />
                 ) : pane === "about" ? (
                   <AboutPane />
                 ) : (

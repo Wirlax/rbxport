@@ -40,6 +40,8 @@ pub struct RowDto {
     pub has_artwork: bool,
     /// The file's own name, for the Explorer's File Name column.
     pub file_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +121,8 @@ pub enum TrackSourceDto {
     Collection,
     #[serde(rename = "playlist")]
     Playlist { id: String },
+    #[serde(rename = "playlistFolder")]
+    PlaylistFolder { id: String },
     #[serde(rename = "history")]
     History { id: String },
     /// A folder on disk, for the Explorer. Empty for the section heading,

@@ -12,10 +12,12 @@ describe("specForNode", () => {
     expect(specForNode(playlist, "", null).source).toEqual({ kind: "playlist", id: "pl-1" });
   });
 
-  it("shows the collection for anything that is not a playlist", () => {
-    // A folder holds playlists rather than tracks, and a device is not a track
-    // source at all — both would otherwise ask for a view that cannot exist.
-    for (const node of [folder, device, null]) {
+  it("opens a playlist folder over its descendants", () => {
+    expect(specForNode(folder, "", null).source).toEqual({ kind: "playlistFolder", id: "f-1" });
+  });
+
+  it("shows the collection for nodes without a track source", () => {
+    for (const node of [device, null]) {
       expect(specForNode(node, "", null).source).toEqual({ kind: "collection" });
     }
   });

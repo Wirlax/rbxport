@@ -12,7 +12,7 @@
 //! filter is applied. A list computed after it would lose every value not
 //! currently picked, and there would be no way to pick another.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Library, Row, TrackSource, ViewSpec, NO_ID};
 
@@ -293,7 +293,7 @@ impl Library {
             TrackSource::History(index) => {
                 self.histories().members.get(*index).cloned().unwrap_or_default()
             }
-            TrackSource::Collection | TrackSource::Playlist(_) | TrackSource::SmartPlaylist(_) => {
+            TrackSource::Collection | TrackSource::Playlist(_) | TrackSource::PlaylistFolder(_) | TrackSource::SmartPlaylist(_) => {
                 let playlists = self.playlists();
                 self.source_rows_unlocked(&playlists, source)
             }
@@ -312,6 +312,34 @@ impl Library {
                 (0..u32::try_from(self.len()).unwrap_or(u32::MAX)).collect()
             }
             TrackSource::Playlist(index) => playlists.members.get(*index).cloned().unwrap_or_default(),
+            TrackSource::PlaylistFolder(folder) => {
+                if !playlists.is_folder(*folder) {
+                    return Vec::new();
+                }
+                let mut seen = HashSet::new();
+                let mut rows = Vec::new();
+                for index in 0..playlists.len() {
+                    if playlists.is_folder(index) {
+                        continue;
+                    }
+                    let mut parent = playlists.parent.get(index).copied().unwrap_or(NO_ID);
+                    let mut depth = 0;
+                    while parent != NO_ID && depth < playlists.len() {
+                        if parent as usize == *folder {
+                            let members = if playlists.is_smart(index) {
+                                playlists.smart_rule(index).map(|rule| rule.evaluate(self)).unwrap_or_default()
+                            } else {
+                                playlists.members.get(index).cloned().unwrap_or_default()
+                            };
+                            rows.extend(members.into_iter().filter(|row| seen.insert(*row)));
+                            break;
+                        }
+                        parent = playlists.parent.get(parent as usize).copied().unwrap_or(NO_ID);
+                        depth += 1;
+                    }
+                }
+                rows
+            }
             // A rule that does not parse admits nothing, which is what
             // rekordbox shows for a rule it cannot read.
             TrackSource::SmartPlaylist(index) => {

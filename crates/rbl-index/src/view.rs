@@ -59,6 +59,8 @@ pub enum TrackSource {
     Collection,
     /// Index into `Library::playlists`, not a rekordbox id.
     Playlist(usize),
+    /// Tracks in every descendant playlist, with repeated tracks listed once.
+    PlaylistFolder(usize),
     /// Index into `Library::histories`. A session, or a folder of them —
     /// a folder has no members of its own, so it opens empty.
     History(usize),

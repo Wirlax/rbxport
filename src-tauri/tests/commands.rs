@@ -118,7 +118,7 @@ impl Shell {
     }
 
     fn rows(&self, view_id: u32) -> Vec<RowDto> {
-        run(commands::fetch_rows(self.state(), view_id, 0, commands::MAX_ROWS)).unwrap()
+        run(commands::fetch_rows(self.state(), view_id, 0, commands::MAX_ROWS, None)).unwrap()
     }
 
     /// The playlist's rows, in its own order.
@@ -181,6 +181,35 @@ fn playlist_spec(id: &str) -> ViewSpecDto {
         search_field: rbl_index::SearchField::All,
         filter: TrackFilterDto::default(),
     }
+}
+
+fn playlist_folder_spec(id: &str) -> ViewSpecDto {
+    ViewSpecDto { source: TrackSourceDto::PlaylistFolder { id: id.to_owned() }, ..playlist_spec(id) }
+}
+
+#[test]
+fn a_playlist_folder_lists_unique_tracks_from_nested_playlists() {
+    let s = shell();
+    run(commands::create_folder(s.handle(), s.state(), "Shows".into(), ROOT.into())).unwrap();
+    let shows = s.node("Shows");
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), shows.id.clone())).unwrap();
+    run(commands::create_folder(s.handle(), s.state(), "Weekend".into(), shows.id.clone())).unwrap();
+    let weekend = s.node("Weekend");
+    run(commands::create_playlist(s.handle(), s.state(), "Saturday".into(), weekend.id.clone())).unwrap();
+    run(commands::create_playlist(s.handle(), s.state(), "Outside".into(), ROOT.into())).unwrap();
+    let friday = s.node("Friday");
+    let saturday = s.node("Saturday");
+    let outside = s.node("Outside");
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), friday.id, vec![track_id(3), track_id(1)])).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), saturday.id, vec![track_id(1), track_id(2)])).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), outside.id, vec![track_id(4)])).unwrap();
+
+    let (view, len) = s.open(playlist_folder_spec(&shows.id));
+    assert_eq!(len, 3);
+    assert_eq!(ids(&s.rows(view)), [track_id(3), track_id(1), track_id(2)]);
+    let (view, len) = s.open(playlist_folder_spec(&weekend.id));
+    assert_eq!(len, 2);
+    assert_eq!(ids(&s.rows(view)), [track_id(1), track_id(2)]);
 }
 
 /// A silent stereo WAV the deck can load and the writer can import.
@@ -263,7 +292,7 @@ fn a_view_is_a_window_over_rows_the_backend_sorted_and_searched() {
     assert_eq!(rows[39].title, "Track 039");
 
     // A window, not the list: the page is what was asked for.
-    let page = run(commands::fetch_rows(s.state(), view, 10, 3)).unwrap();
+    let page = run(commands::fetch_rows(s.state(), view, 10, 3, None)).unwrap();
     assert_eq!(titles(&page), ["Track 010", "Track 011", "Track 012"]);
     assert_eq!(page[0].track_no, 11, "numbered from where the window starts");
 
@@ -288,14 +317,38 @@ fn a_page_past_the_cap_is_refused_before_it_is_built() {
     // The 64 KB response cap is kept by never building more than a page.
     let s = shell();
     let (view, _) = s.open(collection_spec());
-    let err = run(commands::fetch_rows(s.state(), view, 0, commands::MAX_ROWS + 1)).unwrap_err();
+    let err = run(commands::fetch_rows(s.state(), view, 0, commands::MAX_ROWS + 1, None)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::Malformed);
+}
+
+#[test]
+fn visible_detail_columns_are_added_to_browser_pages() {
+    let s = shell();
+    let (view, _) = s.open(collection_spec());
+    let plain = run(commands::fetch_rows(s.state(), view, 0, 1, None)).unwrap();
+    assert!(plain[0].extra.is_none());
+
+    let columns = [
+        "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
+        "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
+        "location", "dateCreated", "publishTrackInfo", "message", "color",
+        "djPlayCount", "myTag", "trackNumber", "cloud", "unknown",
+    ]
+        .map(str::to_owned).to_vec();
+    let rows = run(commands::fetch_rows(s.state(), view, 0, 1, Some(columns))).unwrap();
+    let extra = rows[0].extra.as_ref().unwrap();
+    assert_eq!(extra.get("size"), Some(&serde_json::json!(0)));
+    assert_eq!(extra.get("publishTrackInfo"), Some(&serde_json::json!(false)));
+    assert_eq!(extra.get("myTag"), Some(&serde_json::json!("")));
+    assert_eq!(extra.get("cloud"), Some(&serde_json::json!(false)));
+    assert_eq!(extra.len(), 22, "every requested browser detail has a value or a blank");
+    assert!(!extra.contains_key("unknown"));
 }
 
 #[test]
 fn a_view_nobody_opened_is_not_found_rather_than_empty() {
     let s = shell();
-    let err = run(commands::fetch_rows(s.state(), 999, 0, 10)).unwrap_err();
+    let err = run(commands::fetch_rows(s.state(), 999, 0, 10, None)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
 }
 
@@ -422,7 +475,7 @@ fn an_edit_closes_the_views_that_were_open_over_the_old_library() {
     run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(0), vec![track_id(30)])).unwrap();
 
     // The page the frontend held is gone; it reopens against the new tree.
-    let err = run(commands::fetch_rows(s.state(), view, 0, 10)).unwrap_err();
+    let err = run(commands::fetch_rows(s.state(), view, 0, 10, None)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
     assert_eq!(s.playlist_rows(&playlist_id(0)).len(), 6);
 }

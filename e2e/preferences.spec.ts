@@ -19,6 +19,19 @@ async function prefs(page: Page) {
   return dialog;
 }
 
+test("Rekordbox browse sync starts enabled and can be disabled", async ({ page }) => {
+  await open(page);
+  const dialog = await prefs(page);
+  await dialog.getByRole("tab", { name: "Rekordbox" }).click();
+  const sync = dialog.getByRole("switch", { name: "Keep browse settings synchronized" });
+  await expect(sync).toBeChecked();
+  await sync.uncheck();
+  await page.reload();
+  const again = await prefs(page);
+  await again.getByRole("tab", { name: "Rekordbox" }).click();
+  await expect(again.getByRole("switch", { name: "Keep browse settings synchronized" })).not.toBeChecked();
+});
+
 const player = (page: Page) => page.getByRole("region", { name: "Preview player" });
 
 test("View VU Meter switches modes and persists the selection", async ({ page }) => {
@@ -281,7 +294,7 @@ test("About groups version and update controls", async ({ page }) => {
   await expect(dialog.getByRole("button", { name: "Check for updates" })).toBeEnabled();
 
   const advancedItem = dialog.locator("li").filter({ has: page.getByRole("tab", { name: "Advanced", exact: true }) });
-  await expect(advancedItem.locator("+ li").getByRole("tab")).toHaveAccessibleName("PRO DJ LINK");
+  await expect(advancedItem.locator("+ li").getByRole("tab")).toHaveAccessibleName("Rekordbox");
   await dialog.getByRole("tab", { name: "Advanced", exact: true }).click();
   await dialog.getByRole("tab", { name: "Others" }).click();
   await expect(dialog.getByRole("switch", { name: "Download updates" })).toHaveCount(0);

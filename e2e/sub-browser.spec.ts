@@ -115,6 +115,31 @@ test("selecting in one browser does not move the other", async ({ page }) => {
   await expect(mainTitle).not.toContainText("(0 Tracks)");
 });
 
+test("tracks drag between the two playlist lists", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await subToggle(page).click();
+  const panel = sub(page);
+  const main = page.getByRole("grid").first();
+  const right = panel.getByRole("grid");
+  const mainTree = page.getByRole("tree").first();
+  const rightTree = panel.getByRole("tree");
+  const mainRows = main.locator('[role="row"]:has([role="gridcell"])');
+  const rightRows = right.locator('[role="row"]:has([role="gridcell"])');
+
+  await rightTree.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first().click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Create New Playlist" }).click();
+  await rightTree.getByRole("treeitem").filter({ hasText: "New playlist" }).first().click();
+  await mainTree.getByRole("treeitem").filter({ hasText: "All Tracks" }).first().click();
+  const firstTitle = await mainRows.first().locator('[data-col="title"]').innerText();
+  await mainRows.first().dragTo(right);
+  await expect(panel.getByTestId("browser-title")).toContainText("New playlist (1 Tracks)");
+  await expect(rightRows.first().locator('[data-col="title"]')).toHaveText(firstTitle.trim());
+
+  await mainTree.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  await rightRows.first().dragTo(main);
+  await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to Melodic Vox.");
+});
+
 test("the sub-browser's splitters move it and its tree within the clamp", async ({ page }) => {
   await subToggle(page).click();
   const panel = sub(page);

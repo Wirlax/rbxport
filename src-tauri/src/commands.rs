@@ -285,6 +285,7 @@ pub async fn fetch_rows(
     view_id: u32,
     offset: u32,
     len: u32,
+    extra_columns: Option<Vec<String>>,
 ) -> AppResult<Vec<RowDto>> {
     if len > MAX_ROWS {
         return Err(
@@ -293,16 +294,79 @@ pub async fn fetch_rows(
         );
     }
     let library = state.library()?;
+    let extra_columns = extra_columns.unwrap_or_default();
+    let handle = Arc::clone(&state);
     if let Some(folder) = state.folder_view(view_id) {
-        return crate::explorer::fetch_rows(library, folder, offset, len).await;
+        let mut rows = crate::explorer::fetch_rows(library, folder, offset, len).await?;
+        if !extra_columns.is_empty() {
+            blocking("fetch_row_details", move || {
+                enrich_rows(&handle, &mut rows, &extra_columns)?;
+                Ok(rows)
+            }).await
+        } else {
+            Ok(rows)
+        }
+    } else {
+        let view = state.view(view_id)?;
+        blocking("fetch_rows", move || {
+            let offset = offset as usize;
+            let window = view.window(offset, len as usize);
+            let mut rows = rows_to_dto(&library, window, offset);
+            if !extra_columns.is_empty() { enrich_rows(&handle, &mut rows, &extra_columns)?; }
+            Ok(rows)
+        })
+        .await
     }
-    let view = state.view(view_id)?;
-    blocking("fetch_rows", move || {
-        let offset = offset as usize;
-        let window = view.window(offset, len as usize);
-        Ok(rows_to_dto(&library, window, offset))
-    })
-    .await
+}
+
+/// Adds only requested browser fields, keeping ordinary row pages small.
+fn enrich_rows(state: &AppState, rows: &mut [RowDto], columns: &[String]) -> AppResult<()> {
+    use serde_json::{json, Value};
+    const FIELDS: &[&str] = &[
+        "size", "discNo", "albumArtist", "composer", "lyricist", "fileType", "year",
+        "mixName", "remixer", "originalArtist", "sampleRate", "bitrate", "bitDepth",
+        "location", "dateCreated", "publishTrackInfo", "message", "color",
+        "djPlayCount", "myTag", "trackNumber", "cloud",
+    ];
+    let wanted: Vec<&str> = columns.iter().map(String::as_str).filter(|column| FIELDS.contains(column)).collect();
+    if wanted.is_empty() { return Ok(()); }
+    state.read_db(|db| {
+        for row in rows {
+            if row.id.starts_with("file:") { continue; }
+            let Some(details) = rbl_db::details::browser_details(db.connection(), &row.id)? else { continue };
+            let mut values = serde_json::Map::new();
+            for &column in &wanted {
+                let value: Value = match column {
+                    "size" => json!(details.file_size),
+                    "discNo" => json!(details.disc_number),
+                    "albumArtist" => json!(details.album_artist),
+                    "composer" => json!(details.composer),
+                    "lyricist" => json!(details.lyricist),
+                    "fileType" => json!(details.file_type),
+                    "year" => json!(details.year),
+                    "mixName" => json!(details.mix_name),
+                    "remixer" => json!(details.remixer),
+                    "originalArtist" => json!(details.original_artist),
+                    "sampleRate" => json!(details.sample_rate),
+                    "bitrate" => json!(details.bitrate),
+                    "bitDepth" => json!(details.bit_depth),
+                    "location" => json!(details.path),
+                    "dateCreated" => json!(details.date_created),
+                    "publishTrackInfo" => json!(details.publish),
+                    "message" => json!(details.message),
+                    "color" => json!(details.color.parse::<u8>().unwrap_or(0)),
+                    "djPlayCount" => json!(details.play_count),
+                    "myTag" => json!(rbl_db::details::my_tag_names(db.connection(), &row.id).join(", ")),
+                    "trackNumber" => json!(details.track_number),
+                    "cloud" => json!(details.path.starts_with("/contents_")),
+                    _ => continue,
+                };
+                values.insert(column.to_owned(), value);
+            }
+            row.extra = Some(values);
+        }
+        Ok(())
+    }).map_err(write_error)
 }
 
 #[tauri::command]

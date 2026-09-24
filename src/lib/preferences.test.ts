@@ -10,6 +10,12 @@ import {
 } from "./preferences";
 
 describe("sanitisePreferences", () => {
+  it("enables rekordbox browse sync by default and remembers an explicit off choice", () => {
+    expect(DEFAULT_PREFERENCES.rekordbox.syncBrowseSettings).toBe(true);
+    expect(sanitisePreferences({ view: {} }).rekordbox.syncBrowseSettings).toBe(true);
+    expect(sanitisePreferences({ rekordbox: { syncBrowseSettings: "no" } }).rekordbox.syncBrowseSettings).toBe(true);
+    expect(sanitisePreferences({ rekordbox: { syncBrowseSettings: false } }).rekordbox.syncBrowseSettings).toBe(false);
+  });
   it("protects a new library without making existing users read-only", () => {
     expect(DEFAULT_PREFERENCES.advanced.protectLibrary).toBe(true);
     expect(sanitisePreferences({ view: { tooltips: true } }).advanced.protectLibrary).toBe(false);

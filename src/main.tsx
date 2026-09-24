@@ -6,6 +6,7 @@ const ReportWindow = lazy(() => import("./views/report/ReportBug").then(m => ({ 
 const SyncWindow = lazy(() => import("./views/sync/SyncWindow").then(m => ({ default: m.SyncWindow })));
 import "./styles/base.css";
 import { Localization } from "./i18n";
+import { syncRekordboxBrowseAtStartup } from "./lib/rekordboxBrowse";
 
 // Suppress the webview's Reload/Inspect menu in every app window. Leave
 // propagation intact so the app's context-menu handlers still receive it.
@@ -19,6 +20,8 @@ if (!el) throw new Error("#root missing from index.html");
 // each draws.
 const preferences = window.location.hash.startsWith("#preferences");
 const sync = window.location.hash.startsWith("#sync");
+
+if (!preferences && !sync) await syncRekordboxBrowseAtStartup();
 
 createRoot(el).render(
   <StrictMode>
