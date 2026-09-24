@@ -17,6 +17,7 @@ pub mod fixture;
 pub mod import;
 pub mod itunes;
 pub mod key;
+pub mod new_library;
 pub mod write;
 pub mod xml;
 mod schema;
@@ -75,13 +76,21 @@ pub const OPTIONS_ENV: &str = "RBXPORT_OPTIONS";
 
 /// The agent's options file, which holds the db path and the wrapped passphrase.
 fn options_path() -> Result<PathBuf> {
+    let path = options_location()?;
+    if path.is_file() {
+        return Ok(path);
+    }
+    Err(DbError::NotInstalled(if std::env::var_os(OPTIONS_ENV).is_some() {
+        format!("{OPTIONS_ENV} names {}, which is not a file", path.display())
+    } else {
+        format!("{} not found", path.display())
+    }))
+}
+
+/// Where the agent's options file is, or goes when there is none yet.
+pub(crate) fn options_location() -> Result<PathBuf> {
     if let Some(chosen) = std::env::var_os(OPTIONS_ENV) {
-        let path = PathBuf::from(chosen);
-        return if path.is_file() {
-            Ok(path)
-        } else {
-            Err(DbError::NotInstalled(format!("{OPTIONS_ENV} names {}, which is not a file", path.display())))
-        };
+        return Ok(PathBuf::from(chosen));
     }
     let base = if cfg!(target_os = "windows") {
         dirs::config_dir().map(|p| p.join("Pioneer"))
@@ -89,13 +98,20 @@ fn options_path() -> Result<PathBuf> {
         dirs::home_dir().map(|p| p.join("Library/Application Support/Pioneer"))
     }
     .ok_or_else(|| DbError::NotInstalled("no home directory".into()))?;
+    Ok(base.join("rekordboxAgent/storage/options.json"))
+}
 
-    let path = base.join("rekordboxAgent/storage/options.json");
-    if path.exists() {
-        Ok(path)
+/// The folder rekordbox keeps `master.db` and `share/` in when nothing says
+/// otherwise: `~/Library/Pioneer/rekordbox` on macOS,
+/// `%APPDATA%\Pioneer\rekordbox` on Windows [OBS 7.2.11, 7.2.14].
+pub(crate) fn default_library_dir() -> Result<PathBuf> {
+    let base = if cfg!(target_os = "windows") {
+        dirs::config_dir()
     } else {
-        Err(DbError::NotInstalled(format!("{} not found", path.display())))
-    }
+        dirs::home_dir().map(|p| p.join("Library"))
+    };
+    base.map(|p| p.join("Pioneer/rekordbox"))
+        .ok_or_else(|| DbError::NotInstalled("no home directory".into()))
 }
 
 /// Finds the installed library and unwraps its passphrase.

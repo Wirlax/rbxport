@@ -61,6 +61,10 @@ struct Inner {
     /// The passive network watcher, running from startup: who is on the
     /// network, so the shell can offer LINK when a player appears.
     watcher: Option<rbl_link::Watcher>,
+    /// Why the last load failed, until one succeeds. Kept rather than only
+    /// sent as an event: with no library at all the load fails in
+    /// milliseconds, before the window has subscribed to anything.
+    library_problem: Option<crate::dto::LibraryProblemDto>,
 }
 
 impl Default for AppState {
@@ -255,6 +259,7 @@ impl AppState {
         *self.reader.lock() = None;
         let mut inner = self.inner.write();
         inner.library = Some(Arc::new(library));
+        inner.library_problem = None;
         inner.location = Some(location);
         inner.read_only = read_only;
         inner.db_version = db_version;
@@ -268,6 +273,15 @@ impl AppState {
         if let Some(session) = inner.link.as_ref() {
             session.analysis_changed();
         }
+    }
+
+    /// Why the library is not loaded, when a load has failed.
+    pub fn library_problem(&self) -> Option<crate::dto::LibraryProblemDto> {
+        self.inner.read().library_problem.clone()
+    }
+
+    pub(crate) fn set_library_problem(&self, problem: Option<crate::dto::LibraryProblemDto>) {
+        self.inner.write().library_problem = problem;
     }
 
     /// Drops every open view and bumps the generation.

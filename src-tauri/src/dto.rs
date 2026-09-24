@@ -95,6 +95,16 @@ pub struct LimiterDto {
     pub release_ms: f32,
 }
 
+/// Why the library did not load at startup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum LibraryProblemDto {
+    /// No library here at all, and one can be made at `master_db`.
+    Missing { master_db: String },
+    /// There is a library, or something in its place, and it would not open.
+    Failed { message: String },
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySummaryDto {

@@ -14,7 +14,7 @@ import theme from "../../design/tokens/theme.json";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
-  FilterValues, GridState, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
@@ -558,8 +558,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * with. `?slow` holds the library back until `window.__libraryReady()` is
    * called, so that race can be driven deliberately.
    */
+  /**
+   * `?nolibrary` is a machine with no rekordbox library at all: nothing loads
+   * until `createLibrary`, and `libraryProblem` says so.
+   */
+  let missing = readFlagFromUrl("nolibrary");
   let ready =
-    typeof location === "undefined" || !new URLSearchParams(location.search).has("slow");
+    !missing && (typeof location === "undefined" || !new URLSearchParams(location.search).has("slow"));
   const readyListeners = new Set<() => void>();
   if (typeof window !== "undefined") {
     (window as unknown as { __libraryReady: () => void }).__libraryReady = () => {
@@ -2067,7 +2072,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       readyListeners.add(listener);
       return () => readyListeners.delete(listener);
     },
-    onLibraryError: () => () => undefined,
+    onLibraryProblem: () => () => undefined,
+    libraryProblem: () =>
+      wait<LibraryProblem | null>(
+        missing ? { kind: "missing", masterDb: "/Users/you/Library/Pioneer/rekordbox/master.db" } : null,
+      ),
+    createLibrary: async () => {
+      await wait(undefined);
+      missing = false;
+      ready = true;
+      for (const listener of readyListeners) listener();
+    },
 
     // A browser has no native menu bar. The mock exposes the listener so a
     // test can fire an item the way the shell would; this is the mock, which

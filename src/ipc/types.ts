@@ -122,6 +122,13 @@ export interface TreeNode {
   lazy?: true;
 }
 
+/** Why the library did not load at startup. */
+export type LibraryProblem =
+  /** No rekordbox library here at all; one can be made at `masterDb`. */
+  | { kind: "missing"; masterDb: string }
+  /** A library, or something in its place, that would not open. */
+  | { kind: "failed"; message: string };
+
 export interface LibrarySummary {
   trackCount: number;
   playlistCount: number;
@@ -238,8 +245,22 @@ export interface Backend {
    */
   onLibraryReady(listener: () => void): () => void;
 
-  /** Fires when the library could not be loaded at all, with the reason. */
-  onLibraryError(listener: (message: string) => void): () => void;
+  /** Fires when the library could not be loaded, with the reason. */
+  onLibraryProblem(listener: (problem: LibraryProblem) => void): () => void;
+
+  /**
+   * Why the library did not load, or null while it is loading or loaded.
+   * Asked as well as listened for: with no library at all the backend gives
+   * up before the window has subscribed.
+   */
+  libraryProblem(): Promise<LibraryProblem | null>;
+
+  /**
+   * Makes a new, empty library where rekordbox keeps one and loads it;
+   * `onLibraryReady` fires when it is up. Only when `libraryProblem` said
+   * `missing`; a library that has appeared since is loaded, not replaced.
+   */
+  createLibrary(): Promise<void>;
 
   /**
    * Fires after a cue edit with the id of the track whose cues changed.

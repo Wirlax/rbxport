@@ -22,6 +22,7 @@ mod backup_zip;
 mod backup_sizes;
 mod backup_restore_scripts;
 mod file_journal;
+mod new_library;
 mod diagnostics;
 mod explorer;
 mod link;
@@ -68,12 +69,12 @@ fn schema_key(db_version: Option<i64>) -> u32 {
     db_version.and_then(|v| u32::try_from(v).ok()).unwrap_or(0)
 }
 
-fn spawn_library_load(app: tauri::AppHandle) {
+pub(crate) fn spawn_library_load(app: tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
         if let Ok(location) = rbl_db::detect() {
             if let Err(e) = backups::recover(app.state::<Arc<state::AppState>>().backup_dir(), &location) {
-                let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
                 return;
             }
         }
@@ -86,7 +87,7 @@ fn spawn_library_load(app: tauri::AppHandle) {
             Ok(db) => {
                 if let Err(e) = file_journal::recover(app.state::<Arc<state::AppState>>().backup_dir(), db.location()) {
                     tracing::error!(error = %e, "analysis recovery failed");
-                    let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                    report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
                     return;
                 }
                 let db_version = db.schema().db_version;
@@ -165,16 +166,32 @@ fn spawn_library_load(app: tauri::AppHandle) {
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "could not index the library");
-                        let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                        report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
                     }
                 }
             }
             Err(e) => {
+                // Nothing to open, as against something that would not open:
+                // offered as a new library rather than reported as a failure.
+                if let Ok(Some(plan)) = rbl_db::new_library::plan() {
+                    tracing::info!(path = %plan.master_db.display(), error = %e, "no library here; offering to make one");
+                    report_problem(&app, dto::LibraryProblemDto::Missing {
+                        master_db: plan.master_db.display().to_string(),
+                    });
+                    return;
+                }
                 tracing::error!(error = %e, "could not open the library");
-                let _ = tauri::Emitter::emit(&app, "library:error", e.to_string());
+                report_problem(&app, dto::LibraryProblemDto::Failed { message: e.to_string() });
             }
         }
     });
+}
+
+/// Keeps why the library did not load, for a window that asks later, and
+/// tells a window already listening.
+fn report_problem(app: &tauri::AppHandle, problem: dto::LibraryProblemDto) {
+    app.state::<Arc<AppState>>().set_library_problem(Some(problem.clone()));
+    let _ = tauri::Emitter::emit(app, "library:problem", problem);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -428,6 +445,8 @@ pub fn run() {
             file_drag::drag_tracks,
             menu::set_history_menu,
             commands::library_summary,
+            new_library::library_problem,
+            new_library::create_library,
             commands::playlist_tree,
             commands::open_view,
             commands::fetch_rows,

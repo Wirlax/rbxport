@@ -14,6 +14,10 @@ the version numbers [Semantic Versioning](https://semver.org/).
   recovery.
 
 ### Added
+- On a computer with no rekordbox library, the app asks whether to create a
+  new database instead of opening on an empty window with an error. The new
+  library goes where rekordbox keeps its own, and tracks, analysis and
+  playlists can be added to it right away.
 - New backups record what they hold: the number of tracks, playlists, hot
   cues and memory cues, and the size of each part. RBXport Restore shows this
   before restoring, so the right backup is easy to pick.
