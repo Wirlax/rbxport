@@ -11,7 +11,7 @@ import { TREE_SEARCH_OPTIONS } from "@/lib/search";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "@/ipc/types";
 import styles from "./TreeView.module.css";
-import { DeviceIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
+import { DeviceIcon, EjectIcon, FolderIcon, HistoryIcon, ListIcon, NoteIcon, SmartListIcon } from "@/components/icons";
 import { ContextMenu } from "@/components/ContextMenu";
 import { treeMenu } from "@/lib/contextMenus";
 import {
@@ -71,6 +71,7 @@ const Row = memo(function Row({
   node, selected, branch, open, onSelect, onToggle, droppable, onDropTracks, onDropFiles, onMenu, count,
   renaming, onRename, onRenameEnd, onRenameStart, doubleClickToEdit,
   movable, moveEdge, onMoveStart, onMoveOver, onMoveDrop, onMoveEnd,
+  onEjectDevice, ejecting, deviceBusy,
 }: {
   node: TreeNode;
   selected: boolean;
@@ -104,6 +105,9 @@ const Row = memo(function Row({
   open: boolean;
   onSelect: (node: TreeNode) => void;
   onToggle: (node: TreeNode) => void;
+  onEjectDevice: ((node: TreeNode) => void) | undefined;
+  ejecting: boolean;
+  deviceBusy: boolean;
 }) {
   // A history node is a session, or the year or month one is filed under —
   // one kind, told apart by whether anything sits beneath it. A month whose
@@ -140,6 +144,7 @@ const Row = memo(function Row({
       className={styles.node}
       data-selected={selected || undefined}
       data-kind={node.kind}
+      data-ejecting={ejecting || undefined}
       style={{ paddingLeft: `${14 + node.depth * 20}px` }}
       // A note is information, not a place: nothing to select.
       onMouseDown={() => node.kind !== "note" && onSelect(node)}
@@ -275,6 +280,22 @@ const Row = memo(function Row({
       {count !== undefined && !renaming ? (
         <span className={styles.count} aria-label={`${count} tracks`}>({count})</span>
       ) : null}
+      {node.kind === "device" && onEjectDevice ? (
+        <button
+          type="button"
+          className={styles.ejectButton}
+          aria-label={`Eject ${node.name}`}
+          title={`Safely eject ${node.name}`}
+          disabled={deviceBusy}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onEjectDevice(node);
+          }}
+        >
+          <EjectIcon />
+        </button>
+      ) : null}
     </div>
   );
 });
@@ -329,6 +350,10 @@ export interface TreeViewProps {
   railShortcuts?: readonly { id: string; name: string; selected: boolean }[];
   onOpenShortcut?: (id: string) => void;
   onDeleteShortcut?: (id: string) => void;
+  /** Safely eject a connected volume from its row in the Devices tree. */
+  onEjectDevice?: (node: TreeNode) => void;
+  ejectingDeviceId?: string | null;
+  deviceBusy?: boolean;
 }
 
 export const TreeView = memo(function TreeView({
@@ -337,6 +362,7 @@ export const TreeView = memo(function TreeView({
   onExpand, showCounts = false, onOpenSync,
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
+  onEjectDevice, ejectingDeviceId, deviceBusy = false,
 }: TreeViewProps) {
   const { advanced: { doubleClickToEdit } } = usePreferences();
   const [query, setQuery] = useState("");
@@ -510,6 +536,9 @@ export const TreeView = memo(function TreeView({
             onMoveOver={moving ? onMoveOver : undefined}
             onMoveDrop={moving ? onMoveDrop : undefined}
             onMoveEnd={endMove}
+            onEjectDevice={onEjectDevice}
+            ejecting={node.id === ejectingDeviceId}
+            deviceBusy={deviceBusy}
           />
         ))}
         {visible.length === 0 ? (

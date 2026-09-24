@@ -138,6 +138,8 @@ function AppBody() {
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [ejectingDeviceId, setEjectingDeviceId] = useState<string | null>(null);
+  const ejectingDeviceRef = useRef(false);
   // Closed by default, which is what browseSetting.xml records for the user's
   // own rekordbox (`ListInfo open="0"`).
   const [infoOpen, setInfoOpen] = useState(restored.infoOpen);
@@ -1657,6 +1659,29 @@ function AppBody() {
     })();
   }, []);
 
+  const ejectDeviceFromTree = useCallback(async (node: TreeNode) => {
+    const path = devicePath(node.id);
+    if (!path || ejectingDeviceRef.current || syncing || exportRunning) return;
+    ejectingDeviceRef.current = true;
+    setEjectingDeviceId(node.id);
+    try {
+      const backend = await getBackend();
+      await backend.ejectDevice(path);
+      // Leave the device view before removing the row. This also keeps the
+      // disconnect watcher from reporting an intentional eject as a loss.
+      setSelectedNode((current) => current?.id === node.id
+        ? tree.find((item) => item.kind === "allTracks") ?? tree[0] ?? null
+        : current);
+      setDevices((current) => current.filter((device) => device.path !== path));
+      report(`${node.name} safely ejected.`);
+    } catch (error) {
+      refuse(error instanceof Error ? error.message : `${node.name} could not be ejected.`);
+    } finally {
+      ejectingDeviceRef.current = false;
+      setEjectingDeviceId(null);
+    }
+  }, [syncing, exportRunning, tree, report, refuse]);
+
   // A stick renamed while the panel is open moves to another mount point on
   // macOS, so the node that was selected names a path that no longer
   // exists. The medium is still the same volume, so the selection follows it
@@ -2026,6 +2051,9 @@ function AppBody() {
           railShortcuts={railShortcuts}
           onOpenShortcut={openShortcut}
           onDeleteShortcut={deleteShortcut}
+          onEjectDevice={(node) => { void ejectDeviceFromTree(node); }}
+          ejectingDeviceId={ejectingDeviceId}
+          deviceBusy={syncing || exportRunning || ejectingDeviceId !== null}
         />
         <div
           className={styles.splitter}

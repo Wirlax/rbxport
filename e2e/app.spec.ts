@@ -587,6 +587,36 @@ test("a connected device appears under Devices", async ({ page }) => {
   await expect(page.getByRole("treeitem", { name: /DJ STICK/ })).toBeVisible();
 });
 
+test("a device row reveals a safe eject button on hover", async ({ page }) => {
+  await page.getByRole("tablist", { name: "Library sources" })
+    .getByRole("tab", { name: "Devices" }).click();
+  const stick = page.locator('[role="treeitem"][data-kind="device"]').filter({ hasText: "DJ STICK" });
+  const other = page.locator('[role="treeitem"][data-kind="device"]').filter({ hasText: "TEST" });
+  await expect(stick).toBeVisible();
+  await other.click();
+  const eject = stick.getByRole("button", { name: "Eject DJ STICK" });
+  await expect(eject).toHaveCSS("opacity", "0");
+  await stick.hover();
+  await expect(eject).toHaveCSS("opacity", "1");
+  await eject.click();
+  await expect(stick).toHaveCount(0);
+  await expect(other).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("contentinfo")).toContainText("DJ STICK safely ejected.");
+});
+
+test("ejecting the selected device returns to the library", async ({ page }) => {
+  await page.getByRole("tablist", { name: "Library sources" })
+    .getByRole("tab", { name: "Devices" }).click();
+  const stick = page.locator('[role="treeitem"][data-kind="device"]').filter({ hasText: "DJ STICK" });
+  await stick.click();
+  await expect(page.getByRole("region", { name: "Device DJ STICK" })).toBeVisible();
+  await stick.hover();
+  await stick.getByRole("button", { name: "Eject DJ STICK" }).click();
+  await expect(page.getByRole("region", { name: "Device DJ STICK" })).toHaveCount(0);
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.getByRole("contentinfo")).toContainText("DJ STICK safely ejected.");
+});
+
 test("a device shows what is on it, and a second write only syncs the difference", async ({ page }) => {
   // A stick with nothing on it: the DJ System switch that would give it an
   // empty database on open is off here, so the first write is a full export.
