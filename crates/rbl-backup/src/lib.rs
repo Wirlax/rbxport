@@ -122,9 +122,9 @@ pub fn analysis_edit_pending(state_dir: &Path) -> bool {
         .is_ok_and(|mut entries| entries.next().is_some())
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-pub(crate) mod testing {
+#[cfg(any(test, feature = "testing"))]
+#[allow(clippy::unwrap_used, clippy::missing_panics_doc)]
+pub mod testing {
     //! A fixture library and archives laid out the way RBXport writes them.
     use std::{fs, io::Write, path::Path};
     use zip::{write::SimpleFileOptions, ZipWriter};

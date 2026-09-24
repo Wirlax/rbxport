@@ -30,5 +30,10 @@ fs2 = "0.4"
 # The unpacked database of a backup without a summary, while it is counted.
 tempfile = "3"
 
+[features]
+# Fixture libraries and archives laid out as RBXport writes them, for the
+# tests of programs built on this crate.
+testing = []
+
 [dev-dependencies]
 tempfile = "3"
