@@ -58,6 +58,22 @@ export function AboutPane() {
 
   useEffect(() => {
     let live = true;
+    // The automatic updater may have finished before About was opened. Its
+    // completed download is held by the backend, including in a separate
+    // Preferences window, so show it without another network check.
+    void getBackend()
+      .then((backend) => backend.readyUpdate())
+      .then((ready) => {
+        if (live && ready) setUpdateStatus((current) => current.kind === "idle"
+          ? { kind: "ready", version: ready.version }
+          : current);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    let live = true;
     let stop: (() => void) | undefined;
     void getBackend().then((backend) => {
       if (!live) return;
@@ -106,7 +122,9 @@ export function AboutPane() {
           setUpdateStatus({ kind: "available", version: found.version });
           // An update found is taken without asking, as any check's is; this
           // pane shows the download happening rather than starting it unseen.
-          void backend.downloadUpdate().catch(() => {});
+          void backend.downloadUpdate()
+            .then((ready) => setUpdateStatus({ kind: "ready", version: ready.version }))
+            .catch(() => setUpdateError("Couldn’t download the update. Please try again."));
         }
       } catch {
         setUpdateStatus({ kind: "idle" });

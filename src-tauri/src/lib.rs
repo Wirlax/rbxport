@@ -476,6 +476,7 @@ pub fn run() {
             commands::master_limiter,
             commands::set_master_limiter,
             update::check_for_update,
+            update::ready_update,
             update::download_update,
             update::restart_to_update,
             commands::deck_tempo,

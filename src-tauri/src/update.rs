@@ -206,6 +206,17 @@ pub async fn check_for_update(
     Ok(dto)
 }
 
+/// The update already downloaded in this run, without a network check.
+#[tauri::command]
+pub fn ready_update(updates: tauri::State<'_, std::sync::Arc<Updates>>) -> Option<UpdateReadyDto> {
+    updates.pending.lock().as_ref().and_then(|pending| {
+        pending.placement.as_ref().map(|placement| UpdateReadyDto {
+            version: pending.update.version.clone(),
+            installed: *placement == Placement::Installed,
+        })
+    })
+}
+
 /// Downloads the update the last check found and puts it in place.
 ///
 /// Progress goes out as `update:progress`. Where the bundle can be swapped

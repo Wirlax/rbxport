@@ -495,6 +495,8 @@ export interface Backend {
    * downloaded this run, so there is nothing to fetch again.
    */
   checkForUpdate(): Promise<UpdateCheck>;
+  /** A completed download held by this process, without asking the network. */
+  readyUpdate(): Promise<UpdateReady | null>;
   /**
    * Downloads what the last check found and puts it in place: swapped on
    * disk where the app can be while it runs (macOS, an AppImage), so the

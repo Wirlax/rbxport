@@ -1955,6 +1955,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           },
         ],
       }),
+    readyUpdate: () => wait(updateReady),
     downloadUpdate: () =>
       new Promise<UpdateReady>((resolve) => {
         if (updateReady) {

@@ -24,6 +24,7 @@ let root: Root;
 let update: ReturnType<typeof vi.fn>;
 let checkForUpdate: ReturnType<typeof vi.fn>;
 let downloadUpdate: ReturnType<typeof vi.fn>;
+let readyUpdate: ReturnType<typeof vi.fn>;
 let openUrl: ReturnType<typeof vi.fn>;
 let progressListeners: Set<(progress: UpdateProgress) => void>;
 
@@ -64,11 +65,13 @@ beforeEach(() => {
   progressListeners = new Set();
   checkForUpdate = vi.fn<() => Promise<UpdateCheck>>();
   downloadUpdate = vi.fn().mockResolvedValue({ version: "0.5.0", installed: true });
+  readyUpdate = vi.fn().mockResolvedValue(null);
   openUrl = vi.fn().mockResolvedValue(undefined);
   __setBackend({
     appVersion: () => Promise.resolve("0.4.0"),
     checkForUpdate,
     downloadUpdate,
+    readyUpdate,
     onUpdateProgress: (listener: (progress: UpdateProgress) => void) => {
       progressListeners.add(listener);
       return () => progressListeners.delete(listener);
@@ -118,6 +121,7 @@ describe("AboutPane › Updates", () => {
   });
 
   it("the button checks here and reports an update found", async () => {
+    downloadUpdate.mockReturnValue(new Promise(() => {}));
     checkForUpdate.mockResolvedValue({
       currentVersion: "0.4.0", version: "0.5.0", date: null, changes: [], ready: null,
     });
@@ -128,6 +132,14 @@ describe("AboutPane › Updates", () => {
     expect(downloadUpdate).toHaveBeenCalledTimes(1);
     expect(update).not.toHaveBeenCalled();
     expect(section().textContent).toContain("Update available v0.5.0.");
+  });
+
+  it("shows an update already downloaded before Check for updates is clicked", async () => {
+    readyUpdate.mockResolvedValue({ version: "0.5.0", installed: true });
+    mount();
+    await settle();
+    expect(section().textContent).toContain("Update v0.5.0 downloaded — restart rbxport to use it.");
+    expect(checkForUpdate).not.toHaveBeenCalled();
   });
 
   it("the button reports being up to date", async () => {

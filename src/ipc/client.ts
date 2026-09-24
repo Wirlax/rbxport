@@ -254,6 +254,7 @@ async function realBackend(): Promise<Backend> {
     audioDevices: () => invoke<AudioDevices>("audio_devices"),
     setAudioDevice: (device) => invoke<void>("set_audio_device", { device }),
     checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
+    readyUpdate: () => invoke<UpdateReady | null>("ready_update"),
     downloadUpdate: () => invoke<UpdateReady>("download_update"),
     restartToUpdate: () => invoke<void>("restart_to_update"),
     onUpdateProgress: (listener) => subscribe<UpdateProgress>("update:progress", listener),
