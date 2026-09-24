@@ -916,6 +916,11 @@ export interface Device {
    * point, so `path` goes stale while this stays the same.
    */
   volumeId: string;
+  /** Connect-time imports that are actually present on this volume. */
+  importableHistory?: boolean;
+  importableSettings?: boolean;
+  /** Inspection or interrupted-export recovery failure. */
+  importError?: string;
   /** What is already on it, null when it holds no export. */
   export: DeviceExport | null;
 }

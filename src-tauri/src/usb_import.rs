@@ -2,9 +2,12 @@
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc};
 use serde::Serialize;
 use tauri::{State, Manager};
-use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult}, state::AppState};
+use crate::{commands::{blocking, reload, write_error}, dto::{DeviceLibraryTreeDto, DevicePlaylistNodeDto}, error::{AppError, AppResult, ErrorKind}, state::AppState};
 
-fn err(e: impl std::fmt::Display) -> AppError { AppError::internal(format!("USB import: {e}")) }
+fn err(e: impl std::fmt::Display) -> AppError {
+    let detail = format!("USB import: {e}");
+    AppError::new(ErrorKind::Internal, detail.clone()).with_detail(detail)
+}
 fn within(root: &Path, relative: &str) -> AppResult<PathBuf> {
     let path = root.join(relative.trim_start_matches('/')).canonicalize().map_err(err)?;
     if !path.starts_with(root.canonicalize().map_err(err)?) { return Err(err("File lies outside the USB device")); }
@@ -34,12 +37,40 @@ pub fn library_trees(root: &Path) -> AppResult<Vec<DeviceLibraryTreeDto>> {
     Ok(libraries)
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct ImportReport {
     tracks: usize, histories: usize, settings: usize, skipped: usize,
     warnings: Vec<String>,
     #[serde(skip)] changed: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct ImportAvailability {
+    pub history: bool,
+    pub settings: bool,
+}
+
+/// What an automatic connect-time import could actually read.
+pub fn availability(root: &Path) -> AppResult<ImportAvailability> {
+    rbl_devices::settings::recover(root)
+        .map_err(|e| err(format!("Could not recover an interrupted export before importing: {e}")))?;
+    let export = rbl_devices::settings::export_root(root);
+    let settings = ["MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT"]
+        .iter()
+        .any(|name| export.join(name).is_file());
+    let has_database = export.join("rekordbox/export.pdb").is_file()
+        || export.join("rekordbox/exportLibrary.db").is_file();
+    let history = if has_database {
+        rbl_export::snapshot::Snapshot::read(root)
+            .map_err(|e| err(format!("Could not inspect play history: {e}")))?
+            .history
+            .iter()
+            .any(|session| !session.folder && !session.tracks.is_empty())
+    } else {
+        false
+    };
+    Ok(ImportAvailability { history, settings })
 }
 
 /// Explicit cue/grid imports and connect-time history/settings imports share identity checks.
@@ -49,6 +80,7 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
     let worker = Arc::clone(&state);
     if !rbl_devices::list().iter().any(|d| d.mount_point == Path::new(&path)) { return Err(err("Device is no longer connected")); }
     let editor = Arc::clone(&app.state::<Arc<crate::grid::GridEditor>>());
+    let log_path = path.clone();
     let result = blocking("import_usb", move || import(&worker, &editor, Path::new(&path), cues, history, settings)).await;
     match result {
         Ok(result) => {
@@ -59,14 +91,19 @@ pub async fn import_usb<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: Stat
             }
             Ok(result)
         }
-        Err(e) => { let _ = reload(app, state).await; Err(e) }
+        Err(e) => {
+            tracing::error!(path = %log_path, cues, history, settings, error = %e, "USB import failed");
+            let _ = reload(app, state).await;
+            Err(e)
+        }
     }
 }
 
 fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues: bool, history: bool, settings: bool) -> AppResult<ImportReport> {
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
-    rbl_devices::settings::recover(root).map_err(err)?;
+    rbl_devices::settings::recover(root)
+        .map_err(|e| err(format!("Could not recover an interrupted export before importing: {e}")))?;
     let _device_read = rbl_core::durable::read_lock(root).map_err(err)?;
     let mut report = ImportReport::default();
     let location = state.location()?;
@@ -138,7 +175,8 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
         }
     }
     if history {
-        let snapshot = rbl_export::snapshot::Snapshot::read(root).map_err(err)?;
+        let snapshot = rbl_export::snapshot::Snapshot::read(root)
+            .map_err(|e| err(format!("Could not read play history: {e}")))?;
         for session in snapshot.history.iter().filter(|h| !h.folder) {
             let matched: Vec<String> = session.tracks.iter().filter_map(|id| tracks.get(id).map(|t| t.0.clone())).collect();
             if matched.len() != session.tracks.len() {
@@ -161,7 +199,8 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
             let source = export.join(name);
             if !source.exists() { continue; }
             let bytes = std::fs::read(within(root, &source.strip_prefix(root).map_err(err)?.to_string_lossy())?).map_err(err)?;
-            validate_settings(name, &bytes)?;
+            validate_settings(name, &bytes)
+                .map_err(|e| err(format!("Could not import {name}: {e}")))?;
             std::fs::create_dir_all(&destination).map_err(err)?;
             crate::durable::write(&destination.join(name), &bytes).map_err(err)?;
             report.settings += 1;
@@ -170,10 +209,10 @@ fn import(state: &AppState, editor: &crate::grid::GridEditor, root: &Path, cues:
     Ok(report)
 }
 
-fn validate_settings(name: &str, bytes: &[u8]) -> AppResult<()> {
-    if bytes.len() < 108 || bytes.len() > 4096 { return Err(err(format!("Invalid {name}"))); }
-    let size = u32::from_le_bytes(bytes[100..104].try_into().map_err(err)?) as usize;
-    if size + 108 != bytes.len() || bytes[0..4] != [96, 0, 0, 0] { return Err(err(format!("Invalid {name} length"))); }
+fn validate_settings(name: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 108 || bytes.len() > 4096 { return Err(format!("Invalid {name}")); }
+    let size = u32::from_le_bytes(bytes[100..104].try_into().map_err(|e: std::array::TryFromSliceError| e.to_string())?) as usize;
+    if size + 108 != bytes.len() || bytes[0..4] != [96, 0, 0, 0] { return Err(format!("Invalid {name} length")); }
     let end = 104 + size;
     let mut crc = 0u16;
     for byte in &bytes[if name == "DJMMYSETTING.DAT" { 0 } else { 104 }..end] {
@@ -181,7 +220,7 @@ fn validate_settings(name: &str, bytes: &[u8]) -> AppResult<()> {
         for _ in 0..8 { crc = if crc & 0x8000 == 0 { crc << 1 } else { (crc << 1) ^ 0x1021 }; }
     }
     let stored = u16::from_le_bytes([bytes[end], bytes[end+1]]);
-    if stored != crc { return Err(err(format!("Invalid {name} checksum"))); }
+    if stored != crc { return Err(format!("Invalid {name} checksum")); }
     Ok(())
 }
 
@@ -255,5 +294,24 @@ mod tests {
         std::fs::create_dir(dir.path().join("usb")).unwrap();
         std::fs::write(dir.path().join("outside"), b"x").unwrap();
         assert!(within(&dir.path().join("usb"), "../outside").is_err());
+    }
+
+    #[test]
+    fn import_explains_an_interrupted_export_that_cannot_be_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let usb = dir.path().join("usb");
+        let journal = usb.join(".rbxport-publication");
+        std::fs::create_dir_all(&journal).unwrap();
+        std::fs::write(
+            journal.join("publication.json"),
+            br#"[{"path":"missing-track.wav","present":true}]"#,
+        )
+        .unwrap();
+        let state = AppState::with_backups(dir.path().join("backups"));
+        let editor = crate::grid::GridEditor::at(state.backup_dir());
+
+        let error = import(&state, &editor, &usb, false, true, false).unwrap_err();
+        assert!(error.message.contains("Could not recover an interrupted export"));
+        assert!(error.message.contains("missing-track.wav"));
     }
 }

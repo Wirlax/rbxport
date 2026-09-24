@@ -50,10 +50,10 @@ it("explains the sync options and shows their defaults", () => {
     </PreferencesProvider>,
   ));
 
-  expect(host.textContent).toContain("Import CDJ Mixer Settings from USB drives");
-  expect(host.textContent).toContain("Import CDJ settings you stored on the USB stick to rbxport when you sync.");
-  expect(host.textContent).toContain("Import Play History");
-  expect(host.textContent).toContain("Import history from USB sticks to rbxport when you sync.");
+  expect(host.textContent).toContain("Automatically import CDJ/mixer settings when a USB is connected");
+  expect(host.textContent).toContain("Copy valid CDJ and mixer settings from a connected USB stick into rbxport.");
+  expect(host.textContent).toContain("Automatically import play history when a USB is connected");
+  expect(host.textContent).toContain("Add new play-history entries from a connected USB stick to your library.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
     "Default: Off", "Default: On", "Default: Off",

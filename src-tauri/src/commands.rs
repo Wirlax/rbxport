@@ -1438,6 +1438,13 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
             .into_iter()
             .map(|device| {
                 let found = rbl_devices::inspect(&device.mount_point);
+                let (availability, import_error) = match crate::usb_import::availability(&device.mount_point) {
+                    Ok(available) => (available, None),
+                    Err(error) => {
+                        tracing::warn!(path = %device.mount_point.display(), error = %error, "USB import inspection failed");
+                        (crate::usb_import::ImportAvailability::default(), Some(error.message))
+                    }
+                };
                 DeviceDto {
                     name: device.name,
                     path: device.mount_point.to_string_lossy().into_owned(),
@@ -1446,6 +1453,9 @@ pub async fn list_devices() -> AppResult<Vec<DeviceDto>> {
                     file_system: device.file_system,
                     removable: device.removable,
                     volume_id: device.volume_id,
+                    importable_history: availability.history,
+                    importable_settings: availability.settings,
+                    import_error,
                     export: found.map(|export| DeviceExportDto {
                         tracks: u32::try_from(export.tracks).unwrap_or(u32::MAX),
                         playlists: u32::try_from(export.playlists).unwrap_or(u32::MAX),

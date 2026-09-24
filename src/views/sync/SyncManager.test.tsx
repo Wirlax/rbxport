@@ -435,6 +435,30 @@ it("imports cue/grid information from selected devices only", async () => {
   expect(status()).toContain("updated 2 tracks");
 });
 
+it("imports history explicitly and offers details and retry after a failure", async () => {
+  const preferences = {
+    ...DEFAULT_PREFERENCES,
+    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false },
+  };
+  act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
+    <SyncManager onClose={onClose} />
+  </PreferencesProvider>));
+  await settle();
+  click(box("USB A"));
+  await settle();
+  importUsb.mockRejectedValueOnce(new Error("Could not read play history: damaged database"));
+  click([...host.querySelectorAll("button")].find(button => button.textContent?.includes("Import history")));
+  await settle();
+  expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", false, true, false);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("damaged database");
+  expect([...host.querySelectorAll("button")].some(button => button.textContent?.includes("Show details"))).toBe(true);
+  const retry = [...host.querySelectorAll("button")].find(button => button.textContent?.includes("Retry import"));
+  expect(retry).toBeTruthy();
+  click(retry);
+  await settle();
+  expect(importUsb).toHaveBeenCalledTimes(2);
+});
+
 it("expanding a USB does not select it for synchronization", async () => {
   click(host.querySelector<HTMLButtonElement>('button[aria-label="Expand USB A"]'));
   await settle();

@@ -114,6 +114,9 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [ejectAfterSync, setEjectAfterSync] = useState(false);
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
+  const [showStatusDetails, setShowStatusDetails] = useState(false);
+  const [lastImport, setLastImport] = useState<"cues" | "history" | "settings" | null>(null);
+  const [importFailed, setImportFailed] = useState(false);
   const [completedReports, setCompletedReports] = useState<ReadonlyMap<string, ExportReport>>(new Map());
   // DJ System in Preferences is what a stick with no settings of its own
   // gets, as it is on every export from the shell.
@@ -347,25 +350,38 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     })();
   }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
-  const importCues = () => {
+  const runUsbImport = (kind: "cues" | "history" | "settings") => {
     if (busy || tickedDevices.size === 0) return;
     setOperation("import");
+    setLastImport(kind);
+    setImportFailed(false);
+    setShowStatusDetails(false);
     setStatus([]);
     void (async () => {
       try {
         const backend = await getBackend();
-        if (!await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
+        if (kind === "cues" && !await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
         const results: string[] = [];
         for (const device of devices.filter(d => tickedDevices.has(d.path))) {
-          setStatus([t("Importing cues and beat grids from {device}…", { device: device.name })]);
+          const label = kind === "cues" ? "cues and beat grids" : kind === "history" ? "play history" : "CDJ/mixer settings";
+          setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: label, device: device.name })]);
           try {
-            const result = await backend.importUsb(device.path, true, false, false);
-            results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
-          } catch (e) { results.push(`${device.name}: ${e instanceof Error ? e.message : String(e)}`); }
+            const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
+            if (kind === "cues") results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
+            else if (kind === "history") results.push(result.histories ? `${device.name}: imported ${result.histories} play-history entries.` : `${device.name}: no new play-history entries.`);
+            else results.push(result.settings ? `${device.name}: imported ${result.settings} CDJ/mixer settings files.` : `${device.name}: no CDJ/mixer settings files found.`);
+            if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));
+          } catch (e) {
+            setImportFailed(true);
+            results.push(`${device.name}: Couldn’t import ${label}. ${errorMessage(e)}`);
+          }
         }
         setStatus(results);
         onSynced?.();
-      } catch (e) { setStatus([e instanceof Error ? e.message : String(e)]); }
+      } catch (e) {
+        setImportFailed(true);
+        setStatus([errorMessage(e)]);
+      }
       finally { setOperation(null); }
     })();
   };
@@ -465,11 +481,22 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           </label>
           </div>
           <div className={styles.importActions}>
-          <button type="button" className={styles.button} onClick={importCues}
+          <button type="button" className={styles.button} onClick={() => runUsbImport("cues")}
             disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary}
             title={preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids." : "Import cues and beat grids from USB to rbxport"}>
-            {operation === "import" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" ? "Importing…" : "CUE GRID INFO"}
+            {operation === "import" && lastImport === "cues" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" && lastImport === "cues" ? "Importing…" : "CUE GRID INFO"}
           </button>
+          <button type="button" className={styles.button} onClick={() => runUsbImport("history")}
+            disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary || rekordboxOpen !== false}>
+            {operation === "import" && lastImport === "history" ? "Importing history…" : "Import history"}
+          </button>
+          <button type="button" className={styles.button} onClick={() => runUsbImport("settings")}
+            disabled={busy || tickedDevices.size === 0}>
+            {operation === "import" && lastImport === "settings" ? "Importing settings…" : "Import settings"}
+          </button>
+          {importFailed && lastImport ? <button type="button" className={styles.button} onClick={() => runUsbImport(lastImport)} disabled={busy || tickedDevices.size === 0}>
+            Retry import
+          </button> : null}
           </div>
         </div>
 
@@ -557,13 +584,16 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         </section>
       </div>
       <footer className={styles.footer}>
-        <div className={styles.status} role="status" aria-live="polite">
+        <div className={styles.status} data-error={importFailed || undefined} role={importFailed ? "alert" : "status"} aria-live="polite">
           {busy ? <LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> : null}
-          <div>
+          <div className={showStatusDetails ? styles.statusDetails : undefined} title={status.join("\n")}>
           {status.length > 0 ? status.join(" · ") : null}
           {status.length === 0 ? <span className={styles.selectionSummary}>{selectionSummary}</span> : null}
           {status.length === 0 ? <span id="sync-selection-hint" className={styles.idleStatus}>{syncHint}</span> : null}
           </div>
+          {status.length > 1 || importFailed ? <button type="button" className={styles.detailsButton} onClick={() => setShowStatusDetails(open => !open)}>
+            {showStatusDetails ? "Hide details" : "Show details"}
+          </button> : null}
         </div>
         {status.length > 0 ? <span id="sync-selection-hint" hidden>{syncHint}</span> : null}
         <button type="button" className={styles.button} onClick={onClose}>

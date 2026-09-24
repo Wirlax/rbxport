@@ -457,8 +457,8 @@ function AppBody() {
   const [note, setNote] = useState<{ text: string; failed: boolean } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
-  useUsbImports(devices, prefs.preferences.usbExport, readOnly || summary === null, report);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
+  useUsbImports(devices, prefs.preferences.usbExport, readOnly || summary === null, exportRunning, report, refuse);
   useEffect(() => {
     setNote((current) => {
       if (!current?.failed) return current;

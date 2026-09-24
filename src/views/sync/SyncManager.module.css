@@ -284,9 +284,13 @@
   overflow: hidden;
 }
 .status > div { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status > .statusDetails { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.status[data-error] { color: var(--c-error); }
+.detailsButton { flex: none; border: 0; background: none; color: var(--c-accent); font: inherit; cursor: pointer; }
 .idleStatus { color: var(--c-text-dim); }
 
 .middle .button { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; font-size: var(--f-size-pref-small); }
+.importActions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; }
 .syncActions { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
 .ejectOption { display: flex; align-items: center; gap: 6px; font-size: var(--f-size-pref-small); cursor: pointer; }
 .ejectOption:has(input:disabled) { color: var(--c-text-dim); cursor: default; }
