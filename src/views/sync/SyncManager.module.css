@@ -327,6 +327,22 @@
 .exportReport strong { color: var(--c-text); font-weight: 700; }
 .exportReport .exportWarning,
 .exportReport .exportWarning strong { color: var(--c-error); }
-.exportProgress progress { width: 100%; height: 6px; appearance: none; border: 0; border-radius: 3px; overflow: hidden; background: var(--c-raised); accent-color: var(--c-meter-green); }
-.exportProgress progress::-webkit-progress-bar { background: var(--c-raised); }
-.exportProgress progress::-webkit-progress-value { background: var(--c-meter-green); }
+.exportProgress progress {
+  width: 100%;
+  height: 8px;
+  appearance: none;
+  border: 1px solid var(--c-cue-ring);
+  border-radius: 4px;
+  overflow: hidden;
+  background: transparent;
+  accent-color: var(--c-cue-ring);
+}
+.exportProgress progress::-webkit-progress-bar { background: transparent; }
+.exportProgress progress::-webkit-progress-value {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c-cue-ring) 65%, transparent) 0 3px, transparent 3px 6px);
+}
+.exportProgress progress[data-state="done"] { border-color: var(--c-meter-green); accent-color: var(--c-meter-green); }
+.exportProgress progress[data-state="done"]::-webkit-progress-value { background: var(--c-meter-green); }
+.exportProgress progress[data-state="failed"] { border-color: var(--c-error); accent-color: var(--c-error); }
+.exportProgress progress[data-state="failed"]::-webkit-progress-value { background: var(--c-error); }
+.exportError { color: var(--c-error); white-space: normal !important; overflow: visible !important; }

@@ -121,6 +121,9 @@
   font-size: var(--f-size-pref-side);
   text-align: left;
   cursor: default;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .pane[aria-selected="true"] { background: var(--c-pref-select); color: var(--c-icon-on); }
 .pane svg {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { loadPreferences, type Locale } from "@/lib/preferences";
 
@@ -17,6 +17,7 @@ export const LANGUAGE_CHOICES: readonly { value: Locale; label: string }[] = [
 export type Catalog = Readonly<Record<string, string>>;
 const originalText = new WeakMap<Text, string>();
 const originalAttributes = new WeakMap<Element, Map<string, string>>();
+const templateCache = new WeakMap<Catalog, readonly { pattern: RegExp; translated: string }[]>();
 const attributes = ["aria-label", "placeholder", "title"] as const;
 
 function storedLocale(): Locale {
@@ -31,7 +32,35 @@ export async function loadCatalog(locale: Locale): Promise<Catalog> {
 }
 
 export function translate(text: string, catalog: Catalog): string {
-  return catalog[text] ?? text;
+  const exact = catalog[text];
+  if (exact !== undefined) return exact;
+  let templates = templateCache.get(catalog);
+  if (!templates) {
+    templates = Object.entries(catalog).flatMap(([source, translated]) => {
+      if (!/\{[^}]+\}/.test(source)) return [];
+      const pattern = source.split(/\{[^}]+\}/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(.+?)");
+      return [{ pattern: new RegExp(`^${pattern}$`), translated }];
+    });
+    templateCache.set(catalog, templates);
+  }
+  for (const template of templates) {
+    const match = text.match(template.pattern);
+    if (!match) continue;
+    let index = 1;
+    return template.translated.replace(/\{[^}]+\}/g, () => match[index++] ?? "");
+  }
+  return text;
+}
+
+const TranslationContext = createContext<Catalog>({});
+
+export function useTranslation(): (text: string, values?: Readonly<Record<string, string | number>>) => string {
+  const catalog = useContext(TranslationContext);
+  return useCallback((text, values = {}) => {
+    let result = translate(text, catalog);
+    for (const [name, value] of Object.entries(values)) result = result.replaceAll(`{${name}}`, String(value));
+    return result;
+  }, [catalog]);
 }
 
 function localize(root: Node, catalog: Catalog, force: boolean) {
@@ -105,5 +134,5 @@ export function Localization({ children }: { children: ReactNode }) {
     observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: [...attributes] });
     return () => observer.disconnect();
   }, [catalog, locale]);
-  return children;
+  return <TranslationContext.Provider value={catalog}>{children}</TranslationContext.Provider>;
 }

@@ -393,7 +393,7 @@ export interface Backend {
   exportProgress(): Promise<ExportProgress[]>;
   cancelExport(path: string): Promise<void>;
   /** A yes-or-no question in the platform's own dialog; false when dismissed. */
-  confirm(message: string): Promise<boolean>;
+  confirm(message: string, labels?: { yes: string; no: string }): Promise<boolean>;
   /** The volumes an export could be written to, and what is on each. */
   listDevices(): Promise<Device[]>;
   /**
@@ -646,6 +646,9 @@ export interface Backend {
     /** Convert incompatible USB copies; undefined preserves the source format. */
     compatibilityFormat?: "wav" | "mp3",
   ): Promise<SyncDeviceReport[]>;
+
+  /** Missing source audio in the exact playlists selected for USB export. */
+  validateExportFiles(playlists: string[]): Promise<MissingExportFile[]>;
 
   /** Safely eject a mounted USB device; fails if it is in use. */
   ejectDevice(path: string): Promise<void>;
@@ -955,6 +958,11 @@ export interface SyncDeviceReport {
   path: string;
   report?: ExportReport;
   error?: string;
+}
+
+export interface MissingExportFile {
+  title: string;
+  path: string;
 }
 
 /** One playlist a stick was last synced with. */

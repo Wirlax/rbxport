@@ -17,6 +17,7 @@ import { usePreferencesContext } from "@/store/usePreferences";
 import layout from "./PaneLayout.module.css";
 import styles from "./Preferences.module.css";
 import { Button, Select, Toggle } from "./controls";
+import { useTranslation } from "@/i18n";
 
 /** Where a check this pane made itself has got to. */
 type UpdateStatus =
@@ -45,6 +46,7 @@ export const ABOUT_LINKS = [
 const SUPPORT_URL = "https://www.paypal.com/donate/?hosted_button_id=H6GGU8PHP8CJE";
 
 export function AboutPane() {
+  const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const { checkUpdates, updateFrequency } = preferences.advanced;
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ kind: "idle" });
@@ -114,13 +116,13 @@ export function AboutPane() {
   };
 
   const statusText = updateStatus.kind === "checking"
-    ? "Checking for updates…"
+    ? t("Checking for updates…")
     : updateStatus.kind === "upToDate"
-    ? `rbxport v${updateStatus.version} is up to date.`
+    ? t("rbxport v{version} is up to date.", { version: updateStatus.version })
     : updateStatus.kind === "available"
-    ? `Update available v${updateStatus.version}.`
+    ? t("Update available v{version}.", { version: updateStatus.version })
     : updateStatus.kind === "ready"
-    ? `Update v${updateStatus.version} downloaded — restart rbxport to use it.`
+    ? t("Update v{version} downloaded — restart rbxport to use it.", { version: updateStatus.version })
     : null;
 
   // Done when the last event's downloaded byte count reached the total; the

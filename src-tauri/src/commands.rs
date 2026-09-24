@@ -18,7 +18,7 @@ use crate::dto::{
     ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
-    ExportProgressDto, FilterValuesDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
+    ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
@@ -795,6 +795,36 @@ pub async fn sync_devices<R: tauri::Runtime>(
     .await
 }
 
+/// Checks the exact playlist selection before any USB is touched.
+#[tauri::command]
+pub async fn validate_export_files(
+    state: State<'_, Arc<AppState>>,
+    playlists: Vec<String>,
+) -> AppResult<Vec<MissingExportFileDto>> {
+    let library = state.library()?;
+    let share = state.share_root();
+    let state = Arc::clone(&state);
+    blocking("validate_export_files", move || {
+        let selection =
+            ExportSelection::from_playlists(&state, &library, &share, &playlists, false)?;
+        Ok(selection.tracks.into_iter().filter_map(|track| {
+            if track.source_path.is_file() {
+                return None;
+            }
+            Some(MissingExportFileDto {
+                title: if track.title.is_empty() {
+                    "Untitled track".to_owned()
+                } else {
+                    track.title
+                },
+                path: track.source_path.to_string_lossy().into_owned(),
+            })
+        })
+        .collect())
+    })
+    .await
+}
+
 #[allow(clippy::too_many_arguments, reason = "one independent USB sync worker")]
 fn sync_one_device<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>, state: &AppState, library: &rbl_index::Library,
@@ -831,6 +861,7 @@ fn sync_one_device<R: tauri::Runtime>(
         Err(e) => {
             progress("failed");
             tracing::warn!(destination, error = %e, "sync to one device failed");
+            set_export_failure(app, stick, e.message.clone());
             SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
         }
     }
@@ -1223,6 +1254,31 @@ fn set_export_stage<R: tauri::Runtime>(app: &tauri::AppHandle<R>, destination: &
         }
     } else { None };
     if let Some(progress) = progress { let _ = tauri::Emitter::emit(app, "export:progress", progress); }
+}
+
+fn set_export_failure<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    destination: &std::path::Path,
+    message: String,
+) {
+    let path = destination.to_string_lossy().into_owned();
+    let progress = if let Ok(mut jobs) = EXPORT_PROGRESS.lock() {
+        let job = jobs.entry(path.clone()).or_insert_with(|| ExportProgressDto {
+            path,
+            state: "failed",
+            done: 0,
+            total: 0,
+            title: String::new(),
+        });
+        job.state = "failed";
+        job.title = message;
+        Some(job.clone())
+    } else {
+        None
+    };
+    if let Some(progress) = progress {
+        let _ = tauri::Emitter::emit(app, "export:progress", progress);
+    }
 }
 
 #[tauri::command]

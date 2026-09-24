@@ -508,6 +508,7 @@ pub fn run() {
             report::report_attachment,
             report::open_report_attachment,
             commands::sync_devices,
+            commands::validate_export_files,
             commands::eject_device,
             commands::export_tracks_to_device,
             commands::device_sync_state,

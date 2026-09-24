@@ -11,7 +11,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
+  LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
 } from "./types";
@@ -240,9 +240,9 @@ async function realBackend(): Promise<Backend> {
     },
     setBackupDirectory: (directory) => invoke<string>("set_backup_directory", { directory }),
     deleteBackup: (path) => invoke<void>("delete_backup", { path }),
-    confirm: async (message) => {
+    confirm: async (message, labels) => {
       const { ask } = await import("@tauri-apps/plugin-dialog");
-      return ask(message, { kind: "warning" });
+      return ask(message, { kind: "warning", ...(labels ? { okLabel: labels.yes, cancelLabel: labels.no } : {}) });
     },
     deckLoad: (deck, trackId) => invoke<void>("deck_load", { deck, track: trackId }),
     deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
@@ -380,6 +380,7 @@ async function realBackend(): Promise<Backend> {
         deleteUnlistedMusic: deleteUnlistedMusic ?? false,
         compatibilityFormat: compatibilityFormat ?? null,
       }),
+    validateExportFiles: (playlists) => invoke<MissingExportFile[]>("validate_export_files", { playlists }),
     importUsb: (path, cues, history, settings) => invoke("import_usb", { path, cues, history, settings }),
     ejectDevice: (path) => invoke<void>("eject_device", { path }),
     deviceSyncState: (path) => invoke<DeviceSyncState>("device_sync_state", { path }),

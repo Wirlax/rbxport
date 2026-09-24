@@ -316,6 +316,14 @@ pub struct SyncDeviceReportDto {
     pub eject_error: Option<String>,
 }
 
+/// A selected track whose source audio cannot be read before USB export.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingExportFileDto {
+    pub title: String,
+    pub path: String,
+}
+
 /// One playlist a stick was last synced with.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -847,6 +847,36 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
 }
 
 #[test]
+fn usb_export_preflight_reports_missing_source_audio() {
+    let s = shell();
+    let audio = s._dir.path().join("Will disappear.wav");
+    write_wav(&audio, 2);
+    let imported = run(commands::import_files(
+        s.handle(),
+        s.state(),
+        vec![audio.display().to_string()],
+    ))
+    .unwrap();
+    run(commands::add_tracks_to_playlist(
+        s.handle(),
+        s.state(),
+        playlist_id(1),
+        vec![imported.tracks[0].id.clone()],
+    ))
+    .unwrap();
+    std::fs::remove_file(&audio).unwrap();
+
+    let missing = run(commands::validate_export_files(
+        s.state(),
+        vec![playlist_id(1)],
+    ))
+    .unwrap();
+    assert!(missing
+        .iter()
+        .any(|file| file.path == audio.display().to_string()));
+}
+
+#[test]
 fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
     let s = shell();
     let one = s._dir.path().join("One.wav");

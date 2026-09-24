@@ -17,6 +17,17 @@ const locales = {
   ko: "korean.lang", ja: "japanese.lang",
 };
 
+// Product terminology that should differ from rekordbox's untranslated loanwords
+// or from a generic machine translation.
+const overrides = {
+  de: {
+    "Backups": "Sicherungen",
+    "Check for updates": "Nach Updates suchen",
+    "No backups yet.": "Noch keine Sicherungen.",
+    "Backups unavailable": "Sicherungen nicht verfügbar",
+  },
+};
+
 function values(value, out = new Set()) {
   if (typeof value === "string") out.add(value);
   else if (value && typeof value === "object") Object.values(value).forEach((item) => values(item, out));
@@ -31,6 +42,31 @@ async function sourceFiles(directory) {
     return /\.(ts|tsx)$/.test(entry.name) && !/\.test\.(ts|tsx)$/.test(entry.name) ? [path] : [];
   }));
   return nested.flat();
+}
+
+async function rustErrorStrings() {
+  const found = new Set();
+  const walk = async (directory) => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!["examples", "tests", "vendor"].includes(entry.name)) await walk(path);
+        continue;
+      }
+      if (extname(entry.name) !== ".rs") continue;
+      for (const line of (await readFile(path, "utf8")).split(/\r?\n/)) {
+        if (!/(?:AppError|Conflict|Err\(|error\(|updater_error)/.test(line)) continue;
+        for (const match of line.matchAll(/"((?:\\.|[^"\\])*)"/g)) {
+          const text = unescapeLang(match[1]);
+          if (/^[A-Z][^/]*[ .!?]$/.test(text)) found.add(text);
+        }
+      }
+    }
+  };
+  await walk(resolve(root, "src-tauri/src"));
+  await walk(resolve(root, "crates"));
+  return found;
 }
 
 async function sourceStrings() {
@@ -74,6 +110,22 @@ async function uiStrings() {
       path, await readFile(path, "utf8"), ts.ScriptTarget.Latest, true,
       extname(path) === ".tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
+    const hasAncestor = (node, predicate) => {
+      for (let parent = node.parent; parent; parent = parent.parent) {
+        if (predicate(parent)) return true;
+        if (ts.isSourceFile(parent) || ts.isFunctionLike(parent)) return false;
+      }
+      return false;
+    };
+    const inUiVariable = (node) => hasAncestor(node, (parent) =>
+      ts.isVariableDeclaration(parent) && /(?:error|hint|message|notice|status|summary|text)$/i.test(parent.name.getText(source))
+    );
+    const inUiCall = (node) => hasAncestor(node, (parent) => {
+      if (ts.isNewExpression(parent) && parent.expression.getText(source) === "Error") return true;
+      if (!ts.isCallExpression(parent)) return false;
+      const name = parent.expression.getText(source);
+      return /(?:confirm|set(?:\w*(?:Error|Message|Status))|t)$/.test(name);
+    });
     const visit = (node) => {
       if (ts.isJsxText(node)) add(node.text);
       if (ts.isJsxAttribute(node) && uiProperties.has(node.name.getText(source)) && node.initializer) {
@@ -84,7 +136,9 @@ async function uiStrings() {
       if (ts.isPropertyAssignment(node) &&
         uiProperties.has(node.name.getText(source).replaceAll(/["']/g, "")) &&
         ts.isStringLiteralLike(node.initializer)) add(node.initializer.text);
-      if (ts.isStringLiteralLike(node) && ts.isJsxExpression(node.parent)) add(node.text);
+      if (ts.isStringLiteralLike(node) && (
+        hasAncestor(node, ts.isJsxExpression) || inUiVariable(node) || inUiCall(node)
+      )) add(node.text);
       ts.forEachChild(node, visit);
     };
     visit(source);
@@ -125,9 +179,15 @@ function unescapeLang(value) {
   return value.replaceAll("\\n", "\n").replaceAll("\\\"", "\"").replaceAll("\\\\", "\\");
 }
 
+function restorePlaceholders(source, translated) {
+  const placeholders = source.match(/\{[a-z][a-z0-9]*\}/gi) ?? [];
+  let index = 0;
+  return translated.replace(/\{[^}]+\}/g, () => placeholders[index++] ?? "");
+}
+
 const english = JSON.parse(await readFile(resolve(root, "src/i18n/en.json"), "utf8"));
 const wanted = new Set([...values(english), ...await sourceStrings()]);
-const ui = await uiStrings();
+const ui = new Set([...await uiStrings(), ...await rustErrorStrings()]);
 await mkdir(outputRoot, { recursive: true });
 await writeFile(resolve(root, "src/i18n/ui.json"), `${JSON.stringify([...ui].sort(), null, 2)}\n`);
 
@@ -152,7 +212,11 @@ for (const [locale, filename] of Object.entries(locales)) {
     const translated = available.get(key);
     return translated && translated !== key ? [[key, translated]] : [];
   }));
-  for (const key of ui) catalog[key] = available.get(key) ?? previous[key] ?? generated.get(key) ?? key;
+  for (const key of ui) {
+    const translated = available.get(key) ?? previous[key] ?? generated.get(key) ?? key;
+    catalog[key] = restorePlaceholders(key, translated);
+  }
+  Object.assign(catalog, overrides[locale] ?? {});
   await writeFile(resolve(outputRoot, `${locale}.json`), `${JSON.stringify(catalog, null, 2)}\n`);
   console.log(`${locale}: ${Object.keys(catalog).length} entries, ${ui.size}/${ui.size} UI strings`);
 }

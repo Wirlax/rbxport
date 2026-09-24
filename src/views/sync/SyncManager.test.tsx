@@ -57,6 +57,8 @@ let host: HTMLDivElement;
 let root: Root;
 let importUsb: ReturnType<typeof vi.fn>;
 let syncDevices: ReturnType<typeof vi.fn>;
+let validateExportFiles: ReturnType<typeof vi.fn>;
+let confirmExport: ReturnType<typeof vi.fn>;
 let ejectDevice: ReturnType<typeof vi.fn>;
 let progress: ((p: SyncProgress) => void) | null;
 let onClose: ReturnType<typeof vi.fn>;
@@ -87,6 +89,8 @@ beforeEach(async () => {
   syncDevices = vi.fn((playlists: string[], destinations: string[]) =>
     Promise.resolve(destinations.map((path) => report(path, playlists.length * 10))),
   );
+  validateExportFiles = vi.fn(() => Promise.resolve([]));
+  confirmExport = vi.fn(() => Promise.resolve(true));
   __setBackend({
     librarySummary: () => Promise.resolve({ trackCount: 3, playlistCount: 3, readOnly: rekordboxOpen, dbVersion: 6000 }),
     playlistTree: () => Promise.resolve(TREE.map((n) => ({ ...n }))),
@@ -96,6 +100,7 @@ beforeEach(async () => {
       return state ? Promise.resolve(state) : Promise.reject(new Error("gone"));
     },
     syncDevices,
+    validateExportFiles,
     cancelExport,
     ejectDevice,
     onExportProgress: (listener: (progress: ExportProgress) => void) => {
@@ -104,7 +109,7 @@ beforeEach(async () => {
     },
     exportProgress: () => Promise.resolve([]),
     importUsb,
-    confirm: () => Promise.resolve(true),
+    confirm: confirmExport,
     onSyncProgress: (listener: (p: SyncProgress) => void) => {
       progress = listener;
       return () => {
@@ -164,6 +169,26 @@ describe("SyncManager", () => {
     expect(syncDevices).not.toHaveBeenCalled();
     expect(sync?.disabled).toBe(true);
     expect(status()).toContain("Quit rekordbox to enable synchronization.");
+  });
+  it("lists missing source files and requires confirmation before writing", async () => {
+    validateExportFiles.mockResolvedValueOnce([
+      { title: "Missing One", path: "/Music/missing-one.mp3" },
+      { title: "Missing Two", path: "/Music/missing-two.wav" },
+    ]);
+    confirmExport.mockResolvedValueOnce(false);
+    click(box("Closing"));
+    click(box("USB B"));
+    await settle();
+    click(host.querySelector<HTMLButtonElement>('button[aria-label="SYNC"]'));
+    await settle();
+    expect(validateExportFiles).toHaveBeenCalledWith(["p3"]);
+    expect(confirmExport).toHaveBeenCalledWith(
+      expect.stringContaining("2 selected tracks have missing audio files"),
+      { yes: "Yes", no: "No" },
+    );
+    expect(confirmExport.mock.calls[0]?.[0]).toContain("Missing One\n  /Music/missing-one.mp3");
+    expect(syncDevices).not.toHaveBeenCalled();
+    expect(status()).toContain("Export cancelled because files are missing.");
   });
   it("stops an export started outside Sync Manager", async () => {
     const job: ExportProgress = { path: "/Volumes/USB B", state: "copying", done: 3, total: 10, title: "Track" };
@@ -228,8 +253,10 @@ describe("SyncManager", () => {
     expect(meter?.value).toBe(99);
     act(() => exportProgress?.({ ...job, state: "done", done: 10 }));
     expect(meter?.value).toBe(100);
+    expect(meter?.dataset.state).toBe("done");
     act(() => exportProgress?.({ ...job, state: "failed", title: "Device disconnected" }));
     expect(meter?.value).toBe(30);
+    expect(meter?.dataset.state).toBe("failed");
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Device disconnected");
   });
   it("passes cleanup and the chosen compatibility format to sync", async () => {

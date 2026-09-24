@@ -1698,6 +1698,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       }
       return reports;
     },
+    validateExportFiles: () => wait([]),
     smartRule: (playlist) => wait(smartRules.get(playlist) ?? { logic: "all", conditions: [] }),
     importUsb: () => Promise.resolve({ tracks: 0, histories: 0, settings: 0, skipped: 0 }),
     ejectDevice: async (path) => {

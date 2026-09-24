@@ -25,6 +25,7 @@ import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { usePreferences } from "@/store/usePreferences";
 import { useExportProgress, exportPercent } from "@/store/useExportProgress";
 import { StopExport } from "@/components/StopExport";
+import { useTranslation } from "@/i18n";
 import styles from "./SyncManager.module.css";
 
 export interface SyncManagerProps {
@@ -87,6 +88,7 @@ function TickBox({
 }
 
 export function SyncManager({ windowed = false, onClose, onSynced }: SyncManagerProps) {
+  const t = useTranslation();
   const exportJobs = useExportProgress();
   const window_ = useRef<HTMLDivElement>(null);
   const [tree, setTree] = useState<readonly TreeNode[]>([]);
@@ -128,15 +130,17 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     ? playlists.filter(node => node.name.toLocaleLowerCase().includes(search))
     : visibleNodes(nodes, collapsed), [nodes, playlists, collapsed, search]);
   const selectedCount = playlists.filter(node => ticked.has(node.id)).length;
-  const selectionSummary = `${selectedCount} playlist${selectedCount === 1 ? "" : "s"} → ${tickedDevices.size} USB device${tickedDevices.size === 1 ? "" : "s"}`;
-  const selectionHint = selectedCount === 0 && tickedDevices.size === 0 ? "Select playlists and a USB device."
-    : selectedCount === 0 ? "Select playlists to sync."
-    : tickedDevices.size === 0 ? "Select a USB device to sync to."
-    : "Selected playlists will sync to each selected device.";
+  const playlistCount = selectedCount === 1 ? t("{count} playlist", { count: selectedCount }) : t("{count} playlists", { count: selectedCount });
+  const deviceCount = tickedDevices.size === 1 ? t("{count} USB device", { count: tickedDevices.size }) : t("{count} USB devices", { count: tickedDevices.size });
+  const selectionSummary = t("{playlists} → {devices}", { playlists: playlistCount, devices: deviceCount });
+  const selectionHint = selectedCount === 0 && tickedDevices.size === 0 ? t("Select playlists and a USB device.")
+    : selectedCount === 0 ? t("Select playlists to sync.")
+    : tickedDevices.size === 0 ? t("Select a USB device to sync to.")
+    : t("Selected playlists will sync to each selected device.");
   const syncHint = rekordboxOpen
-    ? "Quit rekordbox to enable synchronization."
+    ? t("Quit rekordbox to enable synchronization.")
     : rekordboxOpen === null
-      ? "Checking whether rekordbox is running…"
+      ? t("Checking whether rekordbox is running…")
       : selectionHint;
 
   useEffect(() => {
@@ -295,7 +299,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
     const nameOf = (path: string) => devices.find((d) => d.path === path)?.name ?? path;
     setOperation("sync");
     setCompletedReports(new Map());
-    setStatus(["Preparing for export…"]);
+    setStatus([t("Preparing for export…")]);
     void (async () => {
       let stop = () => {};
       try {
@@ -305,12 +309,23 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         const summary = await backend.librarySummary();
         setRekordboxOpen(summary.readOnly);
         if (summary.readOnly) {
-          setStatus(["Quit rekordbox to enable synchronization."]);
+          setStatus([t("Quit rekordbox to enable synchronization.")]);
           return;
         }
+        const missing = await backend.validateExportFiles(playlists);
+        if (missing.length > 0) {
+          const shown = missing.slice(0, 10).map((file) => `• ${file.title}\n  ${file.path}`).join("\n");
+          const remaining = missing.length > 10 ? `\n${t("…and {count} more missing files.", { count: missing.length - 10 })}` : "";
+          const question = `${t("{count} selected tracks have missing audio files and will be skipped.", { count: missing.length })}\n\n${shown}${remaining}\n\n${t("Continue anyway?")}`;
+          const proceed = await backend.confirm(question, { yes: t("Yes"), no: t("No") });
+          if (!proceed) {
+            setStatus([t("Export cancelled because files are missing.")]);
+            return;
+          }
+        }
         stop = backend.onSyncProgress((progress) => {
-          if (progress.state === "writing") setStatus([`Writing to ${nameOf(progress.path)}…`]);
-          if (progress.state === "ejecting") setStatus([`Ejecting ${nameOf(progress.path)}…`]);
+          if (progress.state === "writing") setStatus([t("Writing to {device}…", { device: nameOf(progress.path) })]);
+          if (progress.state === "ejecting") setStatus([t("Ejecting {device}…", { device: nameOf(progress.path) })]);
         });
         const reports = await backend.syncDevices(playlists, destinations, stickDefaults, false, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat);
         setCompletedReports(new Map(reports.flatMap(r => r.report ? [[r.path, r.report] as const] : [])));
@@ -318,19 +333,19 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
           ? [`${nameOf(r.path)}: ${r.error}`]
           : r.ejected ? [`${nameOf(r.path)}: Safely ejected.`]
           : r.ejectError ? [`${nameOf(r.path)}: Not ejected: ${r.ejectError}`] : []);
-        setStatus(outcomes.length > 0 ? outcomes : ["Sync complete."]);
+        setStatus(outcomes.length > 0 ? outcomes : [t("Sync complete.")]);
         // What the sticks hold now, without touching the ticks.
         await refreshDevices().catch(() => {});
         await Promise.all(reports.filter(r => !r.ejected).map(({ path }) => readDevice(path, false).catch(() => {})));
         onSynced?.();
       } catch (e) {
-        setStatus([e instanceof Error ? e.message : "The sync could not be written."]);
+        setStatus([e instanceof Error ? e.message : t("The sync could not be written.")]);
       } finally {
         stop();
         setOperation(null);
       }
     })();
-  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced]);
+  }, [canSync, nodes, ticked, devices, tickedDevices, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
   const importCues = () => {
     if (busy || tickedDevices.size === 0) return;
@@ -342,7 +357,7 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
         if (!await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
         const results: string[] = [];
         for (const device of devices.filter(d => tickedDevices.has(d.path))) {
-          setStatus([`Importing cues and beat grids from ${device.name}…`]);
+          setStatus([t("Importing cues and beat grids from {device}…", { device: device.name })]);
           try {
             const result = await backend.importUsb(device.path, true, false, false);
             results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
@@ -511,11 +526,13 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
                     {usedPercent !== null ? <span style={{ width: `${usedPercent}%` }} /> : null}
                   </div>
                   <div className={styles.storageLabels}>{usedPercent !== null ? <span><i aria-hidden="true" />{used} used</span> : null}<span>{free}</span></div>
-                  {job ? <div className={styles.exportProgress}>
-                    <progress aria-label={`Exporting ${device.name}`} max={100} value={exportPercent(job)} />
+                  {job ? <div className={styles.exportProgress} data-state={job.state}>
+                    <progress data-state={job.state} aria-label={`Exporting ${device.name}`} max={100} value={exportPercent(job)} />
                     <span>{job.state === "cancelled" ? "Export stopped" : job.state === "failed" ? "Export failed" : job.state === "done" ? "Export complete" : job.state === "preparing" ? "Preparing for export" : job.state === "checking" ? `Checking — ${job.title || device.name}` : job.state === "database" ? "Building databases" : job.state === "verifying" ? "Verifying databases" : job.state === "publishing" ? "Publishing safely" : job.state === "ejecting" ? `Ejecting ${device.name}` : `Exporting — ${job.title || device.name}`} ({exportPercent(job)}%)</span>
                     {job.state === "preparing" || job.state === "checking" || job.state === "copying" || job.state === "database" ? <StopExport path={job.path} className={styles.button} /> : null}
-                    {job.state === "failed" ? <span role="alert">{job.title}</span> : null}
+                    {job.state === "failed" ? <span className={styles.exportError} role="alert">
+                      {job.title || "The export failed before the device could be verified. Check that it is connected, writable, and has enough free space."}
+                    </span> : null}
                   </div> : null}
                   {completedReports.has(device.path) ? (() => {
                     const report = completedReports.get(device.path)!;
