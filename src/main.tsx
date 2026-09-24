@@ -14,6 +14,7 @@ window.addEventListener("contextmenu", (event) => event.preventDefault());
 
 const el = document.getElementById("root");
 if (!el) throw new Error("#root missing from index.html");
+const root = createRoot(el);
 
 // The same bundle serves the Preferences and Sync Manager windows: the
 // shell opens them at `#preferences/<pane>` and `#sync`, and that is all
@@ -21,14 +22,20 @@ if (!el) throw new Error("#root missing from index.html");
 const preferences = window.location.hash.startsWith("#preferences");
 const sync = window.location.hash.startsWith("#sync");
 
-if (!preferences && !sync) await syncRekordboxBrowseAtStartup();
+function mount() {
+  root.render(
+    <StrictMode>
+      <Localization>
+        <Suspense fallback={null}>
+          {window.location.hash.startsWith("#report") ? <ReportWindow /> : preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
+        </Suspense>
+      </Localization>
+    </StrictMode>,
+  );
+}
 
-createRoot(el).render(
-  <StrictMode>
-    <Localization>
-    <Suspense fallback={null}>
-    {window.location.hash.startsWith("#report") ? <ReportWindow /> : preferences ? <PreferencesWindow /> : sync ? <SyncWindow /> : <App />}
-    </Suspense>
-    </Localization>
-  </StrictMode>,
-);
+// Finish evaluating this entry module before loading the mock backend. The
+// production bundle can share code back into this module, so a top-level await
+// on that dynamic import would leave both sides waiting and the window blank.
+if (!preferences && !sync) void syncRekordboxBrowseAtStartup().then(mount, mount);
+else mount();

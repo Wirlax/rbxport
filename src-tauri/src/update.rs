@@ -208,6 +208,7 @@ pub async fn check_for_update(
 
 /// The update already downloaded in this run, without a network check.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri's State extractor is injected by value")]
 pub fn ready_update(updates: tauri::State<'_, std::sync::Arc<Updates>>) -> Option<UpdateReadyDto> {
     updates.pending.lock().as_ref().and_then(|pending| {
         pending.placement.as_ref().map(|placement| UpdateReadyDto {

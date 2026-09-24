@@ -298,13 +298,13 @@ pub async fn fetch_rows(
     let handle = Arc::clone(&state);
     if let Some(folder) = state.folder_view(view_id) {
         let mut rows = crate::explorer::fetch_rows(library, folder, offset, len).await?;
-        if !extra_columns.is_empty() {
+        if extra_columns.is_empty() {
+            Ok(rows)
+        } else {
             blocking("fetch_row_details", move || {
                 enrich_rows(&handle, &mut rows, &extra_columns)?;
                 Ok(rows)
             }).await
-        } else {
-            Ok(rows)
         }
     } else {
         let view = state.view(view_id)?;
