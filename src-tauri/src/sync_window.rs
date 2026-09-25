@@ -37,7 +37,8 @@ pub async fn open_sync_window(app: tauri::AppHandle) -> AppResult<()> {
     // an `App` path does not survive the `http://tauri.localhost` route
     // (what 0.5.1's Preferences window taught).
     let builder = WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::App("index.html".into()))
-        .initialization_script("if (!location.hash) location.hash = '#sync';")
+        // Top frame only: on Windows wry runs it in every frame (see `report.rs`).
+        .initialization_script("if (window === window.top && !location.hash) location.hash = '#sync';")
         .title("Sync Manager");
     // The same debugging port as the main window's, when one was asked for;
     // a no-op off Windows (see `crate::browser_args`).

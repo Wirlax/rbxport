@@ -48,7 +48,8 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
     // platform and puts no fragment in a path.
     let builder = WebviewWindowBuilder::new(&app, WINDOW, WebviewUrl::App("index.html".into()))
         .initialization_script(format!(
-            "if (!location.hash) location.hash = '#preferences/{pane}';"
+            // Top frame only: on Windows wry runs it in every frame (see `report.rs`).
+            "if (window === window.top && !location.hash) location.hash = '#preferences/{pane}';"
         ))
         .title("Preferences");
     // The same debugging port as the main window's, when one was asked for;

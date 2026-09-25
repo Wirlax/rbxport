@@ -5,70 +5,64 @@ import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
 
-// Public sitekey; the matching secret exists only in the report Worker.
-const TURNSTILE_SITE_KEY = "0x4AAAAAAFAzF9GiS4tEQvN6";
+/**
+ * The report Worker's Turnstile page, framed out of sight.
+ *
+ * Turnstile cannot run on the app's own pages: under `tauri://localhost` its
+ * challenge fails with 600010. On an https page it passes, including inside a
+ * frame whose parent is the app, so the widget lives on the Worker
+ * (`report-worker/src/index.ts`, `/verify`) and hands each token to the origin
+ * named here — this one.
+ */
+const VERIFY_ORIGIN = "https://report.rbxport.com";
 
-interface TurnstileApi {
-  render(container: HTMLElement, options: {
-    sitekey: string;
-    callback: (token: string) => void;
-    "expired-callback": () => void;
-    "error-callback": () => void;
-    theme: "dark";
-    size: "invisible";
-    action: "bug_report";
-  }): string;
-  remove(widgetId: string): void;
-  reset(widgetId: string): void;
+/** How long without a word from the page before verification counts as failed. */
+const VERIFY_SILENCE_MS = 20_000;
+
+type VerifyMessage =
+  | { source: "rbxport-verify"; type: "token"; token: string }
+  | { source: "rbxport-verify"; type: "expired" }
+  | { source: "rbxport-verify"; type: "error"; code: string };
+
+function isVerifyMessage(data: unknown): data is VerifyMessage {
+  if (!data || typeof data !== "object") return false;
+  const message = data as { source?: unknown; type?: unknown; token?: unknown };
+  if (message.source !== "rbxport-verify") return false;
+  return (message.type === "token" && typeof message.token === "string") || message.type === "expired" || message.type === "error";
 }
 
-declare global {
-  interface Window { turnstile?: TurnstileApi; }
-}
-
-function Turnstile({ onToken, onError, resetCount }: { onToken: (token: string) => void; onError: () => void; resetCount: number }) {
-  const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const widgetIdRef = useRef<string | null>(null);
+function Turnstile({ onToken, onError, resetCount }: { onToken: (token: string) => void; onError: (code: string) => void; resetCount: number }) {
+  const frame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
-    if (!element || !TURNSTILE_SITE_KEY) return;
-    let widgetId: string | undefined;
-    let live = true;
-    const render = () => {
-      if (!live || !window.turnstile || widgetId) return;
-      widgetId = window.turnstile.render(element, {
-        sitekey: TURNSTILE_SITE_KEY,
-        callback: onToken,
-        "expired-callback": () => onToken(""),
-        "error-callback": onError,
-        theme: "dark",
-        size: "invisible",
-        action: "bug_report",
-      });
-      widgetIdRef.current = widgetId;
+    // A page that never loads (offline, blocked) sends nothing at all, and a
+    // frame reports no load error; say so rather than leave Send disabled.
+    let heard = false;
+    const silence = window.setTimeout(() => { if (!heard) onError("no response"); }, VERIFY_SILENCE_MS);
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== VERIFY_ORIGIN || event.source !== frame.current?.contentWindow || !isVerifyMessage(event.data)) return;
+      heard = true;
+      if (event.data.type === "token") onToken(event.data.token);
+      else if (event.data.type === "expired") onToken("");
+      else onError(event.data.code);
     };
-    const existing = document.querySelector<HTMLScriptElement>("script[data-rbxport-turnstile]");
-    if (window.turnstile) render();
-    else if (existing) existing.addEventListener("load", render, { once: true });
-    else {
-      const script = document.createElement("script");
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-      script.async = true;
-      script.defer = true;
-      script.dataset.rbxportTurnstile = "";
-      script.addEventListener("load", render, { once: true });
-      script.addEventListener("error", onError, { once: true });
-      document.head.append(script);
-    }
+    window.addEventListener("message", onMessage);
     return () => {
-      live = false;
-      if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
-      widgetIdRef.current = null;
+      window.clearTimeout(silence);
+      window.removeEventListener("message", onMessage);
     };
-  }, [element, onError, onToken]);
+  }, [onError, onToken]);
+  // A token is spent by one submission; ask the page for the next.
   useEffect(() => {
-    if (resetCount > 0 && widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    if (resetCount > 0) frame.current?.contentWindow?.postMessage({ source: "rbxport-verify", type: "reset" }, VERIFY_ORIGIN);
   }, [resetCount]);
-  return <div className={styles.turnstile} ref={setElement} aria-label="Human verification" />;
+  return (
+    <iframe
+      ref={frame}
+      className={styles.turnstile}
+      src={`${VERIFY_ORIGIN}/verify?origin=${encodeURIComponent(window.location.origin)}`}
+      title="Human verification"
+    />
+  );
 }
 
 export function ReportBug({ onClose, windowed = false }: { onClose: () => void; windowed?: boolean }) {
@@ -83,7 +77,8 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
   const [receipt, setReceipt] = useState<{ key: string; attachmentAdded: boolean } | null>(null);
   const [resetCount, setResetCount] = useState(0);
   const receiveTurnstileToken = useCallback((token: string) => { setTurnstileToken(token); if (token) setError(""); }, []);
-  const reportTurnstileError = useCallback(() => setError("Human verification could not load. Check your connection and try again."), []);
+  // Turnstile's own code, so a report of this message says which failure it was.
+  const reportTurnstileError = useCallback((code: string) => setError(`Human verification could not load (${code}). Check your connection and try again.`), []);
   useEffect(() => {
     if (!include) { setAttachment(null); return; }
     let live = true;
@@ -130,14 +125,14 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
             </div>
             <p className={styles.hint}>The log may include library paths and track titles.</p>
           </div>
-          {TURNSTILE_SITE_KEY ? <Turnstile onToken={receiveTurnstileToken} onError={reportTurnstileError} resetCount={resetCount} /> : <p className={styles.error}>Bug reporting is temporarily unavailable.</p>}
+          <Turnstile onToken={receiveTurnstileToken} onError={reportTurnstileError} resetCount={resetCount} />
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
           {receipt ? <p role="status">Report {receipt.key} submitted.{receipt.attachmentAdded ? "" : " The log attachment could not be added."}</p> : null}
         </div>
         <footer>
           <span className={styles.hint}>Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.</span>
           <button type="button" onClick={onClose}>Close</button>
-          <button className={styles.save} type="submit" disabled={busy || !TURNSTILE_SITE_KEY || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
+          <button className={styles.save} type="submit" disabled={busy || !turnstileToken || !description.trim() || (include && attachment === null)}>{busy ? "Sending…" : "Send report"}</button>
         </footer>
       </form>
     </section>

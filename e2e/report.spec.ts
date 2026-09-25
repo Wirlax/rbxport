@@ -1,22 +1,21 @@
 import { expect, test } from "@playwright/test";
 
 test("bug reports include diagnostics by default and open the attachment externally", async ({ page }) => {
-  await page.addInitScript(() => {
-    const turnstile = {
-      render: (_container: HTMLElement, options: { callback: (token: string) => void }) => {
-        (window as typeof window & { __turnstileOptions?: unknown }).__turnstileOptions = options;
-        queueMicrotask(() => options.callback("test-turnstile-token"));
-        return "test-widget";
-      },
-      remove: () => {},
-      reset: () => {},
-    };
-    Object.defineProperty(window, "turnstile", { value: turnstile, configurable: true });
+  // The report Worker's Turnstile page, standing in: it answers the origin it
+  // was framed for with a token, as the real one does once Turnstile passes.
+  let framedFor = "";
+  await page.route("https://report.rbxport.com/verify?**", async (route) => {
+    framedFor = new URL(route.request().url()).searchParams.get("origin") ?? "";
+    await route.fulfill({
+      contentType: "text/html",
+      body: `<script>parent.postMessage({ source: "rbxport-verify", type: "token", token: "test-turnstile-token" }, ${JSON.stringify(framedFor)});</script>`,
+    });
   });
   await page.goto("/");
   await page.getByRole("contentinfo").getByRole("button", { name: "Report bug", exact: true }).click();
   const report = page.getByRole("dialog", { name: "Report bug", exact: true });
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __turnstileOptions?: { size?: string } }).__turnstileOptions?.size)).toBe("invisible");
+  await expect(report.locator('iframe[title="Human verification"]')).toHaveCount(1);
+  await expect.poll(() => framedFor).toBe(new URL(page.url()).origin);
   await expect(report.getByRole("checkbox")).toBeChecked();
   await expect(report).toContainText("Reports are sent to TRIODE. I read every report, but please don’t expect a personal reply.");
   await expect(report.getByRole("button", { name: "Send report" })).toBeDisabled();

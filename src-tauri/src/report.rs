@@ -14,7 +14,11 @@ pub async fn open_report_window(app: tauri::AppHandle) -> AppResult<()> {
         return Ok(());
     }
     let builder = WebviewWindowBuilder::new(&app, "report", WebviewUrl::App("index.html".into()))
-        .initialization_script("if (!location.hash) location.hash = '#report';")
+        // Top frame only. On Windows wry runs initialization scripts in every
+        // frame whatever it is told, and this one used to set `#report` on
+        // Cloudflare's Turnstile frames inside the window, which Turnstile
+        // failed with 600010.
+        .initialization_script("if (window === window.top && !location.hash) location.hash = '#report';")
         .title("Report bug");
     let builder = match crate::browser_args() {
         Some(args) => builder.additional_browser_args(&args),
