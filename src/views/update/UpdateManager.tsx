@@ -9,7 +9,7 @@
  *
  * Nothing here asks whether to download: an update found is taken, and the
  * window shows the download happening when somebody asked to look. Between
- * the versions and the buttons sits what changed: every changelog section
+ * the versions and the buttons sits what changed: every release-note section
  * between the version running and the one on offer, so somebody two
  * releases behind reads both. The download's progress is a bar with the
  * bytes beside it; the install that follows has no progress to give, so its

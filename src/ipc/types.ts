@@ -526,7 +526,7 @@ export interface Backend {
    * Asks the download server for the newest version.
    *
    * `version` is null when this build is the newest; otherwise `changes`
-   * holds the changelog between the two, newest first, and the update is
+   * holds the release notes between the two, newest first, and the update is
    * held for `downloadUpdate`. `ready` says when that version was already
    * downloaded this run, so there is nothing to fetch again.
    */
@@ -798,7 +798,7 @@ export interface AudioDevices {
 /** What the Preferences window can ask the main window to do. */
 export type PreferencesRequest = "columns" | "layout";
 
-/** One release's section of the changelog. */
+/** One release's section of the published release notes. */
 export interface UpdateChange {
   version: string;
   /** `2026-09-10`, when the heading carries one. */
@@ -814,7 +814,7 @@ export interface UpdateCheck {
   version: string | null;
   /** RFC 3339, when the feed says when it was published. */
   date: string | null;
-  /** The changelog between the two versions, newest first. */
+  /** The release notes between the two versions, newest first. */
   changes: UpdateChange[];
   /** Set when the version on offer is already downloaded this run. */
   ready: UpdateReady | null;

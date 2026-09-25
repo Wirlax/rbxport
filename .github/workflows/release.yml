@@ -347,20 +347,17 @@ jobs:
     needs: [build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     steps:
-      # For CHANGELOG.md, which rides along in the feed as the release
-      # notes: the app shows the sections between the version it is and the
-      # version on offer. Nothing else here needs the tree. FIRST, before
+      # The checked-in release notes feed the app, website, and Discord.
+      # Nothing else here needs the tree. FIRST, before
       # the installers are downloaded: checkout cleans the workspace, and
       # placed after the download it deleted `out/` — 0.5.1's publish died
       # on `ls: cannot access 'out'` after both builds had passed.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
-          # Discord falls back to the commits since the previous tag when a
-          # release has no matching CHANGELOG section. That comparison needs
-          # the tag history, not checkout's default single commit.
-          fetch-depth: 0
-          sparse-checkout: CHANGELOG.md
+          sparse-checkout: |
+            release-notes.json
+            scripts/release-notes.mjs
           sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
@@ -445,7 +442,9 @@ jobs:
           # bundler signed it, under `linux-x86_64-deb`: an app installed
           # from the package takes the package, one run as an AppImage takes
           # the AppImage.
-          test -s CHANGELOG.md
+          test -s release-notes.json
+          node scripts/release-notes.mjs validate release-notes.json "$version"
+          node scripts/release-notes.mjs markdown release-notes.json release-notes.md
           node -e '
             const fs = require("fs");
             const [, version, base] = process.argv;
@@ -487,7 +486,7 @@ jobs:
             const feed = {
               version,
               pub_date: new Date().toISOString(),
-              notes: fs.readFileSync("CHANGELOG.md", "utf8"),
+              notes: fs.readFileSync("release-notes.md", "utf8"),
               platforms,
               downloads,
             };
@@ -495,6 +494,12 @@ jobs:
             const { notes, ...shown } = feed;
             console.log(JSON.stringify({ ...shown, notes: notes.length + " bytes" }, null, 2));
           ' "$version" "${CDN_BASE_URL:-}"
+
+          # The public website proxies this canonical history and keeps a
+          # checked-in copy only as a fallback for a transient CDN outage.
+          aws s3 cp release-notes.json "s3://$BUCKET/release-notes.json" \
+            --endpoint-url "$ENDPOINT" --no-progress \
+            --content-type application/json --cache-control "public, max-age=60"
 
           # Short TTL: this is the file anything checking for a new version
           # reads, and a long one delays the rollout by exactly that much.
@@ -518,8 +523,11 @@ jobs:
           # seconds, and that is a wait, not a failure.
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
             "$CDN_BASE_URL/latest.json" -o published.json
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$CDN_BASE_URL/release-notes.json" -o published-release-notes.json
           cat published.json
           test "$(node -p 'require("./published.json").version')" = "$version"
+          test "$(node -p 'require("./published-release-notes.json")[0].version')" = "$version"
           for url in $(node -p '
             const feed = require("./published.json");
             [...Object.values(feed.platforms), ...Object.values(feed.downloads)].map((p) => p.url).join("\n")
@@ -577,86 +585,13 @@ jobs:
       - name: Send release notes to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
-          CDN_BASE_URL: ${{ vars.CDN_BASE_URL }}
         run: |
           set -euo pipefail
           test -n "$DISCORD_WEBHOOK_URL"
           version="${RELEASE_TAG#v}"
 
-          VERSION="$version" node <<'NODE'
-          const fs = require("fs");
-          const { execFileSync } = require("child_process");
-          const version = process.env.VERSION;
-          const releaseTag = process.env.RELEASE_TAG;
-          const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
-          const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const heading = new RegExp(`^## \\[${escaped}\\].*$`, "m").exec(changelog);
-          const remainder = heading ? changelog.slice(heading.index + heading[0].length) : "";
-          const nextHeading = remainder.search(/^## \[/m);
-          let notes = (nextHeading < 0 ? remainder : remainder.slice(0, nextHeading)).trim();
-
-          // CHANGELOG entries are preferred because they are written for the
-          // person using the app. Most recent tags have not had a matching
-          // version heading, though, so derive accurate notes from the commits
-          // in this release instead of posting an empty announcement.
-          if (!notes) {
-            let previousTag = "";
-            try {
-              previousTag = execFileSync(
-                "git",
-                ["describe", "--tags", "--abbrev=0", `${releaseTag}^`],
-                { encoding: "utf8" },
-              ).trim();
-            } catch {
-              // The first tagged release has no earlier tag to compare with.
-            }
-
-            const range = previousTag ? `${previousTag}..${releaseTag}` : releaseTag;
-            const subjects = execFileSync(
-              "git",
-              ["log", "--format=%s", "--no-merges", range],
-              { encoding: "utf8" },
-            ).trim().split("\n").filter(Boolean);
-            const groups = { Fixed: [], Added: [], Changed: [] };
-            const other = [];
-            for (const subject of subjects) {
-              const conventional = /^(fix|feat|perf|refactor)(?:\([^)]+\))?!?:\s*(.+)$/i.exec(subject);
-              if (conventional) {
-                const [, type, summary] = conventional;
-                const group = type.toLowerCase() === "fix"
-                  ? "Fixed"
-                  : type.toLowerCase() === "feat" ? "Added" : "Changed";
-                groups[group].push(summary[0].toUpperCase() + summary.slice(1));
-              } else if (!/^(?:build|ci|docs|style|test)(?:\([^)]+\))?!?:/i.test(subject)
-                && !/^chore(?:\([^)]+\))?!?:\s*bump version\b/i.test(subject)) {
-                other.push(subject[0].toUpperCase() + subject.slice(1));
-              }
-            }
-            const sections = Object.entries(groups)
-              .filter(([, items]) => items.length)
-              .map(([label, items]) => `### ${label}\n${items.map((item) => `- ${item}`).join("\n")}`);
-            if (other.length) {
-              sections.push(`### Other changes\n${other.map((item) => `- ${item}`).join("\n")}`);
-            }
-            notes = sections.join("\n\n")
-              || "No user-facing changes were recorded for this release.";
-          }
-          // Discord embed descriptions are capped at 4096 characters.
-          if (notes.length > 3900) notes = notes.slice(0, 3897).trimEnd() + "…";
-          const base = (process.env.CDN_BASE_URL || "").replace(/\/$/, "");
-          const payload = {
-            username: "rbxport releases",
-            embeds: [{
-              title: `rbxport ${version} released`,
-              description: notes,
-              color: 0x3571E3,
-              url: base ? `${base}/latest.json` : undefined,
-              footer: { text: `Release ${process.env.RELEASE_TAG}` },
-              timestamp: new Date().toISOString(),
-            }],
-          };
-          fs.writeFileSync("/tmp/discord-release.json", JSON.stringify(payload));
-          NODE
+          node scripts/release-notes.mjs discord release-notes.json "$version" \
+            /tmp/discord-release.json https://rbxport.com/whats-new/
 
           status="$(curl -sS -o /tmp/discord-response.txt -w '%{http_code}' \
             -H 'Content-Type: application/json' \

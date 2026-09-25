@@ -1,7 +1,7 @@
 /**
- * The changelog's markdown, as the Update Manager draws it.
+ * The release workflow's Markdown, as the Update Manager draws it.
  *
- * `CHANGELOG.md` uses five things — a `## [x.y.z] — date` heading per
+ * The generated notes use five things — a `## [x.y.z] — date` heading per
  * release, `### Added / Changed / Fixed` under it, `- ` bullets, paragraphs,
  * and `code` spans — so that is what this reads. No markdown library: one
  * would be forty kilobytes of parser for five constructs, and this file is

@@ -200,13 +200,14 @@ describe("useUpdater", () => {
     expect(updater.state.phase).toBe("ready");
   });
 
-  it("a restart that comes back is a failure, with its reason and the update kept", async () => {
+  it("a restart that comes back opens the failure, with its reason and the update kept", async () => {
     download = () => Promise.resolve(INSTALLED);
     restart = () => Promise.reject(new Error("The update could not be installed."));
     await mount(false);
-    act(() => updater.check(true));
+    act(() => updater.check(false));
     await settle();
     expect(updater.state.phase).toBe("ready");
+    expect(updater.open).toBe(false);
     act(() => updater.restart());
     await settle();
     expect(updater.state).toEqual({
@@ -214,6 +215,7 @@ describe("useUpdater", () => {
       message: "The update could not be installed.",
       check: AVAILABLE,
     });
+    expect(updater.open).toBe(true);
   });
 
   it("a check that cannot reach the server is a failure with nothing to download", async () => {

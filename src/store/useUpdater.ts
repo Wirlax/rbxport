@@ -166,8 +166,10 @@ export function useUpdater(autoCheck: boolean, frequency: UpdateFrequency = "sta
         // A success never returns: the process ends. Returning is failure.
         await backend.restartToUpdate();
         setState({ phase: "failed", message: "The update did not restart the app.", check: found });
+        setOpen(true);
       } catch (error) {
         setState({ phase: "failed", message: reason(error), check: found });
+        setOpen(true);
       }
     })();
   }, []);

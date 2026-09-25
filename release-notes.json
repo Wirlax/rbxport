@@ -1,0 +1,18 @@
+[
+  {
+    "version": "1.0.0-rc.1",
+    "date": "2026-09-24",
+    "changes": [
+      "(New) Control rbxport from AppleScript on macOS.",
+      "(New) Undo and redo deleting playlists and folders from the Edit menu.",
+      "(New) Create a rekordbox library when none exists instead of opening an empty window with an error.",
+      "(New) Keep the last library screen, artwork, and waveforms visible while the library loads.",
+      "(New) Right-click the version in the status bar to open the current application log.",
+      "(Improved) USB devices and Sync Manager load faster on macOS, and Preferences and bug reporting open faster on every platform.",
+      "(Fixed) Bug reports can be sent again on macOS and Windows.",
+      "(Fixed) Track artwork appears correctly on Windows.",
+      "(Fixed) Zoomed waveforms line up with the playhead and beat grid on tracks with encoder delay.",
+      "(Fixed) Sub-browser track actions, reordering, and Information now act on the playlist open on the right."
+    ]
+  }
+]

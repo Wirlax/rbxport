@@ -3,7 +3,7 @@
 //!
 //! The release workflow publishes `latest.json` to the download bucket in
 //! the updater's own format — version, date, a signed URL per platform, and
-//! the whole `CHANGELOG.md` as the notes. The plugin fetches that, compares
+//! the release workflow's generated release-note Markdown as the notes. The plugin fetches that, compares
 //! the version with this build's and verifies the signature against the
 //! public key in `tauri.conf.json`; this module turns the result into what
 //! the interface shows and does what it asks.
@@ -24,7 +24,7 @@
 //!   the Update Manager's Restart Now.
 //!
 //! What has changed is worked out here, not in the interface: the notes are
-//! the entire changelog, and the part that matters is the sections newer
+//! the full published release history, and the part that matters is the sections newer
 //! than the version running and no newer than the one on offer — a user
 //! two releases behind should read both.
 //!
@@ -105,12 +105,12 @@ fn swaps_in_place() -> bool {
     matches!(bundle_type(), Some(BundleType::App | BundleType::AppImage))
 }
 
-/// One release's entry in the changelog.
+/// One release's entry in the published release notes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeDto {
     pub version: String,
-    /// As the changelog writes it, `2026-09-10`, when the heading has one.
+    /// As the release notes write it, `2026-09-10`, when the heading has one.
     pub date: Option<String>,
     /// The section's markdown, headings included.
     pub body: String,
@@ -125,7 +125,7 @@ pub struct UpdateCheckDto {
     pub version: Option<String>,
     /// RFC 3339, from the feed's `pub_date`.
     pub date: Option<String>,
-    /// The changelog sections between the two versions, newest first.
+    /// The release-note sections between the two versions, newest first.
     pub changes: Vec<ChangeDto>,
     /// The version on offer is already downloaded this run: in place, or
     /// staged for the quit. Nothing to fetch again.
@@ -391,7 +391,7 @@ pub fn on_exit(app: &AppHandle) {
     }
 }
 
-/// The changelog sections newer than `current` and no newer than `target`,
+/// The release-note sections newer than `current` and no newer than `target`,
 /// newest first — what somebody on `current` gets by taking `target`.
 ///
 /// A section starts at a `## [x.y.z]` heading and runs to the next one; the

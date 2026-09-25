@@ -41,6 +41,7 @@ import { startWindowDrag, toggleWindowMaximise } from "@/lib/windowDrag";
 import { AppCost } from "@/views/topbar/AppCost";
 import { useLimiter } from "@/store/useLimiter";
 import { useUpdater } from "@/store/useUpdater";
+import { UpdateReadyNotice } from "@/views/update/UpdateReadyNotice";
 import { MasterOutputProvider, MasterOutputConnection, useMasterControls, useMasterDisplay } from "@/store/MasterOutput";
 import { asLayout, deckCount, isFullDeck, type PlayerLayout } from "@/lib/layout";
 import { FIELD_LABEL, InfoPanel } from "@/views/info/InfoPanel";
@@ -395,6 +396,12 @@ function AppBody() {
   // menu and Preferences ask by hand.
   const updater = useUpdater(advancedPrefs.checkUpdates, advancedPrefs.updateFrequency);
   const checkForUpdates = updater.check;
+  const openWhatsNew = useCallback(() => {
+    const release = updater.state.phase === "ready" ? `#v${updater.state.ready.version}` : "";
+    void getBackend()
+      .then((backend) => backend.openUrl(`https://rbxport.com/whats-new/${release}`))
+      .catch(() => {});
+  }, [updater.state]);
   // DJ System in Preferences is what a stick with no settings of its own
   // gets on export; the same shape goes with every export call.
   const stickDefaults = prefs.preferences.djSystem;
@@ -2426,6 +2433,16 @@ function AppBody() {
           onTakeMasterTempo={takeLinkMasterTempo}
         />
       </div>
+
+      {updater.state.phase === "ready" ? (
+        <div className={styles.updateReady}>
+          <UpdateReadyNotice
+            version={updater.state.ready.version}
+            onWhatsNew={openWhatsNew}
+            onRestart={updater.restart}
+          />
+        </div>
+      ) : null}
 
       <StatusBar
         exports={(exportRunning ? exportBatch : []).map(job => ({
