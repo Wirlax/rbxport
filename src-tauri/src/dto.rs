@@ -248,7 +248,14 @@ pub struct CueDto {
 pub struct RowCueDto(pub char, pub u32, pub Option<String>);
 
 /// `#RRGGBB` for a cue's `ColorTableIndex`, where it has been measured.
+///
+/// Index 0 is a cue with no colour (a NULL column reads as 0), not the black
+/// sentinel at 0 in rekordbox's palette table: it gets `None`, so the pad and
+/// badge fall back to the default hot-cue green.
 pub fn cue_colour_css(index: u8) -> Option<String> {
+    if index == 0 {
+        return None;
+    }
     rbl_anlz::cue_colour_drawn(index)
         .map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
 }

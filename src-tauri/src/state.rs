@@ -690,16 +690,18 @@ mod tests {
             id: 7,
             title: "Take Me Home",
             bpm_x100: 12_800,
-            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41), cue(0, 1000, 0)],
+            cues: vec![cue(1, 46, 21), cue(0, 46, 0), cue(6, 24, 18), cue(2, 165_046, 41), cue(0, 1000, 0), cue(3, 2000, 0)],
             ..TestTrack::default()
         }]);
         let rows = rows_to_dto(&library, &[0], 0);
         let json = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(json["memoryCues"], serde_json::json!([46, 1000]));
-        // In slot order, letters from `Kind` and rekordbox's resolved colour.
+        // In slot order, letters from `Kind` and rekordbox's resolved colour;
+        // a hot cue with no colour carries none, so it is drawn in the default
+        // green rather than the palette's black at index 0.
         assert_eq!(
             json["hotCues"],
-            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, "#E02823"], ["E", 24, "#10B176"]])
+            serde_json::json!([["A", 46, "#3CEB50"], ["B", 165_046, "#E02823"], ["C", 2000, null], ["E", 24, "#10B176"]])
         );
     }
 
