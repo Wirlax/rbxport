@@ -16,7 +16,7 @@ import { drawPcmWave, drawWave, strideOf, waveformKindOf, type HalfWaveform } fr
 import { getBackend } from "@/ipc/client";
 import type { WaveformKind } from "@/ipc/types";
 import { backingSize } from "@/lib/canvasSize";
-import { waveSlice } from "@/lib/player";
+import { detailWaveOriginMs, detailWaveWindow, waveSlice } from "@/lib/player";
 import { usePreferences } from "@/store/usePreferences";
 
 /** Raw waveform bytes per track. Small — a few hundred bytes each. */
@@ -73,6 +73,10 @@ export interface WaveformDetailProps {
   half?: HalfWaveform;
   /** Read the full-resolution `PWV7` rather than the 1,200-column `PWV6`. */
   detail?: boolean;
+  /** Decoded audio duration, used to put fixed-rate detail columns on their millisecond clock. */
+  durationMs?: number;
+  /** First timestamped beat, for removing a leading encoder delay from PWV7's clock. */
+  firstBeatMs?: number | undefined;
   /** Rows to leave clear at the top and bottom, in CSS pixels. */
   inset?: { top: number; bottom: number };
   /** A source-audio window to draw as a stereo PCM envelope instead of PWV7. */
@@ -88,7 +92,7 @@ function forget(trackId: string): void {
 
 export const WaveformDetail = memo(function WaveformDetail({
   trackId, progress, span = 0.08, width, height, half = false, detail = false,
-  inset = { top: 0, bottom: 0 }, pcmWindow: requestedPcmWindow,
+  durationMs = 0, firstBeatMs, inset = { top: 0, bottom: 0 }, pcmWindow: requestedPcmWindow,
 }: WaveformDetailProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [data, setData] = useState<LoadedWaveform | null>(null);
@@ -209,7 +213,10 @@ export const WaveformDetail = memo(function WaveformDetail({
     // edge. The overhang is drawn as nothing rather than as a stretched copy
     // of the first bar. Both tags cover the whole track, so a window into one
     // is a slice of its columns rather than a second fetch.
-    const { first, last, x0, width: span_ } = waveSlice(progress, span, data.bytes.length, w, strideOf(palette, detail));
+    const stride = strideOf(palette, detail);
+    const originMs = detailWaveOriginMs(firstBeatMs, data.bytes, stride);
+    const timed = detailWaveWindow(progress, span, durationMs, Math.floor(data.bytes.length / stride), originMs);
+    const { first, last, x0, width: span_ } = waveSlice(timed.progress, timed.span, data.bytes.length, w, stride);
     // The inset is given in CSS pixels; the canvas is in device pixels.
     const scale = h / Math.max(height, 1);
     ctx.clearRect(0, 0, w, h);
@@ -221,7 +228,7 @@ export const WaveformDetail = memo(function WaveformDetail({
       bottom: inset.bottom * scale,
     });
     ctx.restore();
-  }, [data, pcmData, trackId, revision, progress, span, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
+  }, [data, pcmData, trackId, revision, progress, span, durationMs, firstBeatMs, width, height, half, detail, palette, inset.top, inset.bottom, pcmWindow]);
 
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 });

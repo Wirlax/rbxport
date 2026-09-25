@@ -139,6 +139,61 @@ export function detailSpan(bars: number, bpmX100: number, durationSec: number): 
   return Math.min(1, Math.max(seconds / durationSec, 1e-4));
 }
 
+/** Rekordbox's scrolling waveform tags (`PWV3`, `PWV5`, `PWV7`) run at 150 columns/second. */
+export const DETAIL_WAVE_COLUMNS_PER_SECOND = 150;
+
+/**
+ * Converts an audio-player window to the fixed clock of a scrolling waveform.
+ *
+ * The decoded audio duration and the tag's column count commonly differ by a
+ * few dozen milliseconds. Normalising both to the audio duration stretches
+ * the waveform, so its attacks drift away from the timestamped beat grid.
+ */
+export function detailWaveWindow(
+  progress: number,
+  span: number,
+  audioDurationMs: number,
+  columns: number,
+  originMs = 0,
+): { progress: number; span: number } {
+  if (audioDurationMs <= 0 || columns <= 0) return { progress, span };
+  const waveformDurationMs = columns / DETAIL_WAVE_COLUMNS_PER_SECOND * 1000;
+  return {
+    progress: (progress * audioDurationMs + originMs) / waveformDurationMs,
+    span: span * audioDurationMs / waveformDurationMs,
+  };
+}
+
+/**
+ * Clock correction for an analysis waveform whose first attack includes an
+ * encoder's leading samples while the beat grid and decoder do not.
+ *
+ * Only infer it for the unambiguous start-of-file case: a near-zero first
+ * beat and a short run of genuinely silent waveform columns followed by an
+ * attack. The column timestamp is its centre, not its left edge. Tracks with
+ * an intro before their first beat deliberately return zero.
+ */
+export function detailWaveOriginMs(
+  firstBeatMs: number | undefined,
+  bytes: Uint8Array,
+  stride: number,
+): number {
+  if (firstBeatMs === undefined || firstBeatMs < 0 || firstBeatMs > 100 || stride <= 0) return 0;
+  const columns = Math.floor(bytes.length / stride);
+  let first = -1;
+  for (let column = 0; column < Math.min(columns, 16); column += 1) {
+    const at = column * stride;
+    if (bytes.subarray(at, at + stride).some((value) => value !== 0)) {
+      first = column;
+      break;
+    }
+  }
+  if (first <= 0) return 0;
+  const attackMs = (first + 0.5) / DETAIL_WAVE_COLUMNS_PER_SECOND * 1000;
+  const correction = attackMs - firstBeatMs;
+  return correction > 0 && correction <= 50 ? correction : 0;
+}
+
 /**
  * The slice of the track a window of `span` centred on `at` covers.
  *

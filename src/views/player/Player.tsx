@@ -2047,6 +2047,8 @@ export const Player = memo(function Player({
                   trackId={track.id}
                   progress={anchor}
                   span={span * OVERDRAW}
+                  durationMs={total * 1000}
+                  firstBeatMs={grid.times[0]}
                   width={detail.width * OVERDRAW}
                   height={detail.height}
                   detail

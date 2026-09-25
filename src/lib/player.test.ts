@@ -24,6 +24,8 @@ import {
   faderToTempo,
   tempoForTypedBpm,
   beatCountText,
+  detailWaveWindow,
+  detailWaveOriginMs,
   clickSeconds,
   isClick,
   ZOOM_STEPS,
@@ -661,6 +663,32 @@ describe("waveSlice", () => {
     const slice = waveSlice(0.5, 0.05, 0, 1200);
     expect(slice.first).toBe(0);
     expect(slice.last).toBe(0);
+  });
+});
+
+describe("detailWaveWindow", () => {
+  it("keeps fixed-rate waveform columns on their own millisecond clock", () => {
+    // DFBL's decoded audio is 211.243764 s while its 31,696 PWV7 columns
+    // cover 211.306667 s at the format's fixed 150 columns per second.
+    const window = detailWaveWindow(100 / 211.243764, 4 / 211.243764, 211_243.764, 31_696);
+    expect(window.progress * (31_696 / 150 * 1000)).toBeCloseTo(100_000, 8);
+    expect(window.span * (31_696 / 150 * 1000)).toBeCloseTo(4_000, 8);
+  });
+
+  it("falls back to the supplied fractions without timing metadata", () => {
+    expect(detailWaveWindow(0.4, 0.1, 0, 100)).toEqual({ progress: 0.4, span: 0.1 });
+  });
+});
+
+describe("detailWaveOriginMs", () => {
+  it("removes DFBL's fractional MP3 encoder delay without dropping whole PWV7 columns", () => {
+    const bytes = new Uint8Array(12 * 3);
+    bytes.set([7, 40, 103], 7 * 3);
+    expect(detailWaveOriginMs(25, bytes, 3)).toBeCloseTo(25, 6);
+  });
+
+  it("does not align a waveform that already has audio at its origin", () => {
+    expect(detailWaveOriginMs(25, new Uint8Array([1, 2, 3, 0, 0, 0]), 3)).toBe(0);
   });
 });
 
