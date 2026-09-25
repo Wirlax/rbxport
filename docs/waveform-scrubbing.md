@@ -5,11 +5,12 @@ drag's speed and direction. A low-pass filter follows the magnitude of that
 speed: slow drags sound darker, and fast drags reveal more high frequencies.
 It applies on every scrub, regardless of whether the music contains a kick.
 
-The cutoff rises linearly from 400 Hz at rest to 16 kHz at four times normal
-playback speed, then stays at 16 kHz for faster movement. At normal playback
-speed it is 4.3 kHz. Speed is measured in audio traversed per second, so waveform
-zoom affects how much audio a given mouse movement crosses. Forward and reverse
-drags use the same cutoff curve.
+The cutoff follows a concave quadratic ease-out curve from 400 Hz at rest to 19 kHz
+at normal playback speed, then stays at 19 kHz for faster movement. The curve
+opens quickly at low scrub speeds and eases smoothly into its maximum as it
+approaches 1x. Speed is measured in audio traversed per second, so waveform zoom
+affects how much audio a given mouse movement crosses. Forward and reverse drags
+use the same cutoff curve.
 
 The engine uses a stereo, two-pole Butterworth low-pass driven by the smoothed
 scrub playback rate. Filter coefficients glide with a 5 ms time constant to

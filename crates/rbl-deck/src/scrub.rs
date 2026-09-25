@@ -40,6 +40,12 @@ pub const WINDOW_REACH: u64 = 44_100 * 2;
 /// can aim with, and the interpolation has nothing useful left to read.
 const MAX_RATE: f64 = 8.0;
 
+/// The scrub filter opens quickly at low speeds, then eases into its maximum
+/// at normal playback speed. Faster motion does not make it any brighter.
+const MIN_CUTOFF_HZ: f64 = 400.0;
+const MAX_CUTOFF_HZ: f64 = 19_000.0;
+const CUTOFF_FULLY_OPEN_RATE: f64 = 1.0;
+
 /// A two-pole Butterworth low-pass, with a 5 ms coefficient glide. The
 /// trapezoidal integrators remain stable as the cutoff moves. Each channel
 /// has its own history, and expensive cutoff calculations happen per block.
@@ -69,10 +75,14 @@ impl ScrubFilter {
     }
 
     fn set_rate(&mut self, rate: f64) {
-        // 400 Hz at rest, 4.3 kHz at normal playback speed, reaching 16 kHz
-        // at 4x. Direction does not affect brightness. Leave headroom below
-        // Nyquist even on devices with unusually low sample rates.
-        let cutoff = (400.0 + 15_600.0 * (rate.abs() / 4.0).min(1.0)).min(self.sample_rate * 0.4);
+        // A quadratic ease-out opens quickly at low speed, then eases into 19 kHz
+        // at normal playback speed. Direction does not affect brightness.
+        // Leave headroom below Nyquist on devices with unusually low sample
+        // rates.
+        let velocity = (rate.abs() / CUTOFF_FULLY_OPEN_RATE).min(1.0);
+        let curve = 1.0 - (1.0 - velocity).powi(2);
+        let cutoff = (MIN_CUTOFF_HZ + (MAX_CUTOFF_HZ - MIN_CUTOFF_HZ) * curve)
+            .min(self.sample_rate * 0.4);
         self.target_g = (std::f64::consts::PI * cutoff / self.sample_rate).tan();
     }
 
@@ -646,15 +656,39 @@ mod tests {
     fn slow_scrubs_remove_treble_and_fast_scrubs_open_the_filter() {
         for sample_rate in [44_100, 48_000, 96_000] {
             let slow = filtered_tone_gain(sample_rate, 0.1, 8_000.0);
-            let medium = filtered_tone_gain(sample_rate, 1.0, 8_000.0);
-            let fast = filtered_tone_gain(sample_rate, 4.0, 8_000.0);
-            assert!(slow < 0.02, "slow drag should strongly suppress treble: {slow}");
-            assert!(medium > slow && medium < fast);
-            assert!(fast > 0.95, "fast drag should open the treble: {fast}");
+            let medium = filtered_tone_gain(sample_rate, 0.5, 8_000.0);
+            let full = filtered_tone_gain(sample_rate, 1.0, 8_000.0);
+            assert!(slow < 0.7, "slow drag should suppress treble: {slow}");
+            assert!(medium > slow && medium < full);
+            assert!(full > 0.95, "full-speed drag should open the treble: {full}");
             assert!(filtered_tone_gain(sample_rate, 0.1, 100.0) > 0.99);
             assert_eq!(slow, filtered_tone_gain(sample_rate, -0.1, 8_000.0));
-            assert_eq!(fast, filtered_tone_gain(sample_rate, -4.0, 8_000.0));
+            assert_eq!(full, filtered_tone_gain(sample_rate, 4.0, 8_000.0));
+            assert_eq!(full, filtered_tone_gain(sample_rate, -4.0, 8_000.0));
         }
+    }
+
+    #[test]
+    fn scrub_cutoff_is_quadratic_ease_out_and_caps_at_nineteen_khz_at_full_speed() {
+        fn target_cutoff(rate: f64) -> f64 {
+            let mut filter = ScrubFilter::new(96_000);
+            filter.set_rate(rate);
+            filter.target_g.atan() * filter.sample_rate / std::f64::consts::PI
+        }
+
+        let cutoffs = [0.0, 0.25, 0.5, 0.75, 1.0].map(target_cutoff);
+        for pair in cutoffs.windows(3) {
+            let first_rise = pair[1] - pair[0];
+            let second_rise = pair[2] - pair[1];
+            assert!(
+                second_rise < first_rise,
+                "cutoff rises should diminish: {cutoffs:?}"
+            );
+        }
+        assert!((cutoffs[0] - MIN_CUTOFF_HZ).abs() < 1e-6);
+        assert!((cutoffs[4] - MAX_CUTOFF_HZ).abs() < 1e-6);
+        assert!((target_cutoff(MAX_RATE) - MAX_CUTOFF_HZ).abs() < 1e-6);
+        assert!((target_cutoff(-MAX_RATE) - MAX_CUTOFF_HZ).abs() < 1e-6);
     }
 
     #[test]
