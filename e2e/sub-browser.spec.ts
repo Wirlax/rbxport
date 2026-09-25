@@ -140,6 +140,74 @@ test("tracks drag between the two playlist lists", async ({ page }) => {
   await expect(page.getByRole("contentinfo")).toContainText("Added 1 track to Melodic Vox.");
 });
 
+test("the right playlist owns its track actions and drives Information", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await subToggle(page).click();
+  const panel = sub(page);
+  const main = page.getByRole("grid").first();
+  const right = panel.getByRole("grid");
+  const mainTree = page.getByRole("tree").first();
+  const rightTree = panel.getByRole("tree");
+  const mainRows = main.locator('[role="row"]:has([role="gridcell"])');
+  const rightRows = right.locator('[role="row"]:has([role="gridcell"])');
+
+  // Make a playlist in the right browser, then populate it from the left.
+  // This keeps the regression tied to the same cross-panel drag that exposed
+  // the missing actions rather than relying on a pre-existing playlist.
+  await rightTree.getByRole("treeitem").filter({ hasText: "Hardstyle" }).first().click({ button: "right" });
+  await page.getByRole("menu", { name: "Playlist" }).getByRole("menuitem", { name: "Create New Playlist" }).click();
+  await rightTree.getByRole("treeitem").filter({ hasText: "New playlist" }).first().click();
+  await mainTree.getByRole("treeitem").filter({ hasText: "All Tracks" }).first().click();
+  const title = (await mainRows.first().locator('[data-col="title"]').innerText()).trim();
+  await mainRows.first().dragTo(right);
+  await expect(panel.getByTestId("browser-title")).toHaveText("New playlist (1 Tracks)");
+
+  // A right-side selection is the active selection for Information.
+  await page.getByRole("toolbar", { name: "Browser panels" })
+    .getByRole("button", { name: "Information" }).click();
+  await rightRows.first().locator('[data-col="title"]').click();
+  const info = page.getByRole("complementary", { name: "Information" });
+  await expect(info.getByText(title, { exact: true }).first()).toBeVisible();
+
+  // The menu must mutate the right-side source, not silently do nothing or
+  // use whichever playlist happens to be open in the left browser.
+  await rightRows.first().locator('[data-col="title"]').click({ button: "right" });
+  await page.getByRole("menu", { name: "Track" })
+    .getByRole("menuitem", { name: "Remove from Playlist" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Removed 1 track.");
+  await expect(panel.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
+  await expect(rightRows).toHaveCount(0);
+  // Dropping into a playlist copied the source; removing from the destination
+  // must not remove the collection row on the left.
+  await expect(mainRows.first().locator('[data-col="title"]')).toHaveText(title);
+});
+
+test("tracks reorder inside the right playlist without changing the left view", async ({ page }) => {
+  await page.goto("/?writable=1");
+  await subToggle(page).click();
+  const panel = sub(page);
+  const rightTree = panel.getByRole("tree");
+  const rightRows = panel.getByRole("grid").locator('[role="row"]:has([role="gridcell"])');
+  const titles = () => rightRows.locator('[data-col="title"]').allTextContents();
+  const leftTitle = page.getByTestId("browser-title").first();
+  const leftBefore = await leftTitle.innerText();
+
+  await rightTree.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
+  const before = await titles();
+  expect(before.length).toBeGreaterThan(3);
+  const target = await rightRows.nth(3).boundingBox();
+  if (!target) throw new Error("the right playlist's target row is not visible");
+  await rightRows.first().dragTo(rightRows.nth(3), {
+    targetPosition: { x: 120, y: target.height - 3 },
+  });
+
+  await expect(page.getByRole("contentinfo")).toContainText("Playlist reordered.");
+  await expect.poll(async () => (await titles()).slice(0, 4))
+    .toEqual([before[1], before[2], before[3], before[0]]);
+  // The independently selected main browser stays where it was.
+  await expect(leftTitle).toHaveText(leftBefore);
+});
+
 test("the sub-browser's splitters move it and its tree within the clamp", async ({ page }) => {
   await subToggle(page).click();
   const panel = sub(page);

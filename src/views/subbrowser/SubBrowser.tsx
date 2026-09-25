@@ -42,15 +42,28 @@ import styles from "./SubBrowser.module.css";
 export type SubTreeProps = Pick<
   TreeViewProps,
   "dragging" | "onDropTracks" | "onExport" | "onExportFile" | "onCreatePlaylist" | "onCreateFolder"
-  | "onDeleteNode" | "onRenameNode" | "readOnly"
+  | "onDeleteNode" | "onRenameNode" | "onMoveNode" | "onDropFiles" | "onExpand" | "showCounts"
+  | "onOpenSync" | "onCreateSmartPlaylist" | "onEditSmartPlaylist" | "onAddArtwork"
+  | "onAddToShortcut" | "onSortItems" | "onEjectDevice" | "ejectingDeviceId" | "deviceBusy"
+  | "readOnly"
 >;
 
 /** Likewise for its list: dragging out, loading decks, the writes. */
 export type SubListProps = Pick<
   TrackTableProps,
-  "onDragTracks" | "onDragError" | "players" | "onLoadTrack" | "onShowInFinder" | "onRate" | "onComment"
-  | "pendingEdits" | "readOnly" | "dragging" | "onDropTracks"
->;
+  "onDragTracks" | "onDragError" | "players" | "onLoadTrack" | "onShowInformation" | "onShowInFinder"
+  | "onRate" | "onComment" | "pendingEdits" | "readOnly" | "dragging" | "onDropTracks"
+  | "onResetPlayCount" | "onConvertMemoryCues" | "onRemoveFromCollection" | "onImportToCollection"
+  | "onAnalysisLock" | "onAddToPlaylist" | "onAddToTagList" | "onRemoveFromTagList" | "onReloadTag"
+  | "onExportTrack" | "playlists" | "devices" | "onEditField" | "onEditBlocked" | "onFocusedRow"
+  | "onSelectedRow"
+> & {
+  onRemoveTracksFromPlaylist: (playlistId: string, ids: readonly string[]) => void;
+  onRemoveTracksFromHistory: (historyId: string, ids: readonly string[]) => void;
+  onReorderPlaylist: (playlistId: string, order: readonly string[]) => void;
+  onDropFilesIntoPlaylist: (playlistId: string, files: File[]) => void;
+  onAnalyseTracks: (tracks: readonly { id: string; title: string }[]) => void;
+};
 
 export interface SubBrowserProps {
   nodes: readonly TreeNode[];
@@ -171,6 +184,7 @@ export const SubBrowser = memo(function SubBrowser({
   const [query, setQuery] = useState("");
   const [searchField, setSearchField] = useState<TrackSearchField>("all");
   const [sort, setSort] = useState<SortState | null>(null);
+  const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
   // Its own columns too: a sub-browser is usually kept narrow, and forcing it
   // to share the main table's widths would make it useless.
   const cols = useColumns("subBrowser");
@@ -184,6 +198,34 @@ export const SubBrowser = memo(function SubBrowser({
   const onSortChange = useCallback((column: SortColumn) => {
     setSort((current) => nextSort(current ?? DEFAULT_SORT, column));
   }, []);
+  const removeFromPlaylist = useCallback(
+    (ids: readonly string[]) => {
+      if (spec.source.kind === "playlist") list.onRemoveTracksFromPlaylist(spec.source.id, ids);
+    },
+    [list, spec.source],
+  );
+  const removeFromHistory = useCallback(
+    (ids: readonly string[]) => {
+      if (spec.source.kind === "history") list.onRemoveTracksFromHistory(spec.source.id, ids);
+    },
+    [list, spec.source],
+  );
+  const reorderPlaylist = useCallback(
+    (order: readonly string[]) => {
+      if (spec.source.kind === "playlist") list.onReorderPlaylist(spec.source.id, order);
+    },
+    [list, spec.source],
+  );
+  const dropFilesIntoPlaylist = useCallback(
+    (files: File[]) => {
+      if (spec.source.kind === "playlist") list.onDropFilesIntoPlaylist(spec.source.id, files);
+    },
+    [list, spec.source],
+  );
+  const analyseSelection = useCallback(
+    () => list.onAnalyseTracks(selectedTracks),
+    [list, selectedTracks],
+  );
 
   // The stored widths are what was asked for; what is drawn is what the
   // window allows. Deriving it here rather than writing it back means a
@@ -247,6 +289,19 @@ export const SubBrowser = memo(function SubBrowser({
         libraryGeneration={libraryGeneration}
         {...list}
         onDropTracks={selected?.kind === "playlist" ? list.onDropTracks : undefined}
+        onDropFiles={
+          !list.readOnly && spec.source.kind === "playlist" ? dropFilesIntoPlaylist : undefined
+        }
+        onRemoveFromPlaylist={removeFromPlaylist}
+        onRemoveFromHistory={removeFromHistory}
+        onReorder={
+          !list.readOnly && spec.source.kind === "playlist" &&
+          (sort ?? DEFAULT_SORT).column === "trackNo" && query === ""
+            ? reorderPlaylist
+            : undefined
+        }
+        onSelectedTracks={setSelectedTracks}
+        onAnalyse={analyseSelection}
       />
     </section>
   );

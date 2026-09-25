@@ -1173,16 +1173,21 @@ function AppBody() {
     [write],
   );
 
-  const reorderPlaylistTracks = useCallback(
-    (order: readonly string[]) => {
-      const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
-      if (playlist === null || order.length === 0) return;
+  const reorderPlaylist = useCallback(
+    (playlist: string, order: readonly string[]) => {
+      if (order.length === 0) return;
       write(async (backend) => {
         await backend.edits.reorderPlaylist(playlist, [...order]);
         return "Playlist reordered.";
       });
     },
-    [write, spec],
+    [write],
+  );
+  const reorderPlaylistTracks = useCallback(
+    (order: readonly string[]) => {
+      if (spec.source.kind === "playlist") reorderPlaylist(spec.source.id, order);
+    },
+    [reorderPlaylist, spec.source],
   );
 
   /**
@@ -1200,16 +1205,21 @@ function AppBody() {
     query === "" &&
     spec.filter === undefined;
 
-  const removeFromHistory = useCallback(
-    (ids: readonly string[]) => {
-      const history = spec.source.kind === "history" ? spec.source.id : null;
-      if (history === null || ids.length === 0) return;
+  const removeTracksFromHistory = useCallback(
+    (history: string, ids: readonly string[]) => {
+      if (ids.length === 0) return;
       write(async (backend) => {
         await backend.edits.removeFromHistory(history, [...ids]);
         return `Removed ${ids.length} play${ids.length === 1 ? "" : "s"} from the history.`;
       });
     },
-    [write, spec],
+    [write],
+  );
+  const removeFromHistory = useCallback(
+    (ids: readonly string[]) => {
+      if (spec.source.kind === "history") removeTracksFromHistory(spec.source.id, ids);
+    },
+    [removeTracksFromHistory, spec.source],
   );
 
   const resetPlayCount = useCallback(
@@ -1409,16 +1419,21 @@ function AppBody() {
   }, [tree]);
   const menuDevices = useMemo(() => devices.map((d) => ({ id: d.path, name: d.name })), [devices]);
 
-  const removeFromPlaylist = useCallback(
-    (ids: readonly string[]) => {
-      const playlist = spec.source.kind === "playlist" ? spec.source.id : null;
-      if (playlist === null || ids.length === 0) return;
+  const removeTracksFromPlaylist = useCallback(
+    (playlist: string, ids: readonly string[]) => {
+      if (ids.length === 0) return;
       write(async (backend) => {
         await backend.edits.removeTracksFromPlaylist(playlist, [...ids]);
         return `Removed ${ids.length} track${ids.length === 1 ? "" : "s"}.`;
       });
     },
-    [write, spec],
+    [write],
+  );
+  const removeFromPlaylist = useCallback(
+    (ids: readonly string[]) => {
+      if (spec.source.kind === "playlist") removeTracksFromPlaylist(spec.source.id, ids);
+    },
+    [removeTracksFromPlaylist, spec.source],
   );
 
   const revealTrack = useCallback((row: RowDto) => {
@@ -1445,15 +1460,16 @@ function AppBody() {
   // other write is while rekordbox holds the file or the library is protected.
   const ANALYSIS_REFUSED = "The library is read-only, so nothing can be analysed.";
   const [analysisSelection, setAnalysisSelection] = useState<readonly QueueItem[] | null>(null);
-  /** Capture the selection before opening the settings dialog. */
-  const analyseSelection = useEventCallback(() => {
-    if (selectedTracks.length === 0) return;
+  /** Capture either browser's selection before opening the settings dialog. */
+  const analyseTracks = useEventCallback((tracks: readonly { id: string; title: string }[]) => {
+    if (tracks.length === 0) return;
     if (readOnly) {
       refuse(ANALYSIS_REFUSED);
       return;
     }
-    setAnalysisSelection(selectedTracks.map(({ id, title }) => ({ id, title })));
+    setAnalysisSelection(tracks.map(({ id, title }) => ({ id, title })));
   });
+  const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
   /** Configure one track: the deck's own, from its menu. */
   const analyseOne = useCallback(
     (id: string, title: string) => {
@@ -2015,14 +2031,43 @@ function AppBody() {
     values={filterValues} masterBpmX100={masterBpmX100} />, [filterState, filterValues, masterBpmX100]);
   const subTree = useMemo(() => ({
     dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
+    onDropFiles: readOnly ? undefined : importDroppedFilesTo,
     onExport: exportPlaylist, onExportFile: exportPlaylistFile, onCreatePlaylist: createPlaylistIn,
-    onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode, readOnly,
-  }), [draggedTracks, addDraggedTo, exportPlaylist, exportPlaylistFile, createPlaylistIn, createFolderIn, deleteNode, renameNode, readOnly]);
+    onCreateFolder: createFolderIn, onDeleteNode: deleteNode, onRenameNode: renameNode,
+    onMoveNode: readOnly ? undefined : moveNode, onExpand: explorer.expand,
+    showCounts: viewPrefs.playlistCounts, onOpenSync: openSyncManager,
+    onCreateSmartPlaylist: createSmartPlaylistIn, onEditSmartPlaylist: editSmartPlaylist,
+    onAddArtwork: addPlaylistArtwork, onAddToShortcut: addToShortcut, onSortItems: sortItems,
+    onEjectDevice: (node: TreeNode) => { void ejectDeviceFromTree(node); },
+    ejectingDeviceId, deviceBusy: syncing || exportRunning || ejectingDeviceId !== null, readOnly,
+  }), [
+    draggedTracks, addDraggedTo, readOnly, importDroppedFilesTo, exportPlaylist, exportPlaylistFile,
+    createPlaylistIn, createFolderIn, deleteNode, renameNode, moveNode, explorer.expand,
+    viewPrefs.playlistCounts, openSyncManager, createSmartPlaylistIn, editSmartPlaylist,
+    addPlaylistArtwork, addToShortcut, sortItems, ejectDeviceFromTree, ejectingDeviceId, syncing,
+    exportRunning,
+  ]);
   const subList = useMemo(() => ({
     onDragTracks: setDraggedTracks, onDragError: refuse, players: deckCount(layout), onLoadTrack: loadTrack,
-    onShowInFinder: revealTrack, onRate: rateTrack, onComment: commentTrack, pendingEdits, readOnly,
-    dragging: draggedTracks !== null, onDropTracks: addDraggedTo,
-  }), [layout, loadTrack, revealTrack, rateTrack, commentTrack, pendingEdits, readOnly, refuse, draggedTracks, addDraggedTo]);
+    onShowInformation: showInformation, onShowInFinder: revealTrack, onRate: rateTrack,
+    onComment: commentTrack, onResetPlayCount: resetPlayCount, onConvertMemoryCues: convertMemoryCues,
+    onRemoveFromCollection: removeFromCollection, onImportToCollection: importToCollection,
+    onAnalysisLock: analysisLock, onAddToPlaylist: addToPlaylist, onAddToTagList: addToTagList,
+    onRemoveFromTagList: removeFromTagList, onReloadTag: reloadTag, onExportTrack: exportTrackTo,
+    playlists: menuPlaylists, devices: menuDevices, onEditField: editTrackField,
+    onEditBlocked: readOnly ? explainEditLock : undefined, onFocusedRow: setPlayerTrack,
+    onSelectedRow: setSelectedRow, pendingEdits, readOnly, dragging: draggedTracks !== null,
+    onDropTracks: addDraggedTo, onRemoveTracksFromPlaylist: removeTracksFromPlaylist,
+    onRemoveTracksFromHistory: removeTracksFromHistory, onReorderPlaylist: reorderPlaylist,
+    onDropFilesIntoPlaylist: importDroppedFilesTo, onAnalyseTracks: analyseTracks,
+  }), [
+    layout, loadTrack, showInformation, revealTrack, rateTrack, commentTrack, resetPlayCount,
+    convertMemoryCues, removeFromCollection, importToCollection, analysisLock, addToPlaylist,
+    addToTagList, removeFromTagList, reloadTag, exportTrackTo, menuPlaylists, menuDevices,
+    editTrackField, readOnly, explainEditLock, pendingEdits, draggedTracks, addDraggedTo,
+    removeTracksFromPlaylist, removeTracksFromHistory, reorderPlaylist, importDroppedFilesTo,
+    analyseTracks, refuse,
+  ]);
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
