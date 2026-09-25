@@ -938,9 +938,10 @@
 .bpmField {
   width: var(--s-pad-field-w);
   height: var(--s-pad-edit-h);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  text-align: center;
   background: var(--c-pad-well);
   border-radius: 2px;
   color: var(--c-text);
