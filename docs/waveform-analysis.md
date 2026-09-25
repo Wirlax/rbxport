@@ -40,11 +40,11 @@ Cannonball's outer envelope alone averages 0.95px error. Go Back regresses in
 absolute height even though its shape correlation improves; universal
 pixel-perfect parity is not established. Pixel error scales with display height.
 
-`python3 scripts/analysis-artifacts/compare-waveforms.py` compares the saved
-results against originals, checking overview band boundaries as well as the
-existing browser-height and shape checks. It requires the two local playlists
-and `cargo build -p rbl-db --example sql`. The 2.5px boundary gate is a regression
-limit for these fixtures, not a claim of pixel-perfect output.
+An internal calibration harness compares saved results against originals,
+checking overview band boundaries as well as browser-height and shape checks.
+The 2.5px boundary gate is a regression limit for those fixtures, not a claim
+of pixel-perfect output. The captured tracks and comparison tooling are kept
+outside this public repository.
 
 For read-only audio diagnostics:
 

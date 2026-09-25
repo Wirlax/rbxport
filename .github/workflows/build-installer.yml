@@ -272,8 +272,7 @@ jobs:
         # job hangs for about five minutes and then fails with
         # errSecInternalComponent.
         #
-        # This runs on a real person's Mac, so the job behaves as a guest. The
-        # keychain is created under RUNNER_TEMP, prepended to the search list
+        # The keychain is created under RUNNER_TEMP, prepended to the search list
         # rather than made the default — codesign searches the whole list, so
         # there is no reason to displace what the machine's owner has set — and
         # the original list is put back by the teardown step below.
@@ -365,9 +364,8 @@ jobs:
           # `.app.tar.gz` on macOS, the setup .exe on Windows) with this
           # minisign key, and the app refuses a download whose signature
           # does not match the public key in tauri.conf.json. The key pair
-          # is the 1Password item "rekordbox-lite updater signing key" in
-          # the Code vault; lose it and no shipped app can take another
-          # update.
+          # must remain stable; losing it prevents shipped apps from accepting
+          # another update.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # The DMG bundler arranges the disk image's window by driving

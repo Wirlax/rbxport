@@ -45,7 +45,7 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 # NOT "abort": a panic inside one command is caught at the IPC boundary and
-# returned as an error rather than taking the whole app down (docs/pre-release/PLAN.md §Stability).
+# returned as an error rather than taking the whole app down.
 panic = "unwind"
 strip = "symbols"
 

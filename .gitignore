@@ -9,15 +9,36 @@ target/
 src-tauri/gen/
 
 # Private research and captured reference material. Never commit these.
+.agents/
+.claude/
+bugs/
 docs/pre-release/
 design/reference/
+design/measure/
 docs/screenshots/
 docs/movies/
+e2e-link/
+e2e-mac/
+e2e-win/
 recordings/
+report-worker/
+scripts/analysis-artifacts/
+scripts/cleanup-processes.sh
+scripts/e2e-link/
+scripts/e2e-mac/
+scripts/e2e-win/
+scripts/hooks/
+scripts/macgui/
+scripts/perf/
+scripts/usbtest/
+scripts/verify/
+start.sh
+crates/rbl-usbtest/
+crates/rbl-analysis/docs/grid-fixtures.md
 verification/
 CLAUDE.md
 TODO.md
-.claude/worktrees/
+work/
 
 # generated / local-only
 test-mp3s/

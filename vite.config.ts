@@ -42,7 +42,7 @@ export default defineConfig({
   }],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    // To evaluate Preact at the Milestone 1 gate (see docs/pre-release/PLAN.md appendix), add:
+    // To evaluate Preact as a smaller compatibility layer, add:
     //   react: "preact/compat", "react-dom": "preact/compat"
   },
   clearScreen: false,

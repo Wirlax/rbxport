@@ -1,5 +1,5 @@
 /**
- * Lint rules that mirror CLAUDE.md's frontend rules.
+ * Lint rules that enforce the frontend architecture.
  *
  * The interesting half is at the bottom: the restrictions that encode this
  * project's architecture — Rust owns everything list-shaped, `invoke` lives

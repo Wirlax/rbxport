@@ -7,11 +7,9 @@ name: Release
 # a folder listing. Only the 5 most recently published versions are kept;
 # publish prunes older ones once the new one is confirmed live.
 #
-# R2 is the only place a release is published. No GitHub Release is created:
-# this repository is private and release assets inherit that, so a download
-# link would 404 for everyone it was given to, and the workflow token is
-# read-only, so creating one would need a permission this file does not ask
-# for. The bucket is the download; the tag is the record.
+# R2 is the only place a release is published. No GitHub Release is created;
+# the bucket is the download and the tag is the source record. Keeping a single
+# publication target also makes retention and `latest.json` updates atomic.
 #
 # `workflow_dispatch` without release_tag builds a development preview.
 # Supplying an existing release_tag rebuilds that source with this workflow
@@ -31,13 +29,10 @@ name: Release
 # "Ensure …" step — a no-op on the second run, and the record of what the host
 # needs if it is ever rebuilt.
 #
-# The macOS host being a real person's Mac is why the signing identity is
-# imported into a throwaway keychain under RUNNER_TEMP and removed again on the
-# way out, rather than being left in a login keychain.
-#
+# The signing identity is imported into a throwaway keychain under RUNNER_TEMP
+# and removed on the way out rather than being left in a login keychain.
 # Discord release announcements use the channel-bound
-# `DISCORD_RELEASE_WEBHOOK_URL` repository secret. Its source of truth is the
-# `rbxport release webhook` item in the NowPlaying 1Password vault.
+# `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 on:
   push:
     tags: ["v*"]
@@ -242,7 +237,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Lint
-        # eslint.config.js encodes the frontend rules in CLAUDE.md: no polling,
+        # eslint.config.js encodes the frontend architecture rules: no polling,
         # no deep clones of rows, invoke only in src/ipc, and no sorting or
         # filtering a row array in a view.
         run: pnpm lint

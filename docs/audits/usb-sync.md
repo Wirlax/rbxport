@@ -97,7 +97,8 @@ play counts are zero on B. Artwork references select `aN.jpg` rather than
 default-vs-NULL representations or known path/identity derivations, and are
 reported without assuming they are harmless. File sizes differ on 59 rows;
 RBX records actual source-file size while rekordbox can carry library values.
-The reusable read-only diagnostic is `scripts/usbtest/compare-columns.py`.
+The read-only diagnostic and its captured verification corpus are retained
+outside this public repository.
 
 Matching analysis files by track identity, rather than directory name, found
 all 183 files differ. Differing sections include PPTH paths, PCOB/PCO2 cue

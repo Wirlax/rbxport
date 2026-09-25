@@ -3855,21 +3855,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rbl-usbtest"
-version = "1.0.0-rc.3"
-dependencies = [
- "rbl-anlz",
- "rbl-core",
- "rbl-db",
- "rbl-devices",
- "rbl-export",
- "rbl-onelibrary",
- "rbl-pdb",
- "rusqlite",
- "serde_json",
-]
-
-[[package]]
 name = "rbxport"
 version = "1.0.0-rc.3"
 dependencies = [
