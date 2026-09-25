@@ -41,13 +41,6 @@ export interface Playback {
    * in its own output frames; the playhead here waits the same time.
    */
   playAfter: (delayMs: number) => void;
-  /**
-   * Play the next track loaded, once, when it lands — for swapping the track
-   * under a deck that is already playing so the sound carries on. Armed with
-   * the id about to be loaded; a different load disarms it, so it never plays a
-   * track the caller did not ask to keep running.
-   */
-  playWhenLoaded: (trackId: string) => void;
   seek: (seconds: number) => void;
   /** Seek by fraction, for clicking the waveform. */
   seekFraction: (fraction: number) => void;
@@ -216,8 +209,6 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const desiredMasterTempo = useRef(false);
   const desiredKeyShift = useRef(0);
   const desiredLoop = useRef<DeckLoop | null>(null);
-  /** A track that should start playing the moment its load lands, or null. */
-  const resumeTarget = useRef<string | null>(null);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
   const scrubbing = useRef(false);
   /** When a drag let go, until the seek that ends it comes back. */
@@ -498,20 +489,16 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   // choosing a track in the browser should not make noise.
   useEffect(() => {
     if (!canPlay) return;
-    // A resume armed for another track never fires: only the load it was armed
-    // for should carry on playing.
-    if (resumeTarget.current !== null && resumeTarget.current !== trackId) {
-      resumeTarget.current = null;
-    }
     // The deck already holds this track: the view was put away and brought
     // back around it, and the engine never stopped. Asking again would. Where
     // it has got to arrives with `deckState` above, and with the next tick.
     const current = held.get(DECK);
     if ((current?.trackId ?? null) === trackId) return;
     if (trackId !== null) {
-      desiredPlaying.current = resumeTarget.current === trackId;
+      // PLAY/PAUSE belongs to the deck, not to the file. Loading another
+      // track while PLAY is engaged starts that track as soon as it is ready;
+      // loading on a stopped deck leaves it cued.
       desiredDelay.current = null;
-      resumeTarget.current = null;
       beginLoad(trackId, false);
       return;
     }
@@ -628,10 +615,6 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     },
     [idle, isReady, playing, DECK],
   );
-
-  const playWhenLoaded = useCallback((next: string) => {
-    resumeTarget.current = next;
-  }, []);
 
   const seek = useCallback(
     (seconds: number) => {
@@ -894,11 +877,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   }, [loopCall, DECK]);
 
   return useMemo(() => ({
-    playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
+    playing, position, duration, idle, error, toggle, playAfter, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionRef, positionNow, subscribe,
     tempo, masterTempo, keyShift, shiftsKey, setKeyShift, setTempo, nudgeTempo, setMasterTempo,
     loop, setLoop, setLoopActive, clearLoop,
-  }), [playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,
+  }), [playing, position, duration, idle, error, toggle, playAfter, seek, seekFraction,
     scrubBegin, scrubTo, scrubEnd, positionNow, subscribe, tempo, masterTempo, keyShift, shiftsKey,
     setKeyShift, setTempo, nudgeTempo, setMasterTempo, loop, setLoop, setLoopActive, clearLoop]);
 }

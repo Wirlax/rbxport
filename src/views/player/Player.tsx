@@ -1460,7 +1460,6 @@ export const Player = memo(function Player({
         // playing carries the sound into the new track; a stopped one cues it.
         if (deck !== "a" || !onLoadSelected || selectedTrackId === null) return;
         event.preventDefault();
-        if (playback.playing) playback.playWhenLoaded(selectedTrackId);
         onLoadSelected();
         return;
       }

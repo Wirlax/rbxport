@@ -143,6 +143,36 @@ it("lets a cue release cancel play that was queued during loading", async () => 
   expect(deck.playing).toBe(false);
 });
 
+it("keeps the deck playing when its track is switched", async () => {
+  finish(loads[0]!);
+  await settle();
+  act(() => deck.toggle());
+  await settle();
+  expect(sent).toEqual(["play"]);
+
+  sent = [];
+  await select("replacement-track");
+  const replacement = loads.at(-1)!;
+  expect(replacement.track).toBe("replacement-track");
+  expect(deck.playing).toBe(false);
+  finish(replacement);
+  await settle();
+
+  expect(sent).toEqual(["play"]);
+  expect(deck.playing).toBe(true);
+});
+
+it("leaves a newly selected track cued when the deck was stopped", async () => {
+  finish(loads[0]!);
+  await settle();
+  await select("replacement-track");
+  finish(loads.at(-1)!);
+  await settle();
+
+  expect(sent).toEqual([]);
+  expect(deck.playing).toBe(false);
+});
+
 it("reloads and restores the current deck after its audio engine is replaced", async () => {
   finish(loads[0]!);
   await settle();
