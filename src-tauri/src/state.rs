@@ -22,7 +22,7 @@ const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
     pub(crate) edit_gate: parking_lot::ReentrantMutex<()>,
-    pub(crate) playlist_history: parking_lot::Mutex<PlaylistHistory>,
+    pub(crate) edit_history: parking_lot::Mutex<EditHistory>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
     pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
     pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
@@ -38,23 +38,50 @@ pub struct AppState {
     reader: parking_lot::Mutex<Option<rbl_db::Library>>,
 }
 
-/// Session history for destructive tree edits. The database rows themselves
-/// are the source of truth; these tokens only identify the exact tombstones
-/// made by each delete.
-#[derive(Default)]
-pub(crate) struct PlaylistHistory {
-    pub(crate) undo: Vec<rbl_db::write::PlaylistDeletion>,
-    pub(crate) redo: Vec<rbl_db::write::PlaylistDeletion>,
+/// One reversible library operation. Grid edits keep their own history because
+/// they also rewrite analysis files; text fields keep `WebKit`'s native history.
+#[derive(Clone)]
+pub(crate) enum LibraryEdit {
+    DeletePlaylist(rbl_db::write::PlaylistDeletion),
+    RenamePlaylist(rbl_db::write::PlaylistRename),
+    MovePlaylist(rbl_db::write::PlaylistMove),
+    RemovePlaylistTracks(rbl_db::write::PlaylistTrackRemoval),
+    Track(Vec<rbl_db::write::TrackEdit>),
+    TrackTags(rbl_db::write::TrackTagEdit),
 }
 
-impl PlaylistHistory {
+impl LibraryEdit {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::DeletePlaylist(edit) => edit.is_empty(),
+            Self::RemovePlaylistTracks(edit) => edit.is_empty(),
+            Self::Track(edits) => edits.is_empty() || edits.iter().all(rbl_db::write::TrackEdit::is_empty),
+            Self::TrackTags(edit) => edit.is_empty(),
+            Self::RenamePlaylist(_) | Self::MovePlaylist(_) => false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct HistoryEntry {
+    pub(crate) edit: LibraryEdit,
+    pub(crate) label: &'static str,
+}
+
+/// Bounded session history for reversible library edits. The payloads retain
+/// exact database values or row ids, rather than reconstructing state from the
+/// interface when an action is undone.
+#[derive(Default)]
+pub(crate) struct EditHistory {
+    pub(crate) undo: Vec<HistoryEntry>,
+    pub(crate) redo: Vec<HistoryEntry>,
+}
+
+impl EditHistory {
     const LIMIT: usize = 50;
 
-    pub(crate) fn record(&mut self, deletion: rbl_db::write::PlaylistDeletion) {
-        if deletion.is_empty() {
-            return;
-        }
-        self.undo.push(deletion);
+    pub(crate) fn record(&mut self, edit: LibraryEdit, label: &'static str) {
+        self.undo.push(HistoryEntry { edit, label });
         if self.undo.len() > Self::LIMIT {
             self.undo.remove(0);
         }
@@ -62,6 +89,11 @@ impl PlaylistHistory {
     }
 
     pub(crate) fn clear_redo(&mut self) {
+        self.redo.clear();
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.undo.clear();
         self.redo.clear();
     }
 }
@@ -116,7 +148,7 @@ impl AppState {
         let backup_destination = rbl_backup::default_destination(&backup_dir);
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
-            playlist_history: parking_lot::Mutex::new(PlaylistHistory::default()),
+            edit_history: parking_lot::Mutex::new(EditHistory::default()),
             analysis_write: parking_lot::Mutex::new(()),
             backup_progress: parking_lot::Mutex::new(crate::backups::BackupProgress::default()),
             backup_sizes: parking_lot::Mutex::new(crate::backup_sizes::SizeCache::default()),

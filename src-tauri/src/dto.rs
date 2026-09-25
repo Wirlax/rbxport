@@ -57,13 +57,15 @@ pub struct TreeNodeDto {
     pub child_count: Option<u32>,
 }
 
-/// Playlist-deletion history after a delete, undo, or redo.
+/// Library edit history after a reversible edit, undo, or redo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlaylistHistoryDto {
+pub struct EditHistoryDto {
     pub generation: u32,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub undo_label: Option<String>,
+    pub redo_label: Option<String>,
 }
 
 /// One output the audio could go to.

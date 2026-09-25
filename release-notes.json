@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.0-rc.2",
+    "date": "2026-09-25",
+    "changes": [
+      "(Fixed) Hot cues without a custom colour use the default green instead of appearing black."
+    ]
+  },
+  {
     "version": "1.0.0-rc.1",
     "date": "2026-09-24",
     "changes": [

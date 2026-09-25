@@ -198,7 +198,7 @@ function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
                           try {
                             const backend = await getBackend();
                             const sure = await backend.confirm(
-                              `Remove this copy of ${group.title} from the collection? The file stays where it is.`,
+                              `Remove this copy of ${group.title} from the collection? This can’t be undone. The file stays where it is.`,
                             );
                             if (!sure) return;
                             await backend.edits.removeFromCollection([track.id]);

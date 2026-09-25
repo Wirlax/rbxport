@@ -14,7 +14,7 @@ import theme from "../../design/tokens/theme.json";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
-  FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
+  EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
   PreferencesRequest, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
@@ -476,13 +476,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return candidates;
   };
   const tree = makeTree();
-  type PlaylistDeletion = {
-    index: number;
-    nodes: TreeNode[];
-    memberships: Map<string, string[]>;
-  };
-  const playlistUndo: PlaylistDeletion[] = [];
-  const playlistRedo: PlaylistDeletion[] = [];
+  type MockEdit = { label: string; undo: () => void; redo: () => void };
+  const editUndo: MockEdit[] = [];
+  const editRedo: MockEdit[] = [];
 
   const views = new Map<number, { order: Uint32Array; gen: number }>();
   // A folder's rows, held whole: a folder is a few files here and a few
@@ -492,23 +488,55 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   let nextViewId = 1;
 
   const listeners = new Set<(generation: number) => void>();
+  const historyListeners = new Set<(history: EditHistoryState) => void>();
+
+  const historyState = (): EditHistoryState => ({
+    generation,
+    canUndo: editUndo.length > 0,
+    canRedo: editRedo.length > 0,
+    undoLabel: editUndo.at(-1)?.label ?? null,
+    redoLabel: editRedo.at(-1)?.label ?? null,
+  });
+  const announceHistory = () => {
+    const state = historyState();
+    for (const listener of historyListeners) listener(state);
+    return state;
+  };
 
   /**
    * Every edit bumps the generation and tells anyone listening, exactly as a
    * real write does — the backend reloads and emits `library:changed`.
    */
-  const bump = (clearPlaylistRedo = true): Promise<number> => {
-    if (clearPlaylistRedo) playlistRedo.length = 0;
+  const bump = (clearEditRedo = true): Promise<number> => {
+    if (clearEditRedo) editRedo.length = 0;
     generation += 1;
     // The counts the tree shows follow the edit, as the re-read tree does.
     for (const node of tree) {
       if (node.kind === "playlist") node.childCount = playlistSize(node.id);
     }
     for (const listener of listeners) listener(generation);
+    if (clearEditRedo) announceHistory();
     return wait(generation);
   };
 
+  const recordEdit = async (edit: MockEdit): Promise<EditHistoryState> => {
+    await bump(false);
+    editUndo.push(edit);
+    if (editUndo.length > 50) editUndo.shift();
+    editRedo.length = 0;
+    return announceHistory();
+  };
+
   const findNode = (id: string) => tree.find((n) => n.id === id);
+  const treeSnapshot = () => tree.map((node) => ({ ...node }));
+  const restoreTree = (snapshot: readonly TreeNode[]) => {
+    tree.splice(0, tree.length, ...snapshot.map((node) => ({ ...node })));
+  };
+  const membershipSnapshot = () => new Map([...membership].map(([id, tracks]) => [id, [...tracks]]));
+  const restoreMembership = (snapshot: ReadonlyMap<string, readonly string[]>) => {
+    membership.clear();
+    for (const [id, tracks] of snapshot) membership.set(id, [...tracks]);
+  };
 
   /**
    * Puts a new node where the re-read tree would show it: last under its
@@ -772,12 +800,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     renamePlaylist: (id, name) => {
       const node = findNode(id);
+      const before = node?.name ?? "";
       if (node) node.name = name;
-      return bump();
+      return recordEdit({
+        label: "Rename Playlist",
+        undo: () => { const target = findNode(id); if (target) target.name = before; },
+        redo: () => { const target = findNode(id); if (target) target.name = name; },
+      });
     },
     movePlaylist: (id, parent, index) => {
+      const before = treeSnapshot();
       const from = tree.findIndex((n) => n.id === id);
-      if (from < 0) return bump();
+      if (from < 0) return recordEdit({ label: "Move Playlist", undo: () => restoreTree(before), redo: () => restoreTree(before) });
       // A folder cannot be put inside itself: the subtree would be detached
       // from the tree and never seen again. The backend refuses it, so does this.
       const span = subtreeLength(from);
@@ -810,51 +844,45 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         to = start < 0 ? tree.length : start + subtreeLength(start);
       }
       tree.splice(to < 0 ? tree.length : to, 0, ...moving);
-      return bump();
+      const afterTree = treeSnapshot();
+      return recordEdit({
+        label: "Move Playlist",
+        undo: () => restoreTree(before),
+        redo: () => restoreTree(afterTree),
+      });
     },
     deletePlaylist: async (id) => {
+      const beforeTree = treeSnapshot();
+      const beforeMembership = membershipSnapshot();
       const at = tree.findIndex((n) => n.id === id);
       if (at < 0) throw new Error(`no playlist or folder ${id}`);
       const nodes = tree.splice(at, subtreeLength(at));
-      const memberships = new Map<string, string[]>();
       for (const node of nodes) {
-        const tracks = membership.get(node.id);
-        if (tracks) memberships.set(node.id, [...tracks]);
         membership.delete(node.id);
       }
-      playlistUndo.push({ index: at, nodes, memberships });
-      if (playlistUndo.length > 50) playlistUndo.shift();
-      playlistRedo.length = 0;
-      const next = await bump(false);
-      return { generation: next, canUndo: true, canRedo: false };
+      const afterTree = treeSnapshot();
+      const afterMembership = membershipSnapshot();
+      return recordEdit({
+        label: "Delete Playlist",
+        undo: () => { restoreTree(beforeTree); restoreMembership(beforeMembership); },
+        redo: () => { restoreTree(afterTree); restoreMembership(afterMembership); },
+      });
     },
-    undoPlaylistDelete: async () => {
-      const deletion = playlistUndo.pop();
-      if (!deletion) throw new Error("There is no playlist deletion to undo.");
-      tree.splice(Math.min(deletion.index, tree.length), 0, ...deletion.nodes);
-      for (const [id, tracks] of deletion.memberships) membership.set(id, [...tracks]);
-      playlistRedo.push(deletion);
-      const next = await bump(false);
-      return {
-        generation: next,
-        canUndo: playlistUndo.length > 0,
-        canRedo: true,
-      };
+    undoEdit: async () => {
+      const edit = editUndo.pop();
+      if (!edit) throw new Error("There is no library edit to undo.");
+      edit.undo();
+      editRedo.push(edit);
+      await bump(false);
+      return announceHistory();
     },
-    redoPlaylistDelete: async () => {
-      const deletion = playlistRedo.pop();
-      if (!deletion) throw new Error("There is no playlist deletion to redo.");
-      const at = tree.findIndex((node) => node.id === deletion.nodes[0]?.id);
-      if (at < 0) throw new Error("that playlist deletion can no longer be redone");
-      tree.splice(at, deletion.nodes.length);
-      for (const node of deletion.nodes) membership.delete(node.id);
-      playlistUndo.push(deletion);
-      const next = await bump(false);
-      return {
-        generation: next,
-        canUndo: true,
-        canRedo: playlistRedo.length > 0,
-      };
+    redoEdit: async () => {
+      const edit = editRedo.pop();
+      if (!edit) throw new Error("There is no library edit to redo.");
+      edit.redo();
+      editUndo.push(edit);
+      await bump(false);
+      return announceHistory();
     },
     addTracksToPlaylist: (playlist, tracks) => {
       // The real backend refuses while Rekordbox holds the database; the mock
@@ -882,21 +910,45 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       return bump();
     },
     removeTracksFromPlaylist: (playlist, tracks) => {
+      const before = [...membersOf(playlist)];
       const current = membersOf(playlist).filter((t) => !tracks.includes(t));
       membership.set(playlist, current);
-      return bump();
+      return recordEdit({
+        label: "Remove Tracks from Playlist",
+        undo: () => membership.set(playlist, [...before]),
+        redo: () => membership.set(playlist, [...current]),
+      });
     },
-    resetPlayCount: () => bump(),
+    resetPlayCount: (tracks) => {
+      const before = tracks.map((id) => {
+        const row = all.find((candidate) => candidate.id === id);
+        return [id, details.get(id)?.playCount ?? (row ? detailsOf(row).playCount : 0)] as const;
+      });
+      const apply = (values: readonly (readonly [string, number])[]) => {
+        for (const [id, count] of values) {
+          const row = all.find((candidate) => candidate.id === id);
+          const detail = details.get(id) ?? (row ? detailsOf(row) : undefined);
+          if (detail) detail.playCount = count;
+        }
+      };
+      const after = before.map(([id]) => [id, 0] as const);
+      apply(after);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(after) });
+    },
     // The mock keeps no history sessions of its own to add to or take from.
     recordPlay: () => wait(generation),
     removeFromHistory: () => bump(),
     // The mock's rows are addressed by index, so a removal only takes the
     // tracks out of every playlist; the collection keeps its count.
-    removeFromCollection: (tracks) => {
+    removeFromCollection: async (tracks) => {
       for (const [playlist, members] of membership) {
         membership.set(playlist, members.filter((t) => !tracks.includes(t)));
       }
-      return bump();
+      const next = await bump(false);
+      editUndo.length = 0;
+      editRedo.length = 0;
+      announceHistory();
+      return next;
     },
     reorderPlaylist: (playlist, tracks) => {
       const current = membersOf(playlist);
@@ -908,53 +960,91 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     },
     setTrackRating: (track, stars) => {
       const row = all.find((r) => r.id === track);
-      if (row) row.rating = Math.max(0, Math.min(5, stars));
-      return bump();
+      const before = row?.rating ?? 0;
+      const after = Math.max(0, Math.min(5, stars));
+      const apply = (value: number) => {
+        if (row) row.rating = value;
+        const detail = details.get(track);
+        if (detail) detail.rating = value;
+      };
+      apply(after);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(after) });
     },
     setTrackComment: (track, comment) => {
       const row = all.find((r) => r.id === track);
-      if (row) row.comment = comment;
-      return bump();
+      const before = row?.comment ?? "";
+      const apply = (value: string) => {
+        if (row) row.comment = value;
+        const detail = details.get(track);
+        if (detail) detail.comment = value;
+      };
+      apply(comment);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(comment) });
     },
     setTrackColor: (track, color) => {
       const at = all.findIndex((r) => r.id === track);
       const row = all[at];
-      if (row) {
-        row.artworkHue = color === null ? 0 : Number.parseInt(color, 10) * 40;
-        colors[at] = color === null ? 0 : Number.parseInt(color, 10);
-      }
-      const d = details.get(track);
-      if (d) d.color = color ?? "0";
-      return bump();
+      const before = details.get(track)?.color ?? String(colors[at] ?? 0);
+      const apply = (value: string | null) => {
+        const numeric = value === null ? 0 : Number.parseInt(value, 10);
+        if (row) row.artworkHue = numeric * 40;
+        if (at >= 0) colors[at] = numeric;
+        const detail = details.get(track);
+        if (detail) detail.color = value ?? "0";
+      };
+      apply(color);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(color) });
     },
     setMyTags: (track, tags) => {
       const row = all.find((r) => r.id === track);
-      if (row) detailsOf(row).myTags = [...tags];
-      return bump();
+      const detail = row ? detailsOf(row) : undefined;
+      const before = [...(detail?.myTags ?? [])];
+      const apply = (value: readonly string[]) => { if (detail) detail.myTags = [...value]; };
+      apply(tags);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(tags) });
     },
     addPlaylistArtwork: () => bump(),
     addArtwork: (track) => {
       const row = all.find((r) => r.id === track);
-      if (row) {
-        row.hasArtwork = true;
-        const d = details.get(track);
-        if (d) d.hasArtwork = true;
-      }
-      return bump();
+      const before = row?.hasArtwork ?? false;
+      const apply = (value: boolean) => {
+        if (row) row.hasArtwork = value;
+        const detail = details.get(track);
+        if (detail) detail.hasArtwork = value;
+      };
+      apply(true);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(true) });
     },
     clearArtwork: (track) => {
       const row = all.find((r) => r.id === track);
-      if (row) {
-        row.hasArtwork = false;
-        const d = details.get(track);
-        if (d) d.hasArtwork = false;
-      }
-      return bump();
+      const before = row?.hasArtwork ?? false;
+      const apply = (value: boolean) => {
+        if (row) row.hasArtwork = value;
+        const detail = details.get(track);
+        if (detail) detail.hasArtwork = value;
+      };
+      apply(false);
+      return recordEdit({ label: "Track Edit", undo: () => apply(before), redo: () => apply(false) });
     },
     setTrackField: (track, field, value) => {
       const row = all.find((r) => r.id === track);
-      if (!row) return bump();
+      if (!row) return bump().then(historyState);
       const d = detailsOf(row);
+      const beforeRow = { ...row };
+      const beforeDetails = { ...d, myTags: [...d.myTags] };
+      const finish = () => {
+        const afterRow = { ...row };
+        const afterDetails = { ...d, myTags: [...d.myTags] };
+        const apply = (rowValue: RowDto, detailValue: TrackDetails) => {
+          Object.assign(row, rowValue);
+          Object.assign(d, detailValue, { myTags: [...detailValue.myTags] });
+        };
+        return recordEdit({
+          label: "Track Edit",
+          undo: () => apply(beforeRow, beforeDetails),
+          redo: () => apply(afterRow, afterDetails),
+        });
+      };
       // The same refusals the writer makes: a number that is not one, and a
       // key the library does not hold.
       const numeric: Partial<Record<TrackField, "year" | "trackNumber" | "discNumber" | "playCount">> = {
@@ -967,7 +1057,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           return Promise.reject(new Error(`${JSON.stringify(value)} is not a whole number`));
         }
         d[which] = n;
-        return bump();
+        return finish();
       }
       if (field === "key" && value !== "" && !KEYS.includes(value)) {
         return Promise.reject(new Error(`${JSON.stringify(value)} is not a key the library knows`));
@@ -979,7 +1069,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         }
         row.bpmX100 = Math.round(bpm * 100);
         d.bpmX100 = row.bpmX100;
-        return bump();
+        return bump().then(historyState);
       }
       // Narrowed by hand: what is left after the numeric fields is text.
       const text = field as Exclude<TrackField, "year" | "trackNumber" | "discNumber" | "playCount" | "bpm">;
@@ -992,7 +1082,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       else if (field === "genre") row.genre = d.genre;
       else if (field === "label") row.label = d.label;
       else if (field === "key") row.key = d.key;
-      return bump();
+      return finish();
     },
     addCue: (track, kind, positionMs) => {
       if (!all.some((r) => r.id === track)) return refuse(`no track ${track}`);
@@ -2340,6 +2430,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     onLibraryChanged: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    onEditHistory: (listener) => {
+      historyListeners.add(listener);
+      return () => historyListeners.delete(listener);
     },
     reloadLibrary: () => bump(),
     // The mock's analysis rewrites no files, so nothing redraws.

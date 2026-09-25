@@ -52,28 +52,30 @@ describe("mock edits", () => {
     await backend.edits.addTracksToPlaylist(playlist.id, ["100000", "100001"]);
 
     const deleted = await backend.edits.deletePlaylist(folder.id);
-    expect(deleted).toMatchObject({ canUndo: true, canRedo: false });
+    expect(deleted).toMatchObject({ canUndo: true, canRedo: false, undoLabel: "Delete Playlist" });
     expect((await backend.playlistTree()).some((n) => n.id === playlist.id)).toBe(false);
 
-    const undone = await backend.edits.undoPlaylistDelete();
+    const undone = await backend.edits.undoEdit();
     expect(undone).toMatchObject({ canRedo: true });
     expect((await backend.playlistTree()).find((n) => n.id === playlist.id)?.depth).toBe(folder.depth + 1);
 
-    const redone = await backend.edits.redoPlaylistDelete();
+    const redone = await backend.edits.redoEdit();
     expect(redone).toMatchObject({ canUndo: true, canRedo: false });
     expect((await backend.playlistTree()).some((n) => n.id === playlist.id)).toBe(false);
   });
 
-  it("clears playlist redo when a new edit branches from an undo", async () => {
+  it("clears library redo when a new edit branches from an undo", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Doomed", TREE_ROOT);
     const doomed = (await backend.playlistTree()).find((n) => n.name === "Doomed")!;
     await backend.edits.deletePlaylist(doomed.id);
-    await backend.edits.undoPlaylistDelete();
+    await backend.edits.undoEdit();
 
     await backend.edits.renamePlaylist(doomed.id, "Kept");
-    await expect(backend.edits.redoPlaylistDelete()).rejects.toThrow("no playlist deletion");
+    await expect(backend.edits.redoEdit()).rejects.toThrow("no library edit");
     expect((await backend.playlistTree()).find((n) => n.id === doomed.id)?.name).toBe("Kept");
+    await backend.edits.undoEdit();
+    expect((await backend.playlistTree()).find((n) => n.id === doomed.id)?.name).toBe("Doomed");
   });
 
   it("does not add a track that is already in the playlist", async () => {

@@ -280,6 +280,72 @@ pub struct PlaylistDeletion {
     pub membership_ids: Vec<String>,
 }
 
+/// One playlist or folder move, with both positions counted among the
+/// destination parent's live children.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistMove {
+    id: String,
+    before_parent: String,
+    before_index: usize,
+    after_parent: String,
+    after_index: usize,
+}
+
+/// One playlist or folder rename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistRename {
+    id: String,
+    before: String,
+    after: String,
+}
+
+/// The exact membership rows removed by one playlist edit, plus the complete
+/// order needed to put them back in their original places.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistTrackRemoval {
+    playlist: String,
+    removed: Vec<String>,
+    order: Vec<String>,
+}
+
+impl PlaylistTrackRemoval {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.removed.is_empty()
+    }
+}
+
+/// The exact database value changed by one editable track field.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackEdit {
+    content: String,
+    column: &'static str,
+    before: Value,
+    after: Value,
+}
+
+/// The My Tag set before and after one information-panel edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackTagEdit {
+    content: String,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+impl TrackTagEdit {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+}
+
+impl TrackEdit {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.before == self.after
+    }
+}
+
 impl PlaylistDeletion {
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -429,6 +495,25 @@ impl Writer {
         self.touch_playlist(id, "Name", &Value::Text(name.to_owned()))
     }
 
+    /// Renames a playlist or folder and retains the old value for undo.
+    pub fn rename_with_undo(&mut self, id: &str, name: &str) -> Result<(Changed, PlaylistRename)> {
+        let before = self.library.connection().query_row(
+            "SELECT Name FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )?;
+        let changed = self.rename(id, name)?;
+        Ok((changed, PlaylistRename { id: id.to_owned(), before, after: name.to_owned() }))
+    }
+
+    pub fn undo_rename(&mut self, edit: &PlaylistRename) -> Result<Changed> {
+        self.rename(&edit.id, &edit.before)
+    }
+
+    pub fn redo_rename(&mut self, edit: &PlaylistRename) -> Result<Changed> {
+        self.rename(&edit.id, &edit.after)
+    }
+
     /// Moves a playlist or folder under a new parent.
     ///
     /// `index` is the place to take among the parent's children, counted once
@@ -483,6 +568,47 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    /// Moves a playlist or folder and retains both exact tree positions.
+    pub fn move_with_undo(
+        &mut self,
+        id: &str,
+        parent: &str,
+        index: Option<usize>,
+    ) -> Result<(Changed, PlaylistMove)> {
+        let (before_parent, before_index) = self.playlist_position(id)?;
+        let changed = self.move_to(id, parent, index)?;
+        let (after_parent, after_index) = self.playlist_position(id)?;
+        Ok((changed, PlaylistMove {
+            id: id.to_owned(), before_parent, before_index, after_parent, after_index,
+        }))
+    }
+
+    pub fn undo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
+        self.move_to(&edit.id, &edit.before_parent, Some(edit.before_index))
+    }
+
+    pub fn redo_move(&mut self, edit: &PlaylistMove) -> Result<Changed> {
+        self.move_to(&edit.id, &edit.after_parent, Some(edit.after_index))
+    }
+
+    fn playlist_position(&self, id: &str) -> Result<(String, usize)> {
+        let conn = self.library.connection();
+        let parent = conn.query_row(
+            "SELECT ParentID FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut statement = conn.prepare(
+            "SELECT ID FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0 ORDER BY Seq, ID",
+        )?;
+        let siblings: Vec<String> = statement
+            .query_map(params![parent], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let index = siblings.iter().position(|sibling| sibling == id)
+            .ok_or_else(|| DbError::WriteRefused(format!("no playlist or folder {id}")))?;
+        Ok((parent, index))
     }
 
     /// Soft-deletes a playlist or folder, everything inside it, and every
@@ -723,6 +849,74 @@ impl Writer {
             usn = renumber(&tx, playlist, &stamp)?;
             set_counter(&tx, usn)?;
         }
+        tx.commit()?;
+        Ok(Changed { rows, usn })
+    }
+
+    /// Removes tracks while retaining the exact membership rows and ordering
+    /// needed to undo the operation without manufacturing replacement rows.
+    pub fn remove_tracks_with_undo(
+        &mut self,
+        playlist: &str,
+        contents: &[String],
+    ) -> Result<(Changed, PlaylistTrackRemoval)> {
+        let conn = self.library.connection();
+        let mut statement = conn.prepare(
+            "SELECT ID, ContentID FROM djmdSongPlaylist
+             WHERE PlaylistID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo, ID",
+        )?;
+        let memberships: Vec<(String, String)> = statement
+            .query_map(params![playlist], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(statement);
+        let order = memberships.iter().map(|(id, _)| id.clone()).collect();
+        let removed = memberships.into_iter()
+            .filter_map(|(id, content)| contents.contains(&content).then_some(id))
+            .collect();
+        let edit = PlaylistTrackRemoval { playlist: playlist.to_owned(), removed, order };
+        let changed = self.remove_tracks(playlist, contents)?;
+        Ok((changed, edit))
+    }
+
+    pub fn undo_track_removal(&mut self, edit: &PlaylistTrackRemoval) -> Result<Changed> {
+        self.set_track_removal(edit, false)
+    }
+
+    pub fn redo_track_removal(&mut self, edit: &PlaylistTrackRemoval) -> Result<Changed> {
+        self.set_track_removal(edit, true)
+    }
+
+    fn set_track_removal(&mut self, edit: &PlaylistTrackRemoval, deleted: bool) -> Result<Changed> {
+        if edit.is_empty() {
+            return Err(DbError::WriteRefused("empty playlist track-removal history".to_owned()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut rows = 0;
+        let mut usn = 0;
+        for membership in &edit.removed {
+            usn = next_usn(&tx)?;
+            rows += tx.execute(
+                "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                    updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                params![i64::from(deleted), usn, stamp, membership, i64::from(!deleted)],
+            )?;
+        }
+        if deleted {
+            usn = renumber(&tx, &edit.playlist, &stamp)?;
+        } else {
+            for (index, membership) in edit.order.iter().enumerate() {
+                usn = next_usn(&tx)?;
+                rows += tx.execute(
+                    "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
+                     WHERE ID = ?4 AND rb_local_deleted = 0",
+                    params![i64::try_from(index + 1).unwrap_or(i64::MAX), usn, stamp, membership],
+                )?;
+            }
+        }
+        set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
     }
@@ -1288,6 +1482,10 @@ impl Writer {
         self.touch_content(content, "Rating", &Value::Integer(i64::from(stars)))
     }
 
+    pub fn set_rating_with_undo(&mut self, content: &str, stars: u8) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "Rating", |writer| writer.set_rating(content, stars))
+    }
+
     /// Sets a track's tempo, BPM x100, as a grid edit that changed the tempo
     /// records it. [`Writer::set_bpm`] is the other way round: a BPM typed
     /// over, which retimes the grid to match.
@@ -1309,6 +1507,10 @@ impl Writer {
         self.touch_content(content, "Commnt", &Value::Text(comment.to_owned()))
     }
 
+    pub fn set_comment_with_undo(&mut self, content: &str, comment: &str) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "Commnt", |writer| writer.set_comment(content, comment))
+    }
+
     /// Sets a track's colour, or clears it with `None`.
     pub fn set_color(&mut self, content: &str, color: Option<&str>) -> Result<Changed> {
         self.touch_content(
@@ -1316,6 +1518,10 @@ impl Writer {
             "ColorID",
             &color.map_or(Value::Null, |c| Value::Text(c.to_owned())),
         )
+    }
+
+    pub fn set_color_with_undo(&mut self, content: &str, color: Option<&str>) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "ColorID", |writer| writer.set_color(content, color))
     }
 
     /// Sets one of the information panel's editable fields.
@@ -1354,6 +1560,68 @@ impl Writer {
             TrackField::Key => self.touch_key(content, value),
             TrackField::Bpm => self.set_bpm(content, value),
         }
+    }
+
+    /// Writes one information-panel field and retains its exact stored value.
+    /// BPM is deliberately excluded: it owns analysis-file history in the
+    /// grid editor rather than this database-only history.
+    pub fn set_field_with_undo(
+        &mut self,
+        content: &str,
+        field: TrackField,
+        value: &str,
+    ) -> Result<(Changed, TrackEdit)> {
+        let column = match field {
+            TrackField::Title => "Title",
+            TrackField::Artist => "ArtistID",
+            TrackField::Album => "AlbumID",
+            TrackField::Year => "ReleaseYear",
+            TrackField::TrackNumber => "TrackNo",
+            TrackField::DiscNumber => "DiscNo",
+            TrackField::OriginalArtist => "OrgArtistID",
+            TrackField::Composer => "ComposerID",
+            TrackField::Remixer => "RemixerID",
+            TrackField::Lyricist => "Lyricist",
+            TrackField::PlayCount => "DJPlayCount",
+            TrackField::Genre => "GenreID",
+            TrackField::Label => "LabelID",
+            TrackField::Key => "KeyID",
+            TrackField::Bpm => return Err(DbError::WriteRefused(
+                "BPM history belongs to the beat grid editor".to_owned(),
+            )),
+        };
+        self.track_edit(content, column, |writer| writer.set_field(content, field, value))
+    }
+
+    pub fn undo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
+        self.touch_content(&edit.content, edit.column, &edit.before)
+    }
+
+    pub fn redo_track_edit(&mut self, edit: &TrackEdit) -> Result<Changed> {
+        self.touch_content(&edit.content, edit.column, &edit.after)
+    }
+
+    fn track_edit(
+        &mut self,
+        content: &str,
+        column: &'static str,
+        write: impl FnOnce(&mut Self) -> Result<Changed>,
+    ) -> Result<(Changed, TrackEdit)> {
+        let before = self.track_value(content, column)?;
+        let changed = write(self)?;
+        let after = self.track_value(content, column)?;
+        Ok((changed, TrackEdit { content: content.to_owned(), column, before, after }))
+    }
+
+    fn track_value(&self, content: &str, column: &'static str) -> Result<Value> {
+        if !WRITABLE_COLUMNS.contains(&column) {
+            return Err(DbError::WriteRefused(format!("{column} is not writable")));
+        }
+        self.library.connection().query_row(
+            &format!("SELECT `{column}` FROM djmdContent WHERE ID = ?1 AND rb_local_deleted = 0"),
+            params![content],
+            |row| row.get(0),
+        ).map_err(Into::into)
     }
 
     // ---------------------------------------------------------------- my tag
@@ -1424,6 +1692,35 @@ impl Writer {
         set_counter(&tx, usn)?;
         tx.commit()?;
         Ok(Changed { rows, usn })
+    }
+
+    pub fn set_my_tags_with_undo(
+        &mut self,
+        content: &str,
+        tags: &[String],
+    ) -> Result<(Changed, TrackTagEdit)> {
+        let before = self.track_tags(content)?;
+        let changed = self.set_my_tags(content, tags)?;
+        let after = self.track_tags(content)?;
+        Ok((changed, TrackTagEdit { content: content.to_owned(), before, after }))
+    }
+
+    pub fn undo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {
+        self.set_my_tags(&edit.content, &edit.before)
+    }
+
+    pub fn redo_tag_edit(&mut self, edit: &TrackTagEdit) -> Result<Changed> {
+        self.set_my_tags(&edit.content, &edit.after)
+    }
+
+    fn track_tags(&self, content: &str) -> Result<Vec<String>> {
+        let mut statement = self.library.connection().prepare(
+            "SELECT MyTagID FROM djmdSongMyTag
+             WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY MyTagID",
+        )?;
+        let tags: Vec<String> = statement.query_map(params![content], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(tags)
     }
 
     /// Persist an edited grid's tempo and invalidate cached analysis consumers.
@@ -1635,6 +1932,14 @@ impl Writer {
         let target = rbl_anlz::resolve(&self.library.location().share_root, &relative);
         write_artwork_sizes(&target, &bytes)?;
         self.touch_content(content, "ImagePath", &Value::Text(relative))
+    }
+
+    pub fn set_artwork_with_undo(
+        &mut self,
+        content: &str,
+        image: Option<&Path>,
+    ) -> Result<(Changed, TrackEdit)> {
+        self.track_edit(content, "ImagePath", |writer| writer.set_artwork(content, image))
     }
 
     /// Import a file's embedded cover only when the track has no artwork.

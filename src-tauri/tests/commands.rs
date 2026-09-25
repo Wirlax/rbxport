@@ -445,18 +445,85 @@ fn a_deleted_playlist_tree_can_be_undone_and_redone() {
     assert!(!s.has_node("Sets"));
     assert!(!s.has_node("Friday"));
 
-    let undone = run(commands::undo_playlist_delete(s.handle(), s.state())).unwrap();
+    let undone = run(commands::undo_edit(s.handle(), s.state())).unwrap();
     assert!(!undone.can_undo);
     assert!(undone.can_redo);
     assert_eq!(s.node("Sets").id, folder.id);
     assert_eq!(s.node("Friday").id, playlist.id);
     assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[1].as_str()]);
 
-    let redone = run(commands::redo_playlist_delete(s.handle(), s.state())).unwrap();
+    let redone = run(commands::redo_edit(s.handle(), s.state())).unwrap();
     assert!(redone.can_undo);
     assert!(!redone.can_redo);
     assert!(!s.has_node("Sets"));
     assert!(!s.has_node("Friday"));
+}
+
+#[test]
+fn library_history_names_and_reverses_each_supported_edit() {
+    let s = shell();
+    run(commands::create_folder(s.handle(), s.state(), "Sets".into(), ROOT.into())).unwrap();
+    let folder = s.node("Sets");
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), ROOT.into())).unwrap();
+    let playlist = s.node("Friday");
+
+    let renamed = run(commands::rename_playlist(
+        s.handle(), s.state(), playlist.id.clone(), "Saturday".into(),
+    )).unwrap();
+    assert_eq!(renamed.undo_label.as_deref(), Some("Rename Playlist"));
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Friday").id, playlist.id);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Saturday").id, playlist.id);
+
+    let moved = run(commands::move_playlist(
+        s.handle(), s.state(), playlist.id.clone(), folder.id.clone(), Some(0),
+    )).unwrap();
+    assert_eq!(moved.undo_label.as_deref(), Some("Move Playlist"));
+    assert_eq!(s.node("Saturday").depth, 2);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(s.node("Saturday").depth, 1);
+
+    let tracks = vec![track_id(1), track_id(2), track_id(3)];
+    run(commands::add_tracks_to_playlist(
+        s.handle(), s.state(), playlist.id.clone(), tracks.clone(),
+    )).unwrap();
+    let removed = run(commands::remove_tracks_from_playlist(
+        s.handle(), s.state(), playlist.id.clone(), vec![tracks[1].clone()],
+    )).unwrap();
+    assert_eq!(removed.undo_label.as_deref(), Some("Remove Tracks from Playlist"));
+    assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[2].as_str()]);
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[1].as_str(), tracks[2].as_str()]);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[2].as_str()]);
+
+    let track = track_id(7);
+    let edited = run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 4)).unwrap();
+    assert_eq!(edited.undo_label.as_deref(), Some("Track Edit"));
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 0);
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().rating, 4);
+
+    let field = run(details::set_track_field(
+        s.handle(), s.state(), track.clone(), "title".into(), "Seven".into(),
+    )).unwrap();
+    assert_eq!(field.undo_label.as_deref(), Some("Track Edit"));
+    run(commands::undo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track.clone())).unwrap().title, "Track 007");
+    run(commands::redo_edit(s.handle(), s.state())).unwrap();
+    assert_eq!(run(details::track_details(s.state(), track)).unwrap().title, "Seven");
+}
+
+#[test]
+fn removing_from_collection_is_permanent_and_clears_history() {
+    let s = shell();
+    let track = track_id(5);
+    run(commands::set_track_rating(s.handle(), s.state(), track.clone(), 3)).unwrap();
+    run(commands::remove_from_collection(s.handle(), s.state(), vec![track])).unwrap();
+    let error = run(commands::undo_edit(s.handle(), s.state())).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::NotFound);
 }
 
 #[test]
@@ -467,8 +534,8 @@ fn every_edit_bumps_the_generation_and_tells_the_interface() {
     let first = run(commands::create_playlist(s.handle(), s.state(), "One".into(), ROOT.into())).unwrap();
     let second = run(commands::set_track_rating(s.handle(), s.state(), track_id(0), 3)).unwrap();
     assert!(first > start);
-    assert!(second > first);
-    assert_eq!(s.state().summary().3, second, "the state reports the latest");
+    assert!(second.generation > first);
+    assert_eq!(s.state().summary().3, second.generation, "the state reports the latest");
 
     // Both went out as `library:changed`, which is what makes the frontend
     // drop the pages it cached against the old generation.
@@ -476,7 +543,7 @@ fn every_edit_bumps_the_generation_and_tells_the_interface() {
     while s.changes.lock().unwrap().len() < 2 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(*s.changes.lock().unwrap(), vec![first, second]);
+    assert_eq!(*s.changes.lock().unwrap(), vec![first, second.generation]);
 }
 
 #[test]

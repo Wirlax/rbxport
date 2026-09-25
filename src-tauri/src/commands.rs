@@ -15,14 +15,14 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, PlaylistHistoryDto, RowDto,
+    EditHistoryDto, ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
     XmlImportReportDto,
 };
 use crate::error::{AppError, AppResult, ErrorKind};
-use crate::state::{rows_to_dto, spec_from_wire, AppState};
+use crate::state::{rows_to_dto, spec_from_wire, AppState, EditHistory, LibraryEdit};
 
 /// Rows per request. The frontend asks a page at a time; this bound is what
 /// keeps a response inside the 64 KB cap.
@@ -594,15 +594,117 @@ where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
 {
     let state = Arc::clone(&state);
-    let generation = blocking(name, move || {
+    let (generation, history) = blocking(name, move || {
+        let _gate = state.edit_gate.lock();
         let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
-        // A new edit after an undo starts a new branch. Deletions use their
-        // own command below so they can add an entry as well as clear redo.
-        state.playlist_history.lock().clear_redo();
-        Ok(generation)
+        // Any non-recorded edit after an undo starts a new branch.
+        let mut history = state.edit_history.lock();
+        history.clear_redo();
+        Ok((generation, history_dto(generation, &history)))
     }).await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     Ok(generation)
+}
+
+/// Commits an edit that must never be traversed by undo and invalidates all
+/// older tokens that could refer to rows the edit permanently removes.
+async fn permanent_edit<R: tauri::Runtime, F>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: &'static str,
+    touched: Touched,
+    action: F,
+) -> AppResult<u32>
+where
+    F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
+{
+    let state = Arc::clone(&state);
+    let (generation, history) = blocking(name, move || {
+        let _gate = state.edit_gate.lock();
+        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
+            .map_err(write_error)?;
+        let mut history = state.edit_history.lock();
+        history.clear();
+        Ok((generation, history_dto(generation, &history)))
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
+    Ok(generation)
+}
+
+fn history_dto(generation: u32, history: &EditHistory) -> EditHistoryDto {
+    EditHistoryDto {
+        generation,
+        can_undo: !history.undo.is_empty(),
+        can_redo: !history.redo.is_empty(),
+        undo_label: history.undo.last().map(|entry| entry.label.to_owned()),
+        redo_label: history.redo.last().map(|entry| entry.label.to_owned()),
+    }
+}
+
+pub(crate) async fn recorded_edit<R: tauri::Runtime, F>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+    name: &'static str,
+    touched: Touched,
+    label: &'static str,
+    action: F,
+) -> AppResult<EditHistoryDto>
+where
+    F: FnOnce(&mut rbl_db::write::Writer) -> Result<LibraryEdit, rbl_db::DbError> + Send + 'static,
+{
+    let state = Arc::clone(&state);
+    let dto = blocking(name, move || {
+        let _gate = state.edit_gate.lock();
+        let (generation, reversible) = state.write_then(
+            action,
+            |db, reversible| refresh_after_edit(&state, db, touched).map(|generation| (generation, reversible)),
+        ).map_err(write_error)?;
+        let mut history = state.edit_history.lock();
+        if !reversible.is_empty() {
+            history.record(reversible, label);
+        }
+        Ok(history_dto(generation, &history))
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+    let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
+    Ok(dto)
+}
+
+fn touched_by(edit: &LibraryEdit) -> Touched {
+    match edit {
+        LibraryEdit::DeletePlaylist(_) | LibraryEdit::RenamePlaylist(_) |
+        LibraryEdit::MovePlaylist(_) | LibraryEdit::RemovePlaylistTracks(_) => Touched::Playlists,
+        // Tokens keep their database row ids private; a full reload after an
+        // undo is uncommon and guarantees every view and sort follows it.
+        LibraryEdit::Track(_) | LibraryEdit::TrackTags(_) => Touched::Tracks,
+    }
+}
+
+fn apply_history(writer: &mut rbl_db::write::Writer, edit: &LibraryEdit, undo: bool) -> Result<(), rbl_db::DbError> {
+    match edit {
+        LibraryEdit::DeletePlaylist(value) => if undo { writer.restore_playlist(value) } else { writer.redo_playlist_deletion(value) }.map(|_| ()),
+        LibraryEdit::RenamePlaylist(value) => if undo { writer.undo_rename(value) } else { writer.redo_rename(value) }.map(|_| ()),
+        LibraryEdit::MovePlaylist(value) => if undo { writer.undo_move(value) } else { writer.redo_move(value) }.map(|_| ()),
+        LibraryEdit::RemovePlaylistTracks(value) => if undo { writer.undo_track_removal(value) } else { writer.redo_track_removal(value) }.map(|_| ()),
+        LibraryEdit::Track(values) => {
+            let ordered: Box<dyn Iterator<Item = _>> = if undo {
+                Box::new(values.iter().rev())
+            } else {
+                Box::new(values.iter())
+            };
+            for value in ordered {
+                if undo { writer.undo_track_edit(value)?; } else { writer.redo_track_edit(value)?; }
+            }
+            Ok(())
+        }
+        LibraryEdit::TrackTags(value) => if undo {
+            writer.undo_tag_edit(value)
+        } else {
+            writer.redo_tag_edit(value)
+        }.map(|_| ()),
+    }
 }
 
 /// Shared by desktop and CDJ edits; the writer holds the edit gate until
@@ -2578,8 +2680,10 @@ pub async fn rename_playlist<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     id: String,
     name: String,
-) -> AppResult<u32> {
-    edit(app, state, "rename_playlist", Touched::Playlists, move |w| w.rename(&id, &name).map(|_| ())).await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "rename_playlist", Touched::Playlists, "Rename Playlist", move |w| {
+        w.rename_with_undo(&id, &name).map(|(_, edit)| LibraryEdit::RenamePlaylist(edit))
+    }).await
 }
 
 #[tauri::command]
@@ -2589,11 +2693,10 @@ pub async fn move_playlist<R: tauri::Runtime>(
     id: String,
     parent: String,
     index: Option<usize>,
-) -> AppResult<u32> {
-    edit(app, state, "move_playlist", Touched::Playlists, move |w| {
-        w.move_to(&id, &parent, index).map(|_| ())
-    })
-    .await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "move_playlist", Touched::Playlists, "Move Playlist", move |w| {
+        w.move_with_undo(&id, &parent, index).map(|(_, edit)| LibraryEdit::MovePlaylist(edit))
+    }).await
 }
 
 #[tauri::command]
@@ -2601,63 +2704,60 @@ pub async fn delete_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
-) -> AppResult<PlaylistHistoryDto> {
-    let state = Arc::clone(&state);
-    let (generation, can_undo, can_redo) = blocking("delete_playlist", move || {
-        let mut history = state.playlist_history.lock();
-        let (generation, deletion) = state.write_then(
-            move |w| w.delete_playlist_with_undo(&id),
-            |db, (_, deletion)| refresh_after_edit(&state, db, Touched::Playlists).map(|generation| (generation, deletion)),
-        ).map_err(write_error)?;
-        history.record(deletion);
-        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
-    }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "delete_playlist", Touched::Playlists, "Delete Playlist", move |w| {
+        w.delete_playlist_with_undo(&id).map(|(_, edit)| LibraryEdit::DeletePlaylist(edit))
+    }).await
 }
 
 #[tauri::command]
-pub async fn undo_playlist_delete<R: tauri::Runtime>(
+pub async fn undo_edit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-) -> AppResult<PlaylistHistoryDto> {
+) -> AppResult<EditHistoryDto> {
     let state = Arc::clone(&state);
-    let (generation, can_undo, can_redo) = blocking("undo_playlist_delete", move || {
-        let mut history = state.playlist_history.lock();
-        let deletion = history.undo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no playlist deletion to undo."))?;
+    let dto = blocking("undo_edit", move || {
+        let _gate = state.edit_gate.lock();
+        let entry = state.edit_history.lock().undo.last().cloned()
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to undo."))?;
+        let touched = touched_by(&entry.edit);
         let generation = state.write_then(
-            |w| w.restore_playlist(&deletion),
-            |db, _| refresh_after_edit(&state, db, Touched::Playlists),
+            |w| apply_history(w, &entry.edit, true),
+            |db, ()| refresh_after_edit(&state, db, touched),
         ).map_err(write_error)?;
+        let mut history = state.edit_history.lock();
         history.undo.pop();
-        history.redo.push(deletion);
-        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
+        history.redo.push(entry);
+        Ok(history_dto(generation, &history))
     }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
+    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+    let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
+    Ok(dto)
 }
 
 #[tauri::command]
-pub async fn redo_playlist_delete<R: tauri::Runtime>(
+pub async fn redo_edit<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
-) -> AppResult<PlaylistHistoryDto> {
+) -> AppResult<EditHistoryDto> {
     let state = Arc::clone(&state);
-    let (generation, can_undo, can_redo) = blocking("redo_playlist_delete", move || {
-        let mut history = state.playlist_history.lock();
-        let deletion = history.redo.last().cloned()
-            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no playlist deletion to redo."))?;
+    let dto = blocking("redo_edit", move || {
+        let _gate = state.edit_gate.lock();
+        let entry = state.edit_history.lock().redo.last().cloned()
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no library edit to redo."))?;
+        let touched = touched_by(&entry.edit);
         let generation = state.write_then(
-            |w| w.redo_playlist_deletion(&deletion),
-            |db, _| refresh_after_edit(&state, db, Touched::Playlists),
+            |w| apply_history(w, &entry.edit, false),
+            |db, ()| refresh_after_edit(&state, db, touched),
         ).map_err(write_error)?;
+        let mut history = state.edit_history.lock();
         history.redo.pop();
-        history.undo.push(deletion);
-        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
+        history.undo.push(entry);
+        Ok(history_dto(generation, &history))
     }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
-    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
+    let _ = tauri::Emitter::emit(&app, "library:changed", dto.generation);
+    let _ = tauri::Emitter::emit(&app, "edit-history:changed", dto.clone());
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -2723,11 +2823,10 @@ pub async fn remove_tracks_from_playlist<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     playlist: String,
     tracks: Vec<String>,
-) -> AppResult<u32> {
-    edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, move |w| {
-        w.remove_tracks(&playlist, &tracks).map(|_| ())
-    })
-    .await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "remove_tracks_from_playlist", Touched::Playlists, "Remove Tracks from Playlist", move |w| {
+        w.remove_tracks_with_undo(&playlist, &tracks).map(|(_, edit)| LibraryEdit::RemovePlaylistTracks(edit))
+    }).await
 }
 
 /// Tracks that share a title and an artist, case and accents aside.
@@ -3098,12 +3197,14 @@ pub async fn reset_play_count<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
-) -> AppResult<u32> {
-    edit(app, state, "reset_play_count", Touched::Metadata(tracks.clone()), move |w| {
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "reset_play_count", Touched::Metadata(tracks.clone()), "Track Edit", move |w| {
+        let mut edits = Vec::with_capacity(tracks.len());
         for track in &tracks {
-            w.set_field(track, rbl_db::write::TrackField::PlayCount, "0")?;
+            let (_, edit) = w.set_field_with_undo(track, rbl_db::write::TrackField::PlayCount, "0")?;
+            if !edit.is_empty() { edits.push(edit); }
         }
-        Ok(())
+        Ok(LibraryEdit::Track(edits))
     })
     .await
 }
@@ -3116,7 +3217,7 @@ pub async fn remove_from_collection<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     tracks: Vec<String>,
 ) -> AppResult<u32> {
-    edit(app, state, "remove_from_collection", Touched::Tracks, move |w| {
+    permanent_edit(app, state, "remove_from_collection", Touched::Tracks, move |w| {
         for track in &tracks {
             w.delete_track(track)?;
         }
@@ -3141,8 +3242,10 @@ pub async fn set_track_rating<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
     stars: u8,
-) -> AppResult<u32> {
-    edit(app, state, "set_track_rating", Touched::Metadata(vec![track.clone()]), move |w| w.set_rating(&track, stars).map(|_| ())).await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "set_track_rating", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
+        w.set_rating_with_undo(&track, stars).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    }).await
 }
 
 #[tauri::command]
@@ -3151,9 +3254,10 @@ pub async fn set_track_comment<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
     comment: String,
-) -> AppResult<u32> {
-    edit(app, state, "set_track_comment", Touched::Metadata(vec![track.clone()]), move |w| w.set_comment(&track, &comment).map(|_| ()))
-        .await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "set_track_comment", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
+        w.set_comment_with_undo(&track, &comment).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    }).await
 }
 
 #[tauri::command]
@@ -3162,11 +3266,10 @@ pub async fn set_track_color<R: tauri::Runtime>(
     state: State<'_, Arc<AppState>>,
     track: String,
     color: Option<String>,
-) -> AppResult<u32> {
-    edit(app, state, "set_track_color", Touched::Metadata(vec![track.clone()]), move |w| {
-        w.set_color(&track, color.as_deref()).map(|_| ())
-    })
-    .await
+) -> AppResult<EditHistoryDto> {
+    recorded_edit(app, state, "set_track_color", Touched::Metadata(vec![track.clone()]), "Track Edit", move |w| {
+        w.set_color_with_undo(&track, color.as_deref()).map(|(_, edit)| LibraryEdit::Track(vec![edit]))
+    }).await
 }
 
 /// The BPMs and keys the track filter bar can offer for a list.

@@ -208,8 +208,8 @@ export interface Backend {
   trackPcmWaveform(trackId: string, fromMs: number, toMs: number, columns: number): Promise<Uint8Array>;
 
   /**
-   * Editing. Each returns the library's new generation, which invalidates every
-   * cached page: the backend re-reads the library after a write.
+   * Editing. Plain edits return the library generation; reversible edits
+   * return that generation together with the shared undo/redo state.
    *
    * All of these are refused while Rekordbox is running — it holds the
    * database — and the refusal arrives as an `AppError` of kind `readOnly`.
@@ -224,6 +224,8 @@ export interface Backend {
    * Returns an unsubscribe function.
    */
   onLibraryChanged(listener: (generation: number) => void): () => void;
+  /** The shared library undo stack changed, including its native-menu labels. */
+  onEditHistory(listener: (history: EditHistoryState) => void): () => void;
   /**
    * Re-reads the library on request. What the analysis queue asks for once
    * it has drained: the rows drawn from each answer are then replaced by
@@ -1292,11 +1294,13 @@ export interface SmartCondition {
   unit: string;
 }
 
-/** Playlist deletion history after a delete, undo, or redo. */
-export interface PlaylistHistoryState {
+/** Shared library history after an edit, undo, or redo. */
+export interface EditHistoryState {
   generation: number;
   canUndo: boolean;
   canRedo: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
 }
 
 export interface Edits {
@@ -1306,17 +1310,17 @@ export interface Edits {
   /** Replaces an intelligent playlist's rule. */
   setSmartRule(playlist: string, rule: SmartRule): Promise<number>;
   createFolder(name: string, parent: string): Promise<number>;
-  renamePlaylist(id: string, name: string): Promise<number>;
+  renamePlaylist(id: string, name: string): Promise<EditHistoryState>;
   /**
    * Moves a playlist or folder under `parent`.
    *
    * `index` is the place to take among that parent's children, counted once
    * the node has been lifted out of wherever it was. Omitted, it is appended.
    */
-  movePlaylist(id: string, parent: string, index?: number): Promise<number>;
-  deletePlaylist(id: string): Promise<PlaylistHistoryState>;
-  undoPlaylistDelete(): Promise<PlaylistHistoryState>;
-  redoPlaylistDelete(): Promise<PlaylistHistoryState>;
+  movePlaylist(id: string, parent: string, index?: number): Promise<EditHistoryState>;
+  deletePlaylist(id: string): Promise<EditHistoryState>;
+  undoEdit(): Promise<EditHistoryState>;
+  redoEdit(): Promise<EditHistoryState>;
   addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
   /** Reload Tag: the files' tags read again over the rows. */
   reloadTags(tracks: string[]): Promise<number>;
@@ -1324,9 +1328,9 @@ export interface Edits {
   addToTagList(tracks: string[]): Promise<number>;
   removeFromTagList(tracks: string[]): Promise<number>;
   clearTagList(): Promise<number>;
-  removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<number>;
+  removeTracksFromPlaylist(playlist: string, tracks: string[]): Promise<EditHistoryState>;
   /** Reset DJ Play Count: back to zero on each track. */
-  resetPlayCount(tracks: string[]): Promise<number>;
+  resetPlayCount(tracks: string[]): Promise<EditHistoryState>;
   /** A play: the track goes on today's history session and its count goes up. */
   recordPlay(track: string): Promise<number>;
   /** Remove from History: the tracks' plays leave the session. */
@@ -1334,23 +1338,23 @@ export interface Edits {
   /** Remove from Collection: the tracks leave the library and every playlist. The files stay. */
   removeFromCollection(tracks: string[]): Promise<number>;
   reorderPlaylist(playlist: string, tracks: string[]): Promise<number>;
-  setTrackRating(track: string, stars: number): Promise<number>;
-  setTrackComment(track: string, comment: string): Promise<number>;
-  setTrackColor(track: string, color: string | null): Promise<number>;
+  setTrackRating(track: string, stars: number): Promise<EditHistoryState>;
+  setTrackComment(track: string, comment: string): Promise<EditHistoryState>;
+  setTrackColor(track: string, color: string | null): Promise<EditHistoryState>;
   /**
    * One of the Info tab's editable fields, by wire name. The backend keeps
    * the list of what may be written; a name it does not know is refused as
    * `readOnly` rather than mapped onto a guess.
    */
-  setTrackField(track: string, field: TrackField, value: string): Promise<number>;
+  setTrackField(track: string, field: TrackField, value: string): Promise<EditHistoryState>;
   /** Sets the My Tags on a track to exactly these ids. */
-  setMyTags(track: string, tags: string[]): Promise<number>;
+  setMyTags(track: string, tags: string[]): Promise<EditHistoryState>;
   /** Add Artwork: the image is filed in the share tree and the track points at it. */
-  addArtwork(track: string, image: string): Promise<number>;
+  addArtwork(track: string, image: string): Promise<EditHistoryState>;
   /** Add Artwork on a playlist or folder, from the tree menu. */
   addPlaylistArtwork(playlist: string, image: string): Promise<number>;
   /** Delete Artwork: the track points at no image; the file stays. */
-  clearArtwork(track: string): Promise<number>;
+  clearArtwork(track: string): Promise<EditHistoryState>;
 
   /**
    * Cues. Unlike the edits above these do not return a generation: a cue

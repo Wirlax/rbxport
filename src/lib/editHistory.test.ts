@@ -1,17 +1,33 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listenEditHistory, runEditHistory } from "./editHistory";
+import { listenEditHistory, runEditHistory, setLibraryEditHistory } from "./editHistory";
 import { setHistoryMenu } from "@/ipc/client";
 
 vi.mock("@/ipc/client", () => ({ setHistoryMenu: vi.fn().mockResolvedValue(undefined) }));
 
 afterEach(() => {
+  setLibraryEditHistory(null, null);
   document.body.replaceChildren();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe("native Edit history routing", () => {
+  it("shows the action at the top of the library history", () => {
+    setLibraryEditHistory("Track Edit", "Delete Playlist");
+    expect(setHistoryMenu).toHaveBeenLastCalledWith("Track Edit", "Delete Playlist");
+  });
+
+  it("falls back to library history for actions the deck cannot run", () => {
+    setLibraryEditHistory("Delete Playlist", null);
+    const stop = listenEditHistory(vi.fn(), null, "Set Tempo");
+    try {
+      expect(setHistoryMenu).toHaveBeenLastCalledWith("Delete Playlist", "Set Tempo");
+    } finally {
+      stop();
+    }
+  });
+
   it("describes the active history, resets for text focus and clears on deactivation", () => {
     const field = document.createElement("input");
     document.body.append(field);
