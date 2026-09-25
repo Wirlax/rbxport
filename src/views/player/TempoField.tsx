@@ -122,20 +122,30 @@ export function TempoField({
   return (
     <div ref={box} className={styles.field}>
       {editing !== null ? (
-        <input
-          className={fieldClassName ? `${fieldClassName} ${styles.input}` : styles.input}
-          aria-label="BPM"
-          value={editing}
-          autoFocus
-          inputMode="decimal"
-          onChange={(event) => setEditing(event.target.value)}
-          onBlur={commitTyped}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") commitTyped();
-            else if (event.key === "Escape") setEditing(null);
-            event.stopPropagation();
-          }}
-        />
+        <>
+          {/* Keeps the editor exactly as wide and tall as the readout it
+              replaced; an input's default 20-character width is much wider. */}
+          <span
+            className={fieldClassName ? `${fieldClassName} ${styles.bpm} ${styles.sizer}` : `${styles.bpm} ${styles.sizer}`}
+            aria-hidden
+          >
+            {shown}
+          </span>
+          <input
+            className={fieldClassName ? `${fieldClassName} ${styles.input}` : styles.input}
+            aria-label="BPM"
+            value={editing}
+            autoFocus
+            inputMode="decimal"
+            onChange={(event) => setEditing(event.target.value)}
+            onBlur={commitTyped}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitTyped();
+              else if (event.key === "Escape") setEditing(null);
+              event.stopPropagation();
+            }}
+          />
+        </>
       ) : (
         <span
           className={fieldClassName ? `${fieldClassName} ${styles.bpm}` : styles.bpm}

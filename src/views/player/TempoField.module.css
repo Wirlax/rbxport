@@ -19,7 +19,16 @@
   touch-action: none;
 }
 .bpm[aria-disabled] { color: var(--c-pad-label); }
-.input { text-align: center; outline: 1px solid var(--c-accent); }
+.sizer { visibility: hidden; pointer-events: none; }
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  text-align: center;
+  outline: 1px solid var(--c-accent);
+}
 
 .fader {
   position: absolute;
