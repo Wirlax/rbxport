@@ -1435,7 +1435,12 @@ export const TrackTable = memo(function TrackTable({
           {header}
         </div>
 
-        <div className={styles.inner} ref={rowsRef} style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        <div
+          key={view.token}
+          className={styles.inner}
+          ref={rowsRef}
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+        >
           {items.map((item) => {
             const row = view.rowAt(item.index);
             return (
