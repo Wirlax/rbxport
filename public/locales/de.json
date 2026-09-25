@@ -1203,7 +1203,7 @@
   "mixer": "Mixer",
   "MIXER": "MISCHER",
   "LINK CUE": "LINK-CUE",
-  "Read-only": "Schreibgeschützt",
+  "Library read-only": "Bibliothek schreibgeschützt",
   "Open Preferences": "Voreinstellungen öffnen",
   "USB": "USB",
   "USBs": "USBs",

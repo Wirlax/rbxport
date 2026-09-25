@@ -744,7 +744,7 @@
   "Rating",
   "Rating cleared.",
   "Read from the DeliveryComment column, which is never filled in the reference library; not written.",
-  "Read-only",
+  "Library read-only",
   "Read-only — rekordbox is running",
   "Reading…",
   "Ready",

@@ -1208,7 +1208,7 @@
   "mixer": "mélangeur",
   "MIXER": "MÉLANGEUR",
   "LINK CUE": "SIGNAL DE LIEN",
-  "Read-only": "Lecture seule",
+  "Library read-only": "Bibliothèque en lecture seule",
   "Open Preferences": "Ouvrir les Préférences",
   "USB": "USB",
   "USBs": "Clés USB",

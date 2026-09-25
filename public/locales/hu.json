@@ -1208,7 +1208,7 @@
   "mixer": "mixer",
   "MIXER": "KEVERŐ",
   "LINK CUE": "LINK CUE",
-  "Read-only": "Csak olvasható",
+  "Library read-only": "A könyvtár csak olvasható",
   "Open Preferences": "Nyissa meg a Beállításokat",
   "USB": "USB",
   "USBs": "USB-k",

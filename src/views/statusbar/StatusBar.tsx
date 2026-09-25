@@ -94,7 +94,7 @@ export function StatusBar({
       {readOnly ? (
         <button type="button" className={styles.readOnly} title={refusal(protectedLibrary)}
           onClick={onExplainReadOnly} onDoubleClick={onDisableReadOnly}>
-          Read-only
+          Library read-only
         </button>
       ) : null}
       {/*

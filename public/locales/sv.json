@@ -1203,7 +1203,7 @@
   "mixer": "mixer",
   "MIXER": "BLANDARE",
   "LINK CUE": "LINK CUE",
-  "Read-only": "Skrivskyddad",
+  "Library read-only": "Skrivskyddat bibliotek",
   "Open Preferences": "Öppna Inställningar",
   "USB": "USB",
   "USBs": "USBs",

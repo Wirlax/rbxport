@@ -38,3 +38,11 @@ it("opens the application log when the name and version are right-clicked", () =
   expect(event.defaultPrevented).toBe(true);
   expect(onOpenLog).toHaveBeenCalledOnce();
 });
+
+it("names read-only as a library state", () => {
+  act(() => root.render(<StatusBar readOnly />));
+
+  const badge = host.querySelector<HTMLButtonElement>("footer > button");
+  expect(badge?.textContent).toBe("Library read-only");
+  expect(badge?.title).toContain("Editing is locked while rekordbox is running");
+});

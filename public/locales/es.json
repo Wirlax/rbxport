@@ -1209,7 +1209,7 @@
   "mixer": "mezclador",
   "MIXER": "MEZCLADOR",
   "LINK CUE": "SEÑAL DE ENLACE",
-  "Read-only": "Sólo lectura",
+  "Library read-only": "Biblioteca de solo lectura",
   "Open Preferences": "Abrir Preferencias",
   "USB": "USB",
   "USBs": "USB",

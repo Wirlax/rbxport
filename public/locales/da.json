@@ -1201,7 +1201,7 @@
   "mixer": "mixer",
   "MIXER": "BLANDER",
   "LINK CUE": "LINK CUE",
-  "Read-only": "Skrivebeskyttet",
+  "Library read-only": "Skrivebeskyttet bibliotek",
   "Open Preferences": "Åbn Præferencer",
   "USB": "USB",
   "USBs": "USB'er",
