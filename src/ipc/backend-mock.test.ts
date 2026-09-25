@@ -43,6 +43,39 @@ describe("mock edits", () => {
     expect(after).toHaveLength(before.length - 1);
   });
 
+  it("undoes and redoes a folder deletion with its subtree", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createFolder("Sets", TREE_ROOT);
+    const folder = (await backend.playlistTree()).find((n) => n.name === "Sets")!;
+    await backend.edits.createPlaylist("Friday", folder.id);
+    const playlist = (await backend.playlistTree()).find((n) => n.name === "Friday")!;
+    await backend.edits.addTracksToPlaylist(playlist.id, ["100000", "100001"]);
+
+    const deleted = await backend.edits.deletePlaylist(folder.id);
+    expect(deleted).toMatchObject({ canUndo: true, canRedo: false });
+    expect((await backend.playlistTree()).some((n) => n.id === playlist.id)).toBe(false);
+
+    const undone = await backend.edits.undoPlaylistDelete();
+    expect(undone).toMatchObject({ canRedo: true });
+    expect((await backend.playlistTree()).find((n) => n.id === playlist.id)?.depth).toBe(folder.depth + 1);
+
+    const redone = await backend.edits.redoPlaylistDelete();
+    expect(redone).toMatchObject({ canUndo: true, canRedo: false });
+    expect((await backend.playlistTree()).some((n) => n.id === playlist.id)).toBe(false);
+  });
+
+  it("clears playlist redo when a new edit branches from an undo", async () => {
+    const backend = createMockBackend({ trackCount: 20 });
+    await backend.edits.createPlaylist("Doomed", TREE_ROOT);
+    const doomed = (await backend.playlistTree()).find((n) => n.name === "Doomed")!;
+    await backend.edits.deletePlaylist(doomed.id);
+    await backend.edits.undoPlaylistDelete();
+
+    await backend.edits.renamePlaylist(doomed.id, "Kept");
+    await expect(backend.edits.redoPlaylistDelete()).rejects.toThrow("no playlist deletion");
+    expect((await backend.playlistTree()).find((n) => n.id === doomed.id)?.name).toBe("Kept");
+  });
+
   it("does not add a track that is already in the playlist", async () => {
     const backend = createMockBackend({ trackCount: 20 });
     await backend.edits.createPlaylist("Set", TREE_ROOT);

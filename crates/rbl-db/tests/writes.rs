@@ -319,6 +319,37 @@ fn deleting_a_folder_takes_its_whole_subtree_and_the_memberships() {
 }
 
 #[test]
+fn a_playlist_deletion_can_be_undone_and_redone_exactly() {
+    let mut f = fixture();
+    let before = f.children(ROOT);
+    let outer = f.writer.create_folder("Outer", ROOT).unwrap();
+    let inner = f.writer.create_folder("Inner", &outer).unwrap();
+    let list = f.writer.create_playlist("Deep list", &inner).unwrap();
+    let tracks = [track_id(0), track_id(1), track_id(2)];
+    f.writer.add_tracks(&list, &tracks).unwrap();
+    // This old tombstone must stay deleted when the later playlist deletion
+    // is undone.
+    f.writer.remove_tracks(&list, &[tracks[1].clone()]).unwrap();
+
+    let (_, deletion) = f.writer.delete_playlist_with_undo(&outer).unwrap();
+    assert_eq!(deletion.playlist_ids.len(), 3);
+    assert_eq!(deletion.membership_ids.len(), 2);
+    assert_eq!(f.children(ROOT), before);
+
+    f.writer.restore_playlist(&deletion).unwrap();
+    let mut restored_root = before.clone();
+    restored_root.push(outer.clone());
+    assert_eq!(f.children(ROOT), restored_root);
+    assert_eq!(f.children(&outer), [inner.clone()]);
+    assert_eq!(f.children(&inner), [list.clone()]);
+    assert_eq!(f.order(&list), [tracks[0].clone(), tracks[2].clone()]);
+
+    f.writer.redo_playlist_deletion(&deletion).unwrap();
+    assert_eq!(f.children(ROOT), before);
+    assert!(f.order(&list).is_empty());
+}
+
+#[test]
 fn a_delete_is_always_soft() {
     // rekordbox's sync relies on the tombstone; a real DELETE loses it.
     let mut f = fixture();

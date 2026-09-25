@@ -22,6 +22,7 @@ const MAX_VIEWS: usize = 16;
 
 pub struct AppState {
     pub(crate) edit_gate: parking_lot::ReentrantMutex<()>,
+    pub(crate) playlist_history: parking_lot::Mutex<PlaylistHistory>,
     pub(crate) analysis_write: parking_lot::Mutex<()>,
     pub(crate) backup_progress: parking_lot::Mutex<crate::backups::BackupProgress>,
     pub(crate) backup_sizes: parking_lot::Mutex<crate::backup_sizes::SizeCache>,
@@ -35,6 +36,34 @@ pub struct AppState {
     /// rather than reopened per selection. A `Mutex`, not `RwLock`, because a
     /// `rusqlite::Connection` is `Send` and not `Sync`.
     reader: parking_lot::Mutex<Option<rbl_db::Library>>,
+}
+
+/// Session history for destructive tree edits. The database rows themselves
+/// are the source of truth; these tokens only identify the exact tombstones
+/// made by each delete.
+#[derive(Default)]
+pub(crate) struct PlaylistHistory {
+    pub(crate) undo: Vec<rbl_db::write::PlaylistDeletion>,
+    pub(crate) redo: Vec<rbl_db::write::PlaylistDeletion>,
+}
+
+impl PlaylistHistory {
+    const LIMIT: usize = 50;
+
+    pub(crate) fn record(&mut self, deletion: rbl_db::write::PlaylistDeletion) {
+        if deletion.is_empty() {
+            return;
+        }
+        self.undo.push(deletion);
+        if self.undo.len() > Self::LIMIT {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    pub(crate) fn clear_redo(&mut self) {
+        self.redo.clear();
+    }
 }
 
 #[derive(Default)]
@@ -87,6 +116,7 @@ impl AppState {
         let backup_destination = rbl_backup::default_destination(&backup_dir);
         Self {
             edit_gate: parking_lot::ReentrantMutex::new(()),
+            playlist_history: parking_lot::Mutex::new(PlaylistHistory::default()),
             analysis_write: parking_lot::Mutex::new(()),
             backup_progress: parking_lot::Mutex::new(crate::backups::BackupProgress::default()),
             backup_sizes: parking_lot::Mutex::new(crate::backup_sizes::SizeCache::default()),

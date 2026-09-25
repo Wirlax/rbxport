@@ -3,6 +3,12 @@ import { setHistoryMenu } from "@/ipc/client";
 
 export type HistoryAction = "undo" | "redo";
 const EVENT = "deck-edit-history";
+const available = new Map<symbol, { undo: boolean; redo: boolean }>();
+
+/** Whether a focused editor currently owns this history action. */
+export function hasEditHistory(action: HistoryAction): boolean {
+  return [...available.values()].some((entry) => entry[action]);
+}
 
 /** Native Edit menu commands follow focus, just like typing shortcuts. */
 export function runEditHistory(action: HistoryAction): void {
@@ -19,6 +25,8 @@ export function listenEditHistory(
   undo: string | null = null,
   redo: string | null = null,
 ): () => void {
+  const token = Symbol("edit-history");
+  available.set(token, { undo: undo !== null, redo: redo !== null });
   const listener = (event: Event) => handle((event as CustomEvent<HistoryAction>).detail);
   const updateLabels = () => {
     const typing = isTyping(document.activeElement);
@@ -29,6 +37,7 @@ export function listenEditHistory(
   document.addEventListener("focusout", updateLabels);
   updateLabels();
   return () => {
+    available.delete(token);
     window.removeEventListener(EVENT, listener);
     document.removeEventListener("focusin", updateLabels);
     document.removeEventListener("focusout", updateLabels);

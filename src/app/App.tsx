@@ -23,7 +23,7 @@ import { StatusBar } from "@/views/statusbar/StatusBar";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { detectPlatform, dispatch, isTyping, menuAccelerator } from "@/lib/shortcuts";
-import { runEditHistory } from "@/lib/editHistory";
+import { hasEditHistory, runEditHistory } from "@/lib/editHistory";
 import { gainToKnob, KNOB_FULL, knobToGain } from "@/lib/volume";
 import { clampWidth, TREE_BOUNDS } from "@/lib/splitter";
 import { exportSummary } from "@/lib/exportSummary";
@@ -137,6 +137,7 @@ function AppBody() {
   const [restored] = useState(loadSession);
 
   const [tree, setTree] = useState<readonly TreeNode[]>(restored.tree);
+  const [playlistHistory, setPlaylistHistory] = useState({ canUndo: false, canRedo: false });
   // Connected volumes. Asked for, never polled: a 1 Hz scan of every mount
   // point is exactly the kind of idle work the budgets forbid.
   const [devices, setDevices] = useState<readonly Device[]>([]);
@@ -969,11 +970,15 @@ function AppBody() {
   );
 
   const write = useCallback(
-    (run: (backend: Backend) => Promise<string>) => {
+    (run: (backend: Backend) => Promise<string>, preservesPlaylistRedo = false) => {
       void (async () => {
         const backend = await getBackend();
         try {
-          await afterWrite(await run(backend));
+          const said = await run(backend);
+          if (!preservesPlaylistRedo) {
+            setPlaylistHistory((history) => history.canRedo ? { ...history, canRedo: false } : history);
+          }
+          await afterWrite(said);
         } catch (e) {
           refuse(e instanceof Error ? e.message : "That could not be saved.");
         }
@@ -1124,12 +1129,26 @@ function AppBody() {
   const deleteNode = useCallback(
     (node: TreeNode) => {
       write(async (backend) => {
-        await backend.edits.deletePlaylist(node.id);
+        const history = await backend.edits.deletePlaylist(node.id);
+        setPlaylistHistory({ canUndo: history.canUndo, canRedo: history.canRedo });
         if (selectedNode?.id === node.id) setSelectedNode(null);
         return `Deleted ${node.name}.`;
       });
     },
     [write, selectedNode],
+  );
+
+  const runPlaylistHistory = useCallback(
+    (action: "undo" | "redo") => {
+      write(async (backend) => {
+        const history = action === "undo"
+          ? await backend.edits.undoPlaylistDelete()
+          : await backend.edits.redoPlaylistDelete();
+        setPlaylistHistory({ canUndo: history.canUndo, canRedo: history.canRedo });
+        return action === "undo" ? "Restored deleted playlist." : "Deleted playlist again.";
+      }, true);
+    },
+    [write],
   );
 
   const renameNode = useCallback(
@@ -1514,6 +1533,15 @@ function AppBody() {
   // webview keeps the accelerators from the native menu.
   const runMenu = useCallback((id: string) => {
     if (id === "undo" || id === "redo") {
+      const action = id;
+      const canRunPlaylist = action === "undo" ? playlistHistory.canUndo : playlistHistory.canRedo;
+      // Text fields keep WebKit's own history, and an armed grid editor owns
+      // its labelled history. Otherwise the latest destructive tree edit is
+      // the app-level action.
+      if (!isTyping(document.activeElement) && !hasEditHistory(action) && canRunPlaylist) {
+        runPlaylistHistory(action);
+        return;
+      }
       runEditHistory(id);
       return;
     }
@@ -1565,6 +1593,7 @@ function AppBody() {
   }, [
     readOnly, advancedPrefs.protectLibrary, importFromMenu, importXmlFromMenu, exportXmlFromMenu, refuse,
     openPreferences, checkForUpdates, prefs, viewPrefs.tempoSlider, openReport,
+    playlistHistory, runPlaylistHistory,
   ]);
 
   // Native menu clicks.

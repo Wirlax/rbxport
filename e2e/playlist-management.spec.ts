@@ -187,6 +187,15 @@ test("deleting a playlist takes it out of the tree and the view moves off it", a
   await expect(page.getByTestId("browser-title")).not.toContainText("New playlist");
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
 
+  // Fire the native Edit menu callback exposed by the mock. Undo restores
+  // the identical tree node; redo removes it again.
+  await page.evaluate(() => (window as unknown as { __menu?: (id: string) => void }).__menu?.("undo"));
+  await expect(page.getByRole("contentinfo")).toContainText("Restored deleted playlist.");
+  await expect(item(page, "New playlist")).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __menu?: (id: string) => void }).__menu?.("redo"));
+  await expect(page.getByRole("contentinfo")).toContainText("Deleted playlist again.");
+  await expect(page.getByRole("treeitem").filter({ hasText: "New playlist" })).toHaveCount(0);
+
   // A playlist that was there from the start goes the same way.
   await chooseFromTreeMenu(page, item(page, "Drum and Bass"), "Delete Playlist");
   await expect(page.getByRole("treeitem").filter({ hasText: "Drum and Bass" })).toHaveCount(0);

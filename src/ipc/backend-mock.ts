@@ -476,6 +476,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     return candidates;
   };
   const tree = makeTree();
+  type PlaylistDeletion = {
+    index: number;
+    nodes: TreeNode[];
+    memberships: Map<string, string[]>;
+  };
+  const playlistUndo: PlaylistDeletion[] = [];
+  const playlistRedo: PlaylistDeletion[] = [];
 
   const views = new Map<number, { order: Uint32Array; gen: number }>();
   // A folder's rows, held whole: a folder is a few files here and a few
@@ -490,7 +497,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
    * Every edit bumps the generation and tells anyone listening, exactly as a
    * real write does — the backend reloads and emits `library:changed`.
    */
-  const bump = (): Promise<number> => {
+  const bump = (clearPlaylistRedo = true): Promise<number> => {
+    if (clearPlaylistRedo) playlistRedo.length = 0;
     generation += 1;
     // The counts the tree shows follow the edit, as the re-read tree does.
     for (const node of tree) {
@@ -804,11 +812,49 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       tree.splice(to < 0 ? tree.length : to, 0, ...moving);
       return bump();
     },
-    deletePlaylist: (id) => {
+    deletePlaylist: async (id) => {
       const at = tree.findIndex((n) => n.id === id);
-      if (at >= 0) tree.splice(at, 1);
-      membership.delete(id);
-      return bump();
+      if (at < 0) throw new Error(`no playlist or folder ${id}`);
+      const nodes = tree.splice(at, subtreeLength(at));
+      const memberships = new Map<string, string[]>();
+      for (const node of nodes) {
+        const tracks = membership.get(node.id);
+        if (tracks) memberships.set(node.id, [...tracks]);
+        membership.delete(node.id);
+      }
+      playlistUndo.push({ index: at, nodes, memberships });
+      if (playlistUndo.length > 50) playlistUndo.shift();
+      playlistRedo.length = 0;
+      const next = await bump(false);
+      return { generation: next, canUndo: true, canRedo: false };
+    },
+    undoPlaylistDelete: async () => {
+      const deletion = playlistUndo.pop();
+      if (!deletion) throw new Error("There is no playlist deletion to undo.");
+      tree.splice(Math.min(deletion.index, tree.length), 0, ...deletion.nodes);
+      for (const [id, tracks] of deletion.memberships) membership.set(id, [...tracks]);
+      playlistRedo.push(deletion);
+      const next = await bump(false);
+      return {
+        generation: next,
+        canUndo: playlistUndo.length > 0,
+        canRedo: true,
+      };
+    },
+    redoPlaylistDelete: async () => {
+      const deletion = playlistRedo.pop();
+      if (!deletion) throw new Error("There is no playlist deletion to redo.");
+      const at = tree.findIndex((node) => node.id === deletion.nodes[0]?.id);
+      if (at < 0) throw new Error("that playlist deletion can no longer be redone");
+      tree.splice(at, deletion.nodes.length);
+      for (const node of deletion.nodes) membership.delete(node.id);
+      playlistUndo.push(deletion);
+      const next = await bump(false);
+      return {
+        generation: next,
+        canUndo: true,
+        canRedo: playlistRedo.length > 0,
+      };
     },
     addTracksToPlaylist: (playlist, tracks) => {
       // The real backend refuses while Rekordbox holds the database; the mock

@@ -57,6 +57,15 @@ pub struct TreeNodeDto {
     pub child_count: Option<u32>,
 }
 
+/// Playlist-deletion history after a delete, undo, or redo.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistHistoryDto {
+    pub generation: u32,
+    pub can_undo: bool,
+    pub can_redo: bool,
+}
+
 /// One output the audio could go to.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

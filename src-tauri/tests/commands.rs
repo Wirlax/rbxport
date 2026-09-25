@@ -425,6 +425,41 @@ fn a_playlist_is_made_filled_reordered_renamed_moved_and_deleted() {
 }
 
 #[test]
+fn a_deleted_playlist_tree_can_be_undone_and_redone() {
+    let s = shell();
+    run(commands::create_folder(s.handle(), s.state(), "Sets".into(), ROOT.into())).unwrap();
+    let folder = s.node("Sets");
+    run(commands::create_playlist(s.handle(), s.state(), "Friday".into(), folder.id.clone())).unwrap();
+    let playlist = s.node("Friday");
+    let tracks = vec![track_id(0), track_id(1)];
+    run(commands::add_tracks_to_playlist(
+        s.handle(),
+        s.state(),
+        playlist.id.clone(),
+        tracks.clone(),
+    )).unwrap();
+
+    let deleted = run(commands::delete_playlist(s.handle(), s.state(), folder.id.clone())).unwrap();
+    assert!(deleted.can_undo);
+    assert!(!deleted.can_redo);
+    assert!(!s.has_node("Sets"));
+    assert!(!s.has_node("Friday"));
+
+    let undone = run(commands::undo_playlist_delete(s.handle(), s.state())).unwrap();
+    assert!(!undone.can_undo);
+    assert!(undone.can_redo);
+    assert_eq!(s.node("Sets").id, folder.id);
+    assert_eq!(s.node("Friday").id, playlist.id);
+    assert_eq!(ids(&s.playlist_rows(&playlist.id)), [tracks[0].as_str(), tracks[1].as_str()]);
+
+    let redone = run(commands::redo_playlist_delete(s.handle(), s.state())).unwrap();
+    assert!(redone.can_undo);
+    assert!(!redone.can_redo);
+    assert!(!s.has_node("Sets"));
+    assert!(!s.has_node("Friday"));
+}
+
+#[test]
 fn every_edit_bumps_the_generation_and_tells_the_interface() {
     let s = shell();
     let (_, _, _, start) = s.state().summary();

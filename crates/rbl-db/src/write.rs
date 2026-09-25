@@ -269,6 +269,24 @@ pub struct Changed {
     pub usn: i64,
 }
 
+/// The exact tombstones made by one playlist deletion.
+///
+/// Keeping row ids, rather than only the deleted root, matters for undo: a
+/// playlist can already contain old membership tombstones, and restoring all
+/// rows that point at it would bring previously removed tracks back too.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistDeletion {
+    pub playlist_ids: Vec<String>,
+    pub membership_ids: Vec<String>,
+}
+
+impl PlaylistDeletion {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.playlist_ids.is_empty()
+    }
+}
+
 impl Writer {
     /// Opens the library for writing and prepares the backup directory.
     ///
@@ -472,10 +490,24 @@ impl Writer {
     ///
     /// Never `DELETE`: rekordbox's own sync relies on the tombstone.
     pub fn delete_playlist(&mut self, id: &str) -> Result<Changed> {
+        self.delete_playlist_with_undo(id).map(|(changed, _)| changed)
+    }
+
+    /// Deletes a playlist and returns the exact rows needed to undo it.
+    pub fn delete_playlist_with_undo(&mut self, id: &str) -> Result<(Changed, PlaylistDeletion)> {
         self.prepare()?;
         let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let exists = tx.query_row(
+            "SELECT 1 FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![id],
+            |_| Ok(()),
+        ).optional()?.is_some();
+        if !exists {
+            return Err(DbError::WriteRefused(format!("no playlist or folder {id}")));
+        }
 
         // Collect the subtree first: deleting as we walk would hide children
         // from the walk.
@@ -494,6 +526,18 @@ impl Writer {
             }
         }
 
+        let mut membership_ids = Vec::new();
+        for node in &doomed {
+            let mut stmt = tx.prepare(
+                "SELECT ID FROM djmdSongPlaylist
+                 WHERE PlaylistID = ?1 AND rb_local_deleted = 0",
+            )?;
+            membership_ids.extend(
+                stmt.query_map(params![node], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+        }
+
         let mut rows = 0;
         let mut usn = 0;
         for node in &doomed {
@@ -509,6 +553,90 @@ impl Writer {
                     updated_at = ?2 WHERE ID = ?3 AND rb_local_deleted = 0",
                 params![usn, stamp, node],
             )?;
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok((Changed { rows, usn }, PlaylistDeletion {
+            playlist_ids: doomed,
+            membership_ids,
+        }))
+    }
+
+    /// Restores exactly the rows made into tombstones by a deletion.
+    pub fn restore_playlist(&mut self, deletion: &PlaylistDeletion) -> Result<Changed> {
+        self.set_playlist_deletion(deletion, false)
+    }
+
+    /// Reapplies a deletion after it has been undone.
+    pub fn redo_playlist_deletion(&mut self, deletion: &PlaylistDeletion) -> Result<Changed> {
+        self.set_playlist_deletion(deletion, true)
+    }
+
+    fn set_playlist_deletion(&mut self, deletion: &PlaylistDeletion, deleted: bool) -> Result<Changed> {
+        if deletion.is_empty() {
+            return Err(DbError::WriteRefused("empty playlist deletion history".to_owned()));
+        }
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let from = i64::from(!deleted);
+        let to = i64::from(deleted);
+        let mut rows = 0;
+        let mut usn = 0;
+
+        // Foreign-key order even though the reference schema does not enforce
+        // it: children disappear first and return only after their playlist.
+        if !deleted {
+            for id in &deletion.playlist_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                }
+                rows += changed;
+            }
+            for id in &deletion.membership_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                }
+                rows += changed;
+            }
+        } else {
+            for id in &deletion.membership_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                }
+                rows += changed;
+            }
+            for id in &deletion.playlist_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                }
+                rows += changed;
+            }
         }
         set_counter(&tx, usn)?;
         tx.commit()?;

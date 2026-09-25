@@ -15,7 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::link::LinkStatusDto;
 use crate::dto::{
     cue_colour_css, AudioDeviceDto, AudioDevicesDto, CueDto, DeviceDto, DeviceExportDto, ExportReportDto,
-    ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, RowDto,
+    ImportReportDto, LibrarySummaryDto, LimiterDto, MissingTrackDto, MissingTracksDto, PhraseDto, PlaylistHistoryDto, RowDto,
     TreeNodeDto, ViewHandleDto, ViewSpecDto,
     BackupDto, CountedDto, DeviceSyncStateDto, DuplicateGroupDto, DuplicateTrackDto, DuplicatesDto,
     ExportProgressDto, FilterValuesDto, MissingExportFileDto, SmartConditionDto, SmartRuleDto, SyncDeviceReportDto, SyncPlaylistDto, SyncProgressDto, TagCategoryDto,
@@ -582,7 +582,11 @@ where
 {
     let state = Arc::clone(&state);
     let generation = blocking(name, move || {
-        state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)
+        let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
+        // A new edit after an undo starts a new branch. Deletions use their
+        // own command below so they can add an entry as well as clear redo.
+        state.playlist_history.lock().clear_redo();
+        Ok(generation)
     }).await?;
     let _ = tauri::Emitter::emit(&app, "library:changed", generation);
     Ok(generation)
@@ -2573,8 +2577,63 @@ pub async fn delete_playlist<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     id: String,
-) -> AppResult<u32> {
-    edit(app, state, "delete_playlist", Touched::Playlists, move |w| w.delete_playlist(&id).map(|_| ())).await
+) -> AppResult<PlaylistHistoryDto> {
+    let state = Arc::clone(&state);
+    let (generation, can_undo, can_redo) = blocking("delete_playlist", move || {
+        let mut history = state.playlist_history.lock();
+        let (generation, deletion) = state.write_then(
+            move |w| w.delete_playlist_with_undo(&id),
+            |db, (_, deletion)| refresh_after_edit(&state, db, Touched::Playlists).map(|generation| (generation, deletion)),
+        ).map_err(write_error)?;
+        history.record(deletion);
+        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
+}
+
+#[tauri::command]
+pub async fn undo_playlist_delete<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<PlaylistHistoryDto> {
+    let state = Arc::clone(&state);
+    let (generation, can_undo, can_redo) = blocking("undo_playlist_delete", move || {
+        let mut history = state.playlist_history.lock();
+        let deletion = history.undo.last().cloned()
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no playlist deletion to undo."))?;
+        let generation = state.write_then(
+            |w| w.restore_playlist(&deletion),
+            |db, _| refresh_after_edit(&state, db, Touched::Playlists),
+        ).map_err(write_error)?;
+        history.undo.pop();
+        history.redo.push(deletion);
+        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
+}
+
+#[tauri::command]
+pub async fn redo_playlist_delete<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<PlaylistHistoryDto> {
+    let state = Arc::clone(&state);
+    let (generation, can_undo, can_redo) = blocking("redo_playlist_delete", move || {
+        let mut history = state.playlist_history.lock();
+        let deletion = history.redo.last().cloned()
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "There is no playlist deletion to redo."))?;
+        let generation = state.write_then(
+            |w| w.redo_playlist_deletion(&deletion),
+            |db, _| refresh_after_edit(&state, db, Touched::Playlists),
+        ).map_err(write_error)?;
+        history.redo.pop();
+        history.undo.push(deletion);
+        Ok((generation, !history.undo.is_empty(), !history.redo.is_empty()))
+    }).await?;
+    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    Ok(PlaylistHistoryDto { generation, can_undo, can_redo })
 }
 
 #[tauri::command]

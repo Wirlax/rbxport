@@ -551,6 +551,8 @@ pub fn run() {
             commands::rename_playlist,
             commands::move_playlist,
             commands::delete_playlist,
+            commands::undo_playlist_delete,
+            commands::redo_playlist_delete,
             commands::add_tracks_to_playlist,
             commands::reload_tags,
             commands::add_to_tag_list,

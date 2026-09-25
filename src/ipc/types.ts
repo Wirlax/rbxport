@@ -1285,6 +1285,13 @@ export interface SmartCondition {
   unit: string;
 }
 
+/** Playlist deletion history after a delete, undo, or redo. */
+export interface PlaylistHistoryState {
+  generation: number;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
 export interface Edits {
   createPlaylist(name: string, parent: string): Promise<number>;
   /** Create New Intelligent Playlist: a rule under `parent`. */
@@ -1300,7 +1307,9 @@ export interface Edits {
    * the node has been lifted out of wherever it was. Omitted, it is appended.
    */
   movePlaylist(id: string, parent: string, index?: number): Promise<number>;
-  deletePlaylist(id: string): Promise<number>;
+  deletePlaylist(id: string): Promise<PlaylistHistoryState>;
+  undoPlaylistDelete(): Promise<PlaylistHistoryState>;
+  redoPlaylistDelete(): Promise<PlaylistHistoryState>;
   addTracksToPlaylist(playlist: string, tracks: string[]): Promise<number>;
   /** Reload Tag: the files' tags read again over the rows. */
   reloadTags(tracks: string[]): Promise<number>;
