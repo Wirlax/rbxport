@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.0.0-rc.3",
+    "date": "2026-09-25",
+    "changes": [
+      "(New) Undo and redo playlist renames, moves, deletions and track removals, plus track metadata, rating, comment, colour and My Tag edits.",
+      "(New) See release notes before updating and get a persistent prompt when a downloaded update is ready to install.",
+      "(Improved) Each deck's waveform zoom is remembered across sessions.",
+      "(Improved) Scrubbing opens to full-frequency audio at normal playback speed.",
+      "(Fixed) A playing deck immediately plays the next loaded track, even when tracks are switched rapidly.",
+      "(Fixed) The inline BPM editor stays the same compact width as its readout.",
+      "(Fixed) Switching to a shorter playlist no longer leaves old track rows painted below the list.",
+      "(Fixed) USB waveform settings such as RGB can be changed while rekordbox is running; the status badge now clarifies that only library editing is read-only."
+    ]
+  },
+  {
     "version": "1.0.0-rc.2",
     "date": "2026-09-25",
     "changes": [
