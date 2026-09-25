@@ -75,6 +75,11 @@ the library is opened.
 
 ## Development
 
+To expose the session-only read-only override, launch with
+`RBX_DISABLE_READ_ONLY=1`. When rekordbox is running, double-click the
+Read-only badge to arm writes for that rbxport process. This can allow both
+applications to write the same library, so it is intentionally not persisted.
+
 `pnpm build` obfuscates application JavaScript and omits source maps; Tauri's
 installer builds run this automatically. Third-party dependencies stay minified
 without obfuscation, and `pnpm dev` remains readable. The output is JavaScript

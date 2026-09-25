@@ -26,6 +26,7 @@ export interface StatusBarProps {
   /** Library Protection in Preferences is why, rather than rekordbox running. */
   protectedLibrary?: boolean;
   onExplainReadOnly?: (() => void) | undefined;
+  onDisableReadOnly?: (() => void) | undefined;
   onOpenProtection?: (() => void) | undefined;
   onReportBug?: (() => void) | undefined;
   onSupport?: (() => void) | undefined;
@@ -49,6 +50,7 @@ export function StatusBar({
   readOnly = false,
   protectedLibrary = false,
   onExplainReadOnly,
+  onDisableReadOnly,
   onOpenProtection,
   onReportBug,
   onSupport,
@@ -90,7 +92,8 @@ export function StatusBar({
         {version === null ? null : <> <span className={styles.version}>{version}</span></>}
       </span>
       {readOnly ? (
-        <button type="button" className={styles.readOnly} title={refusal(protectedLibrary)} onClick={onExplainReadOnly}>
+        <button type="button" className={styles.readOnly} title={refusal(protectedLibrary)}
+          onClick={onExplainReadOnly} onDoubleClick={onDisableReadOnly}>
           Read-only
         </button>
       ) : null}

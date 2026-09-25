@@ -449,6 +449,7 @@ pub fn run() {
             file_drag::drag_tracks,
             menu::set_history_menu,
             commands::library_summary,
+            commands::disable_read_only,
             new_library::library_problem,
             new_library::create_library,
             commands::playlist_tree,

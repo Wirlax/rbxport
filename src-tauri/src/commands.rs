@@ -68,7 +68,7 @@ pub async fn library_summary(state: State<'_, Arc<AppState>>) -> AppResult<Libra
         // The UI refreshes this while open; startup's process state is stale
         // as soon as rekordbox launches or exits. Fixtures keep their own gate.
         let read_only = if is_real_install {
-            rbl_db::is_rekordbox_running()
+            rbl_db::is_rekordbox_running() && !rbl_db::unsafe_writes_enabled()
         } else {
             read_only
         };
@@ -81,6 +81,20 @@ pub async fn library_summary(state: State<'_, Arc<AppState>>) -> AppResult<Libra
         })
     })
     .await
+}
+
+/// Removes the rekordbox-running write gate for this process. This deliberately
+/// requires both an environment opt-in and an explicit gesture in the UI.
+#[tauri::command]
+pub fn disable_read_only() -> AppResult<()> {
+    if rbl_db::enable_unsafe_writes() {
+        Ok(())
+    } else {
+        Err(AppError::internal(format!(
+            "Set {} before launching rbxport to enable this override.",
+            rbl_db::UNSAFE_WRITES_ENV
+        )))
+    }
 }
 
 #[tauri::command]

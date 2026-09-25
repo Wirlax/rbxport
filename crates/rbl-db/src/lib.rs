@@ -22,9 +22,31 @@ pub mod write;
 pub mod xml;
 mod schema;
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use rusqlite::{Connection, OpenFlags};
+
+/// Opts a deliberately launched app into the manual, session-only write override.
+pub const UNSAFE_WRITES_ENV: &str = "RBX_DISABLE_READ_ONLY";
+
+static UNSAFE_WRITES_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Arms writes while rekordbox is running, but only for a process explicitly
+/// launched with [`UNSAFE_WRITES_ENV`]. The choice is not persisted.
+pub fn enable_unsafe_writes() -> bool {
+    if std::env::var_os(UNSAFE_WRITES_ENV).is_none() {
+        return false;
+    }
+    UNSAFE_WRITES_ENABLED.store(true, Ordering::Release);
+    true
+}
+
+pub fn unsafe_writes_enabled() -> bool {
+    UNSAFE_WRITES_ENABLED.load(Ordering::Acquire)
+}
 use serde::{Deserialize, Serialize};
 
 pub use schema::{SchemaProbe, SchemaSupport};
@@ -192,7 +214,7 @@ pub fn write_refusal_reason(
     if test_mode {
         return Some("RB_LITE_TEST is set and this is the real library; tests must copy a fixture first");
     }
-    if rekordbox_running {
+    if rekordbox_running && !unsafe_writes_enabled() {
         return Some("rekordbox is running. Quit it before making changes.");
     }
     None

@@ -182,6 +182,8 @@ export interface Backend {
   /** The installed rekordbox browseSetting.xml, when present. Read-only. */
   rekordboxBrowseSettings(): Promise<string | null>;
   librarySummary(): Promise<LibrarySummary>;
+  /** Session-only escape hatch, available only when the native process opted in. */
+  disableReadOnly(): Promise<void>;
   playlistTree(): Promise<TreeNode[]>;
   openView(spec: ViewSpec): Promise<ViewHandle>;
   fetchRows(viewId: number, offset: number, len: number, extraColumns?: readonly string[]): Promise<RowDto[]>;

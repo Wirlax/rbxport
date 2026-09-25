@@ -80,6 +80,7 @@ async function realBackend(): Promise<Backend> {
   return {
     rekordboxBrowseSettings: () => invoke<string | null>("rekordbox_browse_settings"),
     librarySummary: () => invoke<LibrarySummary>("library_summary"),
+    disableReadOnly: () => invoke<void>("disable_read_only"),
     playlistTree: () => invoke<TreeNode[]>("playlist_tree"),
     openView: (spec) => invoke<ViewHandle>("open_view", { spec }),
     fetchRows: (viewId, offset, len, extraColumns) => invoke<RowDto[]>("fetch_rows", { viewId, offset, len, extraColumns }),

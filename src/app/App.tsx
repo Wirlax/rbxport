@@ -2368,6 +2368,16 @@ function AppBody() {
         readOnly={readOnly}
         protectedLibrary={advancedPrefs.protectLibrary}
         onExplainReadOnly={() => { setPlayerError(null); explainEditLock(); }}
+        onDisableReadOnly={() => {
+          if (advancedPrefs.protectLibrary) {
+            explainEditLock();
+            return;
+          }
+          void getBackend().then(backend => backend.disableReadOnly()).then(() => {
+            setSummary(current => current ? { ...current, readOnly: false } : current);
+            setNote({ text: "Read-only mode disabled for this session.", failed: false });
+          }).catch(error => refuse(error instanceof Error ? error.message : String(error)));
+        }}
       />
     </div>
     </PreferencesProvider>
