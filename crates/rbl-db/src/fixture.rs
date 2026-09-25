@@ -274,7 +274,7 @@ pub fn point_at_audio(location: &LibraryLocation, index: usize, path: &str, seco
         "UPDATE djmdContent SET FolderPath = ?1, FileNameL = ?2, Title = ?3, Length = ?4 WHERE ID = ?5",
         params![path, name, stem, seconds, track_id(index)],
     )?;
-    Ok(())
+    mark_changed(&conn, index)
 }
 
 /// Points a fixture track's `AnalysisDataPath` at a file under the share
@@ -286,7 +286,7 @@ pub fn set_analysis_path(location: &LibraryLocation, index: usize, relative: &st
         "UPDATE djmdContent SET AnalysisDataPath = ?1 WHERE ID = ?2",
         params![relative, track_id(index)],
     )?;
-    Ok(())
+    mark_changed(&conn, index)
 }
 
 /// Sets a fixture track's tempo, BPM x100 as the column holds it, so a row
@@ -294,7 +294,7 @@ pub fn set_analysis_path(location: &LibraryLocation, index: usize, relative: &st
 pub fn set_tempo(location: &LibraryLocation, index: usize, bpm_x100: u32) -> Result<()> {
     let conn = open_fixture(location)?;
     conn.execute("UPDATE djmdContent SET BPM = ?1 WHERE ID = ?2", params![bpm_x100, track_id(index)])?;
-    Ok(())
+    mark_changed(&conn, index)
 }
 
 /// Writes the `options.json` rekordbox's agent would keep for this library,
@@ -309,6 +309,23 @@ pub fn write_options_json(to: &Path, master_db_as: &str, passphrase: &str) -> Re
 }
 
 /// A fixture's database, keyed, for one more statement.
+/// Marks a track row as changed the way rekordbox does: the next update
+/// number on the row and in `agentRegistry.localUpdateCount`.
+///
+/// Without it an edit made after [`build`] leaves the library's change counter
+/// where it was, and the app's index snapshot, which is keyed to that counter
+/// and the database's path, is served in its place wherever the fixture is
+/// rebuilt at the same path — as it is on the Windows test host.
+fn mark_changed(conn: &Connection, index: usize) -> Result<()> {
+    let usn = crate::write::next_usn(conn)?;
+    conn.execute("UPDATE djmdContent SET rb_local_usn = ?1 WHERE ID = ?2", params![usn, track_id(index)])?;
+    conn.execute(
+        "UPDATE agentRegistry SET int_1 = ?1 WHERE registry_id = 'localUpdateCount'",
+        params![usn],
+    )?;
+    Ok(())
+}
+
 fn open_fixture(location: &LibraryLocation) -> Result<Connection> {
     let conn = Connection::open(&location.master_db)
         .map_err(|e| DbError::Open(format!("{}: {e}", location.master_db.display())))?;
