@@ -83,7 +83,9 @@
   z-index: 5;
 }
 .knob svg { width: 100%; height: 100%; display: block; }
-.knob:focus-visible { outline: 1px solid var(--c-accent); outline-offset: 1px; }
+/* Keep keyboard control without drawing the browser's square focus box around
+   a circular control. The blue arc itself remains the knob's visual affordance. */
+.knob:focus-visible { outline: none; }
 
 .knobTrack,
 .knobFill {
