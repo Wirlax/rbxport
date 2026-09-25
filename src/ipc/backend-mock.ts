@@ -1467,6 +1467,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           })
         : notReady(),
     disableReadOnly: () => Promise.reject(new Error("Set RBX_DISABLE_READ_ONLY before launching rbxport to enable this override.")),
+    rememberScreenAssets: () => Promise.resolve(),
 
     // A copy, like the real backend: handing out the internal array lets a
     // caller mutate the backend's own state, and makes a list captured before

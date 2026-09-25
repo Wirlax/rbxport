@@ -27,7 +27,7 @@ const ARTWORK_HOST: &str = "artwork";
 
 /// Refuses anything larger. Real artwork is tens of kilobytes; a file this big
 /// is not album art and should not be read into memory to find out.
-const MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Answers one `rbl://` request.
 pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
@@ -44,7 +44,10 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
     }
 
     let Ok(library) = state.library() else {
-        return status(StatusCode::SERVICE_UNAVAILABLE);
+        // The last visible screen survives a cold start. Its files are
+        // trusted app-owned copies keyed only by numeric id, never paths.
+        return crate::screen_cache::cached_artwork(track_id)
+            .map_or_else(|| status(StatusCode::SERVICE_UNAVAILABLE), image_response);
     };
 
     let Some(relative) = library.artwork_path_of(track_id) else {
@@ -80,11 +83,25 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
         .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR))
 }
 
+fn image_response(bytes: Vec<u8>) -> Response<Vec<u8>> {
+    let content_type = if bytes.starts_with(b"\x89PNG") { "image/png" }
+        else if bytes.starts_with(b"GIF8") { "image/gif" }
+        else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { "image/webp" }
+        else { "image/jpeg" };
+    Response::builder().status(StatusCode::OK)
+        .header("Content-Type", content_type)
+        .header("Access-Control-Allow-Origin", "*")
+        // This is a startup placeholder. The table remounts once the live
+        // library is ready and must be allowed to fetch the authoritative art.
+        .header("Cache-Control", "no-store")
+        .body(bytes).unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR))
+}
+
 /// Joins a share-relative path onto the root, refusing anything that climbs out.
 ///
 /// `ImagePath` comes from the database, so it is not ours to trust: a value
 /// with `..` in it would otherwise read outside the library.
-fn resolve_under(root: &Path, relative: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_under(root: &Path, relative: &str) -> Option<PathBuf> {
     let mut out = root.to_path_buf();
     for part in relative.split(['/', '\\']) {
         match part {

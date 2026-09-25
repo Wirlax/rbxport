@@ -184,6 +184,7 @@ export interface Backend {
   librarySummary(): Promise<LibrarySummary>;
   /** Session-only escape hatch, available only when the native process opted in. */
   disableReadOnly(): Promise<void>;
+  rememberScreenAssets(ids: string[], waveformKind: WaveformKind): Promise<void>;
   playlistTree(): Promise<TreeNode[]>;
   openView(spec: ViewSpec): Promise<ViewHandle>;
   fetchRows(viewId: number, offset: number, len: number, extraColumns?: readonly string[]): Promise<RowDto[]>;

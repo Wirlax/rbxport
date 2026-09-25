@@ -15,6 +15,10 @@ import { usePreferences } from "@/store/usePreferences";
 
 /** Shared across every row: bounded, and released when entries fall out. */
 const cache = new WaveformCache(500);
+
+export function clearWaveformPreviewCache(): void {
+  cache.clear();
+}
 // A re-analysed track's renderings are stale; its rows draw afresh when they
 // next settle. One subscription for the module rather than one per row.
 void getBackend().then((backend) => {
@@ -125,6 +129,8 @@ export interface WaveformPreviewProps {
   hotCues: readonly RowCue[];
   memoryCues?: readonly number[] | undefined;
   durationSec: number;
+  /** Separates cold-start placeholder media from the live library rendering. */
+  startupCache?: boolean;
 }
 
 export const WaveformPreview = memo(function WaveformPreview({
@@ -134,6 +140,7 @@ export const WaveformPreview = memo(function WaveformPreview({
   hotCues,
   memoryCues,
   durationSec,
+  startupCache = false,
 }: WaveformPreviewProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   // View › Color › Waveform color: the row follows the deck's palette, and a
@@ -143,7 +150,7 @@ export const WaveformPreview = memo(function WaveformPreview({
   useEffect(() => {
     let cancelled = false;
     const dpr = window.devicePixelRatio || 1;
-    const key = `${palette}:${WaveformCache.key(trackId, width, dpr)}`;
+    const key = `${startupCache ? "startup" : "live"}:${palette}:${WaveformCache.key(trackId, width, dpr)}`;
 
     const paint = (entry: { bitmap: CanvasImageSource }) => {
       const canvas = ref.current;
@@ -176,7 +183,7 @@ export const WaveformPreview = memo(function WaveformPreview({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [trackId, width, height, hotCues, memoryCues, durationSec, palette, hotCueColor]);
+  }, [trackId, width, height, hotCues, memoryCues, durationSec, palette, hotCueColor, startupCache]);
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   return (

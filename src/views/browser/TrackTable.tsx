@@ -346,7 +346,7 @@ const EditableCell = memo(function EditableCell({
 const TrackRow = memo(function TrackRow({
   row, top, selected, onSelect, onOpen, onDragStart, onDragEnd, index, columns, onRate,
   onComment, onEditField, onEditBlocked, onMenu, keyDisplay, previewCues, clickToEdit, tooltips, trafficKey, trafficReach,
-  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop,
+  reorderable, isLocalDrag, dropEdge, onReorderOver, onReorderDrop, startupCache,
 }: {
   row: RowDto | undefined;
   top: number;
@@ -384,6 +384,7 @@ const TrackRow = memo(function TrackRow({
   dropEdge: "above" | "below" | null;
   onReorderOver: (index: number, below: boolean) => void;
   onReorderDrop: () => void;
+  startupCache: boolean;
 }) {
   const nativePress = useRef<{ x: number; y: number } | null>(null);
   const suppressClick = useRef(false);
@@ -586,6 +587,7 @@ const TrackRow = memo(function TrackRow({
                   hotCues={previewCues ? row.hotCues : NO_CUES}
                   memoryCues={previewCues ? row.memoryCues : undefined}
                   durationSec={row.durationSec}
+                  startupCache={startupCache}
                 />
               ) : null}
             </div>
@@ -1466,6 +1468,7 @@ export const TrackTable = memo(function TrackTable({
                 }
                 onReorderOver={reorderOver}
                 onReorderDrop={reorderDrop}
+                startupCache={seed !== undefined}
               />
             );
           })}

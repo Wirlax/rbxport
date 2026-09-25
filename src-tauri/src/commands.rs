@@ -427,34 +427,50 @@ pub async fn track_waveform(
     from: Option<u32>,
     len: Option<u32>,
 ) -> AppResult<tauri::ipc::Response> {
-    let library = state.library()?;
+    let library = match state.library() {
+        Ok(library) => library,
+        Err(error) => return crate::screen_cache::cached_waveform(&track_id, &kind)
+            .map(tauri::ipc::Response::new)
+            .ok_or(error),
+    };
     let share = state.share_root();
+    blocking("track_waveform", move || waveform_bytes(&library, &share, &track_id, &kind, from, len))
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+pub(crate) fn waveform_bytes(
+    library: &Library,
+    share: &std::path::Path,
+    track_id: &str,
+    kind: &str,
+    from: Option<u32>,
+    len: Option<u32>,
+) -> AppResult<Vec<u8>> {
     let Ok(numeric) = track_id.parse::<u64>() else {
         return Err(AppError::new(ErrorKind::Malformed, "That track id is not valid.")
             .with_detail(format!("track_id {track_id:?}")));
     };
-
-    blocking("track_waveform", move || {
-        // Through the id map, not a scan. `ids` is 38,681 long and a screenful
-        // of rows asks once each, which is the reason `artwork_path_of` was
-        // given the map in the first place; this call was still walking the
-        // whole column for every row a scroll went past.
-        let Some(row) = library.row_of_id(numeric).map(|row| row as usize) else {
-            return Ok(Vec::new());
-        };
-        let analysis_path = library.analysis_path.get(row);
-        if analysis_path.is_empty() {
-            return Ok(Vec::new());
-        }
+    // Through the id map, not a scan. `ids` is 38,681 long and a screenful
+    // of rows asks once each, which is the reason `artwork_path_of` was
+    // given the map in the first place; this call was still walking the
+    // whole column for every row a scroll went past.
+    let Some(row) = library.row_of_id(numeric).map(|row| row as usize) else {
+        return Ok(Vec::new());
+    };
+    let analysis_path = library.analysis_path.get(row);
+    if analysis_path.is_empty() {
+        return Ok(Vec::new());
+    }
 
         // The stored path names the .DAT; the colour waveforms live in the
         // .EXT sibling and the three-band ones in .2EX.
-        let dat = rbl_anlz::resolve(&share, analysis_path);
+    let dat = rbl_anlz::resolve(share, analysis_path);
         // rekordbox 7 draws the three-band waveforms, and every one of the
         // first 300 tracks checked in the reference library has them. `PWV6`
         // is the 1,200-column overview and `PWV7` the full-resolution detail,
         // both three bytes per column: low, mid, high.
-        let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind.as_str() {
+    let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind {
             "bands" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV6", 3),
             "bandsDetail" => (rbl_anlz::sibling(&dat, "2EX"), *b"PWV7", 3),
             // The RGB palette's pair, six and two bytes a column.
@@ -463,17 +479,14 @@ pub async fn track_waveform(
             // The BLUE palette's pair, one byte a column.
             "monoDetail" => (rbl_anlz::sibling(&dat, "EXT"), *b"PWV3", 1),
             _ => (dat, *b"PWAV", 1),
-        };
+    };
 
-        let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
-            // Analysis missing on disk: draw nothing rather than fail the view.
-            return Ok(Vec::new());
-        };
-        let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
-        Ok(window_of(whole, stride, from, len))
-    })
-    .await
-    .map(tauri::ipc::Response::new)
+    let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
+        // Analysis missing on disk: draw nothing rather than fail the view.
+        return Ok(Vec::new());
+    };
+    let whole = anlz.waveform(&tag).map(|(_, data)| data).unwrap_or_default();
+    Ok(window_of(whole, stride, from, len))
 }
 
 /// A short, true stereo PCM waveform window. The response is decimated to

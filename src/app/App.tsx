@@ -1,6 +1,7 @@
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
+import { waveformKindOf } from "@/canvas";
 import { useEventCallback } from "@/store/useEventCallback";
 /**
  * Export-mode shell.
@@ -17,6 +18,7 @@ import type {
   Backend, DeckId, Device, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
 } from "@/ipc/types";
 import { TrackTable, type TrackDrag } from "@/views/browser/TrackTable";
+import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
 import { TreeView } from "@/views/tree/TreeView";
 import { ConnectedTopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
@@ -1947,6 +1949,18 @@ function AppBody() {
   const onFirstRows = useCallback((rows: RowDto[], count: number) => {
     setScreen({ rows, count });
   }, []);
+
+  useEffect(() => {
+    if (sessionReady) clearWaveformPreviewCache();
+  }, [sessionReady]);
+
+  useEffect(() => {
+    if (!sessionReady || screen.rows.length === 0) return;
+    void getBackend().then(backend => backend.rememberScreenAssets(
+      screen.rows.map(row => row.id),
+      waveformKindOf(viewPrefs.waveformColor, false),
+    ));
+  }, [sessionReady, screen.rows, viewPrefs.waveformColor]);
 
   // Written on every change rather than on exit: a window that is force-quit,
   // or a machine that loses power, still comes back where it was. It is a few

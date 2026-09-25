@@ -9,6 +9,7 @@ mod windowfit;
 mod file_drop;
 mod file_drag;
 mod startup;
+mod screen_cache;
 pub mod analysis;
 pub mod commands;
 mod usb_import;
@@ -381,6 +382,7 @@ pub fn run() {
         .manage(Arc::new(crate::update::Updates::default()))
         .manage(crate::test_port::TestPort::default())
         .setup(|app| {
+            screen_cache::initialize(app.handle());
             // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
             crate::test_port::start(app.handle());
             // AppleScript: the bridge to the window, and on macOS the
@@ -445,6 +447,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             browse_settings::rekordbox_browse_settings,
             startup::startup_milestone,
+            screen_cache::remember_screen_assets,
             file_drop::dropped_file_paths,
             file_drag::drag_tracks,
             menu::set_history_menu,
@@ -623,6 +626,7 @@ pub fn run() {
                 // An update downloaded this run and waiting for the quit
                 // (Windows) is installed now, silently.
                 if matches!(event, tauri::RunEvent::Exit) {
+                    crate::screen_cache::save(handle);
                     crate::update::on_exit(handle);
                 }
             });
