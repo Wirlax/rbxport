@@ -63,6 +63,7 @@ pub async fn open_sync_window(app: tauri::AppHandle) -> AppResult<()> {
         })
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(720.0, 420.0)
+        .visible(false)
         .resizable(true)
         .accept_first_mouse(true)
         .build()

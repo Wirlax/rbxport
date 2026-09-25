@@ -7,20 +7,24 @@
  * reads — the DJ System defaults a fresh stick is given — come from the
  * storage both windows share.
  */
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
 import { SyncManager } from "./SyncManager";
 
 export function SyncWindow() {
+  const [ready, setReady] = useState(false);
+  useShowWindowWhenReady(ready);
+  const markReady = useCallback(() => setReady(true), []);
   const store = usePreferencesStore();
   const close = useCallback(() => {
     void getBackend().then((backend) => backend.closeWindow());
   }, []);
   return (
     <PreferencesProvider value={store}>
-      <SyncManager windowed onClose={close} />
+      <SyncManager windowed onClose={close} onReady={markReady} />
     </PreferencesProvider>
   );
 }

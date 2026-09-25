@@ -210,6 +210,14 @@ fn report_problem(app: &tauri::AppHandle, problem: dto::LibraryProblemDto) {
 /// The label the window in `tauri.conf.json` gets by default.
 const MAIN_WINDOW: &str = "main";
 
+/// What the window-state plugin saves and puts back: everything but whether
+/// the window is showing. Every window is created hidden and shows itself
+/// once its page has rendered (`startup::show_window`); a restore that
+/// included visibility called `show()` the moment the window was built, and
+/// the window came up as an empty frame until React drew into it.
+const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
+    tauri_plugin_window_state::StateFlags::all().difference(tauri_plugin_window_state::StateFlags::VISIBLE);
+
 /// How long after the window appears its geometry is still corrected.
 ///
 /// The restored position arrives asynchronously and was measured landing
@@ -224,14 +232,14 @@ const SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 /// `skip_initial_state` so that the restore happens here instead — the check
 /// has to follow it, and it cannot follow something this does not control.
 fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
+    use tauri_plugin_window_state::{AppHandleExt, WindowExt};
 
     tauri::plugin::Builder::<tauri::Wry>::new("windowfit")
         .on_window_ready(|window| {
             if window.label() != MAIN_WINDOW {
                 return;
             }
-            if let Err(e) = window.restore_state(StateFlags::all()) {
+            if let Err(e) = window.restore_state(WINDOW_STATE) {
                 tracing::warn!(error = %e, "could not restore the window's geometry");
             }
 
@@ -274,7 +282,7 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                 }
                 *last = std::time::Instant::now();
                 drop(last);
-                if let Err(e) = subject.app_handle().save_window_state(StateFlags::all()) {
+                if let Err(e) = subject.app_handle().save_window_state(WINDOW_STATE) {
                     tracing::warn!(error = %e, "could not save the window's geometry");
                 }
             });
@@ -374,7 +382,12 @@ pub fn run() {
         // display — in `setup`, on `RunEvent::Ready`, and from a plugin hook
         // registered after this one — and all three measured the window before
         // the restore had moved it, so all three found nothing wrong.
-        .plugin(tauri_plugin_window_state::Builder::default().skip_initial_state(MAIN_WINDOW).build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(WINDOW_STATE)
+                .skip_initial_state(MAIN_WINDOW)
+                .build(),
+        )
         .plugin(window_geometry())
         .manage(Arc::new(AppState::new()))
         .manage(Arc::new(crate::player::Player::default()))
@@ -447,6 +460,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             browse_settings::rekordbox_browse_settings,
             startup::startup_milestone,
+            startup::show_window,
             screen_cache::remember_screen_assets,
             file_drop::dropped_file_paths,
             file_drag::drag_tracks,

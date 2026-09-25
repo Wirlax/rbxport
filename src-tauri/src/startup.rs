@@ -7,6 +7,16 @@ static REPORTED: AtomicU8 = AtomicU8::new(0);
 
 pub fn begin() { let _ = START.set(Instant::now()); }
 
+/// Reveals a webview only after React has committed its window-specific UI.
+/// All app windows start hidden, preventing the platform's empty webview
+/// background from flashing before the first useful frame is available.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value, reason = "Tauri injects the calling window by value")]
+pub fn show_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value, reason = "a Tauri command's injected window and deserialized argument are owned")]
 pub fn startup_milestone(window: tauri::WebviewWindow, phase: String) {

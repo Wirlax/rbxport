@@ -1,6 +1,7 @@
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
+import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { waveformKindOf } from "@/canvas";
 import { useEventCallback } from "@/store/useEventCallback";
 /**
@@ -116,6 +117,7 @@ export function App() {
 }
 
 function AppBody() {
+  useShowWindowWhenReady();
   useEffect(() => { reportStartupPaint("shell-painted"); }, []);
   useEffect(() => {
     // Native file drags can land anywhere, including outside a drop target.

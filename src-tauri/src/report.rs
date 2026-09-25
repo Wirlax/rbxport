@@ -22,7 +22,7 @@ pub async fn open_report_window(app: tauri::AppHandle) -> AppResult<()> {
     };
     #[cfg(target_os = "macos")]
     let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
-    let window = builder.inner_size(660.0, 650.0).min_inner_size(480.0, 440.0)
+    let window = builder.inner_size(660.0, 650.0).min_inner_size(480.0, 440.0).visible(false)
         .build().map_err(|e| AppError::internal(format!("The report window could not open: {e}")))?;
     let _ = window.hide_menu();
     Ok(())

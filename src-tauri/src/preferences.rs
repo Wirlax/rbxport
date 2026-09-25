@@ -79,6 +79,7 @@ pub async fn open_preferences(app: tauri::AppHandle, pane: String) -> AppResult<
         })
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(WIDTH, 480.0)
+        .visible(false)
         .resizable(true)
         .accept_first_mouse(true)
         .build()

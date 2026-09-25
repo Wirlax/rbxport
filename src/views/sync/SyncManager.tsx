@@ -34,6 +34,8 @@ export interface SyncManagerProps {
   onClose: () => void;
   /** A sync finished, so the shell can re-read what its devices hold. */
   onSynced?: () => void;
+  /** The playlists, the devices and rekordbox's state have all been read once. */
+  onReady?: () => void;
 }
 
 /** Ticked, not ticked, or a folder with some of its playlists ticked. */
@@ -87,7 +89,7 @@ function TickBox({
   );
 }
 
-export function SyncManager({ windowed = false, onClose, onSynced }: SyncManagerProps) {
+export function SyncManager({ windowed = false, onClose, onSynced, onReady }: SyncManagerProps) {
   const t = useTranslation();
   const exportJobs = useExportProgress();
   const window_ = useRef<HTMLDivElement>(null);
@@ -102,7 +104,9 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
   const [query, setQuery] = useState("");
   const [loadingTree, setLoadingTree] = useState(true);
   const [treeError, setTreeError] = useState("");
-  const [loadingDevices, setLoadingDevices] = useState(false);
+  // True from the start: the first scan begins on mount, and nothing may
+  // offer SYNC or say "no devices" before it has answered.
+  const [loadingDevices, setLoadingDevices] = useState(true);
   const [devicesError, setDevicesError] = useState("");
   // This window may live in its own webview, so it keeps its own live view
   // of rekordbox's process lock instead of relying on the main window.
@@ -208,6 +212,11 @@ export function SyncManager({ windowed = false, onClose, onSynced }: SyncManager
       // No devices to list: the column says so.
     });
   }, [refreshDevices]);
+
+  const firstReadDone = !loadingTree && !loadingDevices && rekordboxOpen !== null;
+  useEffect(() => {
+    if (firstReadDone) onReady?.();
+  }, [firstReadDone, onReady]);
 
   useEffect(() => {
     let live = true;

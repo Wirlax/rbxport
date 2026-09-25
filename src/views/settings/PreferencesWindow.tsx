@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
+import { useShowWindowWhenReady } from "@/lib/windowReady";
 import type { LibrarySummary } from "@/ipc/types";
 import { useLimiter } from "@/store/useLimiter";
 import { useMaster } from "@/store/useMaster";
@@ -26,6 +27,10 @@ export function PreferencesWindow() {
   const store = usePreferencesStore();
   const [pane, setPane] = useState<PreferencesTarget>(() => paneFromHash(window.location.hash));
   const [summary, setSummary] = useState<LibrarySummary | null>(null);
+  // The window shows once the first library read has answered, so the
+  // library facts and backup controls are there when it appears.
+  const [firstRead, setFirstRead] = useState(false);
+  useShowWindowWhenReady(firstRead);
   // The limiter is the engine's, so this window reads and sets it the same
   // way the shell does, and its meter ticks arrive here as they do there.
   const limiter = useLimiter();
@@ -57,7 +62,10 @@ export function PreferencesWindow() {
       } catch {
         // Keep the last known status while the library is unavailable.
       } finally {
-        if (live) timer = setTimeout(() => void refresh(), 2000);
+        if (live) {
+          setFirstRead(true);
+          timer = setTimeout(() => void refresh(), 2000);
+        }
       }
     };
     void refresh();

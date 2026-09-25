@@ -3,6 +3,7 @@ import { getBackend } from "@/ipc/client";
 import { submitBugReport } from "@/lib/bugReport";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
+import { useShowWindowWhenReady } from "@/lib/windowReady";
 
 // Public sitekey; the matching secret exists only in the report Worker.
 const TURNSTILE_SITE_KEY = "0x4AAAAAAFAzF9GiS4tEQvN6";
@@ -145,5 +146,6 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
 }
 
 export function ReportWindow() {
+  useShowWindowWhenReady();
   return <ReportBug windowed onClose={() => { void getBackend().then(backend => backend.closeWindow()); }} />;
 }
