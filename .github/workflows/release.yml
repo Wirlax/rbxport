@@ -356,6 +356,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          # Discord falls back to the commits since the previous tag when a
+          # release has no matching CHANGELOG section. That comparison needs
+          # the tag history, not checkout's default single commit.
+          fetch-depth: 0
           sparse-checkout: CHANGELOG.md
           sparse-checkout-cone-mode: false
 
@@ -581,14 +585,62 @@ jobs:
 
           VERSION="$version" node <<'NODE'
           const fs = require("fs");
+          const { execFileSync } = require("child_process");
           const version = process.env.VERSION;
+          const releaseTag = process.env.RELEASE_TAG;
           const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
           const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           const heading = new RegExp(`^## \\[${escaped}\\].*$`, "m").exec(changelog);
           const remainder = heading ? changelog.slice(heading.index + heading[0].length) : "";
           const nextHeading = remainder.search(/^## \[/m);
-          let notes = (nextHeading < 0 ? remainder : remainder.slice(0, nextHeading)).trim()
-            || "Release notes are available in the app.";
+          let notes = (nextHeading < 0 ? remainder : remainder.slice(0, nextHeading)).trim();
+
+          // CHANGELOG entries are preferred because they are written for the
+          // person using the app. Most recent tags have not had a matching
+          // version heading, though, so derive accurate notes from the commits
+          // in this release instead of posting an empty announcement.
+          if (!notes) {
+            let previousTag = "";
+            try {
+              previousTag = execFileSync(
+                "git",
+                ["describe", "--tags", "--abbrev=0", `${releaseTag}^`],
+                { encoding: "utf8" },
+              ).trim();
+            } catch {
+              // The first tagged release has no earlier tag to compare with.
+            }
+
+            const range = previousTag ? `${previousTag}..${releaseTag}` : releaseTag;
+            const subjects = execFileSync(
+              "git",
+              ["log", "--format=%s", "--no-merges", range],
+              { encoding: "utf8" },
+            ).trim().split("\n").filter(Boolean);
+            const groups = { Fixed: [], Added: [], Changed: [] };
+            const other = [];
+            for (const subject of subjects) {
+              const conventional = /^(fix|feat|perf|refactor)(?:\([^)]+\))?!?:\s*(.+)$/i.exec(subject);
+              if (conventional) {
+                const [, type, summary] = conventional;
+                const group = type.toLowerCase() === "fix"
+                  ? "Fixed"
+                  : type.toLowerCase() === "feat" ? "Added" : "Changed";
+                groups[group].push(summary[0].toUpperCase() + summary.slice(1));
+              } else if (!/^(?:build|ci|docs|style|test)(?:\([^)]+\))?!?:/i.test(subject)
+                && !/^chore(?:\([^)]+\))?!?:\s*bump version\b/i.test(subject)) {
+                other.push(subject[0].toUpperCase() + subject.slice(1));
+              }
+            }
+            const sections = Object.entries(groups)
+              .filter(([, items]) => items.length)
+              .map(([label, items]) => `### ${label}\n${items.map((item) => `- ${item}`).join("\n")}`);
+            if (other.length) {
+              sections.push(`### Other changes\n${other.map((item) => `- ${item}`).join("\n")}`);
+            }
+            notes = sections.join("\n\n")
+              || "No user-facing changes were recorded for this release.";
+          }
           // Discord embed descriptions are capped at 4096 characters.
           if (notes.length > 3900) notes = notes.slice(0, 3897).trimEnd() + "…";
           const base = (process.env.CDN_BASE_URL || "").replace(/\/$/, "");
