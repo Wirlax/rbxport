@@ -481,7 +481,7 @@ export interface Backend {
    * Position does not come back from any of these: it arrives on `onDeckTick`
    * ten times a second and the interface extrapolates between ticks.
    */
-  deckLoad(deck: DeckId, trackId: string): Promise<void>;
+  deckLoad(deck: DeckId, trackId: string, loadId: number): Promise<void>;
   deckUnload(deck: DeckId): Promise<void>;
   deckPlay(deck: DeckId): Promise<void>;
   /**
@@ -602,6 +602,8 @@ export interface Backend {
   onMeters(listener: (meters: Meters) => void): () => void;
   /** A deck has finished loading a track, or could not. */
   onDeckEvent(listener: (event: DeckEvent) => void): () => void;
+  /** The audio engine was replaced after its device or stream format changed. */
+  onDeckReset(listener: () => void): () => void;
 
   /** A reading of this process, sampled on demand. */
   appDiagnostics(): Promise<Diagnostics>;
@@ -864,6 +866,8 @@ export interface DeckTick {
   generation: number;
   playing: boolean;
   loaded: boolean;
+  /** The load request whose audio is installed; zero means no track. */
+  loadId?: number;
   /** A multiple of the file's own speed: 1 is the track as recorded. */
   tempo: number;
   /** Whether the pitch is held while that speed changes. */
@@ -915,6 +919,8 @@ export interface Meters {
 /** A deck finishing a load, or failing one. */
 export interface DeckEvent {
   deck: DeckId;
+  /** The request this completion belongs to, so superseded loads are ignored. */
+  loadId: number;
   totalFrames: number;
   sampleRate: number;
   /** Set when the load failed, and says why. */

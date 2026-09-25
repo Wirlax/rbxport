@@ -122,8 +122,8 @@ impl Deck {
 /// What the engine tells the interface about, outside the position tick.
 #[derive(Debug, Clone)]
 pub enum DeckEvent {
-    Loaded { deck: Deck, total_frames: u64, sample_rate: u32 },
-    Error { deck: Deck, message: String },
+    Loaded { deck: Deck, load_id: u64, total_frames: u64, sample_rate: u32 },
+    Error { deck: Deck, load_id: u64, message: String },
 }
 
 /// Where those go. Called from a decode thread, never from the audio callback.
@@ -566,14 +566,28 @@ impl Engine {
     /// Points a deck at a file. Readiness arrives as `DeckEvent::Loaded`,
     /// because opening one means reading from a disk that may be asleep.
     pub fn load(&self, deck: Deck, path: &Path) {
+        let request = self
+            .deck(deck)
+            .map_or(1, |handle| handle.clock().requested_load().wrapping_add(1).max(1));
+        self.load_as(deck, path, request);
+    }
+
+    /// The same load under an identity supplied by a caller. Only the newest
+    /// identity may finish; stale opens are discarded by the deck worker.
+    pub fn load_as(&self, deck: Deck, path: &Path, request: u64) {
+        let request = request.max(1);
         if let Some(handle) = self.deck(deck) {
-            handle.send(deck::Command::Load(PathBuf::from(path)));
+            handle.clock().request_load(request);
+            handle.send(deck::Command::Load { request, path: PathBuf::from(path) });
         }
         self.settle_device();
     }
 
     pub fn unload(&self, deck: Deck) {
         if let Some(handle) = self.deck(deck) {
+            // Invalidates an open already in progress before its worker can
+            // publish it, not only when the queued unload is handled.
+            handle.clock().request_load(0);
             handle.send(deck::Command::Unload);
         }
         self.settle_device();
@@ -803,6 +817,7 @@ impl OrEmptySnapshot for Option<DeckSnapshot> {
             sample_rate: 0,
             playing: false,
             loaded: false,
+            load_id: 0,
             tempo: 1.0,
             master_tempo: false,
             key_shift: 0,

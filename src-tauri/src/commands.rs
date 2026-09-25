@@ -1676,6 +1676,7 @@ pub async fn deck_load<R: tauri::Runtime>(
     player: State<'_, Arc<crate::player::Player>>,
     deck: String,
     track: String,
+    load_id: u64,
 ) -> AppResult<()> {
     let library = state.library()?;
     let Some(path) = library.audio_path_of(&track).map(std::path::PathBuf::from) else {
@@ -1685,7 +1686,7 @@ pub async fn deck_load<R: tauri::Runtime>(
     let engine = player.engine(&app)?;
     let which = crate::player::deck_of(&deck);
     // The engine's own thread does the opening; this only hands it the path.
-    engine.load(which, &path);
+    engine.load_as(which, &path, load_id);
     player.loaded_tracks.lock().insert(which, track.clone());
     // And the grid, for the metronome. Read off the async thread: it is a
     // file, and the deck is loading on its own thread anyway.
@@ -1698,10 +1699,14 @@ pub async fn deck_load<R: tauri::Runtime>(
             .unwrap_or_default())
     })
     .await?;
-    engine.set_metronome_grid(
-        which,
-        &grid.iter().map(|&(ms, number, _)| (ms, number == 1)).collect::<Vec<_>>(),
-    );
+    // A newer track may have been selected while its predecessor's analysis
+    // file was being read. Never put the older grid on the newer audio.
+    if player.loaded_tracks.lock().get(&which) == Some(&track) {
+        engine.set_metronome_grid(
+            which,
+            &grid.iter().map(|&(ms, number, _)| (ms, number == 1)).collect::<Vec<_>>(),
+        );
+    }
     Ok(())
 }
 
@@ -1757,12 +1762,15 @@ pub async fn set_metronome(
 /// time a deck plays, as a device change does: a stream has the rate it was
 /// opened at.
 #[tauri::command]
-pub async fn set_audio_config(
+pub async fn set_audio_config<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     sample_rate: Option<u32>,
     buffer_frames: Option<u32>,
 ) -> AppResult<()> {
-    player.set_wish(rbl_deck::StreamWish { sample_rate, buffer_frames });
+    if player.set_wish(rbl_deck::StreamWish { sample_rate, buffer_frames }) {
+        let _ = tauri::Emitter::emit(&app, "deck:reset", ());
+    }
     Ok(())
 }
 
@@ -2050,11 +2058,14 @@ pub async fn audio_devices(
 /// device it was opened on, so the engine is dropped and rebuilt rather than
 /// moved.
 #[tauri::command]
-pub async fn set_audio_device(
+pub async fn set_audio_device<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     player: State<'_, Arc<crate::player::Player>>,
     device: Option<String>,
 ) -> AppResult<()> {
-    player.set_device(device);
+    if player.set_device(device) {
+        let _ = tauri::Emitter::emit(&app, "deck:reset", ());
+    }
     Ok(())
 }
 

@@ -1300,7 +1300,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const SAMPLE_RATE = 44_100;
   const TICK_MS = 100;
   const deckA = {
-    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
+    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false, loadId: 0,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
     loopInFrames: 0, loopOutFrames: 0, looping: false,
   };
@@ -1308,7 +1308,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   // audio to apply them to: a control that snapped back on the next tick would
   // read as a broken one, and the deck it stands for does keep them.
   const deckB = {
-    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false,
+    frames: 0, totalFrames: 0, generation: 0, playing: false, loaded: false, loadId: 0,
     tempo: 1, masterTempo: false, keyShift: 0, startInFrames: 0,
     loopInFrames: 0, loopOutFrames: 0, looping: false,
   };
@@ -1874,7 +1874,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // does; everything above it — the scrolling waveform, the cue point, the
     // readouts — then behaves in a browser exactly as it does in the app, and
     // can be tested. What a browser cannot do is make a noise.
-    deckLoad: (deck, trackId) => {
+    deckLoad: (deck, trackId, loadId) => {
       if (deck !== "a") return wait(undefined);
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
@@ -1882,11 +1882,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       deckA.totalFrames = row ? row.durationSec * SAMPLE_RATE : 0;
       deckA.playing = false;
       deckA.loaded = row !== undefined;
+      deckA.loadId = row === undefined ? 0 : loadId;
       deckA.generation += 1;
       stopClock();
       for (const listener of deckEventListeners) {
         listener({
           deck: "a",
+          loadId,
           totalFrames: deckA.totalFrames,
           sampleRate: SAMPLE_RATE,
           message: row ? null : "That track's file could not be found.",
@@ -1899,6 +1901,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       deckA.loaded = false;
       deckA.playing = false;
       deckA.frames = 0;
+      deckA.loadId = 0;
       stopClock();
       sendTick();
       return wait(undefined);
@@ -2116,6 +2119,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       deckEventListeners.add(listener);
       return () => deckEventListeners.delete(listener);
     },
+    onDeckReset: () => () => undefined,
 
     onLibraryReady: (listener) => {
       readyListeners.add(listener);

@@ -42,6 +42,8 @@ pub struct DeckTickDto {
     pub generation: u32,
     pub playing: bool,
     pub loaded: bool,
+    /// Identifies the load whose audio is installed. Zero means no track.
+    pub load_id: u64,
     /// How fast the deck is playing, as a multiple of the file's own speed.
     pub tempo: f32,
     /// Whether the pitch is held while that speed changes.
@@ -87,6 +89,7 @@ impl TickDto {
             generation: 0,
             playing: false,
             loaded: false,
+            load_id: 0,
             tempo: 1.0,
             master_tempo: false,
             key_shift: 0,
@@ -131,6 +134,7 @@ pub struct MeterDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeckEventDto {
     pub deck: String,
+    pub load_id: u64,
     pub total_frames: u64,
     pub sample_rate: u32,
     pub message: Option<String>,
@@ -288,11 +292,16 @@ impl Player {
     /// Takes effect on the next thing played: the engine is dropped here and
     /// rebuilt then, because a running stream belongs to the device it was
     /// opened on.
-    pub fn set_device(&self, device: Option<String>) {
-        *self.device.lock() = device;
+    pub fn set_device(&self, device: Option<String>) -> bool {
+        let mut current = self.device.lock();
+        if *current == device {
+            return false;
+        }
+        *current = device;
+        drop(current);
         // Dropped rather than replaced: whatever is playing is on the old
         // device, and the next play opens the new one.
-        *self.engine.lock() = None;
+        self.engine.lock().take().is_some()
     }
 
     pub fn device(&self) -> Option<String> {
@@ -301,12 +310,14 @@ impl Player {
 
     /// The rate and buffer size to open the device with. A change drops the
     /// engine, as a device change does: a stream has the rate it was opened at.
-    pub fn set_wish(&self, wish: StreamWish) {
-        if *self.wish.lock() == wish {
-            return;
+    pub fn set_wish(&self, wish: StreamWish) -> bool {
+        let mut current = self.wish.lock();
+        if *current == wish {
+            return false;
         }
-        *self.wish.lock() = wish;
-        *self.engine.lock() = None;
+        *current = wish;
+        drop(current);
+        self.engine.lock().take().is_some()
     }
 
     pub fn wish(&self) -> StreamWish {
@@ -335,19 +346,21 @@ impl Player {
 
 fn emit_deck_event<R: Runtime>(app: &AppHandle<R>, event: &DeckEvent) {
     let (name, payload) = match event {
-        DeckEvent::Loaded { deck, total_frames, sample_rate } => (
+        DeckEvent::Loaded { deck, load_id, total_frames, sample_rate } => (
             "deck:loaded",
             DeckEventDto {
                 deck: deck.name().to_owned(),
+                load_id: *load_id,
                 total_frames: *total_frames,
                 sample_rate: *sample_rate,
                 message: None,
             },
         ),
-        DeckEvent::Error { deck, message } => (
+        DeckEvent::Error { deck, load_id, message } => (
             "deck:error",
             DeckEventDto {
                 deck: deck.name().to_owned(),
+                load_id: *load_id,
                 total_frames: 0,
                 sample_rate: 0,
                 message: Some(message.clone()),
@@ -438,6 +451,7 @@ pub fn tick_of(snapshot: &rbl_deck::Snapshot, master: &rbl_deck::Master) -> Tick
         generation: s.generation,
         playing: s.playing,
         loaded: s.loaded,
+        load_id: s.load_id,
         tempo: s.tempo,
         master_tempo: s.master_tempo,
         key_shift: s.key_shift,

@@ -260,6 +260,40 @@ fn a_loaded_deck_reports_its_length_and_stays_silent_until_it_is_played() {
 }
 
 #[test]
+fn rapid_loads_leave_only_the_newest_request_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let brief = dir.path().join("brief.wav");
+    let long = dir.path().join("long.wav");
+    ramp(&brief, RATE as usize);
+    ramp(&long, RATE as usize * 3);
+
+    let h = harness();
+    // Browser selection can outrun disk opening by several tracks. Each new
+    // request invalidates every older decoder result before it can replace
+    // the deck, even when the same worker already started opening one.
+    for request in 1..=25 {
+        let path = if request % 2 == 0 { &brief } else { &long };
+        h.engine.load_as(Deck::A, path, request);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.engine.snapshot().a.load_id != 25 {
+        assert!(Instant::now() < deadline, "the newest load never landed: {:?}", h.events());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let newest = h.engine.snapshot().a;
+    assert!(newest.loaded);
+    assert_eq!(newest.load_id, 25);
+    assert_eq!(newest.total_frames, u64::from(RATE) * 3);
+
+    // Give every queued command time to finish; none may overwrite request 25
+    // after the interface has already begun acting on it.
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(h.engine.snapshot().a.load_id, 25);
+    assert_eq!(h.engine.snapshot().a.total_frames, u64::from(RATE) * 3);
+}
+
+#[test]
 fn playing_moves_the_clock_and_produces_the_files_own_audio() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ramp.wav");
@@ -872,7 +906,10 @@ fn unloading_clears_the_deck() {
 
     h.engine.unload(Deck::A);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while h.engine.snapshot().a.loaded && Instant::now() < deadline {
+    while {
+        let deck = h.engine.snapshot().a;
+        (deck.loaded || deck.position_frames != 0) && Instant::now() < deadline
+    } {
         std::thread::sleep(Duration::from_millis(2));
     }
     let snapshot = h.engine.snapshot();

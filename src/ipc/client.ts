@@ -240,7 +240,7 @@ async function realBackend(): Promise<Backend> {
       const { ask } = await import("@tauri-apps/plugin-dialog");
       return ask(message, { kind: "warning", ...(labels ? { okLabel: labels.yes, cancelLabel: labels.no } : {}) });
     },
-    deckLoad: (deck, trackId) => invoke<void>("deck_load", { deck, track: trackId }),
+    deckLoad: (deck, trackId, loadId) => invoke<void>("deck_load", { deck, track: trackId, loadId }),
     deckUnload: (deck) => invoke<void>("deck_unload", { deck }),
     deckPlay: (deck) => invoke<void>("deck_play", { deck }),
     deckPlayAfter: (deck, delayMs) => invoke<void>("deck_play_after", { deck, delayMs }),
@@ -293,6 +293,7 @@ async function realBackend(): Promise<Backend> {
         stopError();
       };
     },
+    onDeckReset: (listener) => subscribe<void>("deck:reset", listener),
     onLibraryReady: (listener) => subscribe("library:ready", () => listener()),
     onLibraryProblem: (listener) => subscribe<LibraryProblem>("library:problem", listener),
     libraryProblem: () => invoke<LibraryProblem | null>("library_problem"),

@@ -146,7 +146,18 @@ const FALLBACK = "This track could not be played.";
  * not report which track it holds, which is why this is remembered here
  * rather than asked.
  */
-const held = new Map<DeckId, string | null>();
+interface HeldLoad {
+  trackId: string;
+  loadId: number;
+}
+
+const held = new Map<DeckId, HeldLoad | null>();
+let nextLoadId = 0;
+
+function allocateLoadId(): number {
+  nextLoadId = nextLoadId >= Number.MAX_SAFE_INTEGER ? 1 : nextLoadId + 1;
+  return nextLoadId;
+}
 
 /**
  * The reason, not a shrug.
@@ -189,8 +200,22 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   const anchor = useRef<Anchor>(NO_ANCHOR);
   /** The generation the playhead last snapped to. */
   const shownGeneration = useRef(0);
-  /** Which track this deck was told to load, so a stale tick is ignored. */
-  const loading = useRef<string | null>(null);
+  /** The selected load, and the one whose audio is actually ready. */
+  const selectedTrack = useRef(trackId);
+  selectedTrack.current = trackId;
+  const targetLoad = useRef<HeldLoad | null>(held.get(DECK) ?? null);
+  const readyLoad = useRef(0);
+  const loadPending = useRef(false);
+  const applyingLoad = useRef(0);
+  /** Transport/settings intent survives a load and an audio-engine rebuild. */
+  const desiredPlaying = useRef(false);
+  const desiredDelay = useRef<number | null>(null);
+  const transportVersion = useRef(0);
+  const deferredSeek = useRef<number | null>(null);
+  const desiredTempo = useRef(1);
+  const desiredMasterTempo = useRef(false);
+  const desiredKeyShift = useRef(0);
+  const desiredLoop = useRef<DeckLoop | null>(null);
   /** A track that should start playing the moment its load lands, or null. */
   const resumeTarget = useRef<string | null>(null);
   /** Whether a drag is running, so a move is aimed rather than seeked. */
@@ -213,19 +238,126 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     };
   }, []);
 
+  const currentLoad = useCallback((request: HeldLoad) => {
+    const current = targetLoad.current;
+    return current?.loadId === request.loadId && current.trackId === request.trackId;
+  }, []);
+
+  /** Applies everything pressed while this load was still opening. */
+  const completeLoad = useCallback((request: HeldLoad) => {
+    if (!currentLoad(request) || !loadPending.current || readyLoad.current === request.loadId) return;
+    readyLoad.current = request.loadId;
+    loadPending.current = false;
+    applyingLoad.current = request.loadId;
+    setError(null);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (!currentLoad(request)) return;
+        await Promise.all([
+          backend.deckTempo(DECK, desiredTempo.current),
+          backend.deckMasterTempo(DECK, desiredMasterTempo.current),
+          backend.deckKeyShift(DECK, desiredKeyShift.current),
+        ]);
+        if (!currentLoad(request)) return;
+        const seekTo = deferredSeek.current;
+        deferredSeek.current = null;
+        if (seekTo !== null) await backend.deckSeek(DECK, seekTo * 1000);
+        const wantedLoop = desiredLoop.current;
+        if (wantedLoop !== null) {
+          await backend.deckSetLoop(DECK, wantedLoop.inSeconds * 1000, wantedLoop.outSeconds * 1000);
+          if (!wantedLoop.active) await backend.deckLoopActive(DECK, false);
+        }
+        if (!currentLoad(request)) return;
+        if (desiredPlaying.current) {
+          const wait = desiredDelay.current;
+          desiredDelay.current = null;
+          setPlaying(true);
+          anchor.current = {
+            ...anchor.current,
+            playing: true,
+            at: performance.now() + (wait ?? 0),
+          };
+          if (wait !== null && wait > 0) await backend.deckPlayAfter(DECK, wait);
+          else await backend.deckPlay(DECK);
+        } else {
+          setPlaying(false);
+        }
+      } catch (failure) {
+        if (currentLoad(request)) {
+          desiredPlaying.current = false;
+          setPlaying(false);
+          setError(reasonFrom(failure));
+        }
+      } finally {
+        if (applyingLoad.current === request.loadId) applyingLoad.current = 0;
+      }
+    })();
+  }, [currentLoad, DECK]);
+
+  /** Starts a uniquely identified load; stale completions cannot satisfy it. */
+  const beginLoad = useCallback((nextTrack: string, restore: boolean) => {
+    const request = { trackId: nextTrack, loadId: allocateLoadId() };
+    targetLoad.current = request;
+    held.set(DECK, request);
+    readyLoad.current = 0;
+    loadPending.current = true;
+    applyingLoad.current = 0;
+    scrubbing.current = false;
+    landing.current = null;
+    pending.current = null;
+    if (restore) deferredSeek.current = positionRef.current;
+    else deferredSeek.current = null;
+    const at = restore ? positionRef.current : 0;
+    anchor.current = pinned(anchor.current, at, performance.now());
+    setPosition(at);
+    setPlaying(false);
+    setError(null);
+    if (!restore) {
+      setDuration(0);
+      setLoopState(null);
+      desiredLoop.current = null;
+    }
+    emit(at);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (currentLoad(request)) await backend.deckLoad(DECK, nextTrack, request.loadId);
+      } catch (failure) {
+        if (currentLoad(request)) {
+          held.set(DECK, null);
+          targetLoad.current = null;
+          loadPending.current = false;
+          desiredPlaying.current = false;
+          setPlaying(false);
+          setError(reasonFrom(failure));
+        }
+      }
+    })();
+  }, [currentLoad, DECK, emit, setPosition]);
+
   /** Takes a tick as the truth about where the deck is. */
   const anchorOn = useCallback(
     (tick: Tick) => {
       const deck = DECK === "b" ? tick.b : tick.a;
+      const target = targetLoad.current;
+      if (target !== null && deck.loadId !== undefined && deck.loadId !== target.loadId) return;
+      if (target !== null && loadPending.current) completeLoad(target);
+      if (target !== null && applyingLoad.current === target.loadId) return;
+      if (target !== null) readyLoad.current = target.loadId;
       const rate = tick.sampleRate;
       const now = performance.now();
       setPlaying(deck.playing);
+      desiredPlaying.current = deck.playing;
       setDuration(rate > 0 ? deck.totalFrames / rate : 0);
       // The engine's word for both, so a deck loaded by something else still
       // shows what it is doing.
       setTempoState(deck.tempo > 0 ? deck.tempo : 1);
+      desiredTempo.current = deck.tempo > 0 ? deck.tempo : 1;
       setMasterTempoState(deck.masterTempo);
+      desiredMasterTempo.current = deck.masterTempo;
       setKeyShiftState(deck.keyShift);
+      desiredKeyShift.current = deck.keyShift;
       setShiftsKey(tick.shiftsKey);
       setLoopState((current) => {
         const next =
@@ -240,6 +372,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         ) {
           return current;
         }
+        desiredLoop.current = next;
         return next;
       });
       // A drag owns the playhead, and the deck's head is not under the
@@ -296,7 +429,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         emit(at);
       }
     },
-    [emit, DECK, setPosition],
+    [completeLoad, emit, DECK, setPosition],
   );
 
   // The deck reports itself loaded, or says why it could not be.
@@ -311,39 +444,60 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       });
       const unlistenEvent = backend.onDeckEvent((event) => {
         if (!live || event.deck !== DECK) return;
+        const target = targetLoad.current;
+        if (target === null || event.loadId !== target.loadId) return;
         if (event.message !== null) {
           // A deck that could not open the file holds nothing, so the next
           // mount asks again rather than trusting a load that never landed.
           held.set(DECK, null);
+          targetLoad.current = null;
+          loadPending.current = false;
+          applyingLoad.current = 0;
+          desiredPlaying.current = false;
+          setPlaying(false);
           setError(event.message.trim() === "" ? FALLBACK : event.message);
           return;
         }
         setError(null);
         if (event.sampleRate > 0) setDuration(event.totalFrames / event.sampleRate);
+        completeLoad(target);
       });
+      const unlistenReset = backend.onDeckReset?.(() => {
+        if (!live) return;
+        const current = selectedTrack.current;
+        if (current !== null) beginLoad(current, true);
+      }) ?? (() => undefined);
       if (!live) {
         unlistenTick();
         unlistenEvent();
+        unlistenReset();
         return;
       }
       stop = () => {
         unlistenTick();
         unlistenEvent();
+        unlistenReset();
       };
       // What the deck holds right now, so a reload does not start at zero.
-      anchorOn(await backend.deckState());
+      const state = await backend.deckState();
+      const deck = DECK === "b" ? state.b : state.a;
+      const target = targetLoad.current;
+      if (target !== null && deck.loadId !== undefined && deck.loadId !== target.loadId && !loadPending.current) {
+        beginLoad(target.trackId, true);
+      } else {
+        anchorOn(state);
+      }
     })();
     return () => {
       live = false;
       stop?.();
     };
-  }, [anchorOn, DECK]);
+  }, [anchorOn, beginLoad, completeLoad, DECK]);
 
   // Point the deck at the selected track. Loading does not start playback:
   // choosing a track in the browser should not make noise.
   useEffect(() => {
     if (!canPlay) return;
-    loading.current = trackId;
     // A resume armed for another track never fires: only the load it was armed
     // for should carry on playing.
     if (resumeTarget.current !== null && resumeTarget.current !== trackId) {
@@ -352,43 +506,33 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     // The deck already holds this track: the view was put away and brought
     // back around it, and the engine never stopped. Asking again would. Where
     // it has got to arrives with `deckState` above, and with the next tick.
-    if (held.get(DECK) === trackId) return;
-    held.set(DECK, trackId);
+    const current = held.get(DECK);
+    if ((current?.trackId ?? null) === trackId) return;
+    if (trackId !== null) {
+      desiredPlaying.current = resumeTarget.current === trackId;
+      desiredDelay.current = null;
+      resumeTarget.current = null;
+      beginLoad(trackId, false);
+      return;
+    }
+    held.set(DECK, null);
+    targetLoad.current = null;
+    readyLoad.current = 0;
+    loadPending.current = false;
+    applyingLoad.current = 0;
+    desiredPlaying.current = false;
+    desiredDelay.current = null;
+    deferredSeek.current = null;
+    desiredLoop.current = null;
     anchor.current = NO_ANCHOR;
     setPosition(0);
     setDuration(0);
     setPlaying(false);
+    setLoopState(null);
     setError(null);
     emit(0);
-    void (async () => {
-      try {
-        const backend = await getBackend();
-        if (loading.current !== trackId) return;
-        if (trackId === null) {
-          await backend.deckUnload(DECK);
-        } else {
-          await backend.deckLoad(DECK, trackId);
-          // Swapped under a playing deck: carry the sound on into the new
-          // track rather than cueing it, but only if this is still the load
-          // that was armed and nothing newer has taken over.
-          if (loading.current === trackId && resumeTarget.current === trackId) {
-            resumeTarget.current = null;
-            setPlaying(true);
-            anchor.current = { ...anchor.current, playing: true, at: performance.now() };
-            await backend.deckPlay(DECK);
-          }
-        }
-      } catch (failure) {
-        // A missing file, or no audio device at all. Either way the deck has
-        // nothing, and which of the two it was is the whole of what the person
-        // looking at it needs.
-        if (loading.current === trackId) {
-          held.set(DECK, null);
-          setError(reasonFrom(failure));
-        }
-      }
-    })();
-  }, [trackId, emit, DECK, setPosition]);
+    void getBackend().then((backend) => backend.deckUnload(DECK)).catch((failure) => setError(reasonFrom(failure)));
+  }, [trackId, beginLoad, emit, DECK, setPosition]);
 
   // One frame loop for the whole player, running only while audio is, so an
   // idle window schedules nothing.
@@ -414,44 +558,75 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   }, [playing, emit]);
 
   const idle = !canPlay || trackId === null;
+  const isLoaded = useCallback(() => {
+    const target = targetLoad.current;
+    return target !== null && readyLoad.current === target.loadId;
+  }, []);
+  const isReady = useCallback(() => {
+    return isLoaded() && applyingLoad.current === 0;
+  }, [isLoaded]);
 
   const toggle = useCallback(() => {
     if (idle) return;
-    const wanted = !playing;
+    // While a load is pending the visible transport is stopped, but a play
+    // may already be queued. A second press cancels that intent.
+    const wanted = isReady() ? !playing : !desiredPlaying.current;
+    desiredPlaying.current = wanted;
+    desiredDelay.current = null;
+    const version = ++transportVersion.current;
     // The button follows at once rather than on the next tick, which is up to
     // a tenth of a second away.
+    if (!isReady()) {
+      // Keep the transport intent visible (and cancellable by CUE release),
+      // while the pinned anchor prevents the playhead from running early.
+      setPlaying(wanted);
+      anchor.current = pinned(anchor.current, positionRef.current, performance.now());
+      return;
+    }
     setPlaying(wanted);
     anchor.current = { ...anchor.current, playing: wanted, at: performance.now() };
     void (async () => {
       try {
         const backend = await getBackend();
+        if (version !== transportVersion.current || !isReady()) return;
         if (wanted) await backend.deckPlay(DECK);
         else await backend.deckPause(DECK);
       } catch (failure) {
+        desiredPlaying.current = false;
         setPlaying(false);
         setError(reasonFrom(failure));
       }
     })();
-  }, [idle, playing, DECK]);
+  }, [idle, isReady, playing, DECK]);
 
   const playAfter = useCallback(
     (delayMs: number) => {
       if (idle || playing) return;
       const wait = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+      desiredPlaying.current = true;
+      desiredDelay.current = wait;
+      const version = ++transportVersion.current;
+      if (!isReady()) {
+        setPlaying(true);
+        anchor.current = pinned(anchor.current, positionRef.current, performance.now());
+        return;
+      }
       setPlaying(true);
       // Anchored in the future: `extrapolate` holds the head still until then.
       anchor.current = { ...anchor.current, playing: true, at: performance.now() + wait };
       void (async () => {
         try {
           const backend = await getBackend();
+          if (version !== transportVersion.current || !isReady()) return;
           await backend.deckPlayAfter(DECK, wait);
         } catch (failure) {
+          desiredPlaying.current = false;
           setPlaying(false);
           setError(reasonFrom(failure));
         }
       })();
     },
-    [idle, playing, DECK],
+    [idle, isReady, playing, DECK],
   );
 
   const playWhenLoaded = useCallback((next: string) => {
@@ -470,6 +645,10 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
       };
       setPosition(at);
       emit(at);
+      if (!isLoaded()) {
+        deferredSeek.current = at;
+        return;
+      }
       void (async () => {
         try {
           const backend = await getBackend();
@@ -482,7 +661,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       })();
     },
-    [idle, emit, DECK, setPosition],
+    [idle, emit, isLoaded, DECK, setPosition],
   );
 
   /**
@@ -495,7 +674,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
    * playing, and letting go leaves it as it was found.
    */
   const scrubBegin = useCallback(() => {
-    if (idle || scrubbing.current) return;
+    if (idle || scrubbing.current || !isReady()) return;
     scrubbing.current = true;
     landing.current = null;
     // The head stops running the moment it is grabbed. A playing deck keeps
@@ -510,7 +689,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         setError(reasonFrom(failure));
       }
     })();
-  }, [idle, DECK]);
+  }, [idle, isReady, DECK]);
 
   /**
    * Where the drag is now.
@@ -521,7 +700,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
    */
   const scrubTo = useCallback(
     (seconds: number) => {
-      if (idle || !Number.isFinite(seconds)) return;
+      if (idle || !isReady() || !Number.isFinite(seconds)) return;
       const at = Math.max(seconds, -5);
       // Pinned, not merely moved: a drag on a playing deck must not carry on
       // running forward between pointer moves, which is what made a steady
@@ -551,7 +730,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         })();
       });
     },
-    [idle, emit, DECK, setPosition],
+    [idle, emit, isReady, DECK, setPosition],
   );
 
   /** Lets go. The playhead stays where the drag left it. */
@@ -568,9 +747,11 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     (next: number) => {
       if (idle || !Number.isFinite(next)) return;
       const safe = Math.min(Math.max(next, 0.5), 2);
+      desiredTempo.current = safe;
       // Shown at once rather than on the next tick: a fader that answers a
       // tenth of a second later is a fader people press twice.
       setTempoState(safe);
+      if (!isLoaded()) return;
       void (async () => {
         try {
           const backend = await getBackend();
@@ -580,7 +761,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       })();
     },
-    [idle, DECK],
+    [idle, isLoaded, DECK],
   );
 
   const nudgeTempo = useCallback(
@@ -592,7 +773,9 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
     (semitones: number) => {
       if (idle || !Number.isFinite(semitones)) return;
       const safe = Math.max(-12, Math.min(12, Math.round(semitones)));
+      desiredKeyShift.current = safe;
       setKeyShiftState(safe);
+      if (!isLoaded()) return;
       void (async () => {
         try {
           const backend = await getBackend();
@@ -602,13 +785,15 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       })();
     },
-    [idle, DECK],
+    [idle, isLoaded, DECK],
   );
 
   const setMasterTempo = useCallback(
     (on: boolean) => {
       if (idle) return;
+      desiredMasterTempo.current = on;
       setMasterTempoState(on);
+      if (!isLoaded()) return;
       void (async () => {
         try {
           const backend = await getBackend();
@@ -618,7 +803,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       })();
     },
-    [idle, DECK],
+    [idle, isLoaded, DECK],
   );
 
   const scrubEnd = useCallback(() => {
@@ -674,7 +859,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
   // sounds. A failure is reported as a deck error, like a seek's.
   const loopCall = useCallback(
     (call: (backend: Backend) => Promise<void>) => {
-      if (idle) return;
+      if (idle || !isLoaded()) return;
       void (async () => {
         try {
           await call(await getBackend());
@@ -683,17 +868,30 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         }
       })();
     },
-    [idle],
+    [idle, isLoaded],
   );
   const setLoop = useCallback(
     (inSeconds: number, outSeconds: number) => {
       if (!Number.isFinite(inSeconds) || !Number.isFinite(outSeconds) || outSeconds <= inSeconds) return;
-      loopCall((b) => b.deckSetLoop(DECK, Math.max(0, inSeconds) * 1000, outSeconds * 1000));
+      const next = { inSeconds: Math.max(0, inSeconds), outSeconds, active: true };
+      desiredLoop.current = next;
+      setLoopState(next);
+      loopCall((b) => b.deckSetLoop(DECK, next.inSeconds * 1000, next.outSeconds * 1000));
     },
     [loopCall, DECK],
   );
-  const setLoopActive = useCallback((on: boolean) => loopCall((b) => b.deckLoopActive(DECK, on)), [loopCall, DECK]);
-  const clearLoop = useCallback(() => loopCall((b) => b.deckClearLoop(DECK)), [loopCall, DECK]);
+  const setLoopActive = useCallback((on: boolean) => {
+    if (desiredLoop.current !== null) {
+      desiredLoop.current = { ...desiredLoop.current, active: on };
+      setLoopState(desiredLoop.current);
+    }
+    loopCall((b) => b.deckLoopActive(DECK, on));
+  }, [loopCall, DECK]);
+  const clearLoop = useCallback(() => {
+    desiredLoop.current = null;
+    setLoopState(null);
+    loopCall((b) => b.deckClearLoop(DECK));
+  }, [loopCall, DECK]);
 
   return useMemo(() => ({
     playing, position, duration, idle, error, toggle, playAfter, playWhenLoaded, seek, seekFraction,

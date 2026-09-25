@@ -24,7 +24,7 @@ use crate::{Deck, DeckEvent, EventSink};
 
 /// What the control side asks a deck to do.
 pub enum Command {
-    Load(PathBuf),
+    Load { request: u64, path: PathBuf },
     /// Both play and pause are already in the clock when this arrives; the
     /// command exists to wake the thread from its blocking wait.
     Wake,
@@ -222,7 +222,7 @@ impl Worker {
     /// Returns false when the deck has been told to quit.
     fn handle(&mut self, command: Command) -> bool {
         match command {
-            Command::Load(path) => self.load(&path),
+            Command::Load { request, path } => self.load(request, &path),
             Command::Seek(frame) => self.seek(frame),
             Command::ScrubBegin => self.scrub_begin(),
             Command::ScrubTo(frame, pre_roll, at) => self.scrub_to(frame, pre_roll, at),
@@ -255,7 +255,12 @@ impl Worker {
         true
     }
 
-    fn load(&mut self, path: &std::path::Path) {
+    fn load(&mut self, request: u64, path: &std::path::Path) {
+        // Requests waiting behind a slow open are cheap to skip. The newest
+        // path is the only one a person still has selected.
+        if self.clock.requested_load() != request {
+            return;
+        }
         self.clock.set_start_in(0);
         self.clock.set_loop(None);
         self.clock.set_playing(false);
@@ -263,7 +268,13 @@ impl Worker {
         self.clock.set_loaded(false);
         self.clock.set_end_of_stream(false);
 
-        match Streamer::open(path, self.device_rate) {
+        let opened = Streamer::open(path, self.device_rate);
+        // Opening can block on a sleeping disk. If another selection arrived
+        // meanwhile, never publish this stale file or its error.
+        if self.clock.requested_load() != request {
+            return;
+        }
+        match opened {
             Ok(streamer) => {
                 let total = streamer.total_frames();
                 self.generation = self.clock.bump_generation();
@@ -274,18 +285,29 @@ impl Worker {
                 self.clock.set_total(total);
                 self.clock.set_sample_rate(self.device_rate);
                 self.streamer = Some(streamer);
-                self.clock.set_loaded(true);
+                if !self.clock.install_load(request) {
+                    self.streamer = None;
+                    return;
+                }
                 (self.events)(DeckEvent::Loaded {
                     deck: self.deck,
+                    load_id: request,
                     total_frames: total,
                     sample_rate: self.device_rate,
                 });
             }
             Err(e) => {
+                if !self.clock.finish_load_error(request) {
+                    return;
+                }
                 self.clock.set_total(0);
                 self.clock.set_pre_roll(0);
                 self.clock.set_position(0);
-                (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
+                (self.events)(DeckEvent::Error {
+                    deck: self.deck,
+                    load_id: request,
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -309,7 +331,11 @@ impl Worker {
                 self.restart_stretch();
             }
             Err(e) => {
-                (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
+                (self.events)(DeckEvent::Error {
+                    deck: self.deck,
+                    load_id: self.clock.load_id(),
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -332,7 +358,11 @@ impl Worker {
                 self.generation = self.clock.generation();
             }
             Err(e) => {
-                (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
+                (self.events)(DeckEvent::Error {
+                    deck: self.deck,
+                    load_id: self.clock.load_id(),
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -389,6 +419,7 @@ impl Worker {
         self.streamer = None;
         self.generation = self.clock.bump_generation();
         self.clock.set_loaded(false);
+        self.clock.set_load_id(0);
         self.clock.set_pre_roll(0);
         self.clock.set_position(0);
         self.clock.set_total(0);
@@ -556,7 +587,11 @@ impl Worker {
                 // A decode that fails mid-track stops the deck rather than
                 // playing whatever was left in the buffer.
                 self.clock.set_end_of_stream(true);
-                (self.events)(DeckEvent::Error { deck: self.deck, message: e.to_string() });
+                (self.events)(DeckEvent::Error {
+                    deck: self.deck,
+                    load_id: self.clock.load_id(),
+                    message: e.to_string(),
+                });
                 return false;
             }
         };
@@ -657,6 +692,7 @@ impl Worker {
                         self.clock.set_end_of_stream(true);
                         (self.events)(DeckEvent::Error {
                             deck: self.deck,
+                            load_id: self.clock.load_id(),
                             message: e.to_string(),
                         });
                         return false;

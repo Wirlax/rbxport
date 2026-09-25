@@ -868,10 +868,11 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
     assert!(s.sink.lock().unwrap().is_none());
     assert!(!s.deck_state().a.loaded);
 
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id.clone())).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id.clone(), 1)).unwrap();
     let loaded = s.pull_until("the deck to load", |t| t.a.loaded);
     assert_eq!(loaded.sample_rate, RATE);
     assert_eq!(loaded.a.total_frames, u64::from(RATE) * 2);
+    assert_eq!(loaded.a.load_id, 1);
     assert!(!loaded.a.playing);
     assert_eq!(loaded.a.frames, 0);
     assert!(!loaded.b.loaded, "the other deck is untouched");
@@ -901,7 +902,7 @@ fn an_imported_file_goes_into_a_playlist_and_plays_on_a_deck() {
 
     // Unloaded: the deck is empty again.
     run(commands::deck_unload(s.player(), "a".into())).unwrap();
-    let empty = s.pull_until("the deck to unload", |t| !t.a.loaded);
+    let empty = s.pull_until("the deck to unload", |t| !t.a.loaded && t.a.frames == 0);
     assert_eq!(empty.a.frames, 0);
 }
 
@@ -910,7 +911,7 @@ fn a_track_whose_file_is_gone_is_refused_at_load_rather_than_failing_later() {
     let s = shell();
     // The fixture's tracks point at files that do not exist. That is caught
     // when the deck is asked for one, not by the engine mid-play.
-    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), "no-such-track".into()))
+    let err = run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), "no-such-track".into(), 1))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
     assert!(s.sink.lock().unwrap().is_none(), "the audio output was not opened for it");
@@ -930,8 +931,8 @@ fn the_two_decks_play_independently_and_the_master_level_is_the_engine_s() {
     assert_eq!(report.imported, 2);
     let (id_a, id_b) = (report.tracks[0].id.clone(), report.tracks[1].id.clone());
 
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id_a)).unwrap();
-    run(commands::deck_load(s.handle(), s.state(), s.player(), "b".into(), id_b)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), "a".into(), id_a, 1)).unwrap();
+    run(commands::deck_load(s.handle(), s.state(), s.player(), "b".into(), id_b, 2)).unwrap();
     s.pull_until("both decks to load", |t| t.a.loaded && t.b.loaded);
 
     run(commands::set_master_level(s.handle(), s.player(), 0.5)).unwrap();

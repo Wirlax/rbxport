@@ -26,6 +26,14 @@ pub struct DeckClock {
     playing: AtomicBool,
     scrubbing: AtomicBool,
     loaded: AtomicBool,
+    /// The newest load the control side asked for. A decoder that finishes an
+    /// older request discards it instead of installing the wrong track.
+    requested_load: AtomicU64,
+    /// The request that is actually installed, or 0 while empty/loading.
+    load_id: AtomicU64,
+    /// Serializes publishing a result with invalidating it. The audio thread
+    /// never takes this; it is only shared by the caller and decode worker.
+    load_gate: std::sync::Mutex<()>,
     /// The decode thread has pushed the last block it will push. The callback
     /// stops the deck when it has drained what is left.
     end_of_stream: AtomicBool,
@@ -66,6 +74,8 @@ pub struct DeckSnapshot {
     pub sample_rate: u32,
     pub playing: bool,
     pub loaded: bool,
+    /// Which load request is installed, or 0 while empty/loading.
+    pub load_id: u64,
     /// A multiple of the file's own speed: 1.0 is the track as recorded.
     pub tempo: f32,
     /// Whether the pitch is held while the speed changes.
@@ -91,6 +101,7 @@ impl DeckClock {
             sample_rate: self.sample_rate.load(Ordering::Relaxed),
             playing: self.playing.load(Ordering::Relaxed),
             loaded: self.loaded.load(Ordering::Relaxed),
+            load_id: self.load_id(),
             tempo: self.tempo(),
             master_tempo: self.master_tempo(),
             key_shift: self.key_shift(),
@@ -249,6 +260,52 @@ impl DeckClock {
 
     pub fn set_loaded(&self, loaded: bool) {
         self.loaded.store(loaded, Ordering::Relaxed);
+    }
+
+    pub fn requested_load(&self) -> u64 {
+        self.requested_load.load(Ordering::Acquire)
+    }
+
+    /// Makes `request` the only load whose result may be installed.
+    pub fn request_load(&self, request: u64) {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.requested_load.store(request, Ordering::Release);
+        self.load_id.store(0, Ordering::Release);
+        self.loaded.store(false, Ordering::Release);
+        self.playing.store(false, Ordering::Release);
+    }
+
+    pub fn load_id(&self) -> u64 {
+        self.load_id.load(Ordering::Acquire)
+    }
+
+    pub fn set_load_id(&self, request: u64) {
+        self.load_id.store(request, Ordering::Release);
+    }
+
+    /// Publishes a decoder only if nothing newer was requested. Holding the
+    /// same gate as `request_load` closes the last-instruction race between
+    /// checking an id and marking its audio loaded.
+    pub fn install_load(&self, request: u64) -> bool {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.requested_load.load(Ordering::Acquire) != request {
+            return false;
+        }
+        self.load_id.store(request, Ordering::Release);
+        self.loaded.store(true, Ordering::Release);
+        true
+    }
+
+    /// An open failure belongs to the current selection only while its request
+    /// still does. A newer selection must not receive the older error.
+    pub fn finish_load_error(&self, request: u64) -> bool {
+        let _gate = self.load_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.requested_load.load(Ordering::Acquire) != request {
+            return false;
+        }
+        self.load_id.store(0, Ordering::Release);
+        self.loaded.store(false, Ordering::Release);
+        true
     }
 
     pub fn end_of_stream(&self) -> bool {
