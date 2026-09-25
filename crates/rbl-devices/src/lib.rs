@@ -230,12 +230,8 @@ fn count_playlists(pdb: &Path) -> usize {
 fn filesystem_name(path: &Path, raw: &str) -> String {
     #[cfg(target_os = "macos")]
     if matches!(raw.to_ascii_lowercase().as_str(), "msdos" | "fat") {
-        if let Ok(output) = std::process::Command::new("/usr/sbin/diskutil").args(["info", "-plist"]).arg(path).output() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            if let Some(value) = text.split("<key>FilesystemName</key>").nth(1)
-                .and_then(|v| v.split("<string>").nth(1)).and_then(|v| v.split("</string>").next()) {
-                return value.trim().trim_start_matches("MS-DOS ").to_owned();
-            }
+        if let Some(fat) = volume_type(path).as_deref().and_then(fat_variant) {
+            return fat.to_owned();
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -243,10 +239,56 @@ fn filesystem_name(path: &Path, raw: &str) -> String {
     raw.to_owned()
 }
 
+/// `FAT32` from Disk Arbitration's `MS-DOS (FAT32)`: which FAT a stick is,
+/// where the mount itself only says `msdos`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn fat_variant(volume_type: &str) -> Option<&str> {
+    volume_type.strip_prefix("MS-DOS (")?.strip_suffix(')')
+}
+
+/// The volume's type as Disk Utility names it, such as `MS-DOS (FAT32)`.
+///
+/// Asked of Disk Arbitration directly, which answers in well under a
+/// millisecond. `diskutil info` gives the same name but takes 100 to 200 ms
+/// a stick, and the Sync Manager waits for the device list before it opens.
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "Disk Arbitration is a C framework; each object it returns is held by a CFRetained and released on drop"
+)]
+fn volume_type(path: &Path) -> Option<String> {
+    use objc2_core_foundation::{CFDictionary, CFRetained, CFString, CFType, CFURL};
+    use objc2_disk_arbitration::{kDADiskDescriptionVolumeTypeKey, DADisk, DASession};
+
+    let url = CFURL::from_directory_path(path)?;
+    // SAFETY: the default allocator; the session is released when dropped.
+    let session = unsafe { DASession::new(None) }?;
+    // SAFETY: a live session and a file URL; returns a new, owned disk.
+    let disk = unsafe { DADisk::from_volume_path(None, &session, &url) }?;
+    // SAFETY: a live disk; returns a new, owned dictionary.
+    let description = unsafe { disk.description() }?;
+    // SAFETY: Disk Arbitration's description is keyed by CFString constants,
+    // and its values are CF objects of whatever type each key documents.
+    let description: CFRetained<CFDictionary<CFString, CFType>> =
+        unsafe { CFRetained::cast_unchecked(description) };
+    // SAFETY: an immutable CFString constant the framework exports.
+    let key = unsafe { kDADiskDescriptionVolumeTypeKey };
+    let value = description.get(key)?.downcast::<CFString>().ok()?;
+    Some(value.to_string())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fat_variant_is_read_from_the_volume_type() {
+        assert_eq!(fat_variant("MS-DOS (FAT32)"), Some("FAT32"));
+        assert_eq!(fat_variant("MS-DOS (FAT16)"), Some("FAT16"));
+        assert_eq!(fat_variant("ExFAT"), None);
+        assert_eq!(fat_variant("Mac OS Extended (Journaled)"), None);
+    }
 
     #[test]
     fn the_boot_volume_is_never_an_export_destination() {

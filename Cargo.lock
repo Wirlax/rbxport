@@ -3024,6 +3024,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-disk-arbitration"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee6933800935dccff2b811f1c5b804eb9b3d3347face044712188624bf547b45"
+dependencies = [
+ "objc2-core-foundation",
+]
+
+[[package]]
 name = "objc2-encode"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3702,6 +3711,8 @@ name = "rbl-devices"
 version = "0.19.3"
 dependencies = [
  "dirs 5.0.1",
+ "objc2-core-foundation",
+ "objc2-disk-arbitration",
  "rbl-anlz",
  "rbl-core",
  "rbl-export",
