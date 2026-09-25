@@ -20,6 +20,7 @@ import {
 } from "@/lib/tree";
 import { SourceRail } from "./SourceRail";
 import { usePreferences } from "@/store/usePreferences";
+import type { TreeExpansion } from "@/lib/session";
 
 /**
  * The name, while it is being typed over.
@@ -335,6 +336,10 @@ export interface TreeViewProps {
    * whose children are not known until somebody looks.
    */
   onExpand?: (node: TreeNode) => void;
+  /** Main-tree folder choices restored from the previous app session. */
+  initialExpansion?: TreeExpansion;
+  /** Keeps main-tree folder choices current for the next app session. */
+  onExpansionChange?: (expansion: TreeExpansion) => void;
   /** Opens the Sync Manager from the foot of the rail. */
   onOpenSync?: () => void;
   /** Create New Intelligent Playlist under the node, and Edit the Intelligent Playlist. */
@@ -360,6 +365,7 @@ export const TreeView = memo(function TreeView({
   nodes, selectedId, onSelect, dragging, onDropTracks, onDropFiles, onExport, onExportFile,
   onCreatePlaylist, onCreateFolder, onDeleteNode, onRenameNode, onMoveNode, readOnly = false,
   onExpand, showCounts = false, onOpenSync,
+  initialExpansion, onExpansionChange,
   onCreateSmartPlaylist, onEditSmartPlaylist, onAddArtwork, onAddToShortcut, onSortItems,
   railShortcuts, onOpenShortcut, onDeleteShortcut,
   onEjectDevice, ejectingDeviceId, deviceBusy = false,
@@ -430,29 +436,63 @@ export const TreeView = memo(function TreeView({
   // what should open, and 187 history sessions filed by year and month would
   // otherwise arrive on top of the playlists — and the user's own toggles take
   // over from there.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [expansion, setExpansion] = useState(() => ({
+    collapsed: new Set(initialExpansion?.collapsed ?? []),
+    expanded: new Set(initialExpansion?.expanded ?? []),
+  }));
+  const collapsed = expansion.collapsed;
   // Every id seeded so far. Only a node the tree has never seen is seeded:
   // re-seeding on every later tree would shut whatever the user had opened
   // each time a playlist changed, and the Explorer's folders arrive a level
   // at a time, each level closed, long after the first tree.
-  const seen = useRef<Set<string>>(new Set());
+  const seen = useRef<Set<string>>(new Set([
+    ...(initialExpansion?.collapsed ?? []),
+    ...(initialExpansion?.expanded ?? []),
+  ]));
   useEffect(() => {
     const fresh = newlyClosed(nodes, seen.current);
     for (const node of nodes) seen.current.add(node.id);
     if (fresh.length === 0) return;
-    setCollapsed((c) => {
-      const next = new Set(c);
+    setExpansion((current) => {
+      const next = new Set(current.collapsed);
       for (const id of fresh) next.add(id);
-      return next;
+      return { collapsed: next, expanded: current.expanded };
     });
   }, [nodes]);
 
+  // Persist explicit choices after every toggle (and after newly discovered
+  // default-closed nodes are seeded). The parent owns storage so this view is
+  // still reusable by the independently stateful Sub-Browser.
+  useEffect(() => {
+    onExpansionChange?.({
+      collapsed: [...expansion.collapsed],
+      expanded: [...expansion.expanded],
+    });
+  }, [expansion, onExpansionChange]);
+
+  // Restoring an open Explorer folder has to read it before its remembered
+  // descendants can appear. As each level arrives this effect runs again;
+  // useExplorer de-duplicates folders that are loaded or already pending.
+  useEffect(() => {
+    if (!onExpand) return;
+    for (const node of nodes) {
+      if (node.lazy === true && expansion.expanded.has(node.id)) onExpand(node);
+    }
+  }, [nodes, expansion.expanded, onExpand]);
+
   const onToggle = useCallback(
     (node: TreeNode) => {
-      setCollapsed((c) => toggle(c, node.id));
+      const wasCollapsed = collapsed.has(node.id);
+      setExpansion((current) => {
+        const nextCollapsed = toggle(current.collapsed, node.id);
+        const nextExpanded = new Set(current.expanded);
+        if (wasCollapsed) nextExpanded.add(node.id);
+        else nextExpanded.delete(node.id);
+        return { collapsed: nextCollapsed, expanded: nextExpanded };
+      });
       // Opening a lazy node is the moment to read what is under it. Told on
       // every open, and the owner ignores what it already holds.
-      if (node.lazy === true && collapsed.has(node.id)) onExpand?.(node);
+      if (node.lazy === true && wasCollapsed) onExpand?.(node);
     },
     [collapsed, onExpand],
   );

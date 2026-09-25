@@ -16,6 +16,7 @@ describe("sanitiseSession", () => {
     const session = {
       treeWidth: 420,
       selectedNodeId: "pl-7",
+      treeExpansion: { collapsed: ["folder-1"], expanded: ["dir:0:/Music"] },
       sort: { column: "bpm", descending: true },
       infoOpen: true,
       subOpen: false,
@@ -94,6 +95,18 @@ describe("sanitiseSession", () => {
   it("keeps a selected node only when it is an id", () => {
     expect(sanitiseSession({ selectedNodeId: "pl-1" }).selectedNodeId).toBe("pl-1");
     expect(sanitiseSession({ selectedNodeId: 42 }).selectedNodeId).toBeNull();
+  });
+
+  it("keeps only bounded, unambiguous tree expansion ids", () => {
+    const session = sanitiseSession({
+      treeExpansion: {
+        collapsed: ["closed", "closed", 7],
+        expanded: ["open", "closed", null],
+      },
+    });
+    expect(session.treeExpansion).toEqual({ collapsed: ["closed"], expanded: ["open"] });
+    expect(sanitiseSession({ treeExpansion: "wide open" }).treeExpansion)
+      .toEqual(DEFAULT_SESSION.treeExpansion);
   });
 
   it("restores only waveform zoom levels the player can select", () => {

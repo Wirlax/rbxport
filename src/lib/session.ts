@@ -38,6 +38,8 @@ export interface Session {
   treeWidth: number;
   /** The tree node that was selected, if it still exists at load. */
   selectedNodeId: string | null;
+  /** Folder open/closed choices that override the library's defaults. */
+  treeExpansion: TreeExpansion;
   sort: SortState;
   infoOpen: boolean;
   subOpen: boolean;
@@ -68,6 +70,19 @@ export interface Session {
   waveformZoom: { a: number; b: number };
 }
 
+/**
+ * Explicit folder choices in the main library tree.
+ *
+ * Both sides are needed: most playlist folders arrive open while Explorer
+ * folders arrive closed, so absence alone cannot mean the same thing for
+ * every node. Explorer ids also let the UI reopen lazy ancestors after a
+ * restart and read their children back one level at a time.
+ */
+export interface TreeExpansion {
+  collapsed: string[];
+  expanded: string[];
+}
+
 /** MASTER DECK, PLAYER A or PLAYER B, as the menu offers them. */
 export type TrafficLightSource = "master" | "a" | "b";
 
@@ -81,6 +96,7 @@ export const DEFAULT_SUB_TREE_WIDTH = 298;
 export const DEFAULT_SESSION: Session = {
   treeWidth: DEFAULT_TREE_WIDTH,
   selectedNodeId: null,
+  treeExpansion: { collapsed: [], expanded: [] },
   sort: DEFAULT_SORT,
   infoOpen: false,
   subOpen: false,
@@ -135,6 +151,23 @@ function records<T extends { id: string }>(value: unknown, limit: number): T[] {
     .slice(0, limit);
 }
 
+/** A bounded, de-duplicated list of node ids from untrusted storage. */
+function nodeIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === "string"))]
+    .slice(0, SEEDED_NODES);
+}
+
+function treeExpansionOrDefault(value: unknown): TreeExpansion {
+  if (typeof value !== "object" || value === null) return { collapsed: [], expanded: [] };
+  const raw = value as { collapsed?: unknown; expanded?: unknown };
+  const collapsed = nodeIds(raw.collapsed);
+  const closed = new Set(collapsed);
+  // A corrupt value naming a node on both sides resolves safely to closed.
+  const expanded = nodeIds(raw.expanded).filter((id) => !closed.has(id));
+  return { collapsed, expanded };
+}
+
 /** Turns whatever was stored into a session that will render. */
 export function sanitiseSession(value: unknown): Session {
   if (typeof value !== "object" || value === null) return DEFAULT_SESSION;
@@ -142,6 +175,7 @@ export function sanitiseSession(value: unknown): Session {
   return {
     treeWidth: widthOrDefault(raw.treeWidth, DEFAULT_TREE_WIDTH),
     selectedNodeId: typeof raw.selectedNodeId === "string" ? raw.selectedNodeId : null,
+    treeExpansion: treeExpansionOrDefault(raw.treeExpansion),
     sort: sortOrDefault(raw.sort),
     infoOpen: raw.infoOpen === true,
     subOpen: raw.subOpen === true,

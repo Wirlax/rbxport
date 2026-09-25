@@ -142,6 +142,7 @@ function AppBody() {
   const [restored] = useState(loadSession);
 
   const [tree, setTree] = useState<readonly TreeNode[]>(restored.tree);
+  const [treeExpansion, setTreeExpansion] = useState(restored.treeExpansion);
   const [editHistory, setEditHistory] = useState({
     canUndo: false, canRedo: false, undoLabel: null as string | null, redoLabel: null as string | null,
   });
@@ -2025,6 +2026,7 @@ function AppBody() {
     saveSession({
       treeWidth,
       selectedNodeId: selectedNode?.id ?? null,
+      treeExpansion,
       sort: sortState,
       infoOpen,
       subOpen,
@@ -2040,7 +2042,7 @@ function AppBody() {
       trafficLight,
       waveformZoom,
     });
-  }, [sessionReady, treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom]);
+  }, [sessionReady, treeWidth, selectedNode, treeExpansion, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -2258,6 +2260,8 @@ function AppBody() {
           onMoveNode={readOnly ? undefined : moveNode}
           readOnly={readOnly}
           onExpand={explorer.expand}
+          initialExpansion={restored.treeExpansion}
+          onExpansionChange={setTreeExpansion}
           showCounts={viewPrefs.playlistCounts}
           onOpenSync={openSyncManager}
           onCreateSmartPlaylist={createSmartPlaylistIn}

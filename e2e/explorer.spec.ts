@@ -96,6 +96,32 @@ test("a root opens into the real folder tree one level at a time", async ({ page
   await expect(item("Shared")).toBeVisible();
 });
 
+test("library and Explorer folder expansion survives a restart", async ({ page }) => {
+  const { rail, item, open } = parts(page);
+
+  // A library folder that starts open is explicitly closed.
+  await page.getByRole("button", { name: "Collapse CURRENT" }).click();
+  await expect(item("CURRENT")).toHaveAttribute("aria-expanded", "false");
+
+  // Explorer descendants are lazy, so restoring this state must reopen each
+  // ancestor before the next remembered folder can even be reconstructed.
+  await rail.getByRole("tab", { name: "Explorer" }).click();
+  await open("Music").click();
+  await open("Rekordbox").click();
+  await expect(item("Sets")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("grid")).toBeVisible();
+  await expect(page.getByRole("treeitem", { name: /CURRENT$/ })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("treeitem", { name: /Melodic Vox/ })).toHaveCount(0);
+
+  const restored = parts(page);
+  await restored.rail.getByRole("tab", { name: "Explorer" }).click();
+  await expect(restored.item("Music")).toHaveAttribute("aria-expanded", "true");
+  await expect(restored.item("Rekordbox")).toHaveAttribute("aria-expanded", "true");
+  await expect(restored.item("Sets")).toBeVisible();
+});
+
 test("selecting a folder lists its audio files, the library's rows first among them", async ({ page }) => {
   const { rail, item, open, rows, title } = parts(page);
   await rail.getByRole("tab", { name: "Explorer" }).click();
