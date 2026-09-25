@@ -12,7 +12,7 @@ if (args.length && (args.length !== 2 || args[0] !== "--version")) {
 const version = args.length ? args[1] : execFileSync("git", [
   "tag", "--merged", "HEAD", "--sort=-version:refname",
 ], { cwd: root, encoding: "utf8" }).split("\n")
-  .find(tag => /^v\d+\.\d+\.\d+$/.test(tag))?.slice(1);
+  .find(tag => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(tag))?.slice(1);
 if (!version || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version)) {
   throw new Error("No valid release version. Fetch release tags or pass --version VERSION.");
 }
