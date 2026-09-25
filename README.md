@@ -27,6 +27,14 @@ to **WAV** (default) or **320 kbps MP3**. Compatible files are copied as-is, and
 your originals stay untouched. Conversion is built in; no FFmpeg installation
 is needed. See [USB export preferences](docs/usb-export.md) for format details.
 
+## AppleScript
+
+On macOS rbxport can be scripted: read the library, edit playlists and
+tracks, load and play the decks, export to a stick, turn LINK on or off,
+and change preferences. Edits follow the same rules as the window: they are
+refused while rekordbox runs or Library Protection is on. See
+[AppleScript](docs/applescript.md) for the dictionary and examples.
+
 ## Backups
 
 The Rekordbox Data bar refreshes automatically when its saved estimate is a week

@@ -56,6 +56,8 @@ import { MixerStrip } from "@/views/player/MixerStrip";
 import { DualZoom } from "@/views/player/DualDeck";
 import type { PreferencesTarget } from "@/views/settings/Preferences";
 import { PreferencesProvider, usePreferencesStore } from "@/store/usePreferences";
+import type { PreferencePane } from "@/lib/preferences";
+import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHandler } from "@/lib/scripting";
 import { useAnalysis } from "@/store/useAnalysis";
 import { AnalysisDialog } from "@/views/analysis/AnalysisDialog";
 import { NewLibraryDialog } from "@/views/library/NewLibraryDialog";
@@ -604,17 +606,21 @@ function AppBody() {
   // On the interface chosen under DJ System, or the one the players are
   // reached through when none is.
   const linkInterface = stickDefaults.linkInterface;
-  const toggleLink = useCallback(() => {
+  /** Turns LINK on or off and shows what came of it; the status says why not. */
+  const setLinkOn = useCallback(async (on: boolean): Promise<LinkStatus> => {
     setLinkBusy(true);
-    void (async () => {
-      const backend = await getBackend();
-      try {
-        setLink(link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined, stickDefaults.linkKeySort));
-      } finally {
-        setLinkBusy(false);
-      }
-    })();
-  }, [link?.on, linkInterface, stickDefaults.linkKeySort]);
+    const backend = await getBackend();
+    try {
+      const status = on ? await backend.startLinkExport(linkInterface ?? undefined, stickDefaults.linkKeySort) : await backend.stopLinkExport();
+      setLink(status);
+      return status;
+    } finally {
+      setLinkBusy(false);
+    }
+  }, [linkInterface, stickDefaults.linkKeySort]);
+  const toggleLink = useCallback(() => {
+    void setLinkOn(!link?.on);
+  }, [link?.on, setLinkOn]);
 
   // The tempo-master controls: each returns LINK's fresh status.
   const setLinkMaster = useCallback((on: boolean) => {
@@ -1777,26 +1783,91 @@ function AppBody() {
     [devices, selectedNode],
   );
 
-  const syncToDevice = useCallback(
-    async (playlistId: string) => {
-      if (!selectedDevice) return;
+  /**
+   * Writes a playlist to a stick and says how it went, in the note and as
+   * the returned summary; throws what went wrong, having said it. Shared by
+   * the device panel and AppleScript's `export`.
+   */
+  const writeToDevice = useCallback(
+    async (playlistId: string, device: { name: string; path: string }): Promise<string> => {
       const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
       setSyncing(true);
-      report(`Writing ${name} to ${selectedDevice.name}…`);
+      report(`Writing ${name} to ${device.name}…`);
       try {
         const backend = await getBackend();
-        const written = await backend.exportPlaylist(playlistId, selectedDevice.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
-        if (written !== null) report(exportSummary(selectedDevice.name, written));
+        const written = await backend.exportPlaylist(playlistId, device.path, stickDefaults, deleteUnlistedMusic, compatibilityFormat);
+        const said = written === null ? "Nothing was written." : exportSummary(device.name, written);
+        if (written !== null) report(said);
         setDevices(await backend.listDevices());
+        return said;
       } catch (e) {
-        if (e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped.") report("Export stopped.");
-        else refuse(e instanceof Error ? e.message : "That export could not be written.");
+        const said = e && typeof e === "object" && "kind" in e && e.kind === "cancelled" || e instanceof Error && e.message === "Export stopped."
+          ? "Export stopped."
+          : e instanceof Error ? e.message : "That export could not be written.";
+        if (said === "Export stopped.") report(said);
+        else refuse(said);
+        throw new Error(said, { cause: e });
       } finally {
         setSyncing(false);
       }
     },
-    [selectedDevice, tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat],
+    [tree, report, refuse, stickDefaults, deleteUnlistedMusic, compatibilityFormat],
   );
+
+  const syncToDevice = useCallback(
+    async (playlistId: string) => {
+      if (!selectedDevice) return;
+      // Said in the note already; nothing else to do with it here.
+      await writeToDevice(playlistId, selectedDevice).catch(() => undefined);
+    },
+    [selectedDevice, writeToDevice],
+  );
+
+  // AppleScript. The backend answers a script's reads itself; what it asks
+  // of the window comes here and runs through the same callbacks the
+  // controls use. See `src/lib/scripting.ts`.
+  const scriptHandlers = useEventCallback((): Readonly<Record<string, ScriptHandler>> => ({
+    "deck.load": async ({ deck, row }) => {
+      const id: DeckId = deck === "b" ? "b" : "a";
+      if (deckCount(layout) < deckNumber(id)) {
+        throw new Error(`Deck ${deckNumber(id)} is not in this layout. Choose a layout with ${deckNumber(id)} players from the View menu.`);
+      }
+      const track = row as RowDto;
+      loadTrack(id, track);
+      await whenLoaded(id, track.id);
+    },
+    "deck.play": ({ deck }) => setPlaying(deck === "b" ? "b" : "a", true),
+    "deck.pause": ({ deck }) => setPlaying(deck === "b" ? "b" : "a", false),
+    "link.set": async ({ on }) => {
+      const status = await setLinkOn(on === true);
+      if (on === true && !status.on) throw new Error(status.problem ?? "LINK could not be turned on.");
+    },
+    "preferences.set": ({ path, value }) => {
+      const next = withSetting(prefs.preferences, String(path), value);
+      const [pane, field] = String(path).split(".") as [PreferencePane, string];
+      prefs.update(pane, { [field]: (next[pane] as unknown as Record<string, unknown>)[field] });
+      return next;
+    },
+    export: ({ playlist, device }) => {
+      const to = device as { name: string; path: string };
+      return writeToDevice(String(playlist), to);
+    },
+  }));
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void getBackend().then((backend) => {
+      if (live) stop = backend.serveScripts((request) => answer(scriptHandlers(), request));
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [scriptHandlers]);
+  // A script reads the preferences from the backend's copy, kept current here.
+  useEffect(() => {
+    void getBackend().then((backend) => backend.mirrorPreferences(prefs.preferences)).catch(() => undefined);
+  }, [prefs.preferences]);
 
   const exportPlaylistFile = useCallback((node: TreeNode, format: "m3u8" | "txt") => {
     void (async () => {

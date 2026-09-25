@@ -11,7 +11,7 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, Phrase, ImportReport,
   LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, Tick,
+  LinkStatus, MissingExportFile, MissingTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   TrackDetails, TrackLookups,
 } from "./types";
@@ -299,6 +299,30 @@ async function realBackend(): Promise<Backend> {
     onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
+    serveScripts: (handle) => {
+      // Ready only once the listener is in: a request sent before then would
+      // reach nobody and wait out its timeout.
+      let live = true;
+      let stop: (() => void) | undefined;
+      void import("@tauri-apps/api/event").then(async ({ listen }) => {
+        const unlisten = await listen<ScriptRequest>("script:request", (e) => {
+          void handle(e.payload).then((reply) =>
+            invoke<void>("script_reply", { id: e.payload.id, value: reply.value ?? null, error: reply.error ?? null }),
+          );
+        });
+        if (!live) {
+          unlisten();
+          return;
+        }
+        stop = unlisten;
+        await invoke<void>("script_ready");
+      });
+      return () => {
+        live = false;
+        stop?.();
+      };
+    },
+    mirrorPreferences: (preferences) => invoke<void>("script_preferences", { preferences }),
     onDevicesChanged: (listener) => subscribe("devices:changed", () => listener()),
     linkStatus: () => invoke<LinkStatus>("link_status"),
     linkPeers: () => invoke<LinkPeerSeen[]>("link_peers"),

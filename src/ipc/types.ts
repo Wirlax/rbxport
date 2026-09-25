@@ -432,6 +432,18 @@ export interface Backend {
    */
   onMenu(listener: (id: string) => void): () => void;
 
+  /**
+   * AppleScript's requests to the window: each is run with `handle` and its
+   * reply sent back, and the backend is told once they can be heard.
+   * Returns its own unsubscribe.
+   */
+  serveScripts(handle: (request: ScriptRequest) => Promise<ScriptReply>): () => void;
+  /**
+   * Keeps the backend's copy of the preferences current, for scripts to
+   * read: the whole set, as `src/lib/preferences.ts` stores it.
+   */
+  mirrorPreferences(preferences: object): Promise<void>;
+
   /** LINK as it stands: on or off, on what, and who is listening. */
   linkStatus(): Promise<LinkStatus>;
   /** Players and mixers heard on the network, whether or not LINK is on. */
@@ -750,6 +762,16 @@ export interface Backend {
 
 /** Which deck. Two, named rather than indexed, as the mixer is. */
 export type DeckId = "a" | "b";
+
+/** Something an AppleScript asks of the window; see `src/lib/scripting.ts`. */
+export interface ScriptRequest {
+  id: number;
+  action: string;
+  args: Record<string, unknown>;
+}
+
+/** What goes back to the script: the value, or why it could not be done. */
+export type ScriptReply = { value: unknown; error?: undefined } | { value?: undefined; error: string };
 
 /** One deck in a tick. */
 /** One output the audio could go to. */

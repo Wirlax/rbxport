@@ -2090,6 +2090,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // The fake volumes never come or go.
     onDevicesChanged: () => () => undefined,
 
+    // A browser has no AppleScript to ask anything of the window.
+    serveScripts: () => () => undefined,
+    mirrorPreferences: () => wait(undefined),
+
     onMenu: (listener) => {
       const w = window as unknown as { __menu?: (id: string) => void };
       w.__menu = listener;

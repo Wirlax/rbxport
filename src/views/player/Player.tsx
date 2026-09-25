@@ -85,6 +85,7 @@ import { useTrackDetails } from "./useTrackDetails";
 import { useTrackGrid } from "./useTrackGrid";
 import { useGridEditor } from "./useGridEditor";
 import { listenEditHistory } from "@/lib/editHistory";
+import { registerDeck } from "@/lib/scripting";
 import { useHoldRepeat } from "./useHoldRepeat";
 import { DeckInfo } from "./DeckInfo";
 import { DualControls, DualHead } from "./DualDeck";
@@ -1267,6 +1268,20 @@ export const Player = memo(function Player({
     }
     playback.toggle();
   }, [playback, synced, quantize, peerSync, grid]);
+
+  // AppleScript's PLAY and pause, read at the moment a script asks, and the
+  // same PLAY a click gives: see `src/lib/scripting.ts`.
+  const scriptTrack = useEventCallback(() => track?.id ?? null);
+  const scriptIdle = useEventCallback(() => playback.idle);
+  const scriptPlaying = useEventCallback(() => playback.playing);
+  const scriptError = useEventCallback(() => playback.error);
+  const scriptPlay = useEventCallback(() => togglePlay());
+  useEffect(
+    () => registerDeck(deck, {
+      track: scriptTrack, idle: scriptIdle, playing: scriptPlaying, error: scriptError, togglePlay: scriptPlay,
+    }),
+    [deck, scriptTrack, scriptIdle, scriptPlaying, scriptError, scriptPlay],
+  );
 
 
   /**

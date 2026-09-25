@@ -51,7 +51,10 @@
     "copyright": "Chris Le",
     "macOS": {
       "entitlements": "entitlements.plist",
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "files": {
+        "Resources/rbxport.sdef": "rbxport.sdef"
+      }
     },
     "windows": {
       "nsis": {

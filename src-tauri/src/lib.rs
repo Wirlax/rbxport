@@ -36,6 +36,7 @@ mod protocol;
 mod relocate;
 mod sync_window;
 mod report;
+mod scripting;
 mod device_settings;
 pub mod dto;
 mod error;
@@ -382,6 +383,9 @@ pub fn run() {
         .setup(|app| {
             // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
             crate::test_port::start(app.handle());
+            // AppleScript: the bridge to the window, and on macOS the
+            // scriptable classes, before any Apple Event can arrive.
+            crate::scripting::install(app.handle());
             spawn_library_load(app.handle().clone());
             // Join the network on start: a passive watcher that hears every
             // player and mixer and reports them, so the shell can offer LINK
@@ -597,6 +601,12 @@ pub fn run() {
             details::add_playlist_artwork,
             details::set_my_tags,
             details::clear_artwork,
+            // AppleScript's way into the window: it says it is listening,
+            // answers what a script asked of it, and mirrors the
+            // preferences so a script can read them.
+            scripting::script_ready,
+            scripting::script_reply,
+            scripting::script_preferences,
             // Test-only: the page answering `RBXPORT_TEST_PORT`'s questions.
             test_port::test_eval_result,
         ])

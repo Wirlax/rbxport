@@ -71,8 +71,18 @@ harness = false
 [target.'cfg(target_os = "macos")'.dependencies]
 drag = "2.1.1"
 libc = "0.2"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+# AppleScript (`scripting/`): the scriptable classes are Objective-C classes
+# defined from Rust, and Cocoa Scripting's commands and specifiers are
+# Foundation's.
+# `exception`: an Objective-C exception Cocoa throws while a command is
+# resumed is caught and logged, instead of aborting the process.
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSPasteboardItem", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std", "NSAppleEventDescriptor", "NSArray", "NSClassDescription", "NSDictionary", "NSEnumerator", "NSObjCRuntime", "NSScriptClassDescription",
+  "NSScriptCommand", "NSScriptCommandDescription", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands",
+  "NSString", "NSURL", "NSValue",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }

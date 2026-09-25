@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged by Tauri into the bundle's own Info.plist. These two keys turn on
+  Cocoa Scripting and point it at the dictionary, which tauri.conf.json copies
+  into Contents/Resources.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSAppleScriptEnabled</key>
+  <true/>
+  <key>OSAScriptingDefinition</key>
+  <string>rbxport.sdef</string>
+</dict>
+</plist>
