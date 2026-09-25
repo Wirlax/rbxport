@@ -587,19 +587,7 @@ impl Writer {
 
         // Foreign-key order even though the reference schema does not enforce
         // it: children disappear first and return only after their playlist.
-        if !deleted {
-            for id in &deletion.playlist_ids {
-                usn = next_usn(&tx)?;
-                let changed = tx.execute(
-                    "UPDATE djmdPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
-                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
-                    params![to, usn, stamp, id, from],
-                )?;
-                if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
-                }
-                rows += changed;
-            }
+        if deleted {
             for id in &deletion.membership_ids {
                 usn = next_usn(&tx)?;
                 let changed = tx.execute(
@@ -608,23 +596,23 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                }
+                rows += changed;
+            }
+            for id in &deletion.playlist_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
                 }
                 rows += changed;
             }
         } else {
-            for id in &deletion.membership_ids {
-                usn = next_usn(&tx)?;
-                let changed = tx.execute(
-                    "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
-                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
-                    params![to, usn, stamp, id, from],
-                )?;
-                if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
-                }
-                rows += changed;
-            }
             for id in &deletion.playlist_ids {
                 usn = next_usn(&tx)?;
                 let changed = tx.execute(
@@ -633,7 +621,19 @@ impl Writer {
                     params![to, usn, stamp, id, from],
                 )?;
                 if changed != 1 {
-                    return Err(DbError::WriteRefused("that playlist deletion can no longer be redone".to_owned()));
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
+                }
+                rows += changed;
+            }
+            for id in &deletion.membership_ids {
+                usn = next_usn(&tx)?;
+                let changed = tx.execute(
+                    "UPDATE djmdSongPlaylist SET rb_local_deleted = ?1, rb_local_usn = ?2,
+                        updated_at = ?3 WHERE ID = ?4 AND rb_local_deleted = ?5",
+                    params![to, usn, stamp, id, from],
+                )?;
+                if changed != 1 {
+                    return Err(DbError::WriteRefused("that playlist deletion can no longer be undone".to_owned()));
                 }
                 rows += changed;
             }

@@ -103,7 +103,7 @@ fn latest_log_file_in(dir: &Path) -> std::io::Result<Option<PathBuf>> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with("rbxport.") || !name.ends_with(".log") {
+        if !name.starts_with("rbxport.") || Path::new(&name).extension().is_none_or(|ext| ext != "log") {
             continue;
         }
         if newest.as_ref().is_none_or(|(current, _)| name > *current) {
@@ -159,6 +159,7 @@ pub fn install() {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

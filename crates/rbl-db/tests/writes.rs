@@ -340,8 +340,8 @@ fn a_playlist_deletion_can_be_undone_and_redone_exactly() {
     let mut restored_root = before.clone();
     restored_root.push(outer.clone());
     assert_eq!(f.children(ROOT), restored_root);
-    assert_eq!(f.children(&outer), [inner.clone()]);
-    assert_eq!(f.children(&inner), [list.clone()]);
+    assert_eq!(f.children(&outer), std::slice::from_ref(&inner));
+    assert_eq!(f.children(&inner), std::slice::from_ref(&list));
     assert_eq!(f.order(&list), [tracks[0].clone(), tracks[2].clone()]);
 
     f.writer.redo_playlist_deletion(&deletion).unwrap();

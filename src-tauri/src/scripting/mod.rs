@@ -19,6 +19,11 @@
 //! reads them without a round trip, and an edit that never passes through
 //! the window still honours Library Protection.
 
+// Only `cocoa.rs` drives most of this, and it is compiled on macOS alone;
+// elsewhere the model and the request plumbing are there with nothing to
+// call them yet.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, reason = "the AppleScript bridge that uses it is macOS-only"))]
+
 pub mod model;
 
 #[cfg(target_os = "macos")]
