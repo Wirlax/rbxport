@@ -6,7 +6,8 @@
 //! under `audio/`, and an `options.json` whose `db-path` is where `master.db`
 //! will be on the other machine, so `RBXPORT_OPTIONS` can point the
 //! app at it. The first three tracks play those WAVs; the rest point nowhere,
-//! as the fixture's always have.
+//! as the fixture's always have. The first [`ARTWORK_TRACKS`] also have a
+//! sleeve under `share/PIONEER/Artwork/`, where rekordbox keeps its own.
 #![allow(clippy::pedantic, clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
@@ -16,6 +17,13 @@ use rbl_db::fixture::{self, Shape, FIXTURE_PASSPHRASE};
 /// Seconds of each audio file, in track order. Different so a test can tell
 /// them apart by what the deck reports.
 const AUDIO_SECONDS: [u32; 3] = [4, 2, 6];
+
+/// How many tracks, from the first, have artwork. The third playable track has
+/// none, so a test can see the empty sleeve beside two drawn ones.
+const ARTWORK_TRACKS: usize = 2;
+
+/// An 80x80 JPEG, the kind of file rekordbox caches a sleeve as.
+const ARTWORK: &[u8] = include_bytes!("e2e_fixture_artwork.jpg");
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -40,6 +48,15 @@ fn main() {
         fixture::point_at_audio(&location, i, &there, *seconds).expect("point the track at its file");
     }
 
+    // Relative to the share root, as `ImagePath` holds it.
+    for i in 0..ARTWORK_TRACKS {
+        let relative = format!("/PIONEER/Artwork/00{i}/a{i}.jpg");
+        let file = location.share_root.join(relative.trim_start_matches('/'));
+        std::fs::create_dir_all(file.parent().expect("an artwork directory")).expect("create the artwork directory");
+        std::fs::write(&file, ARTWORK).expect("write the artwork");
+        fixture::set_image_path(&location, i, &relative).expect("point the track at its artwork");
+    }
+
     let master_db_as = format!("{seen_as}{sep}master.db");
     fixture::write_options_json(&out.join("options.json"), &master_db_as, FIXTURE_PASSPHRASE)
         .expect("write options.json");
@@ -53,7 +70,7 @@ fn main() {
             "tracks": Shape::default().tracks,
             "playlists": Shape::default().playlists,
             "audio": AUDIO_SECONDS.iter().enumerate().map(|(i, s)| serde_json::json!({
-                "title": format!("Fixture Track {i}"), "seconds": s
+                "title": format!("Fixture Track {i}"), "seconds": s, "artwork": i < ARTWORK_TRACKS
             })).collect::<Vec<_>>(),
         })
     );

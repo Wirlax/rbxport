@@ -25,7 +25,10 @@ let Artwork: typeof import("./Artwork").Artwork;
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  (window as unknown as Record<string, unknown>)["__TAURI_INTERNALS__"] = {};
+  // Tauri's own `convertFileSrc`, as it answers on macOS and Linux.
+  (window as unknown as Record<string, unknown>)["__TAURI_INTERNALS__"] = {
+    convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${encodeURIComponent(path)}`,
+  };
   vi.resetModules();
   ({ Artwork } = await import("./Artwork"));
   host = document.createElement("div");
@@ -66,7 +69,7 @@ describe("Artwork", () => {
     vi.useFakeTimers();
     mount();
     const first = image()?.getAttribute("src");
-    expect(first).toBe("rbl://artwork/7");
+    expect(first).toBe("rbl://localhost/artwork/7");
 
     act(() => {
       image()?.dispatchEvent(new Event("error"));
@@ -77,7 +80,7 @@ describe("Artwork", () => {
     act(() => {
       vi.advanceTimersByTime(250);
     });
-    expect(image()?.getAttribute("src")).toBe("rbl://artwork/7?retry=1");
+    expect(image()?.getAttribute("src")).toBe("rbl://localhost/artwork/7?retry=1");
   });
 
   it("gives up once the attempts run out, so the ground behind it can show", () => {
@@ -142,6 +145,6 @@ describe("Artwork", () => {
     // not inherit the last one's.
     mount("8");
     expect(image()?.getAttribute("data-state")).toBe("pending");
-    expect(image()?.getAttribute("src")).toBe("rbl://artwork/8");
+    expect(image()?.getAttribute("src")).toBe("rbl://localhost/artwork/8");
   });
 });

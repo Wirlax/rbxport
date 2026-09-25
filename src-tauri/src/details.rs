@@ -54,7 +54,7 @@ pub struct TrackDetailsDto {
     pub path: String,
     pub hot_cue_auto_load: bool,
     pub publish: bool,
-    /// Whether `rbl://artwork/<id>` will serve anything for this track.
+    /// Whether `rbl://localhost/artwork/<id>` will serve anything for this track.
     pub has_artwork: bool,
     /// The ids of the My Tags on the track.
     pub my_tags: Vec<String>,

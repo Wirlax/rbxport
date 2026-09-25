@@ -9,13 +9,20 @@
  * Outside Tauri — `pnpm dev:mock` and the Playwright suite — there is no such
  * scheme, so this returns nothing and the tint stands in.
  */
+import { convertFileSrc } from "@tauri-apps/api/core";
+
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export function artworkUrl(trackId: string): string | undefined {
   if (!isTauri) return undefined;
+  // The scheme's root as this platform's webview spells it: `rbl://localhost/`
+  // on macOS and Linux, `http://rbl.localhost/` on Windows, where WebView2
+  // does not load custom schemes and `rbl://` fails as an unknown scheme.
+  // Both reach the handler as `rbl://localhost/…`.
+  //
   // The backend resolves the id against the library; it never takes a path
   // from here, so nothing in the webview can name a file to read.
-  return `rbl://artwork/${encodeURIComponent(trackId)}`;
+  return `${convertFileSrc("", "rbl")}artwork/${encodeURIComponent(trackId)}`;
 }
 
 /**

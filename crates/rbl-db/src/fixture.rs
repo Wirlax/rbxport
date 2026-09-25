@@ -289,6 +289,17 @@ pub fn set_analysis_path(location: &LibraryLocation, index: usize, relative: &st
     mark_changed(&conn, index)
 }
 
+/// Points a fixture track's `ImagePath` at a file under the share root, as
+/// rekordbox does (`/PIONEER/Artwork/…/…jpg`); the caller puts the image there.
+pub fn set_image_path(location: &LibraryLocation, index: usize, relative: &str) -> Result<()> {
+    let conn = open_fixture(location)?;
+    conn.execute(
+        "UPDATE djmdContent SET ImagePath = ?1 WHERE ID = ?2",
+        params![relative, track_id(index)],
+    )?;
+    mark_changed(&conn, index)
+}
+
 /// Sets a fixture track's tempo, BPM x100 as the column holds it, so a row
 /// pointed at real audio can carry the tempo its analysis found.
 pub fn set_tempo(location: &LibraryLocation, index: usize, bpm_x100: u32) -> Result<()> {

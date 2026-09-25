@@ -36,7 +36,7 @@ pub struct RowDto {
     /// Deterministic tint, drawn when a track has no artwork — a little under
     /// half the reference library.
     pub artwork_hue: u16,
-    /// Whether `rbl://artwork/<id>` will serve anything for this track.
+    /// Whether `rbl://localhost/artwork/<id>` will serve anything for this track.
     pub has_artwork: bool,
     /// The file's own name, for the Explorer's File Name column.
     pub file_name: String,

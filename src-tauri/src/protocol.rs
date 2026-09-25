@@ -21,9 +21,15 @@ use tauri::http::{Request, Response, StatusCode};
 
 use crate::state::AppState;
 
-/// Artwork, by track id. The only host: audio used to be served here for an
-/// `<audio>` element, and playback is the Rust engine now.
-const ARTWORK_HOST: &str = "artwork";
+/// Artwork, by track id: `rbl://localhost/artwork/<id>`. The only kind of
+/// request: audio used to be served here for an `<audio>` element, and
+/// playback is the Rust engine now.
+///
+/// The kind is the first path segment, not the host. On Windows `WebView2` loads
+/// no custom scheme, so the page asks for `http://rbl.localhost/…` and `wry`
+/// hands it over as `rbl://localhost/…`; the host is `localhost` there, and
+/// it is the same on macOS and Linux because the page asks for it there too.
+const ARTWORK: &str = "artwork";
 
 /// Refuses anything larger. Real artwork is tens of kilobytes; a file this big
 /// is not album art and should not be read into memory to find out.
@@ -31,13 +37,8 @@ pub(crate) const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Answers one `rbl://` request.
 pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let uri = request.uri();
-    if uri.host() != Some(ARTWORK_HOST) {
+    let Some(track_id) = artwork_id(request.uri().path()) else {
         return status(StatusCode::NOT_FOUND);
-    }
-    // rbl://<host>/<track id>
-    let Some(track_id) = uri.path().trim_start_matches('/').split('/').next() else {
-        return status(StatusCode::BAD_REQUEST);
     };
     if track_id.is_empty() {
         return status(StatusCode::BAD_REQUEST);
@@ -81,6 +82,13 @@ pub fn handle(state: &Arc<AppState>, request: &Request<Vec<u8>>) -> Response<Vec
         .header("Cache-Control", "max-age=31536000, immutable")
         .body(bytes)
         .unwrap_or_else(|_| status(StatusCode::INTERNAL_SERVER_ERROR))
+}
+
+/// The track id in `/artwork/<id>`, or `None` for a path that asks for
+/// anything else. Whatever follows the id is ignored.
+fn artwork_id(path: &str) -> Option<&str> {
+    let mut parts = path.trim_start_matches('/').split('/');
+    (parts.next() == Some(ARTWORK)).then(|| parts.next().unwrap_or(""))
 }
 
 fn image_response(bytes: Vec<u8>) -> Response<Vec<u8>> {
@@ -201,7 +209,7 @@ mod tests {
         // request that arrives during the load must come back, not hang.
         let state = Arc::new(AppState::new());
         let request = Request::builder()
-            .uri("rbl://artwork/12345")
+            .uri("rbl://localhost/artwork/12345")
             .body(Vec::new())
             .unwrap();
         let mut out = Vec::new();
@@ -211,12 +219,27 @@ mod tests {
     }
 
     #[test]
-    fn a_host_that_is_not_ours_is_refused(){
+    fn a_request_that_is_not_for_artwork_is_refused() {
         let state = Arc::new(AppState::new());
-        let request = Request::builder().uri("rbl://etc/passwd").body(Vec::new()).unwrap();
-        let mut out = Vec::new();
-        serve(&state, &request, |response| out.push(response));
-        assert_eq!(out[0].status(), StatusCode::NOT_FOUND);
+        for uri in ["rbl://localhost/etc/passwd", "rbl://etc/passwd", "rbl://localhost/"] {
+            let request = Request::builder().uri(uri).body(Vec::new()).unwrap();
+            let mut out = Vec::new();
+            serve(&state, &request, |response| out.push(response));
+            assert_eq!(out[0].status(), StatusCode::NOT_FOUND, "{uri}");
+        }
+    }
+
+    #[test]
+    fn the_track_id_is_read_from_the_path_whatever_the_host() {
+        // macOS and Linux ask for `rbl://localhost/artwork/7`; Windows asks
+        // for `http://rbl.localhost/artwork/7`, which `wry` hands over as
+        // the same `rbl://localhost/artwork/7`.
+        assert_eq!(artwork_id("/artwork/7"), Some("7"));
+        assert_eq!(artwork_id("/artwork/7/anything"), Some("7"));
+        assert_eq!(artwork_id("/artwork/"), Some(""));
+        assert_eq!(artwork_id("/artwork"), Some(""));
+        assert_eq!(artwork_id("/7"), None);
+        assert_eq!(artwork_id("/"), None);
     }
 
     #[test]
