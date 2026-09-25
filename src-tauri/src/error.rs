@@ -43,6 +43,8 @@ impl AppError {
     }
 
     pub fn internal(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        tracing::error!(error.detail = %detail, "internal error");
         Self::new(ErrorKind::Internal, "Something went wrong inside rbxport.")
             .with_detail(detail)
     }
@@ -93,5 +95,12 @@ mod tests {
     #[test]
     fn a_normal_command_passes_its_value_through() {
         assert_eq!(run_command("ok", || Ok(7)).unwrap(), 7);
+    }
+
+    #[test]
+    fn an_internal_error_keeps_its_explanation() {
+        let err = AppError::internal("the database was unavailable");
+        assert_eq!(err.message, "Something went wrong inside rbxport.");
+        assert_eq!(err.detail.as_deref(), Some("the database was unavailable"));
     }
 }
