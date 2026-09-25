@@ -276,6 +276,7 @@ async function realBackend(): Promise<Backend> {
     setEqCurve: (isolator) => invoke<void>("set_eq_curve", { isolator }),
     appDiagnostics: () => invoke<Diagnostics>("app_diagnostics"),
     appVersion: () => invoke<string>("app_version"),
+    openLog: () => invoke<void>("open_log"),
     revealTrack: (trackId) => invoke<void>("reveal_track", { track: trackId }),
     deckState: () => invoke<Tick>("deck_state"),
     onDeckTick: (listener) => subscribe<Tick>("deck:tick", listener),

@@ -474,6 +474,11 @@ function AppBody() {
   const [playerError, setPlayerError] = useState<string | null>(null);
   const report = useCallback((text: string) => setNote({ text, failed: false }), []);
   const refuse = useCallback((text: string) => setNote({ text, failed: true }), []);
+  const openLog = useCallback(() => {
+    void getBackend()
+      .then((backend) => backend.openLog())
+      .catch((error) => refuse(error instanceof Error ? error.message : String(error)));
+  }, [refuse]);
   useEffect(() => {
     setNote((current) => {
       if (!current?.failed) return current;
@@ -2338,6 +2343,7 @@ function AppBody() {
         }))}
         onReportBug={openReport}
         onSupport={SHOW_MAIN_SUPPORT ? openSupport : undefined}
+        onOpenLog={openLog}
         backupActivity={backupJob.error || backupJob.text}
         backupProgress={backupJob.progress.running ? backupJob.progress : undefined}
         version={version}

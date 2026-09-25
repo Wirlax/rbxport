@@ -604,6 +604,8 @@ export interface Backend {
   appDiagnostics(): Promise<Diagnostics>;
   /** The version this build carries, for About; no network is asked. */
   appVersion(): Promise<string>;
+  /** Opens the current application log with the OS default handler. */
+  openLog(): Promise<void>;
 
   /** Shows a track's file in the Finder. */
   revealTrack(trackId: string): Promise<void>;

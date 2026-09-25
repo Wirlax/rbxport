@@ -2086,6 +2086,26 @@ pub async fn app_version<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResu
     Ok(app.package_info().version.to_string())
 }
 
+/// Opens the active daily log in the application associated with `.log` files
+/// on this computer (Console on a stock macOS installation, for example).
+#[tauri::command]
+pub async fn open_log<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> AppResult<()> {
+    blocking("open_log", move || {
+        let path = crate::logging::latest_log_file()
+            .map_err(|e| {
+                AppError::internal("The log folder could not be read.").with_detail(e.to_string())
+            })?
+            .ok_or_else(|| AppError::new(ErrorKind::NotFound, "No application log was found."))?;
+        app.opener()
+            .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+            .map_err(|e| {
+                AppError::internal("The application log could not be opened.")
+                    .with_detail(e.to_string())
+            })
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn app_diagnostics(player: State<'_, std::sync::Arc<crate::player::Player>>) -> AppResult<crate::diagnostics::Diagnostics> {
     // The sampler is kept between calls: CPU is a difference between two

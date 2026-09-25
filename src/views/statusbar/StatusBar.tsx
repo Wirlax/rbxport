@@ -29,6 +29,8 @@ export interface StatusBarProps {
   onOpenProtection?: (() => void) | undefined;
   onReportBug?: (() => void) | undefined;
   onSupport?: (() => void) | undefined;
+  /** Opens the current application log with the OS default handler. */
+  onOpenLog?: (() => void) | undefined;
   /** Present only while analysis is running, so it can be stopped. */
   onCancelAnalysis?: (() => void) | undefined;
   /** Tracks that failed analysis in the current run. */
@@ -50,6 +52,7 @@ export function StatusBar({
   onOpenProtection,
   onReportBug,
   onSupport,
+  onOpenLog,
   onCancelAnalysis,
   analysisFailures = 0,
 }: StatusBarProps) {
@@ -75,7 +78,14 @@ export function StatusBar({
     : `Syncing ${exportNoun}`;
   return (
     <footer className={styles.statusBar}>
-      <span className={styles.logo}>
+      <span
+        className={`${styles.logo} ${onOpenLog ? styles.logLink : ""}`}
+        title={onOpenLog ? "Right-click to open the application log" : undefined}
+        onContextMenu={onOpenLog ? (event) => {
+          event.preventDefault();
+          onOpenLog();
+        } : undefined}
+      >
         rbxport
         {version === null ? null : <> <span className={styles.version}>{version}</span></>}
       </span>

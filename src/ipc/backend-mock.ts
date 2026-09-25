@@ -2046,6 +2046,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     // A browser cannot see its own process. Zeroes would read as an app that
     // costs nothing, so every figure the platform will not give is null.
     appVersion: () => wait("0.4.0"),
+    openLog: () => wait(undefined),
     appDiagnostics: () =>
       wait({ audioLoad: 0, audioXruns: 0, cpu: 0, memoryMb: 0, threads: null, openFiles: null, gpu: null }),
     // A browser has no Finder to open. Refusing is the truth; succeeding
