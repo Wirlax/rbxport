@@ -2106,6 +2106,30 @@ test("the wheel over a waveform zooms it", async ({ page }) => {
   await expect.poll(gaps).toBeGreaterThan(wide);
 });
 
+test("the waveform zoom survives a restart", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks");
+  const loadTrack = () =>
+    page.locator('[role="gridcell"][data-col="title"]').nth(3).dblclick();
+  await loadTrack();
+
+  // 12 → 8 → 4 → 2 → 1 → 0.5 bars, close enough to switch to PCM.
+  const zoomIn = page.getByRole("button", { name: "Zoom in", exact: true });
+  for (let i = 0; i < 5; i++) await zoomIn.click();
+  await expect(page.getByTestId("player-detail")).toHaveAttribute("data-pcm");
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem("rbl.session") ?? "{}";
+    return (JSON.parse(raw) as { waveformZoom?: { a?: number } }).waveformZoom?.a;
+  })).toBe(0.5);
+
+  // Tracks deliberately start empty after a restart; loading one into the
+  // restored deck must nevertheless use the zoom it had before.
+  await page.reload();
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks");
+  await loadTrack();
+  await expect(page.getByTestId("player-detail")).toHaveAttribute("data-pcm");
+});
+
 test("wheel crossing PCM returns to the same PWV7 canvas as ordinary zoom", async ({ page }) => {
   const load = async () => {
     await page.goto("/");

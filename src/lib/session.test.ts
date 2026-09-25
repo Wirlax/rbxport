@@ -27,6 +27,7 @@ describe("sanitiseSession", () => {
       subWidth: 700,
       subTreeWidth: 240,
       trafficLight: "b",
+      waveformZoom: { a: 4, b: 32 },
     };
     expect(sanitiseSession(session)).toEqual(session);
   });
@@ -93,5 +94,16 @@ describe("sanitiseSession", () => {
   it("keeps a selected node only when it is an id", () => {
     expect(sanitiseSession({ selectedNodeId: "pl-1" }).selectedNodeId).toBe("pl-1");
     expect(sanitiseSession({ selectedNodeId: 42 }).selectedNodeId).toBeNull();
+  });
+
+  it("restores only waveform zoom levels the player can select", () => {
+    expect(sanitiseSession({ waveformZoom: { a: 0.5, b: 64 } }).waveformZoom).toEqual({
+      a: 0.5,
+      b: 64,
+    });
+    expect(sanitiseSession({ waveformZoom: { a: 3, b: "close" } }).waveformZoom).toEqual(
+      DEFAULT_SESSION.waveformZoom,
+    );
+    expect(sanitiseSession({}).waveformZoom).toEqual(DEFAULT_SESSION.waveformZoom);
   });
 });

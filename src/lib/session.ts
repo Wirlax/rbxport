@@ -17,6 +17,7 @@
  * value can be anything at all; none of those may produce a broken window.
  */
 import { asLayout, type PlayerLayout } from "./layout";
+import { DETAIL_BARS, ZOOM_STEPS } from "./player";
 import type { RowDto, SortColumn, TreeNode } from "@/ipc/types";
 import { DEFAULT_SORT, type SortState } from "./viewSpec";
 
@@ -63,6 +64,8 @@ export interface Session {
   subTreeWidth: number;
   /** Which deck the browser's Traffic Light reads: the MASTER menu above the list. */
   trafficLight: TrafficLightSource;
+  /** Bars visible across each deck's detail waveform. */
+  waveformZoom: { a: number; b: number };
 }
 
 /** MASTER DECK, PLAYER A or PLAYER B, as the menu offers them. */
@@ -89,6 +92,7 @@ export const DEFAULT_SESSION: Session = {
   subWidth: DEFAULT_SUB_WIDTH,
   subTreeWidth: DEFAULT_SUB_TREE_WIDTH,
   trafficLight: "master",
+  waveformZoom: { a: DETAIL_BARS, b: DETAIL_BARS },
 };
 
 const SORT_COLUMNS: readonly string[] = [
@@ -111,6 +115,13 @@ function widthOrDefault(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.round(value)
     : fallback;
+}
+
+/** A zoom is one of the discrete steps the waveform controls can select. */
+function zoomOrDefault(value: unknown): number {
+  return typeof value === "number" && ZOOM_STEPS.includes(value as (typeof ZOOM_STEPS)[number])
+    ? value
+    : DETAIL_BARS;
 }
 
 /** Keeps only entries that are objects carrying a string id. */
@@ -147,6 +158,13 @@ export function sanitiseSession(value: unknown): Session {
     trafficLight: TRAFFIC_LIGHT_SOURCES.includes(raw.trafficLight as TrafficLightSource)
       ? (raw.trafficLight as TrafficLightSource)
       : "master",
+    waveformZoom:
+      typeof raw.waveformZoom === "object" && raw.waveformZoom !== null
+        ? {
+            a: zoomOrDefault((raw.waveformZoom as { a?: unknown }).a),
+            b: zoomOrDefault((raw.waveformZoom as { b?: unknown }).b),
+          }
+        : { a: DETAIL_BARS, b: DETAIL_BARS },
   };
 }
 

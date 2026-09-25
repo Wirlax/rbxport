@@ -52,7 +52,7 @@ import { useColumns, type ColumnContext } from "@/store/useColumns";
 import { useExplorer } from "@/store/useExplorer";
 import { isLooseId } from "@/lib/explorer";
 import { childrenOf, containerOf, parentFor, withSources } from "@/lib/tree";
-import { DETAIL_BARS, JUMP_SIZE_ID } from "@/lib/player";
+import { JUMP_SIZE_ID } from "@/lib/player";
 import type { Deck as SyncDeck } from "@/lib/sync";
 import { LayoutDualIcon } from "@/components/icons";
 import { Player } from "@/views/player/Player";
@@ -301,12 +301,21 @@ function AppBody() {
     zoomB.current(by);
   }, []);
   const [dual, setDual] = useState(false);
-  const [dualBars, setDualBars] = useState(DETAIL_BARS);
+  const [waveformZoom, setWaveformZoom] = useState(restored.waveformZoom);
+  const setZoomA = useCallback((bars: number) => {
+    setWaveformZoom((zoom) => zoom.a === bars ? zoom : { ...zoom, a: bars });
+  }, []);
+  const setZoomB = useCallback((bars: number) => {
+    setWaveformZoom((zoom) => zoom.b === bars ? zoom : { ...zoom, b: bars });
+  }, []);
+  const [dualBars, setDualBars] = useState(restored.waveformZoom.a);
+  const setLinkedZoom = useCallback((bars: number) => {
+    setDualBars(bars);
+    setWaveformZoom({ a: bars, b: bars });
+  }, []);
   const [dualJump, setDualJump] = useState(JUMP_SIZE_ID);
   const linked = dual
     ? {
-        bars: dualBars,
-        onBars: setDualBars,
         jumpSize: dualJump,
         onJumpSize: setDualJump,
       }
@@ -2008,8 +2017,9 @@ function AppBody() {
       subWidth,
       subTreeWidth,
       trafficLight,
+      waveformZoom,
     });
-  }, [sessionReady, treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight]);
+  }, [sessionReady, treeWidth, selectedNode, sortState, infoOpen, subOpen, filterOpen, tree, screen, layout, subWidth, subTreeWidth, trafficLight, waveformZoom]);
 
   // The last screen, handed to the table until the backend answers. Dropped as
   // soon as the library is up, so a stale row cannot outlive its replacement —
@@ -2148,6 +2158,8 @@ function AppBody() {
             transportSlot={deckCount(layout) > 1 ? transportA : null}
             dual={deckCount(layout) > 1}
             publishZoom={deckCount(layout) > 1 ? publishZoom.a : undefined}
+            bars={deckCount(layout) > 1 && dual ? dualBars : waveformZoom.a}
+            onBars={deckCount(layout) > 1 && dual ? setLinkedZoom : setZoomA}
             {...(deckCount(layout) > 1 ? linked : {})}
             publishSync={publishSync.a}
             {...(deckCount(layout) > 1 ? { peerSync: peerSync.a } : {})}
@@ -2177,6 +2189,8 @@ function AppBody() {
               flipped
               dual
               publishZoom={publishZoom.b}
+              bars={dual ? dualBars : waveformZoom.b}
+              onBars={dual ? setLinkedZoom : setZoomB}
               {...linked}
               publishSync={publishSync.b}
               peerSync={peerSync.b}
