@@ -274,6 +274,10 @@ pub fn read(mount_point: &Path) -> DeviceSettings {
         tracing::error!(error = %e, "device recovery failed; settings unavailable");
         return DeviceSettings { dev: None, library: None, has_device_library: false, has_one_library: false };
     }
+    read_files(mount_point)
+}
+
+fn read_files(mount_point: &Path) -> DeviceSettings {
     let root = export_root(mount_point);
     let dev = std::fs::read(root.join("DEVSETTING.DAT"))
         .ok()
@@ -302,39 +306,76 @@ pub fn read(mount_point: &Path) -> DeviceSettings {
 /// stick has one — the tabs cannot invent a library.
 pub fn write(mount_point: &Path, settings: &DeviceSettings) -> Result<(), SettingsError> {
     recover(mount_point)?;
+    let current = read_files(mount_point);
+    write_changes_recovered(mount_point, &current, settings)
+}
+
+/// Writes only the settings groups that changed from a previously read stick.
+///
+/// Display choices live in `DEVSETTING.DAT`; list and colour-label choices
+/// live in `exportLibrary.db`. Keeping those writes independent matters when
+/// rekordbox has the USB database open: changing the waveform colour must not
+/// touch, or be blocked by, an unchanged database.
+pub fn write_changes(
+    mount_point: &Path,
+    current: &DeviceSettings,
+    settings: &DeviceSettings,
+) -> Result<(), SettingsError> {
+    recover(mount_point)?;
+    write_changes_recovered(mount_point, current, settings)
+}
+
+fn write_changes_recovered(
+    mount_point: &Path,
+    current: &DeviceSettings,
+    settings: &DeviceSettings,
+) -> Result<(), SettingsError> {
+    let dev_changed = settings.dev.as_ref().is_some_and(|next| current.dev.as_ref() != Some(next));
+    let library_changed = settings
+        .library
+        .as_ref()
+        .is_some_and(|next| current.library.as_ref() != Some(next));
+    if !dev_changed && !library_changed {
+        return Ok(());
+    }
+
     let root = export_root(mount_point);
     let publication = rbl_core::durable::Publication::new(mount_point, ".rbxport-publication")?;
     let relative = root.strip_prefix(mount_point).map_err(std::io::Error::other)?;
     let staged_root = publication.stage().join(relative);
     rbl_core::durable::create_dir_all(staged_root.join("rekordbox"))?;
     let mut files = Vec::new();
-    if let Some(dev) = &settings.dev {
-        rbl_core::durable::write(&staged_root.join("DEVSETTING.DAT"), &dev.encode())?;
-        files.push(relative.join("DEVSETTING.DAT"));
-    }
-    if let Some(library) = &settings.library {
-        let path = root.join("rekordbox/exportLibrary.db");
-        if path.is_file() {
-            let staged = staged_root.join("rekordbox/exportLibrary.db");
-            std::fs::copy(&path, &staged)?;
-            let wal = root.join("rekordbox/exportLibrary.db-wal");
-            if wal.exists() { std::fs::copy(wal, staged_root.join("rekordbox/exportLibrary.db-wal"))?; }
-            library.write(&staged)?;
-            files.extend([relative.join("rekordbox/exportLibrary.db-wal"), relative.join("rekordbox/exportLibrary.db-shm"), relative.join("rekordbox/exportLibrary.db")]);
+    if dev_changed {
+        if let Some(dev) = &settings.dev {
+            rbl_core::durable::write(&staged_root.join("DEVSETTING.DAT"), &dev.encode())?;
+            files.push(relative.join("DEVSETTING.DAT"));
         }
-        // The colour comments live in both databases; rekordbox renames them
-        // in `export.pdb` too, and a player reads its names from there.
-        let pdb_path = root.join("rekordbox/export.pdb");
-        if let Ok(bytes) = std::fs::read(&pdb_path) {
-            let rows: Vec<Vec<u8>> = library
-                .colors
-                .iter()
-                .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
-                .collect();
-            if let Some(next) = rbl_pdb::build::replace_single_page_table(&bytes, 6, &rows) {
-                if next != bytes {
-                    rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &next)?;
-                    files.push(relative.join("rekordbox/export.pdb"));
+    }
+    if library_changed {
+        if let Some(library) = &settings.library {
+            let path = root.join("rekordbox/exportLibrary.db");
+            if path.is_file() {
+                let staged = staged_root.join("rekordbox/exportLibrary.db");
+                std::fs::copy(&path, &staged)?;
+                let wal = root.join("rekordbox/exportLibrary.db-wal");
+                if wal.exists() { std::fs::copy(wal, staged_root.join("rekordbox/exportLibrary.db-wal"))?; }
+                library.write(&staged)?;
+                files.extend([relative.join("rekordbox/exportLibrary.db-wal"), relative.join("rekordbox/exportLibrary.db-shm"), relative.join("rekordbox/exportLibrary.db")]);
+            }
+            // The colour comments live in both databases; rekordbox renames them
+            // in `export.pdb` too, and a player reads its names from there.
+            let pdb_path = root.join("rekordbox/export.pdb");
+            if let Ok(bytes) = std::fs::read(&pdb_path) {
+                let rows: Vec<Vec<u8>> = library
+                    .colors
+                    .iter()
+                    .map(|c| rbl_pdb::rows::color_row(u16::try_from(c.id).unwrap_or(0), &c.name))
+                    .collect();
+                if let Some(next) = rbl_pdb::build::replace_single_page_table(&bytes, 6, &rows) {
+                    if next != bytes {
+                        rbl_core::durable::write(&staged_root.join("rekordbox/export.pdb"), &next)?;
+                        files.push(relative.join("rekordbox/export.pdb"));
+                    }
                 }
             }
         }
@@ -441,6 +482,33 @@ mod tests {
         assert_eq!(back.key_display, KeyDisplay::Alphanumeric);
         assert_eq!(back.encode(), dev.encode());
         assert!(stick.path().join("PIONEER/DEVSETTING.DAT").is_file());
+    }
+
+    #[test]
+    fn a_display_change_does_not_touch_unchanged_library_settings() {
+        let stick = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(stick.path().join("PIONEER")).unwrap();
+        let current = DeviceSettings {
+            dev: Some(DevSetting::default()),
+            library: Some(StickSettings::default()),
+            has_device_library: true,
+            has_one_library: true,
+        };
+        std::fs::write(
+            stick.path().join("PIONEER/DEVSETTING.DAT"),
+            current.dev.as_ref().unwrap().encode(),
+        )
+        .unwrap();
+        let mut next = current.clone();
+        next.dev.as_mut().unwrap().color = WaveformColor::Rgb;
+
+        // There is deliberately no exportLibrary.db fixture. The unchanged
+        // library half must not be opened merely to write DEVSETTING.DAT.
+        write_changes(stick.path(), &current, &next).unwrap();
+
+        let written = read(stick.path()).dev.expect("the display file remains readable");
+        assert_eq!(written.color, WaveformColor::Rgb);
+        assert!(!stick.path().join("PIONEER/rekordbox/exportLibrary.db").exists());
     }
 
     #[test]

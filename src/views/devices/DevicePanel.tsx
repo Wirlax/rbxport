@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { Device, DeviceSettings, TreeNode } from "@/ipc/types";
+import { errorMessage } from "@/lib/errorMessage";
 import { usePreferences } from "@/store/usePreferences";
 import { ColorTab } from "./ColorTab";
 import { ColumnTab } from "./ColumnTab";
@@ -81,7 +82,7 @@ export function DevicePanel({
         if (!cancelled) setSettings(read);
       })
       .catch((e: unknown) => {
-        if (!cancelled) onError?.(e instanceof Error ? e.message : "That device could not be read.");
+        if (!cancelled) onError?.(errorMessage(e));
       });
     return () => {
       cancelled = true;
@@ -100,7 +101,7 @@ export function DevicePanel({
         .then((backend) => backend.saveDeviceSettings(device.path, next))
         .then(setSettings)
         .catch((e: unknown) => {
-          onError?.(e instanceof Error ? e.message : "That setting could not be written.");
+          onError?.(errorMessage(e));
         });
     },
     [device.path, onError],

@@ -282,7 +282,7 @@ pub fn write_dev_defaults(mount: &Path, dto: &StickDefaultsDto) -> AppResult<()>
         return Ok(());
     }
     let next = DeviceSettings { dev: Some(dev_defaults(dto)?), library: None, ..current };
-    rbl_devices::settings::write(mount, &next)
+    rbl_devices::settings::write_changes(mount, &current, &next)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))
 }
 
@@ -359,7 +359,7 @@ pub async fn save_device_settings(
         }
         let current = rbl_devices::settings::read(mount);
         let next = apply(&current, &settings)?;
-        rbl_devices::settings::write(mount, &next)
+        rbl_devices::settings::write_changes(mount, &current, &next)
             .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
         Ok(to_dto(&rbl_devices::settings::read(mount)))
     })
