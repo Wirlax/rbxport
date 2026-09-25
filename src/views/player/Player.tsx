@@ -401,7 +401,7 @@ export const OverviewTempoMarkers = memo(function OverviewTempoMarkers({ grid, t
 
 /** The detail beat grid, with heavier downbeats and labels at tempo changes. */
 const BeatGrid = memo(function BeatGrid({
-  beats, grid, totalMs, window, everyBeat = true,
+  beats, grid, totalMs, window, everyBeat = true, fromMs = null,
 }: {
   beats: readonly { timeMs: number; downbeat: boolean }[];
   grid: TrackBeatGrid;
@@ -409,6 +409,8 @@ const BeatGrid = memo(function BeatGrid({
   window: { from: number; to: number };
   /** False at the widest zoom, where only the bar lines are drawn. */
   everyBeat?: boolean;
+  /** While editing from a boundary, rekordbox hides the earlier grid. */
+  fromMs?: number | null;
 }) {
   if (totalMs <= 0 || beats.length === 0) return null;
   const span = Math.max(window.to - window.from, 1e-6);
@@ -416,6 +418,7 @@ const BeatGrid = memo(function BeatGrid({
     <>
       {beats.map((beat) => {
         if (!everyBeat && !beat.downbeat) return null;
+        if (fromMs !== null && beat.timeMs < fromMs) return null;
         const at = beat.timeMs / totalMs;
         if (at < window.from || at > window.to) return null;
         return (
@@ -423,6 +426,8 @@ const BeatGrid = memo(function BeatGrid({
             key={beat.timeMs}
             className={beat.downbeat ? styles.downbeat : styles.beat}
             style={{ left: `${((at - window.from) / span) * 100}%` }}
+            data-testid="beat-grid-marker"
+            data-beat-ms={beat.timeMs}
             aria-hidden
           >
 
@@ -2069,6 +2074,7 @@ export const Player = memo(function Player({
                 totalMs={total * 1000}
                 window={window}
                 everyBeat={showsEveryBeat(bars)}
+                fromMs={gridEditor.fromMs}
               />
               {/* The edit boundary, while one is set: where the grid edits start. */}
               {gridEditor.fromMs !== null && total > 0 ? (

@@ -99,10 +99,17 @@ test("the lock greys the editing buttons and holds across the panel's redraws", 
 test("scope begins at the playhead and clears with Adjust all beats", async ({ page }) => {
   await load(page);
   await playAWhile(page);
+  const markers = page.getByTestId("beat-grid-marker");
+  const markersBeforeCut = await markers.count();
   const cut = button(page, "Adjust beats from here");
   await cut.click();
   await expect(cut).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("grid-edit-start")).toBeVisible();
+  const boundary = page.getByTestId("grid-edit-start");
+  await expect(boundary).toBeVisible();
+  await expect.poll(() => markers.count()).toBeLessThan(markersBeforeCut);
+  const boundaryBox = await boundary.boundingBox();
+  const markerBoxes = await markers.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().x));
+  expect(markerBoxes.every(x => x >= (boundaryBox?.x ?? 0) - 1)).toBe(true);
   await expect(button(page, "Double the tempo")).toHaveAttribute("title", /from the selected beat on/);
   // A tempo edit from the cut on leaves the grid's own tempo — the first
   // beat's — where it was, which is what the browser's row shows.
@@ -116,9 +123,11 @@ test("scope begins at the playhead and clears with Adjust all beats", async ({ p
   // cut and it is the doubled half's.
   await playAWhile(page);
   await expect(bpmField(page)).toHaveValue(`${(original * 2).toFixed(2)}`);
+  const scopedMarkers = await markers.count();
   await button(page, "Adjust all beats").click();
   await expect(cut).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("grid-edit-start")).toHaveCount(0);
+  await expect.poll(() => markers.count()).toBeGreaterThan(scopedMarkers);
 });
 
 test("the BPM field reads the tempo under the playhead, not the grid's first beat", async ({ page }) => {
