@@ -103,6 +103,17 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Give cargo a home of its own
+        # rustup and its shims stay in ~/.cargo/bin (above); the registry and
+        # git checkouts move to this runner's temp directory. ~/.cargo is
+        # shared by every job on the host, including other repositories'
+        # jobs, and rust-cache deletes ~/.cargo/registry/src when a job ends.
+        # In v1.0.0-rc.4 an rbx-restore job finished during this build, and
+        # the Mac ARM build failed on a serde source file that was no longer
+        # there. rust-cache reads CARGO_HOME, so it caches this directory.
+        if: runner.os != 'Windows'
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
       - name: Ensure rustup
         if: runner.os == 'Windows'
         shell: pwsh

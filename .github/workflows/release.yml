@@ -93,6 +93,12 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Give cargo a home of its own
+        # The host's ~/.cargo is shared with every other job on it, and
+        # rust-cache deletes its registry sources when a job ends. See the
+        # same step in build-installer.yml.
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
