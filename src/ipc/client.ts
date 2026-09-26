@@ -434,6 +434,7 @@ async function realBackend(): Promise<Backend> {
         stop?.();
       };
     },
+    onTagListChanged: (listener) => subscribe("tag-list:changed", () => listener()),
     onEditHistory: (listener) => subscribe<EditHistoryState>("edit-history:changed", listener),
     edits: {
       createPlaylist: (name, parent) => invoke<number>("create_playlist", { name, parent }),

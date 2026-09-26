@@ -224,6 +224,14 @@ export interface Backend {
    * Returns an unsubscribe function.
    */
   onLibraryChanged(listener: (generation: number) => void): () => void;
+  /**
+   * Called when the Tag List changes, from this window or from a player
+   * over LINK. No other list shows Tag List membership, so the generation
+   * stays as it was and only a view of the Tag List has to reopen.
+   *
+   * Returns an unsubscribe function.
+   */
+  onTagListChanged(listener: () => void): () => void;
   /** The shared library undo stack changed, including its native-menu labels. */
   onEditHistory(listener: (history: EditHistoryState) => void): () => void;
   /**

@@ -33,6 +33,7 @@ let setBackend: typeof import("@/ipc/client").__setBackend;
 let ready: boolean;
 let readyListeners: Set<() => void>;
 let opens: number;
+let tagListListeners: Set<() => void>;
 
 const SPEC: ViewSpec = {
   source: { kind: "collection" },
@@ -84,6 +85,10 @@ function makeBackend(): Backend {
     // The hook also listens for cue edits, to patch a cached row's letters
     // in place. Nothing here edits a cue, so the subscription is inert.
     onCuesChanged: () => () => {},
+    onTagListChanged: (listener: () => void) => {
+      tagListListeners.add(listener);
+      return () => tagListListeners.delete(listener);
+    },
   } as unknown as Backend;
 }
 
@@ -107,8 +112,10 @@ let window_: { start: number; end: number } = { start: 0, end: 32 };
 let seed: { count: number; rows: RowDto[] } | undefined;
 let edits: ReadonlyMap<string, Partial<RowDto>> | undefined;
 
+let spec: ViewSpec = SPEC;
+
 function Probe() {
-  const view = useTrackView(SPEC, 0, edits, seed);
+  const view = useTrackView(spec, 0, edits, seed);
   latest = view;
   // A table asks for the window it is showing; this stands in for that.
   view.ensureRange(window_.start, window_.end);
@@ -121,6 +128,8 @@ beforeEach(async () => {
   ready = false;
   readyListeners = new Set();
   opens = 0;
+  tagListListeners = new Set();
+  spec = SPEC;
   window_ = { start: 0, end: 32 };
   seed = undefined;
   edits = undefined;
@@ -229,5 +238,41 @@ describe("useTrackView, against a library that is not up yet", () => {
     for (const listener of readyListeners) listener();
     await settle();
     expect(opens).toBe(before);
+  });
+});
+
+describe("useTrackView, when a player or the menu tags a track", () => {
+  const tagListChanged = async () => {
+    act(() => {
+      for (const listener of tagListListeners) listener();
+    });
+    await settle();
+  };
+
+  it("keeps a playlist's view and pages", async () => {
+    ready = true;
+    act(() => root.render(<Probe />));
+    await settle();
+    await settle();
+    const before = opens;
+    const shown = latest.rowAt(0);
+    expect(shown?.title).toBe("Track 0");
+
+    await tagListChanged();
+
+    expect(opens).toBe(before);
+    expect(latest.rowAt(0)).toBe(shown);
+  });
+
+  it("reopens the Tag List", async () => {
+    ready = true;
+    spec = { ...SPEC, source: { kind: "tagList" } };
+    act(() => root.render(<Probe />));
+    await settle();
+    const before = opens;
+
+    await tagListChanged();
+
+    expect(opens).toBe(before + 1);
   });
 });

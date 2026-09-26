@@ -535,6 +535,9 @@ function AppBody() {
   // Bumped whenever the library changes underneath us, which drops cached
   // pages. Without it an edit's effect never reached the table.
   const [libraryGeneration, setLibraryGeneration] = useState(0);
+  // Tag List edits keep the generation, so the filter bar over the Tag List
+  // follows this instead.
+  const [tagListRevision, setTagListRevision] = useState(0);
   // Edits shown at once, dropped when the backend's reload lands. A write
   // makes the backend re-read the library — 243 ms on the real collection —
   // and waiting for that before a star fills in feels broken.
@@ -698,6 +701,7 @@ function AppBody() {
   // What the bar's lists offer, from Rust, for the source and query alone.
   // Re-asked when either changes or the library does, and only while the bar
   // is open — a closed bar costs nothing.
+  const tagListKey = selectedNode?.kind === "tagList" ? tagListRevision : 0;
   useEffect(() => {
     if (!filterOpen) return;
     let live = true;
@@ -714,7 +718,7 @@ function AppBody() {
     return () => {
       live = false;
     };
-  }, [filterOpen, selectedNode, query, searchField, libraryGeneration, relatedTo]);
+  }, [filterOpen, selectedNode, query, searchField, libraryGeneration, relatedTo, tagListKey]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortState((s) => nextSort(s, column));
@@ -722,10 +726,12 @@ function AppBody() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
+    let stopTagList: (() => void) | undefined;
     let live = true;
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
+      stopTagList = backend.onTagListChanged(() => setTagListRevision((n) => n + 1));
       stop = backend.onLibraryChanged((generation) => {
         setLibraryGeneration(generation);
         // The reload carries the edits, so the overlay has done its job.
@@ -738,6 +744,7 @@ function AppBody() {
     return () => {
       live = false;
       stop?.();
+      stopTagList?.();
     };
   }, []);
 

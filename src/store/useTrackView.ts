@@ -73,6 +73,11 @@ export function useTrackView(
   const overlays = useRef(new WeakMap<RowDto, { edit: Partial<RowDto>; row: RowDto }>());
   // Bumped when a page lands, to re-render the rows it filled.
   const [pagesLoaded, setPagesLoaded] = useState(0);
+  // Bumped when the Tag List changes. The backend keeps the generation for
+  // that edit, since no other list shows it, so a Tag List view reopens on
+  // this alone and every other view keeps the pages it has.
+  const [tagListRevision, setTagListRevision] = useState(0);
+  const tagListKey = spec.source.kind === "tagList" ? tagListRevision : 0;
 
   // The library generation is part of the key: an edit changes the rows under
   // a spec that has not itself changed, and without this the view would keep
@@ -80,9 +85,9 @@ export function useTrackView(
   const specKey = useMemo(
     () =>
       JSON.stringify([
-        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration, extraKey,
+        spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter ?? null, libraryGeneration, tagListKey, extraKey,
       ]),
-    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, extraKey],
+    [spec.source, spec.sort, spec.descending, spec.query, spec.searchField, spec.filter, libraryGeneration, tagListKey, extraKey],
   );
 
   // View identity for the cache: a new view id, or a library change, invalidates pages.
@@ -147,6 +152,20 @@ export function useTrackView(
     // specKey captures every field that changes the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specKey]);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void (async () => {
+      const backend = await getBackend();
+      if (!live) return;
+      stop = backend.onTagListChanged(() => setTagListRevision((n) => n + 1));
+    })();
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
 
   /*
    * A cue edit changes one row's letters and nothing else, and the backend

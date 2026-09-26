@@ -98,6 +98,13 @@ impl EditHistory {
     }
 }
 
+/// A library view, and whether it lists the Tag List: the one source a Tag
+/// List edit makes stale.
+struct OpenView {
+    view: Arc<View>,
+    tag_list: bool,
+}
+
 #[derive(Default)]
 struct Inner {
     library: Option<Arc<Library>>,
@@ -109,7 +116,7 @@ struct Inner {
     read_only: bool,
     db_version: Option<i64>,
     load_ms: u64,
-    views: HashMap<u32, Arc<View>>,
+    views: HashMap<u32, OpenView>,
     /// The Explorer's views, under the same ids and the same eviction.
     folders: HashMap<u32, Arc<FolderView>>,
     /// Insertion order, for eviction.
@@ -360,6 +367,18 @@ impl AppState {
         inner.generation
     }
 
+    /// Drops the views over the Tag List and keeps every other. No row or
+    /// column of any other view shows Tag List membership, so they stay open
+    /// under the same generation and the frontend keeps the pages it has: a
+    /// player tagging a track does not reload the playlist on screen.
+    pub fn invalidate_tag_list_views(&self) -> u32 {
+        let mut inner = self.inner.write();
+        let Inner { views, folders, view_order, generation, .. } = &mut *inner;
+        views.retain(|_, open| !open.tag_list);
+        view_order.retain(|id| views.contains_key(id) || folders.contains_key(id));
+        *generation
+    }
+
     /// Publish metadata without changing row identities or analysis files.
     /// Call under the edit gate, using the connection that committed the edit.
     pub fn refresh_metadata(&self, db: &rbl_db::Library, ids: &[String], histories: bool) -> Result<u32, rbl_db::DbError> {
@@ -470,7 +489,8 @@ impl AppState {
         let len = u32::try_from(view.len()).unwrap_or(u32::MAX);
 
         let mut inner = self.inner.write();
-        let id = inner.register(Registered::Library(Arc::new(view)));
+        let tag_list = matches!(spec.source, TrackSource::TagList);
+        let id = inner.register(Registered::Library(OpenView { view: Arc::new(view), tag_list }));
         let generation = inner.generation;
         Ok((id, len, generation))
     }
@@ -490,7 +510,7 @@ impl AppState {
     }
 
     pub fn view(&self, view_id: u32) -> AppResult<Arc<View>> {
-        self.inner.read().views.get(&view_id).cloned().ok_or_else(|| {
+        self.inner.read().views.get(&view_id).map(|open| Arc::clone(&open.view)).ok_or_else(|| {
             AppError::new(ErrorKind::NotFound, "That list is no longer open. Reselect it to continue.")
                 .with_detail(format!("view {view_id} was evicted or never existed"))
         })
@@ -505,7 +525,7 @@ fn default_backup_dir() -> std::path::PathBuf {
 
 /// A view of either kind, on its way into the table.
 enum Registered {
-    Library(Arc<View>),
+    Library(OpenView),
     Folder(Arc<FolderView>),
 }
 

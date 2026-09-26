@@ -489,6 +489,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
   const listeners = new Set<(generation: number) => void>();
   const historyListeners = new Set<(history: EditHistoryState) => void>();
+  const tagListListeners = new Set<() => void>();
 
   const historyState = (): EditHistoryState => ({
     generation,
@@ -516,6 +517,17 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     }
     for (const listener of listeners) listener(generation);
     if (clearEditRedo) announceHistory();
+    return wait(generation);
+  };
+
+  /**
+   * A Tag List edit, as the real backend answers one: the generation stays,
+   * so the lists on screen keep their pages, and only the Tag List is told.
+   */
+  const tagListChanged = (): Promise<number> => {
+    editRedo.length = 0;
+    for (const listener of tagListListeners) listener();
+    announceHistory();
     return wait(generation);
   };
 
@@ -896,18 +908,18 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     reloadTags: () => bump(),
     addToTagList: (tracks) => {
       for (const track of tracks) if (!tagList.includes(track)) tagList.push(track);
-      return bump();
+      return tagListChanged();
     },
     removeFromTagList: (tracks) => {
       for (const track of tracks) {
         const at = tagList.indexOf(track);
         if (at >= 0) tagList.splice(at, 1);
       }
-      return bump();
+      return tagListChanged();
     },
     clearTagList: () => {
       tagList.length = 0;
-      return bump();
+      return tagListChanged();
     },
     removeTracksFromPlaylist: (playlist, tracks) => {
       const before = [...membersOf(playlist)];
@@ -2430,6 +2442,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     onLibraryChanged: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    onTagListChanged: (listener) => {
+      tagListListeners.add(listener);
+      return () => tagListListeners.delete(listener);
     },
     onEditHistory: (listener) => {
       historyListeners.add(listener);

@@ -158,7 +158,7 @@ pub fn interfaces() -> Vec<InterfaceDto> {
 
 /// The app's library, as the link reads it. Weak so the state does not own
 /// a session that owns the state.
-struct StateSource(Weak<AppState>, Arc<dyn Fn(u32) + Send + Sync>, bool);
+struct StateSource(Weak<AppState>, Arc<dyn Fn(&'static str, u32) + Send + Sync>, bool);
 
 impl Source for StateSource {
     fn alphabetical_keys(&self) -> bool { self.2 }
@@ -175,6 +175,7 @@ impl Source for StateSource {
             rbl_link::Edit::Rating { track, .. } => crate::commands::Touched::Metadata(vec![track.to_string()]),
             rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
         };
+        let event = touched.event();
         let result = state.write_then(|writer| match edit {
             rbl_link::Edit::Tag { track, add: true } => writer.tag_list_add(&[track.to_string()]),
             rbl_link::Edit::Tag { track, add: false } => writer.tag_list_remove(&[track.to_string()]),
@@ -183,7 +184,7 @@ impl Source for StateSource {
             rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
         }, |db, _| crate::commands::refresh_after_edit(&state, db, touched));
         match result {
-            Ok(generation) => { (self.1)(generation); true }
+            Ok(generation) => { (self.1)(event, generation); true }
             Err(error) => { tracing::warn!(%error, ?edit, "player library edit or refresh failed"); false }
         }
     }
@@ -242,7 +243,7 @@ impl Session {
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
-    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, alphabetical_keys: bool, report: F, library_changed: Arc<dyn Fn(u32) + Send + Sync>) -> Result<Self, String>
+    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, alphabetical_keys: bool, report: F, library_changed: Arc<dyn Fn(&'static str, u32) + Send + Sync>) -> Result<Self, String>
     where
         F: Fn(LinkStatusDto) + Send + 'static,
     {
@@ -480,9 +481,10 @@ mod grid_offset_tests {
         let original = state.library().unwrap();
         let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received = notifications.clone();
-        let source = StateSource(Arc::downgrade(&state), Arc::new(move |generation| {
-            received.lock().unwrap().push(generation);
+        let source = StateSource(Arc::downgrade(&state), Arc::new(move |event, generation| {
+            received.lock().unwrap().push((event, generation));
         }), false);
+        let spec = |source| rbl_index::ViewSpec { source, sort: rbl_index::SortColumn::Title, descending: false, query: String::new(), filter: rbl_index::TrackFilter::default() };
         let id = rbl_db::fixture::track_id(1);
         let track = id.parse().unwrap();
         let row = original.row_of(&id).unwrap();
@@ -494,13 +496,19 @@ mod grid_offset_tests {
             (rbl_link::Edit::ClearTags, false),
         ] {
             let generation = state.summary().3;
+            let (collection, ..) = state.open_view(&spec(rbl_index::TrackSource::Collection)).unwrap();
+            let (tag_list, ..) = state.open_view(&spec(rbl_index::TrackSource::TagList)).unwrap();
             assert!(source.edit(&edit));
             assert!(Arc::ptr_eq(&original, &state.library().unwrap()));
             assert_eq!(original.tag_list().contains(&row), present);
             let reopened = state.open_read_only().unwrap();
             assert_eq!(rbl_index::reload_tag_list(&reopened, &original).unwrap(), original.tag_list());
-            assert_ne!(state.summary().3, generation);
-            assert_eq!(notifications.lock().unwrap().last(), Some(&state.summary().3));
+            // Only the Tag List is stale: the list on screen keeps its view
+            // and its pages rather than being fetched again.
+            assert_eq!(state.summary().3, generation);
+            assert!(state.view(collection).is_ok());
+            assert!(state.view(tag_list).is_err());
+            assert_eq!(notifications.lock().unwrap().last(), Some(&("tag-list:changed", generation)));
         }
         assert_eq!(notifications.lock().unwrap().len(), 5);
         let old_rating = original.rating[row as usize];
@@ -514,6 +522,7 @@ mod grid_offset_tests {
         let (persisted, _) = rbl_index::load(&db).unwrap();
         assert_eq!(persisted.rating, updated.rating);
         assert_eq!(notifications.lock().unwrap().len(), 6);
+        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3)));
     }
 
     #[test]

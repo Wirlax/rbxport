@@ -39,6 +39,8 @@ struct Shell {
     sink: Arc<Mutex<Option<Arc<NullSink>>>>,
     /// Every `library:changed` generation the interface would have seen.
     changes: Arc<Mutex<Vec<u32>>>,
+    /// How many `tag-list:changed` the interface would have seen.
+    tag_list_changes: Arc<Mutex<usize>>,
 }
 
 /// A mock app over a fresh fixture, loaded the way `spawn_library_load`
@@ -72,7 +74,11 @@ fn shell() -> Shell {
         }
     });
 
-    Shell { _dir: dir, app, sink, changes }
+    let tag_list_changes = Arc::new(Mutex::new(0));
+    let tagged = Arc::clone(&tag_list_changes);
+    app.listen("tag-list:changed", move |_| *tagged.lock().unwrap() += 1);
+
+    Shell { _dir: dir, app, sink, changes, tag_list_changes }
 }
 
 /// Runs a command the way the invoke handler does: to completion, on the
@@ -609,6 +615,8 @@ fn tag_list_spec() -> ViewSpecDto {
 #[test]
 fn the_tag_list_takes_tracks_in_order_ignores_a_repeat_and_empties_on_clear() {
     let s = shell();
+    let generation = s.state().summary().3;
+    let (collection, _) = s.open(collection_spec());
     let (view, len) = s.open(tag_list_spec());
     assert_eq!(len, 0);
     assert!(s.rows(view).is_empty());
@@ -618,10 +626,8 @@ fn the_tag_list_takes_tracks_in_order_ignores_a_repeat_and_empties_on_clear() {
     let (view, _) = s.open(tag_list_spec());
     assert_eq!(ids(&s.rows(view)), [t3.as_str(), t1.as_str()], "on the end, in the order given");
 
-    // A track already on the list is not put on twice. The edit still went
-    // through the writer, so the generation moves and the interface refetches.
+    // A track already on the list is not put on twice.
     let second = run(commands::add_to_tag_list(s.handle(), s.state(), vec![t3.clone(), t2.clone()])).unwrap();
-    assert!(second > first);
     let (view, _) = s.open(tag_list_spec());
     assert_eq!(ids(&s.rows(view)), [t3.as_str(), t1.as_str(), t2.as_str()]);
 
@@ -632,7 +638,6 @@ fn the_tag_list_takes_tracks_in_order_ignores_a_repeat_and_empties_on_clear() {
 
     // Taking off a track that is not on the list is not a refusal.
     let fourth = run(commands::remove_from_tag_list(s.handle(), s.state(), vec![t3])).unwrap();
-    assert!(fourth > third);
     let (view, _) = s.open(tag_list_spec());
     assert_eq!(ids(&s.rows(view)), [t1.as_str(), t2.as_str()]);
 
@@ -641,14 +646,17 @@ fn the_tag_list_takes_tracks_in_order_ignores_a_repeat_and_empties_on_clear() {
     assert_eq!(len, 0);
     assert!(s.rows(view).is_empty());
 
-    // `Touched::TagList` re-reads the list alone, but what it announces is
-    // the same `library:changed` carrying the generation that a playlist or
-    // a track edit sends — the Tag List has no event of its own.
+    // No other list shows Tag List membership, so the generation stays and
+    // the list on screen keeps its view: tagging a track, from the menu or
+    // from a player, does not reload the playlist being looked at.
+    assert_eq!([first, second, third, fourth, fifth], [generation; 5]);
+    assert!(!s.rows(collection).is_empty(), "the collection's view is still open");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while s.changes.lock().unwrap().len() < 5 && Instant::now() < deadline {
+    while *s.tag_list_changes.lock().unwrap() < 5 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(*s.changes.lock().unwrap(), vec![first, second, third, fourth, fifth]);
+    assert_eq!(*s.tag_list_changes.lock().unwrap(), 5);
+    assert!(s.changes.lock().unwrap().is_empty(), "nothing told every list to refetch");
 }
 
 #[test]
@@ -667,10 +675,10 @@ fn a_tag_list_add_naming_a_track_that_is_not_there_is_read_only_and_adds_none_of
     assert_eq!(ids(&s.rows(view)), [track.as_str()]);
     assert_eq!(s.state().summary().3, generation);
     let deadline = Instant::now() + Duration::from_secs(2);
-    while s.changes.lock().unwrap().is_empty() && Instant::now() < deadline {
+    while *s.tag_list_changes.lock().unwrap() == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(*s.changes.lock().unwrap(), vec![generation], "only the add that went through announced");
+    assert_eq!(*s.tag_list_changes.lock().unwrap(), 1, "only the add that went through announced");
 }
 
 // ----------------------------------------------------------- track editing

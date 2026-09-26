@@ -582,6 +582,15 @@ pub(crate) enum Touched {
     Histories(Vec<String>),
 }
 
+impl Touched {
+    /// The event that tells the window. A Tag List edit leaves every other
+    /// view as it was, so it has its own rather than `library:changed`,
+    /// which makes every open list fetch its rows again.
+    pub(crate) fn event(&self) -> &'static str {
+        if matches!(self, Self::TagList) { "tag-list:changed" } else { "library:changed" }
+    }
+}
+
 /// Commits an edit and refreshes the affected index on the same connection.
 pub(crate) async fn edit<R: tauri::Runtime, F>(
     app: tauri::AppHandle<R>,
@@ -594,6 +603,7 @@ where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
 {
     let state = Arc::clone(&state);
+    let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
         let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched)).map_err(write_error)?;
@@ -602,7 +612,7 @@ where
         history.clear_redo();
         Ok((generation, history_dto(generation, &history)))
     }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    let _ = tauri::Emitter::emit(&app, event, generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     Ok(generation)
 }
@@ -620,6 +630,7 @@ where
     F: FnOnce(&mut rbl_db::write::Writer) -> Result<(), rbl_db::DbError> + Send + 'static,
 {
     let state = Arc::clone(&state);
+    let event = touched.event();
     let (generation, history) = blocking(name, move || {
         let _gate = state.edit_gate.lock();
         let generation = state.write_then(action, |db, ()| refresh_after_edit(&state, db, touched))
@@ -628,7 +639,7 @@ where
         history.clear();
         Ok((generation, history_dto(generation, &history)))
     }).await?;
-    let _ = tauri::Emitter::emit(&app, "library:changed", generation);
+    let _ = tauri::Emitter::emit(&app, event, generation);
     let _ = tauri::Emitter::emit(&app, "edit-history:changed", history);
     Ok(generation)
 }
@@ -723,7 +734,10 @@ pub(crate) fn refresh_after_edit(state: &AppState, db: &rbl_db::Library, touched
         touched => {
             let library = state.library().map_err(|e| rbl_db::DbError::Open(e.to_string()))?;
             match touched {
-                Touched::TagList => library.set_tag_list(rbl_index::reload_tag_list(db, &library)?),
+                Touched::TagList => {
+                    library.set_tag_list(rbl_index::reload_tag_list(db, &library)?);
+                    return Ok(state.invalidate_tag_list_views());
+                }
                 Touched::Playlists => library.set_playlists(rbl_index::reload_playlists(db, &library)?),
                 Touched::Histories(_) => library.set_histories(rbl_index::reload_histories(db, &library)?),
                 _ => unreachable!("track changes handled above"),
@@ -817,8 +831,8 @@ pub async fn start_link_export<R: tauri::Runtime>(
     let started = blocking("start_link_export", move || {
         Ok(crate::link::Session::start(&owner, interface.as_deref(), alphabetical_keys.unwrap_or(false), move |status| {
             let _ = tauri::Emitter::emit(&emitter, "link:status", status);
-        }, Arc::new(move |generation| {
-            let _ = tauri::Emitter::emit(&library_emitter, "library:changed", generation);
+        }, Arc::new(move |event, generation| {
+            let _ = tauri::Emitter::emit(&library_emitter, event, generation);
         })))
     })
     .await?;
