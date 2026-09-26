@@ -2154,7 +2154,15 @@ test("wheel crossing PCM returns to the same PWV7 canvas as ordinary zoom", asyn
   await expect.poll(digest).not.toBe("");
   const expected = await digest();
 
+  // The zoom survives a reload, so the wheel run has to be put back on the
+  // default 12 bars the button run started from.
+  await page.evaluate(() => {
+    const session = JSON.parse(localStorage.getItem("rbl.session") ?? "{}") as { waveformZoom?: unknown };
+    delete session.waveformZoom;
+    localStorage.setItem("rbl.session", JSON.stringify(session));
+  });
   await load();
+  await expect(page.getByTestId("player-detail")).not.toHaveAttribute("data-pcm");
   const detail = page.getByTestId("player-detail");
   // The fifth wheel-in reaches PCM at 1/2 bar; one wheel-out returns to the
   // exact same 1-bar PWV7 state used above. Dispatch them together, as a

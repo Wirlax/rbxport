@@ -782,14 +782,23 @@ export const Player = memo(function Player({
   // Linked or its own, and the setter follows whichever it is: a controlled
   // zoom that kept updating a local copy would fight the link on every change.
   const bars = linkedBars ?? ownBars;
+  // The zoom last asked of the shell, ahead of the render that shows it. A
+  // fast scroll delivers several wheel events before the shell re-renders,
+  // and each has to step from the one before, not from this render's value.
+  const requestedBars = useRef(bars);
+  useLayoutEffect(() => {
+    requestedBars.current = bars;
+  }, [bars]);
   const setBars = useCallback(
     (next: number | ((current: number) => number)) => {
       const resolve = (current: number) =>
         typeof next === "function" ? next(current) : next;
-      if (onBars) onBars(resolve(linkedBars ?? ownBars));
-      else setOwnBars(resolve);
+      if (onBars) {
+        requestedBars.current = resolve(requestedBars.current);
+        onBars(requestedBars.current);
+      } else setOwnBars(resolve);
     },
-    [onBars, linkedBars, ownBars],
+    [onBars],
   );
   const [padMode, setPadMode] = useState<PadMode>("cue");
   const [panel, setPanel] = useState<CuePanel>("memory");
