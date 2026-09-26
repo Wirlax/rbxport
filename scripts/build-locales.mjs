@@ -93,9 +93,15 @@ const uiProperties = new Set([
   "placeholder", "text", "title", "tooltip",
 ]);
 
+const hiddenAttributes = new Set(["key", "className", "id", "role", "type", "htmlFor", "name", "autoComplete", "inputMode"]);
+function hiddenAttribute(name) {
+  return hiddenAttributes.has(name) || name.startsWith("data-") || (name.startsWith("aria-") && !uiProperties.has(name));
+}
+
 function cleanUiText(text) {
   return text
-    .replaceAll("&hellip;", "…").replaceAll("&rsquo;", "’").replaceAll("&amp;", "&")
+    .replaceAll("&hellip;", "…").replaceAll("&rsquo;", "’").replaceAll("&apos;", "'")
+    .replaceAll("&quot;", "\"").replaceAll("&amp;", "&")
     .replace(/\s+/g, " ").trim();
 }
 
@@ -126,6 +132,22 @@ async function uiStrings() {
       const name = parent.expression.getText(source);
       return /(?:confirm|set(?:\w*(?:Error|Message|Status))|t)$/.test(name);
     });
+    // A literal compared against, switched on, or handed to a DOM attribute
+    // that is never shown (key, className, role, data-*) is an identifier, not
+    // text. Component props are left alone: they are often text shown later.
+    const isIdentifier = (node) => {
+      const parent = node.parent;
+      if (ts.isCaseClause(parent)) return true;
+      if (ts.isBinaryExpression(parent) && [
+        ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
+        ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
+      ].includes(parent.operatorToken.kind)) return true;
+      for (let ancestor = parent; ancestor; ancestor = ancestor.parent) {
+        if (ts.isJsxAttribute(ancestor)) return hiddenAttribute(ancestor.name.getText(source));
+        if (ts.isSourceFile(ancestor) || ts.isFunctionLike(ancestor)) return false;
+      }
+      return false;
+    };
     const visit = (node) => {
       if (ts.isJsxText(node)) add(node.text);
       if (ts.isJsxAttribute(node) && uiProperties.has(node.name.getText(source)) && node.initializer) {
@@ -136,7 +158,7 @@ async function uiStrings() {
       if (ts.isPropertyAssignment(node) &&
         uiProperties.has(node.name.getText(source).replaceAll(/["']/g, "")) &&
         ts.isStringLiteralLike(node.initializer)) add(node.initializer.text);
-      if (ts.isStringLiteralLike(node) && (
+      if (ts.isStringLiteralLike(node) && !isIdentifier(node) && (
         hasAncestor(node, ts.isJsxExpression) || inUiVariable(node) || inUiCall(node)
       )) add(node.text);
       ts.forEachChild(node, visit);

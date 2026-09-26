@@ -146,9 +146,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const importTicked = (kind: ImportKind) => importTicks[kind] ?? importDefaults[kind];
   /** Why a kind cannot be imported right now, or null when it can. */
   const importBlocked = (kind: ImportKind): string | null =>
-    kind === "cues" && preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids."
-    : kind === "history" && preferences.advanced.protectLibrary ? "Turn off Library Protection to import play history."
-    : kind === "history" && rekordboxOpen !== false ? "Quit rekordbox to import play history."
+    kind === "cues" && preferences.advanced.protectLibrary ? t("Turn off Library Protection to import cues and grids.")
+    : kind === "history" && preferences.advanced.protectLibrary ? t("Turn off Library Protection to import play history.")
+    : kind === "history" && rekordboxOpen !== false ? t("Quit rekordbox to import play history.")
     : null;
   const importKinds = IMPORT_KINDS.map(({ kind }) => kind).filter(kind => importTicked(kind) && !importBlocked(kind));
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
