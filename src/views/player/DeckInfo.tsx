@@ -20,6 +20,7 @@ import { memo } from "react";
 import type { RowDto, TrackDetails } from "@/ipc/types";
 import { CommentIcon } from "@/components/icons";
 import { deckInfo } from "./deckInfoLines";
+import { RatingStar } from "@/components/RatingStar";
 import styles from "./DeckInfo.module.css";
 
 export const DeckInfo = memo(function DeckInfo({
@@ -33,7 +34,7 @@ export const DeckInfo = memo(function DeckInfo({
     <div className={styles.info} data-testid="deck-info">
       <div className={styles.rating} aria-label={`Rating ${info.rating} of 5`}>
         {[1, 2, 3, 4, 5].map((star) => (
-          <span key={star} aria-hidden>{info.rating >= star ? "★" : "☆"}</span>
+          <span key={star} aria-hidden><RatingStar lit={info.rating >= star} className={styles.starIcon} /></span>
         ))}
       </div>
       <div className={styles.color} data-testid="deck-info-color">

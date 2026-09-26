@@ -1,0 +1,6 @@
+<svg viewBox="0 0 14 13.31" xmlns="http://www.w3.org/2000/svg">
+  <!-- A rating star, as rekordbox 7's track list draws it (2x capture,
+       2026-09-25): five points whose waist is 0.42 of their reach. Drawn
+       rather than typed because none of our fonts has U+2605. -->
+  <path fill="currentColor" d="M7 0L8.82 4.86L14 5.09L9.94 8.32L11.33 13.31L7 10.45L2.67 13.31L4.06 8.32L0 5.09L5.18 4.86Z"/>
+</svg>

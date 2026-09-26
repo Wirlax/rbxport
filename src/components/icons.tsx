@@ -339,6 +339,18 @@ export const SpinnerIcon = (props: IconProps) => (
   </svg>
 );
 
+export const StarEmptyIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 13.31" aria-hidden focusable="false" {...props}>
+    <path fillRule="evenodd" fill="currentColor" d="M7 0L8.82 4.86L14 5.09L9.94 8.32L11.33 13.31L7 10.45L2.67 13.31L4.06 8.32L0 5.09L5.18 4.86ZM5.64 5.49L1.77 5.66L4.8 8.07L3.76 11.81L7 9.67L10.24 11.81L9.2 8.07L12.23 5.66L8.36 5.49L7 1.86Z"/>
+  </svg>
+);
+
+export const StarLitIcon = (props: IconProps) => (
+  <svg viewBox="0 0 14 13.31" aria-hidden focusable="false" {...props}>
+    <path fill="currentColor" d="M7 0L8.82 4.86L14 5.09L9.94 8.32L11.33 13.31L7 10.45L2.67 13.31L4.06 8.32L0 5.09L5.18 4.86Z"/>
+  </svg>
+);
+
 export const SubBrowseIcon = (props: IconProps) => (
   <svg viewBox="0 0 18 18" aria-hidden focusable="false" {...props}>
     <rect x="3" y="4" width="6" height="10" fill="currentColor"/> <rect x="3.5" y="4.5" width="11" height="9" fill="none" stroke="currentColor" strokeWidth="1"/>

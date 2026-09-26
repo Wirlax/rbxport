@@ -1434,6 +1434,14 @@
       "value": "18px",
       "source": "docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Rating stars are 26px tall at 2x, 157px across the five"
     },
+    "infoStarH": {
+      "value": "13px",
+      "source": "docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each Rating star's ink is 26px tall at 2x"
+    },
+    "infoStarsW": {
+      "value": "78.5px",
+      "source": "docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the five Rating stars' ink spans 157px at 2x"
+    },
     "infoCheckSize": {
       "value": "13px",
       "source": "docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the two checkboxes are 26px square at 2x"

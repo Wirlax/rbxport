@@ -37,6 +37,7 @@ import {
 import { getBackend } from "@/ipc/client";
 import type { Backend, RowDto, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
 import { formatBpm } from "@/lib/format";
+import { RatingStar } from "@/components/RatingStar";
 import styles from "./InfoPanel.module.css";
 import { acceptable, COLORS, dateSegments, fieldText, summaryFacts } from "./fields";
 import { useTooltip } from "@/store/usePreferences";
@@ -689,7 +690,7 @@ function Stars({
           // rekordbox behaves and the only way to get back to none.
           onClick={() => onRate(rating === star ? 0 : star)}
         >
-          {star <= rating ? "★" : "☆"}
+          <RatingStar lit={star <= rating} className={styles.starIcon} />
         </button>
       ))}
     </span>

@@ -264,7 +264,8 @@ test("a rating set after a playlist edit stays set once the reload lands", async
   // Past the moment the optimistic overlay is dropped for the re-read rows.
   await page.waitForTimeout(500);
   await expect(stars.getByRole("radio", { name: `${pick} of 5` })).toHaveAttribute("aria-checked", "true");
-  await expect(stars).toHaveText(`${"★".repeat(pick)}${"☆".repeat(5 - pick)}`);
+  await expect(stars.locator("svg[data-lit]")).toHaveCount(pick);
+  await expect(stars.locator("svg")).toHaveCount(5);
 });
 
 test("a playlist is renamed in the row, and Escape puts the old name back", async ({ page }) => {

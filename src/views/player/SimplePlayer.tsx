@@ -24,6 +24,7 @@ import { TempoToggle } from "./TempoToggle";
 import { TimeReadouts, type PositionSource } from "./TimeReadouts";
 import { CueMarkers, OverviewTempoMarkers } from "./Player";
 import { WaveformDetail } from "./WaveformDetail";
+import { RatingStar } from "@/components/RatingStar";
 import styles from "./SimplePlayer.module.css";
 import { usePreferences, useTooltip } from "@/store/usePreferences";
 import { formatKey } from "@/lib/preferences";
@@ -206,7 +207,7 @@ export const SimplePlayer = memo(function SimplePlayer({
         <div className={styles.field}>
           <span className={styles.stars} data-testid="simple-player-stars" aria-label={`${track?.rating ?? 0} of 5`}>
             {[1, 2, 3, 4, 5].map((star) => (
-              <span key={star}>{(track?.rating ?? 0) >= star ? "★" : "☆"}</span>
+              <span key={star}><RatingStar lit={(track?.rating ?? 0) >= star} className={styles.starIcon} /></span>
             ))}
           </span>
           <span className={styles.fieldRow} aria-hidden />

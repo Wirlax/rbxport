@@ -2609,7 +2609,7 @@ test("the simple player is one strip, the way rekordbox draws it", async ({ page
   await expect(page.getByTestId("simple-player-artist")).not.toHaveText("");
   await expect(page.getByTestId("simple-player-key")).not.toHaveText("");
   await expect(page.getByTestId("simple-player-bpm")).toHaveText(/^\d+\.\d\d$/);
-  await expect(page.getByTestId("simple-player-stars")).toHaveText(/^[★☆]{5}$/);
+  await expect(page.getByTestId("simple-player-stars").locator("svg")).toHaveCount(5);
   const overview = page.getByTestId("simple-player-overview");
   await expect(overview).toHaveAttribute("role", "progressbar");
   // Four lettered badges and the memory cue's head beside the first.

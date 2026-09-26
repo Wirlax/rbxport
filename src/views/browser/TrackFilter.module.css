@@ -174,10 +174,9 @@
 .list[data-inert] .row[data-picked] { background: var(--c-raised); }
 
 .ratingList .row { padding-left: 7px; }
-.stars {
-  letter-spacing: 2px;
-  font-size: var(--f-size-ui);
-}
+.stars { display: flex; align-items: center; gap: 2px; }
+/* The track list's star, one pixel further apart as the text was. */
+.starIcon { height: 14.26px; }
 
 .colorList .row { padding-left: 7px; gap: 6px; }
 .dot {

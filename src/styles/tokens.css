@@ -366,6 +366,8 @@
   --s-info-field-h: 22px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each input box is 44px tall at 2x */
   --s-info-comments-h: 150px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Comments box is 300px tall at 2x */
   --s-info-star-size: 18px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Rating stars are 26px tall at 2x, 157px across the five */
+  --s-info-star-h: 13px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): each Rating star's ink is 26px tall at 2x */
+  --s-info-stars-w: 78.5px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the five Rating stars' ink spans 157px at 2x */
   --s-info-check-size: 13px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the two checkboxes are 26px square at 2x */
   --s-info-artwork-inset: 3px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the Artwork tab's black area sits 5-6px at 2x inside the panel's sides */
   --s-info-artwork-top: 7px; /* docs/screenshots 9.09.33/36/45 PM (rekordbox 7.2.11, 2x, the Information Window's Summary, Info and Artwork tabs): the black area starts 14px at 2x below the tabs */

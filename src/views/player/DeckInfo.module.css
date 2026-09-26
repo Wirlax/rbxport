@@ -28,16 +28,13 @@
   height: var(--s-deck-info-rating-h);
   display: flex;
   align-items: center;
-  /* Ink of the star's height on the measured pitch. The glyph is the
-     fallback symbol font's, as the simple player's stars are, so the size is
-     what makes its ink measure the token rather than a face size. */
-  font-size: calc(var(--s-deck-info-star-h) * 1.08);
-  line-height: 1;
 }
+/* Each star in a cell of the measured pitch, its left edge at the cell's. */
 .rating > span {
+  flex: none;
   width: var(--s-deck-info-star-pitch);
-  text-align: left;
 }
+.starIcon { height: var(--s-deck-info-star-h); }
 
 .color {
   height: var(--s-deck-info-color-h);

@@ -364,14 +364,21 @@
   background: var(--c-raised);
 }
 
-.stars { letter-spacing: 1px; color: var(--c-text); display: flex; }
+/* rekordbox 7.2.11's track list at 2x (2026-09-25): each star's ink 30 capture
+   px wide and 28 tall on a 32 px pitch, its middle 1.25px above the row's. */
+.stars { color: var(--c-text); display: flex; align-items: center; gap: 1px; height: 100%; }
 .star {
+  display: flex;
   border: 0;
   padding: 0;
   background: none;
   color: inherit;
   font: inherit;
   cursor: default;
+}
+.starIcon {
+  height: 14.26px;
+  transform: translateY(-1.25px);
 }
 .star:hover { color: var(--c-accent); }
 

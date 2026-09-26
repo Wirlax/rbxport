@@ -304,14 +304,16 @@
 
 .stars {
   display: flex;
-  gap: 1px;
+  align-items: center;
+  /* Five stars of the measured height across 78.5pt of ink. */
+  gap: calc((var(--s-info-stars-w) - 5 * var(--s-info-star-h) * 14 / 13.31) / 4);
   color: var(--c-info-form-text);
-  font-size: var(--s-info-star-size);
-  line-height: 1;
   height: var(--s-info-star-size);
   padding: 0 0 0 2px;
 }
+.starIcon { height: var(--s-info-star-h); }
 .star {
+  display: flex;
   border: 0;
   padding: 0;
   background: none;

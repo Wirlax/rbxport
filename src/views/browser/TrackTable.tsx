@@ -28,6 +28,7 @@ import { WaveformPreview } from "./WaveformPreview";
 import styles from "./TrackTable.module.css";
 import { FilterIcon, SortDownIcon, SortUpIcon } from "@/components/icons";
 import { Artwork } from "@/components/Artwork";
+import { RatingStar } from "@/components/RatingStar";
 import { RecordIcon } from "@/components/icons";
 import { EXTRA_COLUMNS, type ColumnKey, type ColumnSpec } from "@/lib/columns";
 import { COLOR_NAMES } from "@/lib/trackFilter";
@@ -182,16 +183,15 @@ const Stars = memo(function Stars({
               onRate(rating === star ? 0 : star);
             }}
           >
-            {star <= rating ? "★" : "☆"}
+            <RatingStar lit={star <= rating} className={styles.starIcon} />
           </button>
         ))}
       </span>
     );
   }
   return (
-    <span className={styles.stars} aria-label={`${rating} of 5`}>
-      {"★".repeat(rating)}
-      {"☆".repeat(5 - rating)}
+    <span className={styles.stars} role="img" aria-label={`${rating} of 5`}>
+      {[1, 2, 3, 4, 5].map((star) => <RatingStar key={star} lit={star <= rating} className={styles.starIcon} />)}
     </span>
   );
 });

@@ -346,16 +346,13 @@
   padding-left: var(--s-player-simple-stars-inset);
   display: flex;
   align-items: center;
-  /* 10pt of ink on a 16pt pitch. The glyph is the fallback symbol font's,
-     not Arial's, so the size is what makes its ink measure 10pt in WebKit
-     (a 14px face drew 13) rather than a face size, and each star sits in a
-     cell of the pitch rather than being spaced by letter-spacing. */
-  font-size: calc(var(--s-player-simple-star-h) * 1.08);
-  line-height: 1;
   color: var(--c-text-dim);
 }
+/* 10pt of ink on a 16pt pitch: each star at the left of a cell of the pitch,
+   so the first one's edge is the measured inset. */
 .stars > span {
+  flex: none;
   width: var(--s-player-simple-star-pitch);
-  text-align: center;
 }
+.starIcon { height: var(--s-player-simple-star-h); }
 .fieldRow { height: 1px; background: var(--c-panel); }
