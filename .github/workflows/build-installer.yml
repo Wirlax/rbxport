@@ -275,7 +275,18 @@ jobs:
         # The keychain is created under RUNNER_TEMP, prepended to the search list
         # rather than made the default — codesign searches the whole list, so
         # there is no reason to displace what the machine's owner has set — and
-        # the original list is put back by the teardown step below.
+        # the teardown step below takes it off again.
+        #
+        # The search list is one per user, and other repositories' release
+        # jobs sign on the same Mac at the same time with the same scheme. So
+        # this job never snapshots the list and puts the snapshot back later:
+        # it edits the list as it stands at that moment and touches only its
+        # own entry. The snapshot version is what broke v1.0.0-rc.4. An
+        # rbx-restore job took its snapshot before this job's keychain was
+        # added and restored it mid-build, which removed this job's keychain
+        # from the list. codesign then found the same identity in a stale,
+        # locked keychain further down the list and failed with
+        # errSecInternalComponent.
         if: runner.os == 'macOS' && env.HAVE_APPLE == 'true'
         shell: bash
         env:
@@ -286,9 +297,6 @@ jobs:
           KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "::add-mask::$KEYCHAIN_PASSWORD"
-
-          # Remember the search list verbatim so teardown can restore it.
-          security list-keychains -d user | sed 's/^ *"//;s/"$//' > "$RUNNER_TEMP/keychains.before"
 
           # A keychain left behind by a killed run would still be on the list,
           # holding a password this run cannot know.
@@ -313,9 +321,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
 
-          # Prepended, with the machine's own keychains kept after it.
-          # shellcheck disable=SC2046
-          security list-keychains -d user -s "$KEYCHAIN" $(cat "$RUNNER_TEMP/keychains.before")
+          # Prepended to the list as it is now, with the machine's own
+          # keychains kept after it. Entries whose file no longer exists are
+          # dropped. Killed jobs leave those behind, and they do nothing
+          # except make the list longer.
+          others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' |
+            while IFS= read -r k; do
+              if [ -f "$k" ] && [ "$k" != "$KEYCHAIN" ]; then printf '%s\n' "$k"; fi
+            done)"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$KEYCHAIN" $others
 
           echo "Identities visible to codesign:"
           security find-identity -v -p codesigning "$KEYCHAIN"
@@ -617,10 +632,11 @@ jobs:
         shell: bash
         run: |
           KEYCHAIN="$RUNNER_TEMP/rbxport-signing.keychain-db"
-          if [ -f "$RUNNER_TEMP/keychains.before" ]; then
-            # shellcheck disable=SC2046
-            security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains.before") || true
-          fi
+          # Only this job's entry comes off. Keychains other jobs added since
+          # setup stay on the list (see the setup step).
+          others="$(security list-keychains -d user | sed 's/^ *"//;s/"$//' | grep -vxF "$KEYCHAIN" || true)"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s $others || true
           security delete-keychain "$KEYCHAIN" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/cert.p12"
 
