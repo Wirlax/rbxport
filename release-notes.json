@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.0-rc.5",
+    "date": "2026-09-26",
+    "changes": [
+      "(New) Import cues and beat grids, play history, and CDJ/mixer settings from USB devices with one Import button in the Sync Manager, and choose which are ticked when it opens.",
+      "(Fixed) Over LINK, a player's HISTORY shows this session's LINK HISTORY, as with rekordbox, and tracks played on the decks are recorded to it.",
+      "(Fixed) Adding a track to the Tag List, from the menu or a player, no longer reloads the list on screen.",
+      "(Fixed) Recently added text is translated, and several mistranslated labels are corrected."
+    ]
+  },
+  {
     "version": "1.0.0-rc.4",
     "date": "2026-09-25",
     "changes": [
