@@ -1442,5 +1442,14 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Dvě existující knihovny zařízení nesouhlasí. Uspořádejte je v softwaru rekordbox před jejich první synchronizací zde.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Toto USB patří do jiné nebo starší neověřené hlavní knihovny. Importujte jeho obsah do rekordboxu před změnou jeho vlastnictví.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary obsahuje záznamy cue, které by tento export nahradil. Nejprve importujte podněty do softwaru rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Odstraňovaná skladba je stále odkazována historií USB. Nejprve importujte a vymažte historii v softwaru rekordbox.",
+  "Import from USB": "Import z USB",
+  "Cues and beat grids": "Narážky a bití mřížky",
+  "Play history": "Historie přehrávání",
+  "CDJ/mixer settings": "nastavení CDJ/mixéru",
+  "Import the ticked items from the selected USB devices to rbxport": "Importujte zaškrtnuté položky z vybraných USB zařízení do rbxport",
+  "Import cues and beat grids": "Importujte tága a mřížky beatů",
+  "Import play history": "Importovat historii přehrávání",
+  "Import CDJ/mixer settings": "Importujte nastavení CDJ/mixéru",
+  "Ticked for Import in Sync Manager when the window opens.": "Po otevření okna zaškrtnuto u položky Import ve Správci synchronizace."
 }

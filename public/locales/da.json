@@ -1436,5 +1436,14 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "De to eksisterende enhedsbiblioteker er uenige. Afstem dem i rekordbox før deres første synkronisering her.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Denne USB tilhører et andet eller ældre ubekræftet masterbibliotek. Importer dets indhold i rekordbox, før du ændrer dets ejerskab.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary indeholder stikordsposter, som denne eksport ville erstatte. Importér signalerne i rekordbox først.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Et spor, der fjernes, henvises stadig til af USB-historikken. Importer og ryd den historie i rekordbox først."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Et spor, der fjernes, henvises stadig til af USB-historikken. Importer og ryd den historie i rekordbox først.",
+  "Import from USB": "Importer fra USB",
+  "Cues and beat grids": "Stikord og beatgitter",
+  "Play history": "Afspilningshistorik",
+  "CDJ/mixer settings": "CDJ/mixer indstillinger",
+  "Import the ticked items from the selected USB devices to rbxport": "Importer de afkrydsede elementer fra de valgte USB-enheder til rbxport",
+  "Import cues and beat grids": "Importer stikord og beat-gitter",
+  "Import play history": "Importer afspilningshistorik",
+  "Import CDJ/mixer settings": "Importer CDJ/mixer-indstillinger",
+  "Ticked for Import in Sync Manager when the window opens.": "Afkrydset for Importer i Sync Manager, når vinduet åbnes."
 }

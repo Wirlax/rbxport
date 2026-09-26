@@ -1444,5 +1444,14 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Οι δύο υπάρχουσες βιβλιοθήκες συσκευών διαφωνούν. Συμφιλιώστε τα στο rekordbox πριν από τον πρώτο συγχρονισμό τους εδώ.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Αυτό το USB ανήκει σε διαφορετική ή παλαιότερη μη επαληθευμένη κύρια βιβλιοθήκη. Εισαγάγετε τα περιεχόμενά του στο rekordbox πριν αλλάξετε την ιδιοκτησία του.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "Η OneLibrary περιέχει εγγραφές υπόδειξης που θα αντικαταστήσει αυτή η εξαγωγή. Εισαγάγετε πρώτα τα συνθήματα στο rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Ένα κομμάτι που αφαιρείται εξακολουθεί να αναφέρεται από το ιστορικό USB. Εισαγάγετε και διαγράψτε πρώτα αυτό το ιστορικό στο rekordbox.",
+  "Import from USB": "Εισαγωγή από USB",
+  "Cues and beat grids": "Cues και beat πλέγματα",
+  "Play history": "Ιστορικό αναπαραγωγής",
+  "CDJ/mixer settings": "Ρυθμίσεις CDJ/μίκτη",
+  "Import the ticked items from the selected USB devices to rbxport": "Εισαγάγετε τα επιλεγμένα στοιχεία από τις επιλεγμένες συσκευές USB στο rbxport",
+  "Import cues and beat grids": "Εισαγάγετε συνθήματα και πλέγματα κτυπήματος",
+  "Import play history": "Εισαγωγή ιστορικού αναπαραγωγής",
+  "Import CDJ/mixer settings": "Εισαγωγή ρυθμίσεων CDJ/μίκτη",
+  "Ticked for Import in Sync Manager when the window opens.": "Επισημαίνεται για Εισαγωγή στη Διαχείριση συγχρονισμού όταν ανοίξει το παράθυρο."
 }

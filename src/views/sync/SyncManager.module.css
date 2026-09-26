@@ -292,8 +292,10 @@
 .middle .button { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; font-size: var(--f-size-pref-small); }
 .importActions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; }
 .syncActions { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
-.ejectOption { display: flex; align-items: center; gap: 6px; font-size: var(--f-size-pref-small); cursor: pointer; }
-.ejectOption:has(input:disabled) { color: var(--c-text-dim); cursor: default; }
+.option { display: flex; align-items: center; gap: 6px; font-size: var(--f-size-pref-small); cursor: pointer; }
+.option:has(input:disabled) { color: var(--c-text-dim); cursor: default; }
+.importKinds { display: flex; flex-direction: column; gap: 6px; margin: 0 0 4px; padding: 0; border: 0; min-width: 0; }
+.importLegend { padding: 0; margin-bottom: 6px; color: var(--c-text-dim); font-size: var(--f-size-pref-small); }
 .storage { margin: 2px 12px 8px 30px; }
 .storage .capacity { margin: 0 0 6px; }
 .spaceBar { height: 8px; overflow: hidden; border: 1px solid var(--c-pref-control-off); border-radius: 3px; background: transparent; }

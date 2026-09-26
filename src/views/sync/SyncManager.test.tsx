@@ -423,39 +423,74 @@ describe("SyncManager", () => {
   });
 });
 
-it("imports cue/grid information from selected devices only", async () => {
+const importTick = (label: string) =>
+  [...host.querySelectorAll("label")].find(l => l.textContent === label)?.querySelector("input") ?? null;
+const importButton = () => [...host.querySelectorAll("button")].find(b => b.textContent?.trim() === "Import")!;
+const renderWith = async (usbExport: Partial<typeof DEFAULT_PREFERENCES.usbExport>, protectLibrary = false) => {
   const preferences = {
     ...DEFAULT_PREFERENCES,
-    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false },
+    usbExport: { ...DEFAULT_PREFERENCES.usbExport, ...usbExport },
+    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary },
   };
   act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
     <SyncManager onClose={onClose} />
   </PreferencesProvider>));
   await settle();
-  const button = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("CUE GRID INFO"))!;
-  expect(button.disabled).toBe(true);
+};
+
+it("imports cue/grid information from selected devices only", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: false, importButtonSettings: false });
+  expect(importButton().disabled).toBe(true);
   click(box("USB A"));
   await settle();
-  click(button);
+  click(importButton());
   await settle();
   expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", true, false, false);
   expect(importUsb).toHaveBeenCalledTimes(1);
   expect(status()).toContain("updated 2 tracks");
 });
 
-it("imports history explicitly and offers details and retry after a failure", async () => {
-  const preferences = {
-    ...DEFAULT_PREFERENCES,
-    advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary: false },
-  };
-  act(() => root.render(<PreferencesProvider value={{ preferences, update: vi.fn(), reset: vi.fn() }}>
-    <SyncManager onClose={onClose} />
-  </PreferencesProvider>));
+it("starts Import's ticks at the Preferences defaults and imports each ticked kind", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
+  expect(importTick("Cues and beat grids")?.checked).toBe(false);
+  expect(importTick("Play history")?.checked).toBe(true);
+  expect(importTick("CDJ/mixer settings")?.checked).toBe(true);
+  click(importTick("CDJ/mixer settings"));
+  click(importTick("Cues and beat grids"));
+  click(box("USB A"));
   await settle();
+  click(importButton());
+  await settle();
+  expect(importUsb.mock.calls).toEqual([
+    ["/Volumes/USB A", true, false, false],
+    ["/Volumes/USB A", false, true, false],
+  ]);
+});
+
+it("Import cannot be pressed with nothing ticked", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: false, importButtonSettings: false });
+  click(box("USB A"));
+  await settle();
+  expect(importButton().disabled).toBe(true);
+});
+
+it("library protection leaves only settings to import", async () => {
+  await renderWith({ importButtonCues: true, importButtonHistory: true, importButtonSettings: true }, true);
+  expect(importTick("Cues and beat grids")?.disabled).toBe(true);
+  expect(importTick("Play history")?.disabled).toBe(true);
+  click(box("USB A"));
+  await settle();
+  click(importButton());
+  await settle();
+  expect(importUsb).toHaveBeenCalledExactlyOnceWith("/Volumes/USB A", false, false, true);
+});
+
+it("imports history explicitly and offers details and retry after a failure", async () => {
+  await renderWith({ importButtonCues: false, importButtonHistory: true, importButtonSettings: false });
   click(box("USB A"));
   await settle();
   importUsb.mockRejectedValueOnce(new Error("Could not read play history: damaged database"));
-  click([...host.querySelectorAll("button")].find(button => button.textContent?.includes("Import history")));
+  click(importButton());
   await settle();
   expect(importUsb).toHaveBeenCalledWith("/Volumes/USB A", false, true, false);
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("damaged database");
@@ -465,6 +500,7 @@ it("imports history explicitly and offers details and retry after a failure", as
   click(retry);
   await settle();
   expect(importUsb).toHaveBeenCalledTimes(2);
+  expect(importUsb).toHaveBeenLastCalledWith("/Volumes/USB A", false, true, false);
 });
 
 it("expanding a USB does not select it for synchronization", async () => {

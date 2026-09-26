@@ -1442,5 +1442,14 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Les deux bibliothèques de périphériques existantes ne sont pas d'accord. Réconciliez-les dans rekordbox avant leur première synchronisation ici.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Cette clé USB appartient à une bibliothèque principale non vérifiée différente ou plus ancienne. Importez son contenu dans rekordbox avant de changer de propriétaire.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary contient des enregistrements de repères que cette exportation remplacerait. Importez d’abord les cues dans rekordbox.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Une piste en cours de suppression est toujours référencée par l'historique USB. Importez et effacez d’abord cet historique dans rekordbox."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Une piste en cours de suppression est toujours référencée par l'historique USB. Importez et effacez d’abord cet historique dans rekordbox.",
+  "Import from USB": "Importer depuis USB",
+  "Cues and beat grids": "Cues et grilles rythmiques",
+  "Play history": "Historique de lecture",
+  "CDJ/mixer settings": "Paramètres CDJ/mixeur",
+  "Import the ticked items from the selected USB devices to rbxport": "Importez les éléments cochés des périphériques USB sélectionnés vers rbxport",
+  "Import cues and beat grids": "Importer des cues et des grilles rythmiques",
+  "Import play history": "Importer l'historique de lecture",
+  "Import CDJ/mixer settings": "Importer les paramètres du CDJ/mixeur",
+  "Ticked for Import in Sync Manager when the window opens.": "Coché pour Importer dans Sync Manager lorsque la fenêtre s'ouvre."
 }

@@ -1443,5 +1443,14 @@
   "The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.": "Mevcut iki cihaz kütüphanesi aynı fikirde değil. Buradaki ilk senkronizasyondan önce bunları rekordbox'ta uzlaştırın.",
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "Bu USB, farklı veya daha eski, doğrulanmamış bir ana kitaplığa ait. Sahipliğini değiştirmeden önce içeriğini rekordbox'a aktarın.",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary, bu dışa aktarımın yerini alacağı işaret kayıtlarını içerir. Önce ipuçlarını rekordbox'a aktarın.",
-  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin."
+  "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "Kaldırılan bir parçaya USB geçmişi tarafından hâlâ başvurulmaktadır. Öncelikle bu geçmişi rekordbox'a aktarın ve temizleyin.",
+  "Import from USB": "USB'den içe aktar",
+  "Cues and beat grids": "İpuçları ve vuruş ızgaraları",
+  "Play history": "Oynatma geçmişi",
+  "CDJ/mixer settings": "CDJ/mikser ayarları",
+  "Import the ticked items from the selected USB devices to rbxport": "İşaretli öğeleri seçilen USB aygıtlarından rbxport'a aktarın",
+  "Import cues and beat grids": "İpuçlarını içe aktarın ve ızgaraları geçin",
+  "Import play history": "Oynatma geçmişini içe aktar",
+  "Import CDJ/mixer settings": "CDJ/mikser ayarlarını içe aktar",
+  "Ticked for Import in Sync Manager when the window opens.": "Pencere açıldığında Senkronizasyon Yöneticisi'nde İçe Aktarma için işaretlendi."
 }

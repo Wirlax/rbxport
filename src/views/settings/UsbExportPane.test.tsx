@@ -56,6 +56,22 @@ it("explains the sync options and shows their defaults", () => {
   expect(host.textContent).toContain("Add new play-history entries from selected USB devices to your library when you click SYNC in Sync Manager.");
   expect(host.textContent).toContain("Free space on your USB stick by removing songs that aren't in any playlist.");
   expect([...host.querySelectorAll(`.${styles.default}`)].map(node => node.textContent)).toEqual([
-    "Default: Off", "Default: On", "Default: Off",
+    "Default: Off", "Default: On", "Default: On", "Default: On", "Default: Off", "Default: Off",
   ]);
+});
+
+it("sets what Sync Manager's Import has ticked when it opens", () => {
+  const update = vi.fn();
+  act(() => root.render(
+    <PreferencesProvider value={{ preferences: DEFAULT_PREFERENCES, update, reset: vi.fn() }}>
+      <UsbExportPane />
+    </PreferencesProvider>,
+  ));
+  const toggle = (name: string) => [...host.querySelectorAll<HTMLInputElement>('input[role="switch"]')]
+    .find(input => document.getElementById(input.getAttribute("aria-labelledby") ?? "")?.textContent === name)!;
+  expect(toggle("Import cues and beat grids").checked).toBe(true);
+  expect(toggle("Import play history").checked).toBe(true);
+  expect(toggle("Import CDJ/mixer settings").checked).toBe(false);
+  act(() => toggle("Import CDJ/mixer settings").click());
+  expect(update).toHaveBeenCalledWith("usbExport", { importButtonSettings: true });
 });

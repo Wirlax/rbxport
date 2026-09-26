@@ -139,8 +139,9 @@ describe("the sliders and the quantize value", () => {
 });
 
  it("defaults USB imports to history only and preserves saved choices", () => {
-  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" });
-  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav" });
+  expect(sanitisePreferences({}).usbExport).toEqual({ importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
+  expect(sanitisePreferences({ usbExport: { importSettings: true, importHistory: false } }).usbExport).toEqual({ importSettings: true, importHistory: false, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
+  expect(sanitisePreferences({ usbExport: { importButtonCues: false, importButtonSettings: true } }).usbExport).toMatchObject({ importButtonCues: false, importButtonHistory: true, importButtonSettings: true });
 });
 
 it("requires an explicit boolean to enable USB music cleanup", () => {
@@ -155,5 +156,5 @@ it("defaults compatibility conversion to off and WAV, and preserves MP3 selectio
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: true, conversionFormat: "mp3" } }).usbExport)
     .toMatchObject({ maximumCompatibility: true, conversionFormat: "mp3" });
   expect(sanitisePreferences({ usbExport: { maximumCompatibility: "yes", conversionFormat: "flac" } }).usbExport)
-    .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav" });
+    .toMatchObject({ maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false });
 });

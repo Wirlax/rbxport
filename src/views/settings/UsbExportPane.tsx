@@ -44,6 +44,39 @@ export function UsbExportPane() {
     </label>
     <label className={`${layout.summary} ${styles.option}`}>
       <span className={styles.details}>
+        <strong id={`${id}-import-cues`}>Import cues and beat grids</strong>
+        <span id={`${id}-import-cues-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
+        <span className={styles.default}>Default: On</span>
+      </span>
+      <input type="checkbox" role="switch" className={controls.toggle}
+        aria-labelledby={`${id}-import-cues`} aria-describedby={`${id}-import-cues-help`}
+        checked={preferences.usbExport.importButtonCues}
+        onChange={event => update("usbExport", { importButtonCues: event.target.checked })} />
+    </label>
+    <label className={`${layout.summary} ${styles.option}`}>
+      <span className={styles.details}>
+        <strong id={`${id}-import-history`}>Import play history</strong>
+        <span id={`${id}-import-history-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
+        <span className={styles.default}>Default: On</span>
+      </span>
+      <input type="checkbox" role="switch" className={controls.toggle}
+        aria-labelledby={`${id}-import-history`} aria-describedby={`${id}-import-history-help`}
+        checked={preferences.usbExport.importButtonHistory}
+        onChange={event => update("usbExport", { importButtonHistory: event.target.checked })} />
+    </label>
+    <label className={`${layout.summary} ${styles.option}`}>
+      <span className={styles.details}>
+        <strong id={`${id}-import-settings`}>Import CDJ/mixer settings</strong>
+        <span id={`${id}-import-settings-help`} className={styles.description}>Ticked for Import in Sync Manager when the window opens.</span>
+        <span className={styles.default}>Default: Off</span>
+      </span>
+      <input type="checkbox" role="switch" className={controls.toggle}
+        aria-labelledby={`${id}-import-settings`} aria-describedby={`${id}-import-settings-help`}
+        checked={preferences.usbExport.importButtonSettings}
+        onChange={event => update("usbExport", { importButtonSettings: event.target.checked })} />
+    </label>
+    <label className={`${layout.summary} ${styles.option}`}>
+      <span className={styles.details}>
         <strong id={`${id}-cleanup`}>Delete music not in any playlist</strong>
         <span id={`${id}-cleanup-help`} className={styles.description}>Free space on your USB stick by removing songs that aren't in any playlist.</span>
         <span className={styles.default}>Default: Off</span>

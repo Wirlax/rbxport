@@ -41,6 +41,14 @@ export interface SyncManagerProps {
 /** Ticked, not ticked, or a folder with some of its playlists ticked. */
 type Tick = "on" | "off" | "some";
 
+/** What Import can bring back from a stick, in the order it does them. */
+type ImportKind = "cues" | "history" | "settings";
+const IMPORT_KINDS: readonly { kind: ImportKind; label: string; noun: string }[] = [
+  { kind: "cues", label: "Cues and beat grids", noun: "cues and beat grids" },
+  { kind: "history", label: "Play history", noun: "play history" },
+  { kind: "settings", label: "CDJ/mixer settings", noun: "CDJ/mixer settings" },
+];
+
 /**
  * The playlists and folders alone: no All Tracks, no Playlists heading,
  * because neither is a thing a stick can be given.
@@ -119,7 +127,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   /** What is happening now, or what happened: one line, or one per stick. */
   const [status, setStatus] = useState<string[]>([]);
   const [showStatusDetails, setShowStatusDetails] = useState(false);
-  const [lastImport, setLastImport] = useState<"cues" | "history" | "settings" | null>(null);
+  const [lastImport, setLastImport] = useState<readonly ImportKind[] | null>(null);
   const [importFailed, setImportFailed] = useState(false);
   const [completedReports, setCompletedReports] = useState<ReadonlyMap<string, ExportReport>>(new Map());
   // DJ System in Preferences is what a stick with no settings of its own
@@ -127,6 +135,22 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
   const preferences = usePreferences();
   const stickDefaults = preferences.djSystem;
   const { importHistory, importSettings } = preferences.usbExport;
+  // Import's ticks start at the defaults in Preferences, and follow them
+  // until they are changed here.
+  const [importTicks, setImportTicks] = useState<Partial<Record<ImportKind, boolean>>>({});
+  const importDefaults: Record<ImportKind, boolean> = {
+    cues: preferences.usbExport.importButtonCues,
+    history: preferences.usbExport.importButtonHistory,
+    settings: preferences.usbExport.importButtonSettings,
+  };
+  const importTicked = (kind: ImportKind) => importTicks[kind] ?? importDefaults[kind];
+  /** Why a kind cannot be imported right now, or null when it can. */
+  const importBlocked = (kind: ImportKind): string | null =>
+    kind === "cues" && preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids."
+    : kind === "history" && preferences.advanced.protectLibrary ? "Turn off Library Protection to import play history."
+    : kind === "history" && rekordboxOpen !== false ? "Quit rekordbox to import play history."
+    : null;
+  const importKinds = IMPORT_KINDS.map(({ kind }) => kind).filter(kind => importTicked(kind) && !importBlocked(kind));
   const deleteUnlistedMusic = preferences.usbExport.deleteUnlistedMusic;
   const compatibilityFormat = preferences.usbExport.maximumCompatibility ? preferences.usbExport.conversionFormat : undefined;
 
@@ -388,30 +412,33 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
     })();
   }, [canSync, nodes, ticked, devices, tickedDevices, importHistory, importSettings, stickDefaults, ejectAfterSync, deleteUnlistedMusic, compatibilityFormat, refreshDevices, readDevice, onSynced, t]);
 
-  const runUsbImport = (kind: "cues" | "history" | "settings") => {
-    if (busy || tickedDevices.size === 0) return;
+  const runUsbImport = (kinds: readonly ImportKind[]) => {
+    if (busy || tickedDevices.size === 0 || kinds.length === 0) return;
     setOperation("import");
-    setLastImport(kind);
+    setLastImport(kinds);
     setImportFailed(false);
     setShowStatusDetails(false);
     setStatus([]);
     void (async () => {
       try {
         const backend = await getBackend();
-        if (kind === "cues" && !await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
+        if (kinds.includes("cues") && !await backend.confirm("Import cue and beat-grid changes from the selected USB devices? This replaces cues and grids for matching tracks in your library.")) return;
         const results: string[] = [];
         for (const device of devices.filter(d => tickedDevices.has(d.path))) {
-          const label = kind === "cues" ? "cues and beat grids" : kind === "history" ? "play history" : "CDJ/mixer settings";
-          setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: label, device: device.name })]);
-          try {
-            const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
-            if (kind === "cues") results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
-            else if (kind === "history") results.push(result.histories ? `${device.name}: imported ${result.histories} play-history entries.` : `${device.name}: no new play-history entries.`);
-            else results.push(result.settings ? `${device.name}: imported ${result.settings} CDJ/mixer settings files.` : `${device.name}: no CDJ/mixer settings files found.`);
-            if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));
-          } catch (e) {
-            setImportFailed(true);
-            results.push(`${device.name}: Couldn’t import ${label}. ${errorMessage(e)}`);
+          // One kind at a time, so each is reported on its own and one that
+          // fails does not keep the others from being brought in.
+          for (const { kind, noun } of IMPORT_KINDS.filter(({ kind }) => kinds.includes(kind))) {
+            setStatus([t("Waiting for USB activity to finish, then importing {kind} from {device}…", { kind: noun, device: device.name })]);
+            try {
+              const result = await backend.importUsb(device.path, kind === "cues", kind === "history", kind === "settings");
+              if (kind === "cues") results.push(`${device.name}: updated ${result.tracks} tracks${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
+              else if (kind === "history") results.push(result.histories ? `${device.name}: imported ${result.histories} play-history entries.` : `${device.name}: no new play-history entries.`);
+              else results.push(result.settings ? `${device.name}: imported ${result.settings} CDJ/mixer settings files.` : `${device.name}: no CDJ/mixer settings files found.`);
+              if (result.warnings?.length) results.push(...result.warnings.map(warning => `${device.name}: ${warning}`));
+            } catch (e) {
+              setImportFailed(true);
+              results.push(`${device.name}: Couldn’t import ${noun}. ${errorMessage(e)}`);
+            }
           }
         }
         setStatus(results);
@@ -512,25 +539,30 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
           >
             {operation === "sync" ? <><LoaderCircle size={16} className={styles.spinner} aria-hidden="true" /> Syncing…</> : <>SYNC <ArrowRight size={16} aria-hidden="true" /></>}
           </button>
-          <label className={styles.ejectOption}>
+          <label className={styles.option}>
             <input type="checkbox" className={styles.tick} checked={ejectAfterSync} disabled={busy}
               aria-label="Eject after syncing" onChange={e => setEjectAfterSync(e.currentTarget.checked)} />
             Eject after syncing
           </label>
           </div>
           <div className={styles.importActions}>
-          <button type="button" className={styles.button} onClick={() => runUsbImport("cues")}
-            disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary}
-            title={preferences.advanced.protectLibrary ? "Turn off Library Protection to import cues and grids." : "Import cues and beat grids from USB to rbxport"}>
-            {operation === "import" && lastImport === "cues" ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />} {operation === "import" && lastImport === "cues" ? "Importing…" : "CUE GRID INFO"}
-          </button>
-          <button type="button" className={styles.button} onClick={() => runUsbImport("history")}
-            disabled={busy || tickedDevices.size === 0 || preferences.advanced.protectLibrary || rekordboxOpen !== false}>
-            {operation === "import" && lastImport === "history" ? "Importing history…" : "Import history"}
-          </button>
-          <button type="button" className={styles.button} onClick={() => runUsbImport("settings")}
-            disabled={busy || tickedDevices.size === 0}>
-            {operation === "import" && lastImport === "settings" ? "Importing settings…" : "Import settings"}
+          <fieldset className={styles.importKinds} disabled={busy}>
+            <legend className={styles.importLegend}>Import from USB</legend>
+            {IMPORT_KINDS.map(({ kind, label }) => {
+              const blocked = importBlocked(kind);
+              return (
+                <label key={kind} className={styles.option} title={blocked ?? undefined}>
+                  <input type="checkbox" className={styles.tick} checked={importTicked(kind) && !blocked} disabled={blocked !== null}
+                    onChange={e => { const on = e.currentTarget.checked; setImportTicks(ticks => ({ ...ticks, [kind]: on })); }} />
+                  {label}
+                </label>
+              );
+            })}
+          </fieldset>
+          <button type="button" className={styles.button} onClick={() => runUsbImport(importKinds)}
+            disabled={busy || tickedDevices.size === 0 || importKinds.length === 0}
+            title="Import the ticked items from the selected USB devices to rbxport">
+            {operation === "import" ? <><LoaderCircle size={14} className={styles.spinner} aria-hidden="true" /> Importing…</> : <><ArrowLeft size={14} aria-hidden="true" /> Import</>}
           </button>
           {importFailed && lastImport ? <button type="button" className={styles.button} onClick={() => runUsbImport(lastImport)} disabled={busy || tickedDevices.size === 0}>
             Retry import
