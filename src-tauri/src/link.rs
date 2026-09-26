@@ -174,6 +174,9 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { .. } | rbl_link::Edit::ClearTags => crate::commands::Touched::TagList,
             rbl_link::Edit::Rating { track, .. } => crate::commands::Touched::Metadata(vec![track.to_string()]),
             rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+            // The catalog keeps the link session's history and writes it
+            // through the methods below.
+            rbl_link::Edit::HistoryAdd { .. } | rbl_link::Edit::HistoryRemove { .. } | rbl_link::Edit::HistoryDelete { .. } => return false,
         };
         let event = touched.event();
         let result = state.write_then(|writer| match edit {
@@ -181,12 +184,29 @@ impl Source for StateSource {
             rbl_link::Edit::Tag { track, add: false } => writer.tag_list_remove(&[track.to_string()]),
             rbl_link::Edit::ClearTags => writer.tag_list_clear(),
             rbl_link::Edit::Rating { track, stars } => writer.set_rating(&track.to_string(), *stars),
-            rbl_link::Edit::GridOffset { .. } => unreachable!("handled above"),
+            rbl_link::Edit::GridOffset { .. }
+            | rbl_link::Edit::HistoryAdd { .. }
+            | rbl_link::Edit::HistoryRemove { .. }
+            | rbl_link::Edit::HistoryDelete { .. } => unreachable!("handled above"),
         }, |db, _| crate::commands::refresh_after_edit(&state, db, touched));
         match result {
             Ok(generation) => { (self.1)(event, generation); true }
             Err(error) => { tracing::warn!(%error, ?edit, "player library edit or refresh failed"); false }
         }
+    }
+
+    fn new_link_history(&self) -> Option<u32> {
+        let id = self.history_write(Vec::new(), rbl_db::write::Writer::new_link_history)?;
+        id.parse().ok()
+    }
+
+    fn add_to_history(&self, history: u32, track: u32) -> bool {
+        let track = track.to_string();
+        self.history_write(vec![track.clone()], |writer| writer.add_to_history(&history.to_string(), &track)).is_some()
+    }
+
+    fn remove_from_history(&self, history: u32, track: u32) -> bool {
+        self.history_write(Vec::new(), |writer| writer.remove_from_history(&history.to_string(), &[track.to_string()])).is_some()
     }
 
     fn library(&self) -> Option<Arc<rbl_index::Library>> {
@@ -200,6 +220,29 @@ impl Source for StateSource {
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
         let state = self.0.upgrade()?;
         state.read_db(|db| rbl_db::details::track_details(db.connection(), id)).ok().flatten()
+    }
+}
+
+impl StateSource {
+    /// A write to the history tree for a player, then the histories read
+    /// again — with the play counts of `tracks` — and the window told.
+    fn history_write<T>(&self, tracks: Vec<String>, edit: impl FnOnce(&mut rbl_db::write::Writer) -> Result<T, rbl_db::DbError>) -> Option<T> {
+        let state = self.0.upgrade()?;
+        let touched = crate::commands::Touched::Histories(tracks);
+        let event = touched.event();
+        let result = state.write_then(edit, |db, value| {
+            crate::commands::refresh_after_edit(&state, db, touched).map(|generation| (value, generation))
+        });
+        match result {
+            Ok((value, generation)) => {
+                (self.1)(event, generation);
+                Some(value)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "player history edit or refresh failed");
+                None
+            }
+        }
     }
 }
 
@@ -523,6 +566,49 @@ mod grid_offset_tests {
         assert_eq!(persisted.rating, updated.rating);
         assert_eq!(notifications.lock().unwrap().len(), 6);
         assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3)));
+    }
+
+    #[test]
+    fn a_players_plays_make_this_link_sessions_history_in_the_library() {
+        use rbl_dbserver::catalog::{Catalog, Query, Row, Sort, TrackScope};
+        let dir = tempfile::tempdir().unwrap();
+        let location = rbl_db::fixture::build(dir.path(), rbl_db::fixture::Shape::default()).unwrap();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
+        state.set_library(library, false, db.schema().db_version, 0, location);
+        crate::backups::create(&state).unwrap();
+        let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received = notifications.clone();
+        let source = StateSource(Arc::downgrade(&state), Arc::new(move |event, generation| {
+            received.lock().unwrap().push((event, generation));
+        }), false);
+        let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
+        // The fixture's own histories are not the menu.
+        assert!(!state.library().unwrap().histories().is_empty());
+        assert!(catalog.list(&Query::Histories).is_empty());
+
+        let id = rbl_db::fixture::track_id(1);
+        let track: u32 = id.parse().unwrap();
+        let row = state.library().unwrap().row_of(&id).unwrap() as usize;
+        let before = state.library().unwrap().play_count[row];
+        assert!(catalog.edit(&rbl_link::Edit::HistoryAdd { track }));
+        let menu = catalog.list(&Query::Histories);
+        let session = &match menu.as_slice() { [Row::Named { id, .. }] => *id, _ => 0 };
+        assert_eq!(menu, vec![Row::Named { id: *session, name: format!("LINK HISTORY {}", rbl_core::time::local_date()) }]);
+        let tracks = catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default });
+        assert_eq!(tracks, vec![Row::Track { id: track, position: 1 }]);
+        assert_eq!(state.library().unwrap().play_count[row], before + 1);
+        assert_eq!(notifications.lock().unwrap().last(), Some(&("library:changed", state.summary().3)));
+
+        // Persisted: a fresh read of the database has the session and the play.
+        let reopened = state.open_read_only().unwrap();
+        let histories = rbl_index::reload_histories(&reopened, &state.library().unwrap()).unwrap();
+        let index = histories.index_of(u64::from(*session)).unwrap();
+        assert_eq!(histories.members[index].len(), 1);
+
+        assert!(catalog.edit(&rbl_link::Edit::HistoryRemove { track }));
+        assert!(catalog.list(&Query::Tracks { scope: TrackScope::History(*session), sort: Sort::Default }).is_empty());
     }
 
     #[test]

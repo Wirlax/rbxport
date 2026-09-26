@@ -3871,6 +3871,7 @@ dependencies = [
  "rbl-backup",
  "rbl-core",
  "rbl-db",
+ "rbl-dbserver",
  "rbl-deck",
  "rbl-devices",
  "rbl-export",

@@ -38,6 +38,13 @@ pub trait Source: Send + Sync {
     /// The fields the index does not hold, by `djmdContent.ID`.
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails>;
     fn edit(&self, _edit: &Edit) -> bool { false }
+    /// Makes the history of a new link session, returning its id; `None`
+    /// when the library cannot be written.
+    fn new_link_history(&self) -> Option<u32> { None }
+    /// Puts a play on the end of a history session.
+    fn add_to_history(&self, _history: u32, _track: u32) -> bool { false }
+    /// Takes every play of a track off a history session.
+    fn remove_from_history(&self, _history: u32, _track: u32) -> bool { false }
 }
 
 /// Artwork larger than this is not sent: the protocol carries it whole in
@@ -82,17 +89,92 @@ impl Played {
     }
 }
 
+/// The history this link session writes, as rekordbox 7.2.11 keeps it
+/// (`PSvDBMain`): made on the first play a player adds, then added to until
+/// it is deleted from the library or from a player.
+#[derive(Default)]
+struct LinkHistory {
+    session: Option<u32>,
+    /// The track added last, which is not added again straight after
+    /// itself; 0 for none.
+    last: u32,
+}
+
+impl LinkHistory {
+    /// The session, while the library still has it.
+    fn session_in(&self, library: &Library) -> Option<u32> {
+        self.session.filter(|&id| library.histories().index_of(u64::from(id)).is_some())
+    }
+}
+
 /// The library as a player browses it.
 pub struct IndexCatalog {
     source: Arc<dyn Source>,
     played: Played,
     /// Most recently used last.
     analysis: Mutex<Vec<Arc<Parsed>>>,
+    /// Held across the write, so two players' first plays make one session.
+    link_history: Mutex<LinkHistory>,
 }
 
 impl IndexCatalog {
     pub fn new(source: Arc<dyn Source>, played: Played) -> Self {
-        Self { source, played, analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)) }
+        Self {
+            source,
+            played,
+            analysis: Mutex::new(Vec::with_capacity(ANALYSIS_CACHE)),
+            link_history: Mutex::new(LinkHistory::default()),
+        }
+    }
+
+    /// A player's history edits, as `PSvDBMain::OnHistoryCmd` makes them.
+    fn history_edit(&self, edit: &Edit) -> bool {
+        let Some(library) = self.source.library() else { return false };
+        let mut history = self.link_history.lock();
+        match *edit {
+            Edit::HistoryAdd { track } => {
+                let session = match history.session_in(&library) {
+                    // The same track straight after itself is not added again.
+                    Some(_) if history.last == track => return true,
+                    Some(session) => session,
+                    None => {
+                        let Some(session) = self.source.new_link_history() else { return false };
+                        *history = LinkHistory { session: Some(session), last: 0 };
+                        session
+                    }
+                };
+                let added = self.source.add_to_history(session, track);
+                if added {
+                    history.last = track;
+                }
+                added
+            }
+            Edit::HistoryRemove { track } => {
+                let Some(session) = history.session_in(&library) else { return false };
+                if !self.source.remove_from_history(session, track) {
+                    return false;
+                }
+                // What is now last, which a repeat of it may not follow.
+                history.last = self.source.library().and_then(|library| {
+                    let histories = library.histories();
+                    let &row = histories.members.get(histories.index_of(u64::from(session))?)?.last()?;
+                    Self::track_id(&library, row)
+                }).unwrap_or(0);
+                true
+            }
+            // rekordbox deletes only its own link session's history, named
+            // or as `-1`, and afterwards starts a new one. `[ASSUME]` that the
+            // session stays in the library: rekordbox 7.2.11's master.db
+            // controller refuses `deleteLinkHistory`, and the per-session
+            // path it takes on a player's delete only clears played marks.
+            Edit::HistoryDelete { history: named } => {
+                if named == u32::MAX || history.session == Some(named) {
+                    *history = LinkHistory::default();
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn row_of(library: &Library, id: u32) -> Option<rbl_index::Row> {
@@ -318,17 +400,17 @@ impl IndexCatalog {
             .collect()
     }
 
-    /// Every history session, newest first. `[ASSUME]` the order: the one
-    /// capture held a single session.
-    fn histories(lists: &rbl_index::Playlists) -> Vec<Row> {
-        let mut sessions: Vec<Row> = (0..lists.len())
-            .filter(|&i| !lists.is_folder(i))
-            .filter_map(|i| {
-                Some(Row::Named { id: u32::try_from(*lists.ids.get(i)?).ok()?, name: lists.name(i).to_owned() })
-            })
-            .collect();
-        sessions.reverse();
-        sessions
+    /// The HISTORY menu: the link session's own history and nothing else,
+    /// as rekordbox 7.2.11 answers it (`PSvAppSyncDBIF::getHistory_Root`
+    /// selects the one session by id; before a player has added a track
+    /// the id is -1 and the menu is empty). A browse capture of it showed the
+    /// one `LINK HISTORY` row with a whole year-and-month tree behind it.
+    fn histories(&self, library: &Library) -> Vec<Row> {
+        let history = self.link_history.lock();
+        let Some(session) = history.session_in(library) else { return Vec::new() };
+        let lists = library.histories();
+        let Some(index) = lists.index_of(u64::from(session)) else { return Vec::new() };
+        vec![Row::Named { id: session, name: lists.name(index).to_owned() }]
     }
 
     /// The distinct values of one part of the date-added column under a
@@ -413,7 +495,7 @@ impl Catalog for IndexCatalog {
             Query::Albums(_) => Self::named(&library.album, &library.albums),
             Query::ArtistAlbums(artist) => Self::artist_albums(&library, *artist),
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
-            Query::Histories => Self::histories(&library.histories()),
+            Query::Histories => self.histories(&library),
             Query::Years => Self::date_parts(&library, "", 0..4, true),
             Query::Months(year) => Self::date_parts(&library, &date_prefix(*year, None, None), 5..7, false),
             Query::Days { year, month } => {
@@ -528,6 +610,9 @@ impl Catalog for IndexCatalog {
     }
 
     fn edit(&self, edit: &Edit) -> bool {
+        if matches!(edit, Edit::HistoryAdd { .. } | Edit::HistoryRemove { .. } | Edit::HistoryDelete { .. }) {
+            return self.history_edit(edit);
+        }
         let success = self.source.edit(edit);
         if success && matches!(edit, Edit::GridOffset { .. }) { self.forget_analysis(); }
         success
@@ -722,18 +807,98 @@ mod tests {
         assert_eq!(rows, vec![Row::Track { id: 12, position: 1 }, Row::Track { id: 10, position: 2 }]);
     }
 
-    #[test]
-    fn histories_come_newest_first() {
-        let c = catalog();
-        let names: Vec<String> = c
-            .list(&Query::Histories)
+    /// A library that takes the history writes a player's plays make.
+    struct Writable(Arc<Library>);
+
+    impl Source for Writable {
+        fn library(&self) -> Option<Arc<Library>> {
+            Some(Arc::clone(&self.0))
+        }
+        fn share_root(&self) -> PathBuf {
+            PathBuf::from("/nonexistent")
+        }
+        fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+            None
+        }
+        fn new_link_history(&self) -> Option<u32> {
+            let mut lib = Library::default();
+            lib.set_histories((*self.0.histories()).clone());
+            let index = add_history(&mut lib, "LINK HISTORY 2026-09-26", &[]);
+            let id = lib.histories().ids[index];
+            self.0.set_histories((*lib.histories()).clone());
+            u32::try_from(id).ok()
+        }
+        fn add_to_history(&self, history: u32, track: u32) -> bool {
+            let mut lists = (*self.0.histories()).clone();
+            let (Some(index), Some(row)) = (lists.index_of(u64::from(history)), self.0.row_of_id(u64::from(track))) else {
+                return false;
+            };
+            lists.members[index].push(row);
+            self.0.set_histories(lists);
+            true
+        }
+        fn remove_from_history(&self, history: u32, track: u32) -> bool {
+            let mut lists = (*self.0.histories()).clone();
+            let (Some(index), Some(row)) = (lists.index_of(u64::from(history)), self.0.row_of_id(u64::from(track))) else {
+                return false;
+            };
+            lists.members[index].retain(|&r| r != row);
+            self.0.set_histories(lists);
+            true
+        }
+    }
+
+    fn history_menu(c: &IndexCatalog) -> Vec<String> {
+        c.list(&Query::Histories)
             .into_iter()
             .map(|r| match r {
                 Row::Named { name, .. } => name,
                 other => panic!("{other:?}"),
             })
-            .collect();
-        assert_eq!(names, ["HISTORY 2026-09-02", "HISTORY 2026-09-01"]);
+            .collect()
+    }
+
+    #[test]
+    fn the_history_menu_holds_only_this_link_sessions_history() {
+        let source = Arc::new(Writable(Arc::new(library())));
+        let c = IndexCatalog::new(Arc::clone(&source) as Arc<dyn Source>, Played::default());
+        // The library's own sessions are not offered; nothing is until a play.
+        assert!(history_menu(&c).is_empty());
+
+        assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert!(c.edit(&Edit::HistoryAdd { track: 11 }), "a repeat is taken, not written");
+        assert!(c.edit(&Edit::HistoryAdd { track: 10 }));
+        assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert_eq!(history_menu(&c), ["LINK HISTORY 2026-09-26"]);
+        let Row::Named { id: session, .. } = c.list(&Query::Histories)[0].clone() else { panic!() };
+        let tracks = |c: &IndexCatalog| ids(&c.list(&Query::Tracks { scope: TrackScope::History(session), sort: Sort::Default }));
+        assert_eq!(tracks(&c), [11, 10, 11]);
+        assert_eq!(source.0.histories().len(), 3, "one session for the link, beside the library's two");
+
+        assert!(c.edit(&Edit::HistoryRemove { track: 11 }));
+        assert_eq!(tracks(&c), [10]);
+        // 10 is last again, so it is not added straight after itself.
+        assert!(c.edit(&Edit::HistoryAdd { track: 10 }));
+        assert_eq!(tracks(&c), [10]);
+        assert!(!c.edit(&Edit::HistoryRemove { track: 999 }));
+
+        // Deleted from a player: the next play starts another session.
+        assert!(c.edit(&Edit::HistoryDelete { history: u32::MAX }));
+        assert!(history_menu(&c).is_empty());
+        assert!(!c.edit(&Edit::HistoryRemove { track: 10 }), "no session to take it off");
+        assert!(c.edit(&Edit::HistoryAdd { track: 12 }));
+        let Row::Named { id: next, .. } = c.list(&Query::Histories)[0].clone() else { panic!() };
+        assert_ne!(next, session);
+        // A delete naming some other history leaves this one.
+        assert!(c.edit(&Edit::HistoryDelete { history: session }));
+        assert_eq!(c.list(&Query::Histories).len(), 1);
+    }
+
+    #[test]
+    fn a_library_that_cannot_be_written_keeps_the_history_menu_empty() {
+        let c = catalog();
+        assert!(!c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert!(history_menu(&c).is_empty());
     }
 
     #[test]

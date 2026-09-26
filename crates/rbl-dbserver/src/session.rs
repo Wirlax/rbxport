@@ -456,6 +456,35 @@ impl Session for LinkSession {
                 let success = edit.is_some_and(|edit| self.catalog.edit(&edit));
                 vec![menu_header(tx, u32::from(message.kind), u32::from(!success))]
             }
+            // rekordbox acts on these only for its own tracks (the track
+            // type, the last byte of the first argument, is 1) and answers
+            // only the track removal (`PSvDBMain::OnHistoryCmd`). The other
+            // two a player sends and forgets: a reply would reach it as the
+            // answer to nothing.
+            kind::INSERT_HISTORY | kind::DELETE_HISTORY | kind::DELETE_HISTORY_TRACK => {
+                let rekordbox_track = Self::number(message, 0) & 0xff == 1;
+                let target = Self::number(message, 1);
+                match message.kind {
+                    kind::INSERT_HISTORY => {
+                        if rekordbox_track {
+                            self.catalog.edit(&Edit::HistoryAdd { track: target });
+                        }
+                        Vec::new()
+                    }
+                    kind::DELETE_HISTORY => {
+                        if rekordbox_track {
+                            self.catalog.edit(&Edit::HistoryDelete { history: target });
+                        }
+                        Vec::new()
+                    }
+                    // A player waits for this one, so it is answered either
+                    // way, where rekordbox would leave a stranger unanswered.
+                    _ => {
+                        let success = rekordbox_track && self.catalog.edit(&Edit::HistoryRemove { track: target });
+                        vec![menu_header(tx, u32::from(message.kind), if success { 0 } else { u32::MAX })]
+                    }
+                }
+            }
 
             kind::RENDER => {
                 let offset = Self::number(message, 1);

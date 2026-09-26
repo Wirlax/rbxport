@@ -1848,6 +1848,62 @@ fn a_play_goes_on_todays_session_and_can_be_taken_off_again() {
 }
 
 #[test]
+fn each_link_session_gets_its_own_history_in_todays_month_folder() {
+    let mut f = fixture();
+    let today = rbl_core::time::local_date();
+    let first = f.writer.new_link_history().unwrap();
+    let second = f.writer.new_link_history().unwrap();
+    let third = f.writer.new_link_history().unwrap();
+    let name = |id: &str| -> String { f.one("SELECT Name FROM djmdHistory WHERE ID = ?1", &[&id]) };
+    // rekordbox's own numbering: the bare name, then (1), then one past the highest.
+    assert_eq!(name(&first), format!("LINK HISTORY {today}"));
+    assert_eq!(name(&second), format!("LINK HISTORY {today} (1)"));
+    assert_eq!(name(&third), format!("LINK HISTORY {today} (2)"));
+
+    let (month_id, attribute): (String, i64) = f
+        .conn()
+        .query_row("SELECT ParentID, Attribute FROM djmdHistory WHERE ID = ?1", [&first], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!(attribute, 0);
+    let (month_name, year_id): (String, String) = f
+        .conn()
+        .query_row("SELECT Name, ParentID FROM djmdHistory WHERE ID = ?1 AND Attribute = 1", [&month_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!(month_name, today[5..7].trim_start_matches('0'));
+    let year_name: String = f.one("SELECT Name FROM djmdHistory WHERE ID = ?1 AND Attribute = 1 AND ParentID = 'root'", &[&year_id]);
+    assert_eq!(year_name, &today[..4]);
+    // A play on the local HISTORY session shares the month folder.
+    f.writer.record_play(&track_id(1)).unwrap();
+    let played_in: String = f.one("SELECT ParentID FROM djmdHistory WHERE Name = ?1 AND rb_local_deleted = 0", &[&format!("HISTORY {today}")]);
+    assert_eq!(played_in, month_id);
+    let highest: i64 = f.one("SELECT MAX(rb_local_usn) FROM djmdHistory", &[]);
+    let counter: i64 = f.one("SELECT int_1 FROM agentRegistry WHERE registry_id = 'localUpdateCount'", &[]);
+    assert!(counter >= highest, "counter {counter} behind the rows' {highest}");
+}
+
+#[test]
+fn plays_added_to_a_link_history_count_and_can_be_taken_off() {
+    let mut f = fixture();
+    let session = f.writer.new_link_history().unwrap();
+    let before: i64 = f.one("SELECT COALESCE(DJPlayCount, 0) FROM djmdContent WHERE ID = ?1", &[&track_id(2)]);
+    f.writer.add_to_history(&session, &track_id(2)).unwrap();
+    f.writer.add_to_history(&session, &track_id(5)).unwrap();
+    f.writer.add_to_history(&session, &track_id(2)).unwrap();
+    let plays = |f: &Fixture| -> Vec<(String, i64)> {
+        let mut stmt = f.conn().prepare("SELECT ContentID, TrackNo FROM djmdSongHistory WHERE HistoryID = ?1 AND rb_local_deleted = 0 ORDER BY TrackNo").unwrap();
+        stmt.query_map([&session], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    assert_eq!(plays(&f), vec![(track_id(2), 1), (track_id(5), 2), (track_id(2), 3)]);
+    let after: i64 = f.one("SELECT DJPlayCount FROM djmdContent WHERE ID = ?1", &[&track_id(2)]);
+    assert_eq!(after, before + 2);
+
+    f.writer.remove_from_history(&session, &[track_id(2)]).unwrap();
+    assert_eq!(plays(&f), vec![(track_id(5), 1)]);
+    assert!(matches!(f.writer.add_to_history(&session, "no-such-track"), Err(DbError::WriteRefused(_))));
+    assert!(matches!(f.writer.add_to_history("no-such-history", &track_id(2)), Err(DbError::WriteRefused(_))));
+}
+
+#[test]
 fn my_tags_are_set_as_a_whole_and_read_back_on_the_details() {
     use rbl_db::fixture::{MY_TAG_PEAK, MY_TAG_WARM_UP};
     let mut f = fixture();

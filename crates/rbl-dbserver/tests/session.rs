@@ -532,6 +532,7 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
                 Edit::GridOffset { offset_ms, .. } => state.2 = offset_ms,
                 Edit::ClearTags => state.0.clear(),
                 Edit::Rating { stars, .. } => state.1 = u32::from(stars),
+                Edit::HistoryAdd { .. } | Edit::HistoryRemove { .. } | Edit::HistoryDelete { .. } => return false,
             }
             true
         }
@@ -561,6 +562,45 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
     assert_eq!(browse(&mut two, 0x100f, &[CTX, 0]).0, 0);
     let (_, metadata) = browse(&mut two, kind::METADATA, &[0x0102_0301, TRACK]);
     assert_eq!(metadata[0].arguments[7], Argument::Number(0));
+}
+
+#[test]
+fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
+    use rbl_dbserver::catalog::Edit;
+    #[derive(Default)]
+    struct Recording(std::sync::Mutex<Vec<Edit>>);
+    impl Catalog for Recording {
+        fn list(&self, q: &Query) -> Vec<Row> { Small(false).list(q) }
+        fn track_row(&self, id: u32) -> Option<TrackRow> { Small(false).track_row(id) }
+        fn track(&self, id: u32) -> Option<TrackDetails> { Small(false).track(id) }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> { None }
+        fn edit(&self, edit: &Edit) -> bool {
+            self.0.lock().unwrap().push(edit.clone());
+            !matches!(edit, Edit::HistoryRemove { track: 7 })
+        }
+    }
+    let catalog = Arc::new(Recording::default());
+    let mut s = CatalogHandler::new(Arc::clone(&catalog) as Arc<dyn Catalog>).open();
+    browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    // Sent and forgotten: no reply, and the menu being browsed stays.
+    assert!(s.handle(&numbers(kind::INSERT_HISTORY, 2, &[CTX, TRACK])).is_empty());
+    let rendered = s.handle(&numbers(kind::RENDER, 3, &[CTX, 0, 1]));
+    assert_eq!(rendered[1].arguments[1], Argument::Number(TRACK));
+    assert!(s.handle(&numbers(kind::DELETE_HISTORY, 4, &[CTX, 0xffff_ffff])).is_empty());
+    assert_eq!(s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 5, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3401), Argument::Number(0)]);
+    assert_eq!(s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 6, &[CTX, 7]))[0].arguments,
+        vec![Argument::Number(0x3401), Argument::Number(0xffff_ffff)]);
+    // Not a rekordbox track (type 2, a USB track's): left alone, as rekordbox does.
+    assert!(s.handle(&numbers(kind::INSERT_HISTORY, 7, &[0x0101_0302, TRACK])).is_empty());
+    assert_eq!(*catalog.0.lock().unwrap(), vec![
+        Edit::HistoryAdd { track: TRACK },
+        Edit::HistoryDelete { history: 0xffff_ffff },
+        Edit::HistoryRemove { track: TRACK },
+        Edit::HistoryRemove { track: 7 },
+    ]);
 }
 
 #[test]

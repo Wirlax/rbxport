@@ -59,6 +59,9 @@ pub enum Query {
     ArtistAlbums(u32),
     /// A playlist folder's children; 0 is the root.
     Folder(u32),
+    /// The HISTORY menu. rekordbox 7.2.11 lists only the history of the
+    /// running link session there — none until a player has added a
+    /// track — not the folders and sessions of its own history tree.
     Histories,
     Years,
     Months(u32),
@@ -180,4 +183,10 @@ pub enum Edit {
     ClearTags,
     Rating { track: u32, stars: u8 },
     GridOffset { track: u32, offset_ms: i16 },
+    /// A player's play, for the history of this link session.
+    HistoryAdd { track: u32 },
+    /// Every play of a track off the link session's history.
+    HistoryRemove { track: u32 },
+    /// The player deleted a history: `u32::MAX` names the link session's own.
+    HistoryDelete { history: u32 },
 }

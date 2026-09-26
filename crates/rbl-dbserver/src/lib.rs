@@ -391,6 +391,16 @@ pub mod kind {
     pub const USER_INFO: u16 = 0x3006;
     /// The zero-based offset of an item in the current menu.
     pub const ITEM_POSITION: u16 = 0x3100;
+    /// A player adding a track to its history (`CMD_INSERT_HISTORY`):
+    /// `[r:m:s:t, track]`, sent without waiting for a reply, and rekordbox
+    /// 7.2.11 sends none (`PSvDBMain::OnHistoryCmd`).
+    pub const INSERT_HISTORY: u16 = 0x3001;
+    /// A player deleting its history (`CMD_DEL_HISTORY`): `[r:m:s:t,
+    /// history]`, again without a reply.
+    pub const DELETE_HISTORY: u16 = 0x3101;
+    /// A player taking a track off its history (`CMD_DEL_HISTORY_TRACK`):
+    /// `[r:m:s:t, track]`, answered `[0x3401, 0]`, or `-1` when it failed.
+    pub const DELETE_HISTORY_TRACK: u16 = 0x3401;
     pub const TAG_LIST: u16 = 0x100f;
     pub const CHANGE_TAG: u16 = 0x3002;
     pub const CLEAR_TAGS: u16 = 0x3202;
@@ -437,6 +447,9 @@ pub mod kind {
             ALBUM_TRACKS => "album's tracks".to_owned(),
             PLAYLIST_MENU => "playlist menu".to_owned(),
             HISTORY_TRACKS => "history's tracks".to_owned(),
+            INSERT_HISTORY => "insert history".to_owned(),
+            DELETE_HISTORY => "delete history".to_owned(),
+            DELETE_HISTORY_TRACK => "delete history track".to_owned(),
             RELATED_KEYS => "related keys".to_owned(),
             ARTIST_ALBUM_TRACKS => "artist's album tracks".to_owned(),
             KEY_TRACKS => "key's tracks".to_owned(),

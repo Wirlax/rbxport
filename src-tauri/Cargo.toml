@@ -61,6 +61,8 @@ tempfile = "3"
 # `test` gives a mock app, so the native menu can be built and inspected
 # without opening a window — which cannot be screenshotted on this machine.
 tauri = { version = "2", features = ["test"] }
+# The database server's side of a link test: what a player is answered.
+rbl-dbserver = { path = "../crates/rbl-dbserver" }
 
 # macOS builds menu items on the main thread only, and the test harness runs
 # every test on a spawned one. Without a harness, `main` is the main thread.
