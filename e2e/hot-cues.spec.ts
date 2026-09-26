@@ -133,7 +133,7 @@ test("with rekordbox holding the library, setting and clearing are refused and c
   // The mock's library is read-only unless asked otherwise.
   await enableTooltips(page);
   await load(page);
-  await expect(page.getByRole("contentinfo")).toContainText("Read-only");
+  await expect(page.getByRole("contentinfo")).toContainText("Library read-only");
 
   // An empty pad is dead, and says why.
   await expect(pad(page, "E")).toBeDisabled();

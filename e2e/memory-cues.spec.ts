@@ -39,7 +39,7 @@ test("with rekordbox holding the library, storing and deleting are refused and c
   await enableTooltips(page);
   await load(page);
   const deck = player(page);
-  await expect(page.getByRole("contentinfo")).toContainText("Read-only");
+  await expect(page.getByRole("contentinfo")).toContainText("Library read-only");
 
   const store = deck.getByRole("button", { name: "Set memory cue" });
   await expect(store).toBeDisabled();

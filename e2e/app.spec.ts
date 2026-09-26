@@ -1290,7 +1290,7 @@ test("editing follows rekordbox opening and closing without reloading", async ({
 
   // Change the mock process state without remounting the app.
   await page.evaluate(() => history.replaceState(null, "", "/?writable=1"));
-  await expect(page.getByRole("contentinfo")).not.toContainText("Read-only");
+  await expect(page.getByRole("contentinfo")).not.toContainText("Library read-only");
   await expect(warning).toHaveCount(0);
   await cell.click();
   await expect(cell.locator("input")).toBeFocused();
@@ -1298,7 +1298,7 @@ test("editing follows rekordbox opening and closing without reloading", async ({
   await cell.locator("input").fill("Must not save after locking");
 
   await page.evaluate(() => history.replaceState(null, "", "/"));
-  await expect(page.getByRole("contentinfo")).toContainText("Read-only");
+  await expect(page.getByRole("contentinfo")).toContainText("Library read-only");
   await expect(cell.locator("input")).toHaveAttribute("readonly", "");
   await cell.locator("input").press("Enter");
   await expect(cell).toHaveText(originalTitle);
