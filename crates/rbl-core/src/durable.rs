@@ -6,10 +6,25 @@ use std::time::Duration;
 
 pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
-    std::fs::File::open(path)?.sync_all()?;
+    if let Err(error) = std::fs::File::open(path)?.sync_all() {
+        // Some removable filesystems mounted by macOS, notably exFAT, allow
+        // the file and rename flushes above but reject fsync on a directory
+        // with ENOTSUP (os error 45). The directory flush is an extra
+        // durability guarantee, not a reason to report a completed USB
+        // database write as failed. Keep every other error fatal.
+        if !directory_sync_unsupported(&error) {
+            return Err(error);
+        }
+    }
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+#[cfg(unix)]
+fn directory_sync_unsupported(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::Unsupported
+        || cfg!(target_os = "macos") && error.raw_os_error() == Some(45)
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -445,6 +460,27 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_unsupported_directory_flush_is_optional() {
+        assert!(directory_sync_unsupported(&std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "directory fsync is unsupported",
+        )));
+        assert!(!directory_sync_unsupported(&std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied",
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_enotsup_from_directory_flush_is_optional() {
+        assert!(directory_sync_unsupported(
+            &std::io::Error::from_raw_os_error(45)
+        ));
+    }
+
     fn write_file(path: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         write(path, bytes).unwrap();
