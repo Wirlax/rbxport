@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.0-rc.6",
+    "date": "2026-09-26",
+    "changes": [
+      "(New) Use LINK with the XDJ-RX3 over rear USB and correctly handle all-in-one players whose decks and mixer share one network address.",
+      "(Fixed) USB sync on macOS no longer reports a completed export as failed when an exFAT device does not support directory flushing."
+    ]
+  },
+  {
     "version": "1.0.0-rc.5",
     "date": "2026-09-26",
     "changes": [
