@@ -308,7 +308,7 @@ impl Beacon {
         let Some(number) = self.number() else {
             return Err(io::Error::new(io::ErrorKind::NotConnected, "not on the link yet: no device number"));
         };
-        let address = self.shared.lock().players.get(&player_number).map(|p| p.address);
+        let address = player_address(&self.shared.lock().players, player_number);
         let Some(address) = address else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -1012,6 +1012,12 @@ fn peer_kind(shared: &Shared, number: u8) -> DeviceType {
     shared.peers.peers().iter().find(|p| p.device_number == number).map_or(DeviceType::Cdj, |p| p.device_type)
 }
 
+/// Resolve a logical player independently of its address. All-in-one units
+/// expose several player numbers from the same IPv4 address.
+fn player_address(players: &HashMap<u8, Player>, number: u8) -> Option<Ipv4Addr> {
+    players.get(&number).map(|player| player.address)
+}
+
 /// The tempo a player is playing at, ×100: its track's BPM at its pitch,
 /// or 0 with nothing loaded.
 fn tempo_x100(track_bpm: Option<f64>, pitch_percent: f64) -> u32 {
@@ -1037,4 +1043,51 @@ fn send(socket: &UdpSocket, packet: &[u8], to: Ipv4Addr, port: u16, what: &str) 
 
 fn is_timeout(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod all_in_one_tests {
+    use super::*;
+
+    fn player(number: u8, address: Ipv4Addr, kind: DeviceType) -> Player {
+        Player {
+            number,
+            name: format!("device {number}"),
+            address,
+            kind,
+            loaded: None,
+            playing: false,
+            master: false,
+            sync: false,
+            cued: false,
+            bpm_x100: 0,
+            last_seen: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn logical_decks_at_one_address_remain_separate_load_destinations() {
+        let address = Ipv4Addr::new(169, 254, 20, 2);
+        let players = HashMap::from([
+            (1, player(1, address, DeviceType::Cdj)),
+            (2, player(2, address, DeviceType::Cdj)),
+            (33, player(33, address, DeviceType::Mixer)),
+        ]);
+
+        assert_eq!(player_address(&players, 1), Some(address));
+        assert_eq!(player_address(&players, 2), Some(address));
+        assert_eq!(player_address(&players, 33), Some(address));
+        assert_eq!(player_address(&players, 3), None);
+    }
+
+    #[test]
+    fn xdj_az_usb_two_slot_survives_status_parsing() {
+        let mut packet = vec![0_u8; 0xcd];
+        packet[..rbl_prolink::MAGIC.len()].copy_from_slice(&rbl_prolink::MAGIC);
+        packet[0x29] = 0x07;
+
+        let status = status_from_packet(&packet).unwrap().unwrap();
+        assert_eq!(status.track_slot, MediaSlot::Unknown07);
+    }
 }

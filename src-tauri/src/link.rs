@@ -274,6 +274,7 @@ fn save_grid_offset(state: &AppState, track: &str, offset_ms: i16) -> crate::err
 
 /// A running LINK session: the export, and the thread that reports it.
 pub struct Session {
+    rx3_activation: Option<crate::rx3_link::Activation>,
     export: Option<LinkExport>,
     stop: Arc<AtomicBool>,
     reporter: Option<std::thread::JoinHandle<()>>,
@@ -281,8 +282,9 @@ pub struct Session {
 
 impl Session {
     /// Turns LINK on for `interface`, or when none is named the interface
-    /// the OS reaches a player already heard through — the first interface
-    /// when no player has been heard yet — and reports the players to
+    /// the OS reaches a player already heard through. With a connected RX3
+    /// that has not announced yet, its sole link-local USB interface is used.
+    /// Otherwise the first interface is the fallback. Reports the players to
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
@@ -295,6 +297,13 @@ impl Session {
             interfaces = ?available.iter().map(|i| format!("{} {}/{}", i.name, i.address, i.netmask)).collect::<Vec<_>>(),
             "interfaces LINK could run on"
         );
+        let rx3 = match crate::rx3_link::detect() {
+            Ok(rx3) => rx3,
+            Err(error) => {
+                tracing::debug!(%error, "XDJ-RX3 MIDI detection unavailable");
+                None
+            }
+        };
         let chosen = if let Some(name) = interface {
             available.iter().find(|i| i.name == name).cloned()
         } else {
@@ -305,6 +314,17 @@ impl Session {
             if let Some((peer, i)) = toward {
                 tracing::debug!(interface = %i.name, %peer, "interface chosen: the one that reaches a device already heard");
                 Some(i)
+            } else if rx3.is_some() {
+                let mut usb = available.iter().filter(|candidate| is_link_local(candidate.address));
+                let first = usb.next().cloned();
+                if usb.next().is_some() {
+                    return Err("An XDJ-RX3 is connected, but more than one link-local network interface is available. Choose the RX3 USB interface in Settings > LINK.".to_owned());
+                }
+                if first.is_none() {
+                    return Err("An XDJ-RX3 is connected, but its USB Link Export network interface has no 169.254.x.x address. Install the Link Export driver, then reconnect the rear USB-B cable.".to_owned());
+                }
+                tracing::debug!(interface = %first.as_ref().map_or("", |i| i.name.as_str()), "interface chosen: the XDJ-RX3 USB link-local interface");
+                first
             } else {
                 tracing::debug!(peers = peers.len(), "no device heard on any interface; taking the first");
                 available.first().cloned()
@@ -318,6 +338,16 @@ impl Session {
 
         let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state), library_changed, alphabetical_keys));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
+        let rx3_activation = match rx3 {
+            Some(rx3) => match rx3.activate() {
+                Ok(activation) => Some(activation),
+                Err(error) => {
+                    export.stop();
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
 
         let stop = Arc::new(AtomicBool::new(false));
         let weak = Arc::downgrade(state);
@@ -349,7 +379,7 @@ impl Session {
                 }
             })
         };
-        Ok(Self { export: Some(export), stop, reporter: Some(reporter) })
+        Ok(Self { rx3_activation, export: Some(export), stop, reporter: Some(reporter) })
     }
 
     /// The session as the window shows it, with the loaded tracks named
@@ -436,12 +466,70 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        drop(self.rx3_activation.take());
         if let Some(export) = self.export.take() {
             export.stop();
         }
         if let Some(reporter) = self.reporter.take() {
             drop(reporter.join());
         }
+    }
+}
+
+fn is_link_local(address: std::net::Ipv4Addr) -> bool {
+    let [first, second, _, _] = address.octets();
+    first == 169 && second == 254
+}
+
+#[cfg(test)]
+mod rx3_interface_tests {
+    use super::{is_link_local, players};
+    use rbl_link::beacon::{MasterState, Player};
+    use rbl_link::{Interface, LinkState, Snapshot};
+    use rbl_prolink::DeviceType;
+    use std::net::Ipv4Addr;
+    use std::time::Instant;
+
+    #[test]
+    fn only_ipv4_link_local_addresses_are_rx3_usb_candidates() {
+        assert!(is_link_local(Ipv4Addr::new(169, 254, 175, 153)));
+        assert!(is_link_local(Ipv4Addr::new(169, 254, 0, 1)));
+        assert!(!is_link_local(Ipv4Addr::new(192, 168, 1, 14)));
+        assert!(!is_link_local(Ipv4Addr::new(169, 253, 255, 255)));
+    }
+
+    #[test]
+    fn one_appliance_mount_makes_both_logical_decks_available() {
+        let address = Ipv4Addr::new(169, 254, 20, 2);
+        let player = |number, kind| Player {
+            number,
+            name: format!("device {number}"),
+            address,
+            kind,
+            loaded: None,
+            playing: false,
+            master: false,
+            sync: false,
+            cued: false,
+            bpm_x100: 0,
+            last_seen: Instant::now(),
+        };
+        let snapshot = Snapshot {
+            interface: Interface::loopback(),
+            database_port: 0,
+            players: vec![
+                player(1, DeviceType::Cdj),
+                player(2, DeviceType::Cdj),
+                player(33, DeviceType::Mixer),
+            ],
+            master: MasterState::default(),
+            link: LinkState::Up { number: 17 },
+            mounted: vec![address],
+        };
+
+        let shown = players(None, &snapshot);
+        assert_eq!(shown.iter().map(|player| player.number).collect::<Vec<_>>(), [1, 2, 33]);
+        assert!(shown.iter().all(|player| player.mounted));
     }
 }
 

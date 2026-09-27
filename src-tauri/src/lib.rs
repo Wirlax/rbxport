@@ -27,6 +27,7 @@ mod new_library;
 mod diagnostics;
 mod explorer;
 mod link;
+mod rx3_link;
 mod network_labels;
 pub mod logging;
 pub mod menu;
