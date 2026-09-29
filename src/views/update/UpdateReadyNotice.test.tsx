@@ -62,7 +62,9 @@ describe("UpdateReadyNotice", () => {
         onDismiss={onDismiss}
       />,
     ));
-    act(() => vi.advanceTimersByTime(15_000));
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
     expect(onDismiss).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
