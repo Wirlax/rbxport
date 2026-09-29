@@ -20,11 +20,12 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails, TrackScope,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, Query, Row, Sort, TrackColumn, TrackDetails,
+    TrackScope,
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
-use rbl_index::{key::camelot_rank, Library, SortColumn, TrackSource, ViewSpec, NO_ID};
+use rbl_index::{Library, NO_ID, SortColumn, TrackSource, ViewSpec, key::camelot_rank};
 
 use crate::blobs::{self, Analysis, ExtendedCue};
 
@@ -50,6 +51,12 @@ pub trait Source: Send + Sync {
     fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails>;
     /// Content IDs paired with `seed` in rekordbox's Matching table.
     fn matching_ids(&self, _seed: u32) -> Vec<u32> {
+        Vec::new()
+    }
+    fn artist_role_names(&self, _role: ArtistRole) -> Vec<(u32, String)> {
+        Vec::new()
+    }
+    fn artist_role_track_ids(&self, _role: ArtistRole, _artist: u32) -> Vec<u32> {
         Vec::new()
     }
     fn edit(&self, _edit: &Edit) -> bool {
@@ -272,14 +279,23 @@ impl IndexCatalog {
         {
             let mut cache = self.browse.lock();
             if let Some(at) = cache.artwork.iter().position(|entry| {
-                entry.row == row && entry.library.upgrade().is_some_and(|cached| Arc::ptr_eq(&cached, library))
+                entry.row == row
+                    && entry
+                        .library
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, library))
             }) {
                 let hit = cache.artwork.remove(at);
                 let bytes = hit.bytes.to_vec();
                 cache.artwork.push(hit);
                 return Some(bytes);
             }
-            cache.artwork.retain(|entry| entry.library.upgrade().is_some_and(|cached| Arc::ptr_eq(&cached, library)));
+            cache.artwork.retain(|entry| {
+                entry
+                    .library
+                    .upgrade()
+                    .is_some_and(|cached| Arc::ptr_eq(&cached, library))
+            });
             cache.artwork_bytes = cache.artwork.iter().map(|entry| entry.bytes.len()).sum();
         }
         let relative = library.artwork_path.get(row as usize);
@@ -303,7 +319,11 @@ impl IndexCatalog {
         }
         if bytes.len() <= ARTWORK_CACHE_BYTES {
             cache.artwork_bytes += bytes.len();
-            cache.artwork.push(ArtworkCacheEntry { library: Arc::downgrade(library), row, bytes: Arc::clone(&bytes) });
+            cache.artwork.push(ArtworkCacheEntry {
+                library: Arc::downgrade(library),
+                row,
+                bytes: Arc::clone(&bytes),
+            });
         }
         Some(bytes.to_vec())
     }
@@ -311,30 +331,47 @@ impl IndexCatalog {
     fn cached_list(&self, library: &Arc<Library>, query: &Query) -> Vec<Row> {
         // Link history changes independently of the indexed library, so its
         // menu intentionally remains live rather than cacheable.
-        if matches!(query,
+        if matches!(
+            query,
             Query::Histories
-            | Query::Tracks { scope: TrackScope::History(_) | TrackScope::TagList, .. }
+                | Query::Tracks {
+                    scope: TrackScope::History(_) | TrackScope::TagList,
+                    ..
+                }
         ) {
             return self.list_uncached(library, query);
         }
         {
             let mut cache = self.browse.lock();
             if let Some(at) = cache.queries.iter().position(|entry| {
-                entry.query == *query && entry.library.upgrade().is_some_and(|cached| Arc::ptr_eq(&cached, library))
+                entry.query == *query
+                    && entry
+                        .library
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, library))
             }) {
                 let hit = cache.queries.remove(at);
                 let rows = hit.rows.to_vec();
                 cache.queries.push(hit);
                 return rows;
             }
-            cache.queries.retain(|entry| entry.library.upgrade().is_some_and(|cached| Arc::ptr_eq(&cached, library)));
+            cache.queries.retain(|entry| {
+                entry
+                    .library
+                    .upgrade()
+                    .is_some_and(|cached| Arc::ptr_eq(&cached, library))
+            });
         }
         let rows = self.list_uncached(library, query);
         let mut cache = self.browse.lock();
         if cache.queries.len() >= QUERY_CACHE {
             cache.queries.remove(0);
         }
-        cache.queries.push(QueryCacheEntry { library: Arc::downgrade(library), query: query.clone(), rows: Arc::from(rows.clone()) });
+        cache.queries.push(QueryCacheEntry {
+            library: Arc::downgrade(library),
+            query: query.clone(),
+            rows: Arc::from(rows.clone()),
+        });
         rows
     }
 
@@ -376,14 +413,29 @@ impl IndexCatalog {
             Query::LabelArtistAlbums { label, artist } => {
                 Self::label_albums(library, *label, *artist)
             }
+            Query::ArtistRoleArtists(role) => self
+                .source
+                .artist_role_names(*role)
+                .into_iter()
+                .filter(|(_, name)| !name.is_empty())
+                .map(|(id, name)| Row::Named { id, name })
+                .collect(),
+            Query::ArtistRoleAlbums { role, artist } => self.role_albums(library, *role, *artist),
             Query::Artists(_) => Self::named(&library.artist, &library.artists),
             Query::Albums(_) => Self::named(&library.album, &library.albums),
             Query::ArtistAlbums(artist) => Self::artist_albums(library, *artist),
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
             Query::Histories => self.histories(library),
             Query::Years => Self::date_parts(library, "", 0..4, true),
-            Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
-            Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
+            Query::Months(year) => {
+                Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false)
+            }
+            Query::Days { year, month } => Self::date_parts(
+                library,
+                &date_prefix(*year, Some(*month), None),
+                8..10,
+                false,
+            ),
             Query::Tracks { scope, sort } => {
                 self.tracks(library, scope, *sort, self.source.alphabetical_keys())
             }
@@ -521,6 +573,22 @@ impl IndexCatalog {
                             && artist.is_none_or(|id| library.artist.get(at) == Some(&id))
                             && album.is_none_or(|id| library.album.get(at) == Some(&id))
                     })
+                    .collect()
+            }
+            TrackScope::ArtistRole {
+                role,
+                artist,
+                album,
+            } => {
+                let album = album.map(|id| id.wrapping_sub(1));
+                self.source
+                    .artist_role_track_ids(*role, *artist)
+                    .into_iter()
+                    .filter_map(|id| library.row_of_id(u64::from(id)))
+                    .filter(|&row| {
+                        album.is_none_or(|id| library.album.get(row as usize) == Some(&id))
+                    })
+                    .map(|row| (row, 0))
                     .collect()
             }
             TrackScope::Artist { artist, album } => {
@@ -759,6 +827,17 @@ impl IndexCatalog {
                 track_label == label && artist.is_none_or(|id| track_artist == id)
             })
             .map(|(_, &album)| album)
+            .collect();
+        Self::album_rows(library, albums)
+    }
+
+    fn role_albums(&self, library: &Library, role: ArtistRole, artist: u32) -> Vec<Row> {
+        let albums = self
+            .source
+            .artist_role_track_ids(role, artist)
+            .into_iter()
+            .filter_map(|id| library.row_of_id(u64::from(id)))
+            .filter_map(|row| library.album.get(row as usize).copied())
             .collect();
         Self::album_rows(library, albums)
     }
@@ -1265,7 +1344,7 @@ fn resolve_under(share: &std::path::Path, relative: &str) -> Option<PathBuf> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use rbl_index::testing::{add_folder, add_history, add_playlist, library_from, TestTrack};
+    use rbl_index::testing::{TestTrack, add_folder, add_history, add_playlist, library_from};
 
     struct Fixed(Arc<Library>);
 
@@ -1412,7 +1491,10 @@ mod tests {
     #[test]
     fn stable_browse_menus_are_shared_until_the_library_changes() {
         let c = catalog();
-        let query = Query::Tracks { scope: TrackScope::All, sort: Sort::Default };
+        let query = Query::Tracks {
+            scope: TrackScope::All,
+            sort: Sort::Default,
+        };
         let first = c.list(&query);
         let second = c.list(&query);
         assert_eq!(first, second);
@@ -1951,12 +2033,13 @@ mod tests {
             })),
             [12, 10]
         );
-        assert!(c
-            .list(&Query::Tracks {
+        assert!(
+            c.list(&Query::Tracks {
                 scope: TrackScope::Search("nothing".into()),
                 sort: Sort::Default
             })
-            .is_empty());
+            .is_empty()
+        );
     }
 
     #[test]
