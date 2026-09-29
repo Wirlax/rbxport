@@ -4033,6 +4033,7 @@ version = "1.0.0-rc.7"
 dependencies = [
  "rbl-dbserver",
  "rbl-nfs",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
