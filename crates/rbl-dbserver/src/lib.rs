@@ -357,6 +357,11 @@ pub mod kind {
     pub const ALBUM_MENU: u16 = 0x1003;
     /// Every track.
     pub const TRACK_MENU: u16 = 0x1004;
+    /// The all-content track list used by RX3 load/search-depth transitions.
+    /// It has the same `[context, sort]` shape and contents as
+    /// [`TRACK_MENU`], but comes from the player-side `dbcl_GetTrack_Content`
+    /// path.
+    pub const CONTENT_TRACKS: u16 = 0x1200;
     /// Distinct rounded BPM values.
     pub const BPM_MENU: u16 = 0x1006;
     /// Distinct track ratings.
@@ -365,6 +370,9 @@ pub mod kind {
     pub const RELEASE_DECADES: u16 = 0x1008;
     /// Labels referenced by tracks.
     pub const LABEL_MENU: u16 = 0x100a;
+    /// The RX3's original flat key menu. Newer players use [`KEY_MENU`] and
+    /// then request related-key distances first.
+    pub const LEGACY_KEY_MENU: u16 = 0x100b;
     /// The fixed eight-colour palette.
     pub const COLOR_MENU: u16 = 0x100d;
     /// Track-duration minute buckets.
@@ -398,6 +406,8 @@ pub mod kind {
     pub const RELEASE_YEARS: u16 = 0x1108;
     /// Artists referenced by tracks on a label.
     pub const LABEL_ARTISTS: u16 = 0x110a;
+    /// Tracks in a key through the RX3's original flat-key route.
+    pub const LEGACY_KEY_TRACKS: u16 = 0x110b;
     /// Tracks assigned a colour.
     pub const COLOR_TRACKS: u16 = 0x110d;
     /// Tracks in a duration minute bucket.
@@ -440,8 +450,20 @@ pub mod kind {
     pub const DATE_TRACKS: u16 = 0x1a08;
     /// Metadata for one track.
     pub const METADATA: u16 = 0x2002;
+    /// The RX3 Hot Cue Bank hierarchy. The top-level browse heading uses
+    /// this request family rather than the older menu opcode.
+    pub const HOT_CUE_BANK: u16 = 0x2001;
+    /// The three 36-byte cue records for a selected Hot Cue Bank.
+    pub const HOT_CUE_BANK_CUES: u16 = 0x2101;
+    /// A player changing one Hot Cue Bank cue. It expects the same cue reply
+    /// as [`HOT_CUE_BANK_CUES`], not a generic menu header.
+    pub const CHANGE_HOT_CUE_BANK: u16 = 0x2201;
     /// Album art.
     pub const ARTWORK: u16 = 0x2003;
+    /// Album art resolved from a content id. The RX3 uses this form while
+    /// loading a track; it receives the same `0x4002` binary reply as
+    /// [`ARTWORK`].
+    pub const CONTENT_ARTWORK: u16 = 0x2103;
     /// The small waveform preview.
     pub const WAVEFORM_PREVIEW: u16 = 0x2004;
     /// Track information: the path and the copyright text (7 rows).
@@ -474,6 +496,9 @@ pub mod kind {
     /// "Waiting…" for eighteen seconds, retries twice, and gives the source
     /// up. Answered with [`USER_INFO_REPLY`].
     pub const USER_INFO: u16 = 0x3006;
+    /// A track's raw BPM (`djmdContent.BPM`). RX3 asks this as a scalar,
+    /// rather than reading it from a rendered metadata menu.
+    pub const TRACK_BPM: u16 = 0x3008;
     /// The zero-based offset of an item in the current menu.
     pub const ITEM_POSITION: u16 = 0x3100;
     /// A player adding a track to its history (`CMD_INSERT_HISTORY`):
@@ -486,6 +511,9 @@ pub mod kind {
     /// A player taking a track off its history (`CMD_DEL_HISTORY_TRACK`):
     /// `[r:m:s:t, track]`, answered `[0x3401, 0]`, or `-1` when it failed.
     pub const DELETE_HISTORY_TRACK: u16 = 0x3401;
+    /// A player changes a history entry's on-air state. The RX3 sends this
+    /// without waiting for a reply.
+    pub const SET_ON_AIR: u16 = 0x3201;
     pub const TAG_LIST: u16 = 0x100f;
     pub const CHANGE_TAG: u16 = 0x3002;
     pub const CLEAR_TAGS: u16 = 0x3202;
@@ -493,6 +521,20 @@ pub mod kind {
     pub const FILTER_SWITCH: u16 = 0x3007;
     pub const FILTER_GET: u16 = 0x3107;
     pub const FILTER_SET: u16 = 0x3207;
+    /// The remote database's browse kind. RX3 asks this if its device
+    /// property exchange did not already provide one.
+    pub const BROWSE_TYPE: u16 = 0x3303;
+    /// Whether a track has been loaded on a player this session.
+    pub const TRACK_PLAY_STATE: u16 = 0x3b03;
+    /// Converts a legacy key-menu identifier to the dense ID used by the
+    /// newer related-key menus. rbxport's legacy-key rows already use those
+    /// dense IDs, so valid advertised IDs map to themselves.
+    pub const LEGACY_KEY_TO_NEW_KEY: u16 = 0x3a03;
+    /// Resolves a content ID to the dense key ID used by the newer key menus.
+    pub const CONTENT_NEW_KEY: u16 = 0x3d03;
+    /// Asks whether the remote source is rekordbox Mobile. A desktop
+    /// rekordbox export answers false with an empty mount-name string.
+    pub const REKORDBOX_MOBILE: u16 = 0x3e03;
     pub const FILTER_REPLY: u16 = 0x4004;
     /// "Here is how many items your query matched."
     pub const MENU_HEADER: u16 = 0x4000;
@@ -508,6 +550,10 @@ pub mod kind {
     pub const WAVEFORM_PREVIEW_REPLY: u16 = 0x4402;
     pub const CUES_REPLY: u16 = 0x4502;
     pub const BEAT_GRID_REPLY: u16 = 0x4602;
+    /// The USB and Hot Cue Bank cue-record envelope.
+    pub const HOT_CUE_BANK_REPLY: u16 = 0x4702;
+    /// The mobile-source state and its mount-name string.
+    pub const REKORDBOX_MOBILE_REPLY: u16 = 0x4b02;
     pub const WAVEFORM_DETAIL_REPLY: u16 = 0x4a02;
     /// `CMD_RET_USER_INFO`: `[0x3006, 0, 160, blob[160]]`, as rekordbox
     /// sends it. The player copies the blob's first 32 bytes into the
@@ -530,6 +576,7 @@ pub mod kind {
             ARTIST_MENU => "artist menu".to_owned(),
             ALBUM_MENU => "album menu".to_owned(),
             TRACK_MENU => "track menu".to_owned(),
+            CONTENT_TRACKS => "content tracks".to_owned(),
             BPM_MENU => "BPM menu".to_owned(),
             BPM_RANGES => "BPM ranges".to_owned(),
             BPM_TRACKS => "BPM tracks".to_owned(),
@@ -539,7 +586,9 @@ pub mod kind {
             RELEASE_YEARS => "release years".to_owned(),
             RELEASE_YEAR_TRACKS => "release-year tracks".to_owned(),
             LABEL_MENU => "label menu".to_owned(),
+            LEGACY_KEY_MENU => "legacy key menu".to_owned(),
             LABEL_ARTISTS => "label's artists".to_owned(),
+            LEGACY_KEY_TRACKS => "legacy key's tracks".to_owned(),
             LABEL_ARTIST_ALBUMS => "label artist's albums".to_owned(),
             LABEL_ARTIST_ALBUM_TRACKS => "label artist's album tracks".to_owned(),
             COLOR_MENU => "color menu".to_owned(),
@@ -559,6 +608,7 @@ pub mod kind {
             INSERT_HISTORY => "insert history".to_owned(),
             DELETE_HISTORY => "delete history".to_owned(),
             DELETE_HISTORY_TRACK => "delete history track".to_owned(),
+            SET_ON_AIR => "set on-air".to_owned(),
             RELATED_KEYS => "related keys".to_owned(),
             ARTIST_ALBUM_TRACKS => "artist's album tracks".to_owned(),
             KEY_TRACKS => "key's tracks".to_owned(),
@@ -573,6 +623,7 @@ pub mod kind {
             USER_INFO => "user info".to_owned(),
             USER_INFO_REPLY => "user info reply".to_owned(),
             ARTWORK => "artwork".to_owned(),
+            CONTENT_ARTWORK => "content artwork".to_owned(),
             WAVEFORM_PREVIEW => "waveform preview".to_owned(),
             TRACK_INFO => "track info".to_owned(),
             BEAT_GRID => "beat grid".to_owned(),
@@ -592,6 +643,10 @@ pub mod kind {
             FILTER_SWITCH => "filter switch".to_owned(),
             FILTER_GET => "filter properties".to_owned(),
             FILTER_SET => "set filter properties".to_owned(),
+            BROWSE_TYPE => "browse type".to_owned(),
+            LEGACY_KEY_TO_NEW_KEY => "legacy-to-new key id".to_owned(),
+            TRACK_PLAY_STATE => "track play state".to_owned(),
+            CONTENT_NEW_KEY => "content new key id".to_owned(),
             SEARCH_TRACK => "search track".to_owned(),
             MENU_HEADER => "menu header".to_owned(),
             RENDER_HEADER => "render header".to_owned(),
