@@ -220,7 +220,6 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "linux")]
-    #[test]
     fn linux_counts_at_least_the_thread_running_the_test() {
         let mut system = sampler();
         assert!(sample(&mut system).threads.is_some_and(|threads| threads >= 1));
