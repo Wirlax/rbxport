@@ -8,7 +8,9 @@
 //! looking every couple of seconds is far inside the idle budget, and a stick
 //! is seen within that long of arriving whether or not the window has focus.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", test))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -115,6 +117,7 @@ fn platform_mounts() -> Vec<PathBuf> {
 
 /// The entries of a volumes directory, sorted. Split out so a test can point
 /// it at a directory of its own.
+#[cfg(any(target_os = "macos", test))]
 fn entries_of(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
