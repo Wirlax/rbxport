@@ -667,6 +667,7 @@ impl LinkSession {
     }
 
     /// The requests that open a menu: a count now, rows on render.
+    #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
     fn handle_menu(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
             kind::ROOT_MENU => self.menu(message, Menu::Root),
@@ -976,6 +977,7 @@ fn prepend_all_if_multiple(rows: &mut Vec<Row>) {
 }
 
 impl Session for LinkSession {
+    #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
     fn handle(&mut self, message: &Message) -> Vec<Message> {
         let tx = message.transaction;
         match message.kind {
@@ -988,11 +990,10 @@ impl Session for LinkSession {
                     vec![menu_header(tx, 0, u32::from(self.device))]
                 }
             }
-            kind::TEARDOWN => Vec::new(),
-            // RX3 `dbcl_SetOnAir` sends this without calling its reply waiter.
-            // Do not let it replace an unrelated pending menu with a spurious
-            // generic `0x4000` response.
-            kind::SET_ON_AIR => Vec::new(),
+            // Neither request expects a reply. In particular, RX3's
+            // `dbcl_SetOnAir` must not replace an unrelated pending menu with
+            // a spurious generic `0x4000` response.
+            kind::TEARDOWN | kind::SET_ON_AIR => Vec::new(),
             // RX3 `dbcl_GetBrowseType` falls back to this request when the
             // device-property response has no browse kind. `1` is the
             // database-backed/export-media kind the firmware uses for its

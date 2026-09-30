@@ -116,7 +116,7 @@ impl Library {
                 .iter()
                 .take(self.count)
                 .copied()
-                .filter(valid_year)
+                .filter(|&year| valid_year(year))
                 .map(|year| u32::from(year / 10 * 10)),
         )
     }
@@ -129,7 +129,7 @@ impl Library {
                 .iter()
                 .take(self.count)
                 .copied()
-                .filter(valid_year)
+                .filter(|&year| valid_year(year))
                 .map(u32::from)
                 .filter(|&year| year / 10 * 10 == decade),
         )
@@ -151,8 +151,8 @@ impl Library {
     }
 }
 
-fn valid_year(year: &u16) -> bool {
-    *year != 0 && *year <= MAX_MENU_YEAR
+fn valid_year(year: u16) -> bool {
+    year != 0 && year <= MAX_MENU_YEAR
 }
 
 fn descending(values: impl IntoIterator<Item = u32>) -> Vec<u32> {

@@ -302,7 +302,7 @@ impl Beacon {
                 Arc::clone(&number),
             );
             threads.push(std::thread::spawn(move || {
-                announce_loop(&announce, &config, &stop, &shared, &number)
+                announce_loop(&announce, &config, &stop, &shared, &number);
             }));
         }
         {
@@ -310,7 +310,7 @@ impl Beacon {
                 (Arc::clone(&stop), Arc::clone(&shared), Arc::clone(&number));
             let config = config.clone();
             threads.push(std::thread::spawn(move || {
-                status_loop(&status, &config, &stop, &shared, &facts, &number)
+                status_loop(&status, &config, &stop, &shared, &facts, &number);
             }));
         }
         // The beat clock broadcasts a beat on its own socket, tempo-locked,
@@ -327,7 +327,7 @@ impl Beacon {
                 Arc::clone(&number),
             );
             threads.push(std::thread::spawn(move || {
-                beat_clock(&beats, &config, &stop, &shared, &number)
+                beat_clock(&beats, &config, &stop, &shared, &number);
             }));
         } else {
             tracing::warn!("beat clock socket could not bind; LINK master will not drive tempo");
@@ -846,7 +846,7 @@ fn status_loop(
             beat = if beat >= 4 { 1 } else { beat + 1 };
             match out.send_to(&packet, broadcast) {
                 Ok(_) => {
-                    tracing::trace!(len = packet.len(), bytes = %hex(&packet, TRACE_BYTES), "status sent")
+                    tracing::trace!(len = packet.len(), bytes = %hex(&packet, TRACE_BYTES), "status sent");
                 }
                 Err(error) => tracing::warn!(%error, "status not sent"),
             }
@@ -904,7 +904,7 @@ fn status_loop(
             }
             0x05 => answer_media_query(socket, packet, config, facts.as_ref(), ours),
             DEVICE_PROPERTY_QUERY_KIND => {
-                answer_device_property_query(socket, packet, from, config, ours)
+                answer_device_property_query(socket, packet, from, config, ours);
             }
             LINK_HANDSHAKE_KIND => {
                 tracing::debug!(player = %from.ip(), "link handshake; answering");
@@ -923,7 +923,7 @@ fn status_loop(
                 tracing::info!(from = %from.ip(), "player accepted a load track command");
             }
             PLAYER_STATUS_KIND => {
-                hear_player_status(packet, from, socket, config, shared, facts, ours)
+                hear_player_status(packet, from, socket, config, shared, facts, ours);
             }
             _ => {
                 if from.ip() != &config.address {
@@ -1300,16 +1300,18 @@ mod all_in_one_tests {
             ]),
             ..Shared::default()
         };
-        shared.players.get_mut(&1).unwrap().last_seen =
-            Instant::now() - PLAYER_TIMEOUT - Duration::from_millis(1);
+        shared.players.get_mut(&1).unwrap().last_seen = Instant::now()
+            .checked_sub(PLAYER_TIMEOUT + Duration::from_millis(1))
+            .unwrap();
 
         shared.expire_silent_players();
 
         assert!(shared.greeted.contains(&address));
         assert_eq!(shared.players.len(), 1);
 
-        shared.players.get_mut(&2).unwrap().last_seen =
-            Instant::now() - PLAYER_TIMEOUT - Duration::from_millis(1);
+        shared.players.get_mut(&2).unwrap().last_seen = Instant::now()
+            .checked_sub(PLAYER_TIMEOUT + Duration::from_millis(1))
+            .unwrap();
         shared.expire_silent_players();
 
         assert!(shared.players.is_empty());

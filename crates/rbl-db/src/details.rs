@@ -512,7 +512,7 @@ mod tests {
             HotCueBank { id: 10, name: "Late".into(), folder: false },
         ]);
         assert_eq!(hot_cue_bank_cues(&conn, 10).unwrap(), vec![
-            HotCueBankCue { slot: 1, content: 100, in_ms: 1100, out_ms: Some(1800), color: 2, color_table_index: 20, active_loop: true, beat_loop_size: 262145, cue_microsec: 7 },
+            HotCueBankCue { slot: 1, content: 100, in_ms: 1100, out_ms: Some(1800), color: 2, color_table_index: 20, active_loop: true, beat_loop_size: 262_145, cue_microsec: 7 },
             HotCueBankCue { slot: 2, content: 200, in_ms: 2200, out_ms: None, color: 3, color_table_index: 21, active_loop: false, beat_loop_size: 0, cue_microsec: 0 },
         ]);
         assert_eq!(hot_cue_bank_track_ids(&conn, 10).unwrap(), vec![100, 200, 400]);

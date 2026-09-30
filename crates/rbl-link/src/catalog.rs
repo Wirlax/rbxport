@@ -479,6 +479,7 @@ impl IndexCatalog {
 
     /// The rows of a scope, in the order the library holds them, each with
     /// the position a list gives it (0 where the list has none).
+    #[allow(clippy::too_many_lines, reason = "one match arm per protocol track scope")]
     fn scope_rows(&self, library: &Library, scope: &TrackScope) -> Vec<(rbl_index::Row, u32)> {
         let all = || (0..u32::try_from(library.len()).unwrap_or(u32::MAX)).map(|row| (row, 0));
         match scope {
@@ -660,10 +661,8 @@ impl IndexCatalog {
             }
         }
 
-        if album_constrained(scope) {
-            if sort == Sort::Default {
-                rows.sort_by_key(|&(row, position)| (position == 0, position, row));
-            }
+        if album_constrained(scope) && sort == Sort::Default {
+            rows.sort_by_key(|&(row, position)| (position == 0, position, row));
         }
         if let Some(column) = Self::sort_column(sort, scope, alphabetical_keys) {
             let mut order: Vec<rbl_index::Row> = rows.iter().map(|&(row, _)| row).collect();
@@ -1058,7 +1057,7 @@ fn format_nonzero(value: u32, suffix: &str) -> String {
 
 fn camelot_name(id: u32) -> String {
     let side = if id % 2 == 1 { 'A' } else { 'B' };
-    format!("{}{side}", (id + 1) / 2)
+    format!("{}{side}", id.div_ceil(2))
 }
 
 /// `YYYY`, `YYYY-MM` or `YYYY-MM-DD` as a prefix of `StockDate`.
@@ -1136,7 +1135,7 @@ impl Catalog for IndexCatalog {
         let library = self.source.library()?;
         let row = Self::row_of(&library, id)?;
         let mut item = self.track_row(id)?;
-        item.title = library.file_name.get(row as usize).to_owned();
+        library.file_name.get(row as usize).clone_into(&mut item.title);
         Some(item)
     }
 
@@ -1164,8 +1163,7 @@ impl Catalog for IndexCatalog {
             key_id: details.as_ref().map_or(0, |d| d.key_id),
             key_name: details
                 .as_ref()
-                .map(|d| d.key.clone())
-                .unwrap_or_else(|| library.key_name(row).to_owned()),
+                .map_or_else(|| library.key_name(row).to_owned(), |d| d.key.clone()),
             artist_id: lookup_id(&library.artist),
             artist: library.artist_name(row).to_owned(),
             album_id: lookup_id(&library.album),

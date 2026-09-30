@@ -169,26 +169,34 @@ impl Catalog for Small {
         })
     }
     fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
-        (parent.is_none())
-            .then(|| vec![HotCueBank { id: 42, name: "WARMUP".into(), folder: false }])
-            .unwrap_or_default()
+        if parent.is_none() {
+            vec![HotCueBank { id: 42, name: "WARMUP".into(), folder: false }]
+        } else {
+            Vec::new()
+        }
     }
     fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
-        (bank == 42)
-            .then(|| vec![HotCueBankCue {
+        if bank == 42 {
+            vec![HotCueBankCue {
                 slot: 1, content: TRACK, in_ms: 1_000, out_ms: Some(2_000), color: 3,
                 color_table_index: 21, active_loop: true, beat_loop_size: 0, cue_microsec: 0,
-            }])
-            .unwrap_or_default()
+            }]
+        } else {
+            Vec::new()
+        }
     }
     fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
-        (bank == 42).then(|| vec![the_track()]).unwrap_or_default()
+        if bank == 42 { vec![the_track()] } else { Vec::new() }
     }
     fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
-        (track == TRACK).then(|| vec![
-            UsbCue { slot: 1, in_ms: 3_000, out_ms: Some(4_000), color_table_index: 21 },
-            UsbCue { slot: 0, in_ms: 5_000, out_ms: None, color_table_index: 0 },
-        ]).unwrap_or_default()
+        if track == TRACK {
+            vec![
+                UsbCue { slot: 1, in_ms: 3_000, out_ms: Some(4_000), color_table_index: 21 },
+                UsbCue { slot: 0, in_ms: 5_000, out_ms: None, color_table_index: 0 },
+            ]
+        } else {
+            Vec::new()
+        }
     }
     fn edit(&self, edit: &Edit) -> bool {
         matches!(edit, Edit::HotCueBankCue { bank: 42, .. })
