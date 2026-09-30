@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use rbl_dbserver::catalog::{Analysis, Catalog, Query, Row, Sort, TrackDetails, TrackScope};
+use rbl_dbserver::catalog::{Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackDetails, TrackScope, UsbCue};
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::net::{Handler, Session};
 use rbl_dbserver::session::CatalogHandler;
@@ -167,6 +167,31 @@ impl Catalog for Small {
             file_type: 1,
             ..TrackDetails::default()
         })
+    }
+    fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
+        (parent.is_none())
+            .then(|| vec![HotCueBank { id: 42, name: "WARMUP".into(), folder: false }])
+            .unwrap_or_default()
+    }
+    fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
+        (bank == 42)
+            .then(|| vec![HotCueBankCue {
+                slot: 1, content: TRACK, in_ms: 1_000, out_ms: Some(2_000), color: 3,
+                color_table_index: 21, active_loop: true, beat_loop_size: 0, cue_microsec: 0,
+            }])
+            .unwrap_or_default()
+    }
+    fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
+        (bank == 42).then(|| vec![the_track()]).unwrap_or_default()
+    }
+    fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
+        (track == TRACK).then(|| vec![
+            UsbCue { slot: 1, in_ms: 3_000, out_ms: Some(4_000), color_table_index: 21 },
+            UsbCue { slot: 0, in_ms: 5_000, out_ms: None, color_table_index: 0 },
+        ]).unwrap_or_default()
+    }
+    fn edit(&self, edit: &Edit) -> bool {
+        matches!(edit, Edit::HotCueBankCue { bank: 42, .. })
     }
     fn artwork(&self, id: u32) -> Option<Vec<u8>> {
         (id == 0x14).then(|| vec![0xff, 0xd8, 0xff, 0xe1])
@@ -491,6 +516,11 @@ fn the_key_menus_match_the_capture() {
         args(&items[23]),
         "0x0, 0x18, 0x4, \"E\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
     );
+    // The RX3 still uses the original two-level key menu in several browse
+    // flows. It differs only by skipping the related-key distance selector.
+    let (count, items) = browse(&mut s, kind::LEGACY_KEY_MENU, &[CTX, 0]);
+    assert_eq!(count, 24);
+    assert_eq!(items[0].arguments[1], Argument::Number(1));
     let (count, items) = browse(&mut s, kind::RELATED_KEYS, &[0x0102_0301, 0, 1]);
     assert_eq!(count, 3);
     assert_eq!(
@@ -502,6 +532,46 @@ fn the_key_menus_match_the_capture() {
         "0x1, 0x1, 0xe, \"Abm, B\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0"
     );
     assert_eq!(args(&items[2]), "0x2, 0x1, 0x22, \"Abm, B, Dbm, Ebm\", 0x2, \"\", 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, \"\", 0x0");
+}
+
+#[test]
+fn rx3_legacy_key_tracks_are_exact_key_matches() {
+    struct Spy(std::sync::Mutex<Option<Query>>);
+    impl Catalog for Spy {
+        fn list(&self, query: &Query) -> Vec<Row> {
+            *self.0.lock().unwrap() = Some(query.clone());
+            Vec::new()
+        }
+        fn track_row(&self, _: u32) -> Option<TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
+    }
+    let catalog = Arc::new(Spy(std::sync::Mutex::new(None)));
+    let mut s = CatalogHandler::new(Arc::clone(&catalog) as Arc<dyn Catalog>).open();
+    s.handle(&setup_request(1));
+    s.handle(&numbers(kind::LEGACY_KEY_TRACKS, 2, &[CTX, 0, 0x0c]));
+    assert_eq!(
+        *catalog.0.lock().unwrap(),
+        Some(Query::Tracks {
+            scope: TrackScope::Key {
+                key: 0x0c,
+                distance: 0,
+            },
+            sort: Sort::Default,
+        })
+    );
 }
 
 #[test]
@@ -714,6 +784,14 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     );
     let some = s.handle(&numbers(kind::ARTWORK, 0x1a3, &[0x0108_0301, 0x6272, 1]));
     assert_eq!(args(&some[0]), "0x2003, 0x0, 0x4, blob[4]");
+    // RX3 uses `0x2103` while loading: its content id is resolved as a menu
+    // item's artwork, but the binary reply has the request kind it carried.
+    let by_content = s.handle(&numbers(
+        kind::CONTENT_ARTWORK,
+        0x1a3,
+        &[0x0108_0301, 0x6272, 0],
+    ));
+    assert_eq!(args(&by_content[0]), "0x2103, 0x0, 0x4, blob[4]");
     // Without the size argument the id is the title item's artwork field,
     // not the track's id.
     let by_field = s.handle(&numbers(kind::ARTWORK, 0x1a4, &[0x0108_0301, 0x14]));
@@ -736,6 +814,73 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
     assert_eq!(args(&missing[0]), "0x2d04, 0x32, 0x0, blob[0], 0x1");
     let grid = s.handle(&numbers(kind::BEAT_GRID, 0x199, &[0x0108_0301, TRACK]));
     assert_eq!(args(&grid[0]), "0x2204, 0x32, 0x0, blob[0], 0x0");
+}
+
+#[test]
+fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
+    let mut s = session();
+    let banks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c0, &[CTX, 0, 1]));
+    assert_eq!(banks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    let items = s.handle(&numbers(kind::RENDER, 0x1c1, &[CTX, 0, 8]));
+    assert_eq!(items[1].arguments[1], Argument::Number(42));
+    assert_eq!(items[1].arguments[6], Argument::Number(0x2b));
+    let reply = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c2, &[CTX, 42]));
+    assert_eq!(reply.len(), 1);
+    assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
+    assert_eq!(args(&reply[0]), "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]");
+    let Argument::Blob(record) = &reply[0].arguments[3] else { panic!("cue record") };
+    assert_eq!(&record[..8], &[1, 1, 4, 0, 0x5f, 0x47, 0, 0]);
+    let tracks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c3, &[CTX, 42, 0]));
+    assert_eq!(tracks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    let track_items = s.handle(&numbers(kind::RENDER, 0x1c4, &[CTX, 0, 8]));
+    assert_eq!(track_items[1].arguments[1], Argument::Number(TRACK));
+
+    let mut changed_record = Vec::new();
+    for word in [0x0004_0101, TRACK, 0, 150, 300, 0, 21, 0, 0] {
+        changed_record.extend_from_slice(&word.to_le_bytes());
+    }
+    let changed = s.handle(&Message::new(
+        0x1c5,
+        kind::CHANGE_HOT_CUE_BANK,
+        vec![
+            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
+            Argument::Blob(changed_record), Argument::Number(8),
+            Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
+        ],
+    ));
+    assert_eq!(args(&changed[0]), "0x2201, 0x0, 0x48, blob[72], 0x24, 0x1, 0x1, 0x10, blob[16], 0x0, blob[0]");
+    let Argument::Blob(reloaded) = &changed[0].arguments[3] else { panic!("USB cue records") };
+    assert_eq!(&reloaded[..8], &[1, 1, 1, 0, 0, 0, 0, 0]);
+    let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
+    assert_eq!(used, reply[0].encode().len());
+    assert_eq!(decoded, reply[0]);
+
+    // A successful bank edit reloads ordinary USB cues.  An uncued target
+    // still receives the successful, empty `4702` envelope.
+    let mut uncued_record = Vec::new();
+    for word in [0x0004_0101, TRACK + 1, 0, 150, 300, 0, 21, 0, 0] {
+        uncued_record.extend_from_slice(&word.to_le_bytes());
+    }
+    let uncued = s.handle(&Message::new(
+        0x1c5,
+        kind::CHANGE_HOT_CUE_BANK,
+        vec![
+            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
+            Argument::Blob(uncued_record), Argument::Number(8),
+            Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
+        ],
+    ));
+    assert_eq!(args(&uncued[0]), "0x2201, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+
+    let missing = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX, 999]));
+    assert_eq!(args(&missing[0]), "0x2101, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    let (empty, used) = Message::decode(&missing[0].encode()).unwrap();
+    assert_eq!(used, missing[0].encode().len());
+    assert_eq!(empty, missing[0]);
+    let wrong_context = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX & !0xff, 42]));
+    assert_eq!(args(&wrong_context[0]), "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    let malformed = s.handle(&numbers(kind::CHANGE_HOT_CUE_BANK, 0x1c7, &[CTX, 42]));
+    assert_eq!(args(&malformed[0]), "0x2201, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
 }
 
 #[test]
@@ -1110,6 +1255,7 @@ fn tag_and_rating_edits_are_shared_and_acknowledged_after_the_catalog_changes() 
                 Edit::GridOffset { offset_ms, .. } => state.2 = offset_ms,
                 Edit::ClearTags => state.0.clear(),
                 Edit::Rating { stars, .. } => state.1 = u32::from(stars),
+                Edit::HotCueBankCue { .. } => return false,
                 Edit::HistoryAdd { .. }
                 | Edit::HistoryRemove { .. }
                 | Edit::HistoryDelete { .. } => return false,
@@ -1199,6 +1345,11 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
     assert!(s
         .handle(&numbers(kind::DELETE_HISTORY, 4, &[CTX, 0xffff_ffff]))
         .is_empty());
+    // The RX3 changes on-air state without waiting for a response. Its
+    // command must likewise leave the active browse menu intact.
+    assert!(s
+        .handle(&numbers(kind::SET_ON_AIR, 4, &[CTX, TRACK]))
+        .is_empty());
     assert_eq!(
         s.handle(&numbers(kind::DELETE_HISTORY_TRACK, 5, &[CTX, TRACK]))[0].arguments,
         vec![Argument::Number(0x3401), Argument::Number(0)]
@@ -1222,6 +1373,64 @@ fn history_commands_reach_the_catalog_and_only_the_removal_is_answered() {
             Edit::HistoryRemove { track: 7 },
         ]
     );
+}
+
+#[test]
+fn rx3_browse_type_fallback_is_database_backed_media() {
+    let mut s = session();
+    assert_eq!(
+        s.handle(&numbers(kind::BROWSE_TYPE, 0x51, &[CTX, 2]))[0].arguments,
+        vec![Argument::Number(0x3303), Argument::Number(1)]
+    );
+}
+
+#[test]
+fn rx3_scalar_track_and_mobile_queries_use_their_native_reply_shapes() {
+    let mut idle = session();
+    assert_eq!(
+        idle.handle(&numbers(kind::TRACK_BPM, 0x52, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3008), Argument::Number(0x1e80)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::TRACK_PLAY_STATE, 0x53, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3b03), Argument::Number(0)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::LEGACY_KEY_TO_NEW_KEY, 0x56, &[CTX, 0x14]))[0].arguments,
+        vec![Argument::Number(0x3a03), Argument::Number(0x14)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::LEGACY_KEY_TO_NEW_KEY, 0x57, &[CTX, 25]))[0].arguments,
+        vec![Argument::Number(0x3a03), Argument::Number(0)]
+    );
+    assert_eq!(
+        idle.handle(&numbers(kind::CONTENT_NEW_KEY, 0x58, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3d03), Argument::Number(0x14)]
+    );
+
+    let mut loaded = session_with(Small(true));
+    assert_eq!(
+        loaded.handle(&numbers(kind::TRACK_PLAY_STATE, 0x54, &[CTX, TRACK]))[0].arguments,
+        vec![Argument::Number(0x3b03), Argument::Number(1)]
+    );
+    let mobile = loaded.handle(&numbers(kind::REKORDBOX_MOBILE, 0x55, &[CTX]));
+    assert_eq!(mobile[0].kind, kind::REKORDBOX_MOBILE_REPLY);
+    assert_eq!(
+        mobile[0].arguments,
+        vec![
+            Argument::Number(0),
+            Argument::Number(2),
+            Argument::String(String::new()),
+        ]
+    );
+}
+
+#[test]
+fn rx3_content_tracks_is_the_sorted_all_tracks_alias() {
+    let mut s = session();
+    let regular = browse(&mut s, kind::TRACK_MENU, &[CTX, 4]);
+    let content = browse(&mut s, kind::CONTENT_TRACKS, &[CTX, 4]);
+    assert_eq!(content, regular);
 }
 
 #[test]
