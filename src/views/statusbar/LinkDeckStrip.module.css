@@ -250,25 +250,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mixerMaster {
+.mixerLamps {
   position: absolute;
   top: var(--s-link-mixer-master-at);
   left: 10.5px;
+  display: flex;
+  gap: 10px;
+}
+.mixerMaster,
+.mixerLinkCue {
   color: var(--c-link-dim);
   font-size: var(--f-size-link-lamp);
   line-height: 1;
   white-space: nowrap;
 }
 .mixerMaster[data-on] { color: var(--c-link-loaded); }
-.mixerLinkCue {
-  position: absolute;
-  bottom: 6px;
-  left: 10.5px;
-  color: var(--c-link-dim);
-  font-size: var(--f-size-link-lamp);
-  line-height: 1;
-  white-space: nowrap;
-}
 .mixerLinkCue[data-on] { color: var(--c-link-loaded); }
 
 /* Why LINK is unavailable, above the button. */

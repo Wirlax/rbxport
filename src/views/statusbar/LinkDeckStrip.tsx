@@ -335,12 +335,14 @@ function MixerCell({ device }: { device: LinkPlayer }) {
   return (
     <div className={styles.mixer} aria-label={`Mixer ${device.number}`}>
       <span className={styles.mixerLabel}>{device.kind === "mixer" ? "MIXER" : device.name}</span>
-      <span className={styles.mixerMaster} data-on={device.master || undefined}>
-        MASTER
-      </span>
-      <span className={styles.mixerLinkCue} data-on={device.linkCue || undefined}>
-        LINK CUE
-      </span>
+      <div className={styles.mixerLamps}>
+        <span className={styles.mixerMaster} data-on={device.master || undefined}>
+          MASTER
+        </span>
+        <span className={styles.mixerLinkCue} data-on={device.linkCue || undefined}>
+          LINK CUE
+        </span>
+      </div>
     </div>
   );
 }
