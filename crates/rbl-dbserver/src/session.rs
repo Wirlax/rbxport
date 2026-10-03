@@ -86,9 +86,8 @@ enum Menu {
 impl Menu {
     fn len(&self) -> u32 {
         let n = match self {
-            Self::Root(items) => items.len(),
+            Self::Root(items) | Self::Selectors(items) => items.len(),
             Self::SortOptions(sorts) => sorts.len(),
-            Self::Selectors(items) => items.len(),
             Self::Keys => keys::NAMES.len(),
             Self::RelatedKeys(_) => 3,
             Self::Library { rows, .. } => rows.len(),
@@ -184,9 +183,8 @@ impl LinkSession {
         let limit = limit as usize;
         let window = |all: Vec<Item>| all.into_iter().skip(offset).take(limit).collect::<Vec<_>>();
         match self.menus.get(&location).unwrap_or(&Menu::Empty) {
-            Menu::Root(items) => window(items.clone()),
+            Menu::Root(items) | Menu::Selectors(items) => window(items.clone()),
             Menu::SortOptions(sorts) => window(sort_menu(sorts)),
-            Menu::Selectors(items) => window(items.clone()),
             Menu::Keys => window(
                 self.catalog
                     .key_ids()
@@ -707,10 +705,7 @@ impl LinkSession {
     #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
     fn handle_menu(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
-            kind::ROOT_MENU => {
-                let capabilities = Self::number(message, 2);
-                self.menu(message, Menu::Root(root_menu(capabilities)))
-            }
+            kind::ROOT_MENU => self.menu(message, Menu::Root(root_menu())),
             kind::GENRE_MENU => {
                 let sort = Sort::from_id(Self::number(message, 1));
                 self.library(message, Query::Genres(sort))

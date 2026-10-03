@@ -303,10 +303,10 @@ fn args(item: &Message) -> String {
 }
 
 #[test]
-fn the_root_menu_matches_the_live_rekordbox_order() {
+fn the_root_menu_matches_the_captured_cdj_3000_rekordbox_response() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
-    assert_eq!(count, 20);
+    assert_eq!(count, 9);
     let actual: Vec<(u32, String, u32)> = items
         .iter()
         .map(|item| {
@@ -326,83 +326,25 @@ fn the_root_menu_matches_the_live_rekordbox_order() {
     assert_eq!(
         actual,
         vec![
-            (4, heading("TRACK"), 0x83),
-            (12, heading("KEY"), 0x8b),
-            (6, heading("BPM"), 0x85),
-            (1, heading("GENRE"), 0x80),
             (2, heading("ARTIST"), 0x81),
             (3, heading("ALBUM"), 0x82),
-            (26, heading("MATCHING"), 0xaa),
-            (18, heading("SEARCH"), 0x91),
+            (4, heading("TRACK"), 0x83),
+            (12, heading("KEY"), 0x8b),
             (5, heading("PLAYLIST"), 0x84),
             (22, heading("HISTORY"), 0x95),
-            (20, heading("BITRATE"), 0x93),
-            (15, heading("COLOR"), 0x8e),
-            (21, heading("FILE NAME"), 0x94),
-            (23, heading("HOT CUE BANK"), 0x98),
-            (10, heading("LABEL"), 0x89),
-            (11, heading("ORIGINAL ARTIST"), 0x8a),
-            (7, heading("RATING"), 0x86),
-            (9, heading("REMIXER"), 0x88),
-            (19, heading("TIME"), 0x92),
-            (8, heading("YEAR"), 0x87),
+            (18, heading("SEARCH"), 0x91),
+            (26, heading("MATCHING"), 0xaa),
+            (27, heading("DATE ADDED"), 0x8c),
         ]
     );
     // The artist row exactly as captured (transaction 0x180 in the capture).
-    let artist = items[4].clone();
+    let artist = items[0].clone();
     let mut captured = artist.clone();
     captured.transaction = 0x180;
     assert_eq!(
         captured.encode(),
         hex("11872349ae11000001801041010f101400000010060606020602060606060606060602061100000000110000000211000000122600000009fffa004100520054004900530054fffb000011000000022600000001000011000000811100000000110000000011000000001100000000110000000011000000001100000002260000000100001100000000")
     );
-}
-
-#[test]
-fn the_root_menu_honors_the_players_capability_mask() {
-    let expected = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 6),
-        (5, 7),
-        (6, 8),
-        (7, 9),
-        (8, 10),
-        (9, 11),
-        (10, 12),
-        (12, 15),
-        (13, 19),
-        (14, 20),
-        (15, 21),
-        (16, 5),
-        (17, 23),
-        (18, 22),
-        (19, 18),
-        (26, 26),
-    ];
-
-    for (bit, id) in expected {
-        let (count, items) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << bit]);
-
-        assert_eq!(count, 1, "capability bit {bit}");
-        assert_eq!(items[0].arguments[1], Argument::Number(id));
-    }
-
-    for bit in [11, 20, 21, 22, 23, 24, 25] {
-        assert_eq!(
-            browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << bit]).0,
-            0,
-            "unused capability bit {bit}",
-        );
-    }
-
-    let (_, legacy) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 0x00ff_ffff]);
-    assert_eq!(legacy.len(), 19);
-    assert!(legacy
-        .iter()
-        .all(|item| item.arguments[1] != Argument::Number(26)));
 }
 
 #[test]
