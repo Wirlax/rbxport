@@ -104,6 +104,17 @@ pub fn add_smart_playlist(lib: &mut Library, name: &str, rule: &str) -> usize {
     add_list_with(lib, name, &[], crate::ATTRIBUTE_SMART, rule)
 }
 
+/// Adds an intelligent playlist with contradictory stored membership.
+/// Link Export uses this to prove that the rule remains authoritative.
+pub fn add_smart_playlist_with_members(
+    lib: &mut Library,
+    name: &str,
+    rows: &[Row],
+    rule: &str,
+) -> usize {
+    add_list_with(lib, name, rows, crate::ATTRIBUTE_SMART, rule)
+}
+
 fn add_list(lib: &mut Library, name: &str, rows: &[Row], folder: bool) -> usize {
     add_list_with(lib, name, rows, if folder { crate::ATTRIBUTE_FOLDER } else { 0 }, "")
 }

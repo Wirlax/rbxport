@@ -621,16 +621,18 @@ impl IndexCatalog {
                 let Some(index) = playlists.index_of(u64::from(*id)) else {
                     return Vec::new();
                 };
-                playlists
-                    .members
-                    .get(index)
-                    .map(|rows| {
-                        rows.iter()
-                            .enumerate()
-                            .map(|(i, &row)| (row, u32::try_from(i + 1).unwrap_or(u32::MAX)))
-                            .collect()
-                    })
-                    .unwrap_or_default()
+                let rows = if playlists.is_smart(index) {
+                    library.source_rows_unlocked(
+                        &playlists,
+                        &TrackSource::SmartPlaylist(index),
+                    )
+                } else {
+                    playlists.members.get(index).cloned().unwrap_or_default()
+                };
+                rows.into_iter()
+                    .enumerate()
+                    .map(|(i, row)| (row, u32::try_from(i + 1).unwrap_or(u32::MAX)))
+                    .collect()
             }
             TrackScope::History(id) => {
                 let histories = library.histories();
@@ -1419,7 +1421,10 @@ fn resolve_under(share: &std::path::Path, relative: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use rbl_index::Cue;
-    use rbl_index::testing::{add_folder, add_history, add_playlist, library_from, TestTrack};
+    use rbl_index::testing::{
+        add_folder, add_history, add_playlist, add_smart_playlist_with_members, library_from,
+        TestTrack,
+    };
 
     struct Fixed(Arc<Library>);
 
@@ -1930,6 +1935,31 @@ mod tests {
                     position: 2
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn smart_playlists_evaluate_rules_instead_of_stored_membership() {
+        let mut lib = library();
+        let rule = concat!(
+            "<NODE Id=\"1\" LogicalOperator=\"1\" AutomaticUpdate=\"1\">",
+            "<CONDITION PropertyName=\"genre\" Operator=\"1\" ValueUnit=\"\" ",
+            "ValueLeft=\"House\" ValueRight=\"\"/>",
+            "</NODE>"
+        );
+        let index = add_smart_playlist_with_members(&mut lib, "House", &[1], rule);
+        let playlist = u32::try_from(lib.playlists().ids[index]).unwrap();
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
+
+        assert_eq!(
+            c.list(&Query::Tracks {
+                scope: TrackScope::Playlist(playlist),
+                sort: Sort::Default,
+            }),
+            vec![Row::Track {
+                id: 10,
+                position: 1,
+            }]
         );
     }
 
