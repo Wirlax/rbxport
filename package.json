@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.17.1",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/sync-version.mjs && tauri dev",
+    "dev": "node scripts/sync-version.mjs && cross-env RUST_LOG=rbl_dbserver=trace,rbl_link=debug,rbxport_lib=debug tauri dev",
     "dev:web": "vite",
     "dev:mock": "cross-env RBL_MOCK=1 vite",
     "build": "tsc --noEmit && vite build",
