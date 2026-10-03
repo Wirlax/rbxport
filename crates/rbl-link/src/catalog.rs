@@ -124,10 +124,9 @@ struct Parsed {
     two_ex: Option<Anlz>,
 }
 
-/// The tracks players have loaded from us since the link started. The
-/// beacon marks them from the players' status; the catalog greys their rows,
-/// the way rekordbox greys what is in its link history. Cloned handles share
-/// one set.
+/// The tracks players have added to this link session's history with the
+/// `0x3001` command. The catalog greys their rows the way rekordbox greys
+/// what is in its link history. Cloned handles share one set.
 #[derive(Clone, Default)]
 pub struct Played(Arc<Mutex<HashSet<u32>>>);
 
@@ -210,6 +209,7 @@ impl IndexCatalog {
                 let added = self.source.add_to_history(session, track);
                 if added {
                     history.last = track;
+                    self.played.mark(track);
                 }
                 added
             }
@@ -420,7 +420,7 @@ impl IndexCatalog {
             Query::Albums(_) => Self::named(&library.album, &library.albums),
             Query::ArtistAlbums(artist) => Self::artist_albums(library, *artist),
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
-            Query::Histories => self.histories(library),
+            Query::Histories => Self::histories(library),
             Query::Years => Self::date_parts(library, "", 0..4, true),
             Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
             Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
@@ -848,24 +848,23 @@ impl IndexCatalog {
             .collect()
     }
 
-    /// The HISTORY menu: the link session's own history and nothing else,
-    /// as rekordbox 7.2.11 answers it (`PSvAppSyncDBIF::getHistory_Root`
-    /// selects the one session by id; before a player has added a track
-    /// the id is -1 and the menu is empty). A browse capture of it showed the
-    /// one `LINK HISTORY` row with a whole year-and-month tree behind it.
-    fn histories(&self, library: &Library) -> Vec<Row> {
-        let history = self.link_history.lock();
-        let Some(session) = history.session_in(library) else {
-            return Vec::new();
-        };
+    /// The HISTORY menu: every history session, newest first. Folders are an
+    /// internal rekordbox filing detail and are not browseable rows here.
+    /// [OBS] rekordbox 7.2.11's master-library `getHistory_Root` ignores the
+    /// current-history id and enumerates the full History table. A CDJ shows
+    /// those sessions newest first (for example 006, 005, 004).
+    fn histories(library: &Library) -> Vec<Row> {
         let lists = library.histories();
-        let Some(index) = lists.index_of(u64::from(session)) else {
-            return Vec::new();
-        };
-        vec![Row::Named {
-            id: session,
-            name: lists.name(index).to_owned(),
-        }]
+        (0..lists.len())
+            .rev()
+            .filter(|&index| !lists.is_folder(index))
+            .filter_map(|index| {
+                Some(Row::Named {
+                    id: u32::try_from(*lists.ids.get(index)?).ok()?,
+                    name: lists.name(index).to_owned(),
+                })
+            })
+            .collect()
     }
 
     /// The distinct values of one part of the date-added column under a
@@ -1938,20 +1937,35 @@ mod tests {
     }
 
     #[test]
-    fn the_history_menu_holds_only_this_link_sessions_history() {
+    fn the_history_menu_holds_current_and_past_sessions_newest_first() {
         let source = Arc::new(Writable(Arc::new(library())));
-        let c = IndexCatalog::new(Arc::clone(&source) as Arc<dyn Source>, Played::default());
-        // The library's own sessions are not offered; nothing is until a play.
-        assert_eq!(history_menu(&c), [] as [String; 0]);
+        let played = Played::default();
+        let c = IndexCatalog::new(
+            Arc::clone(&source) as Arc<dyn Source>,
+            played.clone(),
+        );
+        assert_eq!(
+            history_menu(&c),
+            ["HISTORY 2026-09-02", "HISTORY 2026-09-01"]
+        );
+        assert!(!played.contains(11), "loading is not a history event");
 
         assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
+        assert!(played.contains(11));
         assert!(
             c.edit(&Edit::HistoryAdd { track: 11 }),
             "a repeat is taken, not written"
         );
         assert!(c.edit(&Edit::HistoryAdd { track: 10 }));
         assert!(c.edit(&Edit::HistoryAdd { track: 11 }));
-        assert_eq!(history_menu(&c), ["LINK HISTORY 2026-09-26"]);
+        assert_eq!(
+            history_menu(&c),
+            [
+                "LINK HISTORY 2026-09-26",
+                "HISTORY 2026-09-02",
+                "HISTORY 2026-09-01"
+            ]
+        );
         let Row::Named { id: session, .. } = c.list(&Query::Histories)[0].clone() else {
             panic!()
         };
@@ -1977,26 +1991,30 @@ mod tests {
 
         // Deleted from a player: the next play starts another session.
         assert!(c.edit(&Edit::HistoryDelete { history: u32::MAX }));
-        assert_eq!(history_menu(&c), [] as [String; 0]);
+        assert_eq!(history_menu(&c).len(), 3);
         assert!(
             !c.edit(&Edit::HistoryRemove { track: 10 }),
             "no session to take it off"
         );
         assert!(c.edit(&Edit::HistoryAdd { track: 12 }));
+        assert!(played.contains(12));
         let Row::Named { id: next, .. } = c.list(&Query::Histories)[0].clone() else {
             panic!()
         };
         assert_ne!(next, session);
         // A delete naming some other history leaves this one.
         assert!(c.edit(&Edit::HistoryDelete { history: session }));
-        assert_eq!(c.list(&Query::Histories).len(), 1);
+        assert_eq!(c.list(&Query::Histories).len(), 4);
     }
 
     #[test]
-    fn a_library_that_cannot_be_written_keeps_the_history_menu_empty() {
+    fn a_library_that_cannot_be_written_still_lists_past_history() {
         let c = catalog();
         assert!(!c.edit(&Edit::HistoryAdd { track: 11 }));
-        assert_eq!(history_menu(&c), [] as [String; 0]);
+        assert_eq!(
+            history_menu(&c),
+            ["HISTORY 2026-09-02", "HISTORY 2026-09-01"]
+        );
     }
 
     #[test]

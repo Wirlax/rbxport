@@ -172,7 +172,6 @@ pub struct LinkExport {
 
 struct Facts {
     source: Arc<dyn Source>,
-    played: Played,
 }
 
 impl beacon::LibraryFacts for Facts {
@@ -185,9 +184,6 @@ impl beacon::LibraryFacts for Facts {
         self.source.library().map_or(0, |l| {
             u16::try_from(l.playlists().len()).unwrap_or(u16::MAX)
         })
-    }
-    fn track_loaded(&self, track: u32) {
-        self.played.mark(track);
     }
 }
 
@@ -223,7 +219,7 @@ impl LinkExport {
                 beat_port: rbl_prolink::PORT_BEAT,
                 computer_name: computer_name(),
             },
-            Arc::new(Facts { source, played }),
+            Arc::new(Facts { source }),
         )
         .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.announce)))?;
         let number = beacon.number_cell();
