@@ -1009,6 +1009,8 @@
   "Please wait…": "Even geduld a.u.b....",
   "Disconnect": "Verbreek de verbinding",
   "Connect to PRO DJ LINK": "Maak verbinding met PRO DJ LINK",
+  "Auto-join LINK when available": "Automatisch deelnemen aan LINK indien beschikbaar",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Schakel PRO DJ LINK automatisch in wanneer een speler of mixer wordt gedetecteerd.",
   "Key sorting": "Sleutel sorteren",
   "Alphabetically — A, Ab, B, …": "Alfabetisch — A, Ab, B, …",
   "musical": "muzikaal",

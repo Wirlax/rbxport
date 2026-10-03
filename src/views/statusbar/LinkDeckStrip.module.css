@@ -206,6 +206,9 @@
 .sleeve[data-state="pending"],
 .sleeve[data-state="failed"] { visibility: hidden; }
 .trackTitle {
+  display: block;
+  flex: 1;
+  min-width: 0;
   color: var(--c-link-ink);
   font-size: var(--f-size-link-label);
   white-space: nowrap;

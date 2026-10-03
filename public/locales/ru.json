@@ -1014,6 +1014,8 @@
   "Please wait…": "Пожалуйста, подождите…",
   "Disconnect": "Отключить",
   "Connect to PRO DJ LINK": "Подключитесь к PRO DJ LINK",
+  "Auto-join LINK when available": "Автоматическое присоединение по LINK, когда оно доступно",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Включайте PRO DJ LINK автоматически при обнаружении проигрывателя или микшера.",
   "Key sorting": "Сортировка ключей",
   "Alphabetically — A, Ab, B, …": "По алфавиту — А, Аб, Б, …",
   "musical": "мюзикл",

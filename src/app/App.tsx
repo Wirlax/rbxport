@@ -3,6 +3,7 @@ import { useExportProgress } from "@/store/useExportProgress";
 import { reportStartupPaint } from "@/lib/startup";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
 import { waveformKindOf } from "@/canvas";
+import { useAutoJoinLink } from "@/store/useAutoJoinLink";
 import { useEventCallback } from "@/store/useEventCallback";
 /**
  * Export-mode shell.
@@ -676,6 +677,15 @@ function AppBody() {
   const toggleLink = useCallback(() => {
     void setLinkOn(!link?.on);
   }, [link?.on, setLinkOn]);
+  const autoStartLink = useCallback(() => setLinkOn(true), [setLinkOn]);
+
+  useAutoJoinLink(
+    stickDefaults.autoJoinLink,
+    linkPeers,
+    link,
+    linkBusy,
+    autoStartLink,
+  );
 
   // The tempo-master controls: each returns LINK's fresh status.
   const setLinkMaster = useCallback((on: boolean) => {

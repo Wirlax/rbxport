@@ -10,7 +10,7 @@ const held = vi.hoisted(() => ({
   backend: { linkStatus: vi.fn(), onLinkStatus: vi.fn(), startLinkExport: vi.fn(), stopLinkExport: vi.fn() },
 }));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
-vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null, linkKeySort: "musical" } }, update: held.update }) }));
+vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null, linkKeySort: "musical", autoJoinLink: false } }, update: held.update }) }));
 const off: LinkStatus = { on: false, problem: null, interface: null, interfaces: [], players: [], master: false, masterBpm: 120, state: "off", number: null };
 const blocked = { ...off, problem: "rekordbox is running and holds the link ports. Quit it to turn LINK on." };
 let host: HTMLDivElement;
@@ -72,4 +72,14 @@ it("shows key sort examples and saves the alphabetical choice", async () => {
   const radio = host.querySelector<HTMLInputElement>('input[name="link-key-sort"]');
   act(() => radio?.click());
   expect(held.update).toHaveBeenCalledWith("djSystem", {linkKeySort: "alphabetical"});
+});
+
+it("offers automatic LINK joining and saves it as an opt-in", async () => {
+  held.backend.linkStatus.mockResolvedValue(off);
+  await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
+  const toggle = [...host.querySelectorAll<HTMLInputElement>('input[role="switch"]')]
+    .find((input) => input.parentElement?.textContent?.includes("Auto-join LINK when available"));
+  expect(toggle?.checked).toBe(false);
+  act(() => toggle?.click());
+  expect(held.update).toHaveBeenCalledWith("djSystem", { autoJoinLink: true });
 });

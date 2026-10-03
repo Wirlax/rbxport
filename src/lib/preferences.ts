@@ -181,6 +181,8 @@ export interface DjSystemPreferences {
    * `Ethernet 2`), or null to take the one the players are reached through.
    */
   linkInterface: string | null;
+  /** Start PRO DJ LINK when a player or mixer first appears on the network. */
+  autoJoinLink: boolean;
   linkKeySort: "alphabetical" | "musical";
 }
 
@@ -284,6 +286,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     subColumn: null,
     createDatabaseFolders: true,
     linkInterface: null,
+    autoJoinLink: false,
     linkKeySort: "musical",
   },
   usbExport: { importSettings: false, importHistory: true, deleteUnlistedMusic: false, maximumCompatibility: false, conversionFormat: "wav", importButtonCues: true, importButtonHistory: true, importButtonSettings: false },
@@ -451,6 +454,7 @@ export function sanitisePreferences(value: unknown): Preferences {
         ? dj.subColumn
         : null,
       createDatabaseFolders: bool(dj.createDatabaseFolders, d.djSystem.createDatabaseFolders),
+      autoJoinLink: bool(dj.autoJoinLink, d.djSystem.autoJoinLink),
       linkKeySort: oneOf(dj.linkKeySort, ["alphabetical", "musical"] as const, d.djSystem.linkKeySort),
       linkInterface: typeof dj.linkInterface === "string" && dj.linkInterface !== "" ? dj.linkInterface : null,
     },

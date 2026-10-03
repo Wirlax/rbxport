@@ -111,6 +111,7 @@ describe("LinkDeckStrip", () => {
     expect(host.querySelector('[data-testid="link-button"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(host.querySelectorAll('[aria-label^="Player "]').length).toBe(2);
     expect(host.textContent).toContain("Bora Bora");
+    expect(host.querySelector('[aria-label="Player 1"] [title="Bora Bora"]')).not.toBeNull();
     expect(host.textContent).toContain("MASTER");
     // A playing deck says PLAY.
     expect(host.querySelector('[aria-label="Player 1"]')?.textContent).toContain("PLAY");

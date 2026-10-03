@@ -1002,6 +1002,8 @@
   "Please wait…": "Vänligen vänta...",
   "Disconnect": "Koppla från",
   "Connect to PRO DJ LINK": "Anslut till PRO DJ LINK",
+  "Auto-join LINK when available": "Gå med automatiskt i LINK när det är tillgängligt",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Slå på PRO DJ LINK automatiskt när en spelare eller mixer upptäcks.",
   "Key sorting": "Nyckelsortering",
   "Alphabetically — A, Ab, B, …": "Alfabetiskt - A, Ab, B, …",
   "musical": "musikal",

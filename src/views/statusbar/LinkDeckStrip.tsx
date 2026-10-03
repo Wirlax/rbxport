@@ -227,7 +227,7 @@ function PlayerDeck({
             <span className={styles.sleeveBox}>
               <Artwork trackId={player.loaded.id} className={styles.sleeve} />
             </span>
-            <span className={styles.trackTitle}>{player.loaded.title}</span>
+            <span className={styles.trackTitle} title={player.loaded.title}>{player.loaded.title}</span>
           </>
         ) : (
           <>

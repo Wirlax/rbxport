@@ -35,6 +35,12 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({djSystem: {linkKeySort: "alphabetical"}}).djSystem.linkKeySort).toBe("alphabetical");
     expect(sanitisePreferences({djSystem: {linkKeySort: "invalid"}}).djSystem.linkKeySort).toBe("musical");
   });
+  it("leaves automatic LINK joining off unless it is explicitly enabled", () => {
+    expect(DEFAULT_PREFERENCES.djSystem.autoJoinLink).toBe(false);
+    expect(sanitisePreferences({ djSystem: {} }).djSystem.autoJoinLink).toBe(false);
+    expect(sanitisePreferences({ djSystem: { autoJoinLink: "yes" } }).djSystem.autoJoinLink).toBe(false);
+    expect(sanitisePreferences({ djSystem: { autoJoinLink: true } }).djSystem.autoJoinLink).toBe(true);
+  });
   it("keeps the browser key-sort choice and preserves the old display-based ordering", () => {
     expect(sanitisePreferences({view: {keySort: "musical"}}).view.keySort).toBe("musical");
     expect(sanitisePreferences({view: {keySort: "invalid"}}).view.keySort).toBe("alphabetical");

@@ -1021,6 +1021,8 @@
   "Please wait…": "お待ちください…",
   "Disconnect": "切断する",
   "Connect to PRO DJ LINK": "PRO DJ LINKに接続する",
+  "Auto-join LINK when available": "利用可能な場合はリンクに自動参加します",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "プレーヤーまたはミキサーを検出すると、PRO DJ LINK が自動的にオンになります。",
   "Key sorting": "キーソート",
   "Alphabetically — A, Ab, B, …": "アルファベット順 — A、Ab、B、…",
   "musical": "ミュージカル",

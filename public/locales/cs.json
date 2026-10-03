@@ -1007,6 +1007,8 @@
   "Please wait…": "Čekejte prosím…",
   "Disconnect": "Odpojit",
   "Connect to PRO DJ LINK": "Připojte se k PRO DJ LINK",
+  "Auto-join LINK when available": "Automaticky se připojit k LINK, je-li k dispozici",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Zapněte PRO DJ LINK automaticky, když je detekován přehrávač nebo mix.",
   "Key sorting": "Třídění klíčů",
   "Alphabetically — A, Ab, B, …": "Abecedně – A, Ab, B, …",
   "musical": "hudební",

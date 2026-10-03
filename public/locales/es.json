@@ -1013,6 +1013,8 @@
   "Please wait…": "Por favor espera...",
   "Disconnect": "Desconectar",
   "Connect to PRO DJ LINK": "Conéctate a PRO DJ LINK",
+  "Auto-join LINK when available": "LINK de unión automática cuando esté disponible",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Enciende PRO DJ LINK automáticamente cuando se detecta un reproductor o mezclador.",
   "Key sorting": "clasificación de claves",
   "Alphabetically — A, Ab, B, …": "Alfabéticamente: A, Ab, B,…",
   "musical": "musicales",

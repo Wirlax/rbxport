@@ -6,11 +6,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+import { useTranslation } from "@/i18n";
 import { getBackend } from "@/ipc/client";
 import type { LinkStatus } from "@/ipc/types";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Section } from "./controls";
+import { Button, Section, Toggle } from "./controls";
 
 /** The radio value for "no interface chosen". */
 const AUTOMATIC = "";
@@ -30,6 +31,7 @@ const AUTOMATIC = "";
  * when Preferences closed would be no source at all.
  */
 export function LinkPane() {
+  const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const linkInterface = preferences.djSystem.linkInterface;
   const onChoose = (name: string | null) => update("djSystem", { linkInterface: name });
@@ -117,7 +119,7 @@ export function LinkPane() {
     <Section title="PRO DJ LINK" label="Link">
       {problem ? <p className={styles.linkError} role="alert">{problem}</p> : null}
       <div className={styles.linkSummary}>
-        <div>
+        <div className={styles.linkSummaryStatus}>
           <strong className={styles.linkStatus} data-connected={link?.on && link.state === "up"} data-state={link?.state} role="status">{status}</strong>
           <p className={styles.linkHelp}>
             {link?.on && link.interface
@@ -133,6 +135,14 @@ export function LinkPane() {
             {busy ? "Please wait…" : link?.on ? "Disconnect" : "Connect to PRO DJ LINK"}
           </Button>
         )}
+        <div className={styles.linkAutoJoin}>
+          <Toggle
+            label={t("Auto-join LINK when available")}
+            checked={preferences.djSystem.autoJoinLink}
+            onChange={(autoJoinLink) => update("djSystem", { autoJoinLink })}
+          />
+          <p className={styles.linkHelp}>{t("Turn on PRO DJ LINK automatically when a player or mixer is detected.")}</p>
+        </div>
       </div>
       <fieldset className={styles.linkKeySort} disabled={!canChoose}>
         <legend>Key sorting</legend>
@@ -189,7 +199,14 @@ export function LinkPane() {
                 <tr key={player.number}>
                   <td>
                     <strong>{player.name}</strong>
-                    {player.loaded ? <span className={styles.linkTrack}>{player.loaded.title}{player.loaded.artist ? ` · ${player.loaded.artist}` : ""}</span> : null}
+                    {player.loaded ? (
+                      <span
+                        className={styles.linkTrack}
+                        title={`${player.loaded.title}${player.loaded.artist ? ` · ${player.loaded.artist}` : ""}`}
+                      >
+                        {player.loaded.title}{player.loaded.artist ? ` · ${player.loaded.artist}` : ""}
+                      </span>
+                    ) : null}
                   </td>
                   <td className={styles.linkRole}>{player.kind} {player.number}</td>
                   <td className={styles.linkAddress}>{player.address}</td>

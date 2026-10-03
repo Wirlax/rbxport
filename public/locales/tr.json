@@ -1009,6 +1009,8 @@
   "Please wait…": "Lütfen bekleyin…",
   "Disconnect": "Bağlantıyı kes",
   "Connect to PRO DJ LINK": "PRO DJ LINK'e bağlanın",
+  "Auto-join LINK when available": "Kullanılabilir olduğunda LINK'e otomatik olarak katıl",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Bir oynatıcı veya mikser algılandığında PRO DJ LINK'i otomatik olarak açın.",
   "Key sorting": "Anahtar sıralama",
   "Alphabetically — A, Ab, B, …": "Alfabetik olarak — A, Ab, B,…",
   "musical": "müzikal",

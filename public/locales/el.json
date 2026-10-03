@@ -1011,6 +1011,8 @@
   "Please wait…": "Παρακαλώ περιμένετε…",
   "Disconnect": "Αποσύνδεση",
   "Connect to PRO DJ LINK": "Συνδεθείτε στο PRO DJ LINK",
+  "Auto-join LINK when available": "Αυτόματη εγγραφή LINK όταν είναι διαθέσιμη",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Ενεργοποιήστε αυτόματα το PRO DJ LINK όταν εντοπιστεί συσκευή αναπαραγωγής ή μίκτη.",
   "Key sorting": "Ταξινόμηση κλειδιών",
   "Alphabetically — A, Ab, B, …": "Αλφαβητικά — A, Ab, B,…",
   "musical": "μουσικό",

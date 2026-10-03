@@ -1008,6 +1008,8 @@
   "Please wait…": "Kérjük, várjon…",
   "Disconnect": "Leválasztás",
   "Connect to PRO DJ LINK": "Csatlakozzon a PRO DJ LINK-hez",
+  "Auto-join LINK when available": "Automatikus csatlakozás LINK, ha elérhető",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "Kapcsolja be automatikusan a PRO DJ LINK funkciót, ha lejátszót vagy keverőt észlel.",
   "Key sorting": "Kulcsok rendezése",
   "Alphabetically — A, Ab, B, …": "ABC sorrendben – A, Ab, B,…",
   "musical": "zenei",

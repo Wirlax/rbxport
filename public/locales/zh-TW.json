@@ -1013,6 +1013,8 @@
   "Please wait…": "請稍等...",
   "Disconnect": "斷開連接",
   "Connect to PRO DJ LINK": "連接到 PRO DJ LINK",
+  "Auto-join LINK when available": "可用時自動加入 LINK",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "當偵測到播放器或混音器時，自動開啟 PRO DJ LINK。",
   "Key sorting": "按鍵排序",
   "Alphabetically — A, Ab, B, …": "按字母顺序排列 — A、Ab、B、...",
   "musical": "音樂劇",

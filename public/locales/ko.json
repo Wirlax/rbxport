@@ -998,6 +998,8 @@
   "Please wait…": "기다려 주십시오…",
   "Disconnect": "연결 끊기",
   "Connect to PRO DJ LINK": "PRO DJ LINK에 연결",
+  "Auto-join LINK when available": "가능한 경우 자동 가입 LINK",
+  "Turn on PRO DJ LINK automatically when a player or mixer is detected.": "플레이어 또는 믹서가 감지되면 자동으로 PRO DJ LINK를 켜십시오.",
   "Key sorting": "키 정렬",
   "Alphabetically — A, Ab, B, …": "알파벳순 — A, Ab, B, …",
   "musical": "뮤지컬",

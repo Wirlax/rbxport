@@ -622,17 +622,25 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 
 
 .linkSummary {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding: 16px;
   margin-bottom: 12px;
   border: 1px solid var(--c-raised);
   border-radius: 4px;
 }
-.linkSummary > div { min-width: 0; }
+.linkSummaryStatus { min-width: 0; }
 .linkSummary button { flex-shrink: 0; }
+.linkAutoJoin {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-raised);
+}
+.linkAutoJoin .row { margin-left: 0; }
+.linkAutoJoin .linkHelp { margin: 2px 0 0 38px; }
 .linkStatus { display: flex; align-items: center; gap: 8px; }
 .linkStatus::before { content: ""; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--c-text-dim); }
 .linkStatus[data-connected="true"]::before { background: var(--c-accent); }
@@ -653,13 +661,22 @@ button.keyBadge:hover { background: var(--c-button-hover, var(--c-raised)); }
 .linkDevices { margin-top: 24px; }
 .linkDevices h4 { margin: 0 0 12px; font-size: inherit; }
 .linkDevices h4 span { margin-left: 6px; color: var(--c-text-dim); font-weight: 400; }
-.linkDevices table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--f-size-sm); }
+.linkDevices table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: var(--f-size-sm); }
 .linkDevices th { color: var(--c-text-dim); font-weight: 400; }
 .linkDevices th, .linkDevices td { padding: 10px 8px; border-bottom: 1px solid var(--c-raised); vertical-align: top; }
 .linkDevices td:first-child { width: 40%; overflow-wrap: anywhere; }
 .linkRole { text-transform: capitalize; white-space: nowrap; }
 .linkAddress { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.linkTrack { display: block; color: var(--c-text-dim); margin-top: 5px; line-height: 1.4; }
+.linkTrack {
+  display: block;
+  min-width: 0;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--c-text-dim);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .linkBadge { display: block; margin-top: 5px; color: var(--c-accent); font-size: var(--f-size-xs); }
 .linkEmpty { padding: 20px 16px; border: 1px solid var(--c-raised); border-radius: 4px; color: var(--c-text-dim); font-size: var(--f-size-sm); line-height: 1.5; }
 
