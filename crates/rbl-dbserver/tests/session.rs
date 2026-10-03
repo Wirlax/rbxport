@@ -1211,7 +1211,7 @@ fn background_metadata_does_not_replace_the_browser_menu() {
 }
 
 #[test]
-fn legacy_client_gets_full_track_fields_in_twelve_field_rows() {
+fn legacy_client_gets_a_bare_title_in_twelve_field_rows() {
     let mut s = session();
     let reply = s.handle(&numbers(kind::SETUP, 0xffff_fffe, &[5]));
     assert_eq!(
@@ -1222,7 +1222,7 @@ fn legacy_client_gets_full_track_fields_in_twelve_field_rows() {
     assert!(rows.iter().all(|row| row.arguments.len() == 12));
     assert_eq!(
         rows[0].arguments[6],
-        Argument::Number(rbl_dbserver::item::item_type::TRACK)
+        Argument::Number(rbl_dbserver::item::item_type::TITLE)
     );
     assert_eq!(rows[0].arguments[3], Argument::String(the_track().title));
     assert_eq!(rows[6].arguments[1], Argument::Number(0x1814_5d65));
@@ -1231,10 +1231,7 @@ fn legacy_client_gets_full_track_fields_in_twelve_field_rows() {
         rows[6].arguments[6],
         Argument::Number(rbl_dbserver::item::item_type::KEY)
     );
-    assert_eq!(
-        rows[0].arguments[5],
-        Argument::String(the_track().secondary_text)
-    );
+    assert_eq!(rows[0].arguments[5], Argument::String(String::new()));
 }
 
 #[test]

@@ -323,8 +323,7 @@ async fn alphatheta_connects_client_reads_metadata_and_analysis_from_us() {
     let track = queries::get_metadata(&conn, &d, served.track)
         .await
         .unwrap();
-    // This client revision recognizes only a bare 0x0004 title row, while
-    // legacy players receive the captured composite 0x2304 track row.
+    assert_eq!(track.title, "At Your Best");
     assert_eq!(track.duration, 290.0);
     assert!((track.tempo - 128.0).abs() < 0.01, "{}", track.tempo);
     assert_eq!(track.comment, "");

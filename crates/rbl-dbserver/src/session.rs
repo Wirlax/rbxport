@@ -246,7 +246,16 @@ impl LinkSession {
             )
                 .iter()
                 .map(|item| {
-                    let mut reply = item.message(message.transaction);
+                    let mut row = item.clone();
+                    // [OBS] Legacy clients identify the title only from the
+                    // bare 0x0004 row. The extended composite TRACK type is
+                    // understood by CDJs but ignored by clients such as
+                    // alphatheta-connect/Now Playing.
+                    if !self.extended && row.item_type == item_type::TRACK {
+                        row.item_type = item_type::TITLE;
+                        row.text2.clear();
+                    }
+                    let mut reply = row.message(message.transaction);
                     if !self.extended {
                         reply.arguments.truncate(12);
                     }
