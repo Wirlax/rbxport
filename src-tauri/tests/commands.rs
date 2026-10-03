@@ -391,6 +391,14 @@ fn a_playlist_is_made_filled_reordered_renamed_moved_and_deleted() {
     assert_eq!(rows.iter().map(|r| r.track_no).collect::<Vec<_>>(), [1, 2, 3]);
     assert_eq!(s.node("Friday").child_count, Some(3), "the tree counts them");
 
+    // The `#` column is the playlist's stored TrackNo, not the row's current
+    // visible index. Sorting changes which track is on each line, not its
+    // place in the set.
+    let (sorted, _) = s.open(ViewSpecDto { sort: "title".into(), descending: true, ..playlist_spec(&friday.id) });
+    let rows = s.rows(sorted);
+    assert_eq!(ids(&rows), [t3.as_str(), t2.as_str(), t1.as_str()]);
+    assert_eq!(rows.iter().map(|r| r.track_no).collect::<Vec<_>>(), [1, 3, 2]);
+
     // Reordered, and one taken out closes the gap.
     run(commands::reorder_playlist(
         s.handle(),

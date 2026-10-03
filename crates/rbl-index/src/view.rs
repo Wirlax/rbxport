@@ -133,6 +133,11 @@ pub struct ViewSpec {
 #[derive(Debug)]
 pub struct View {
     pub rows: Vec<Row>,
+    /// The stored `TrackNo` for each row of an ordinary playlist, kept beside
+    /// the sorted view rows. Searching or sorting a playlist must not turn
+    /// this into the row's current visible position: DJs use it to see where
+    /// a track sits in the set.
+    playlist_track_nos: Option<Vec<u32>>,
 }
 
 impl View {
@@ -149,6 +154,17 @@ impl View {
         let end = start.saturating_add(len).min(self.rows.len());
         self.rows.get(start..end).unwrap_or(&[])
     }
+
+    /// The number shown in the browser's `#` column at this view position.
+    /// Only ordinary playlists have a durable track order; every other view
+    /// numbers its visible rows.
+    #[must_use]
+    pub fn track_no_at(&self, position: usize) -> u32 {
+        self.playlist_track_nos
+            .as_ref()
+            .and_then(|numbers| numbers.get(position).copied())
+            .unwrap_or_else(|| u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX))
+    }
 }
 
 impl Library {
@@ -158,11 +174,17 @@ impl Library {
     }
 
     pub fn open_view_scoped(&self, spec: &ViewSpec, field: SearchField) -> View {
-        let mut rows: Vec<Row> = self.source_rows(&spec.source);
+        let playlist_numbers = matches!(&spec.source, TrackSource::Playlist(_));
+        // Keep the playlist's stored position coupled to its row while the
+        // view is filtered and sorted. A map by row would lose duplicate
+        // playlist entries, which rekordbox permits.
+        let mut rows: Vec<(Row, u32)> = self.source_rows(&spec.source).into_iter().enumerate()
+            .map(|(position, row)| (row, u32::try_from(position.saturating_add(1)).unwrap_or(u32::MAX)))
+            .collect();
 
         let query = fold(spec.query.trim());
         if !query.is_empty() {
-            rows.retain(|&r| self.row_matches_in(r, &query, field));
+            rows.retain(|&(row, _)| self.row_matches_in(row, &query, field));
         }
 
         // The filter bar, in the same pass as the search: a handful of integer
@@ -170,7 +192,7 @@ impl Library {
         // about what a one-letter query does.
         if !spec.filter.is_empty() {
             let compiled = spec.filter.compile();
-            rows.retain(|&r| compiled.matches(self, r));
+            rows.retain(|&(row, _)| compiled.matches(self, row));
         }
 
         // `TrackNo` is not a column to sort by — it *is* the view's own order:
@@ -181,10 +203,15 @@ impl Library {
             if spec.descending {
                 rows.reverse();
             }
-        } else {
-            self.sort_rows(&mut rows, spec.sort, spec.descending);
+        } else if let Some(rank) = self.ranks.get(spec.sort.rank_slot()) {
+            if spec.descending {
+                rows.sort_unstable_by_key(|&(row, _)| std::cmp::Reverse(rank.get(row as usize).copied().unwrap_or(0)));
+            } else {
+                rows.sort_unstable_by_key(|&(row, _)| rank.get(row as usize).copied().unwrap_or(0));
+            }
         }
-        View { rows }
+        let (rows, numbers): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+        View { rows, playlist_track_nos: playlist_numbers.then_some(numbers) }
     }
 
     /// Narrows an existing view. Typing another character only has to filter the
@@ -194,11 +221,15 @@ impl Library {
         if folded.is_empty() {
             // perf-ok: clearing the query copies at most 40k u32 (~160 KB, tens
             // of microseconds) and only on the keystroke that empties the box.
-            return View { rows: previous.rows.clone() };
+            return View { rows: previous.rows.clone(), playlist_track_nos: previous.playlist_track_nos.clone() };
         }
-        View {
-            rows: previous.rows.iter().copied().filter(|&r| self.row_matches(r, &folded)).collect(),
-        }
+        let matched: Vec<_> = previous.rows.iter().copied().enumerate()
+            .filter(|&(_, row)| self.row_matches(row, &folded))
+            .collect();
+        let playlist_track_nos = previous.playlist_track_nos.as_ref().map(|numbers| {
+            matched.iter().filter_map(|&(position, _)| numbers.get(position).copied()).collect()
+        });
+        View { rows: matched.into_iter().map(|(_, row)| row).collect(), playlist_track_nos }
     }
 
     pub(crate) fn row_matches(&self, row: Row, folded_query: &str) -> bool {

@@ -480,7 +480,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const editUndo: MockEdit[] = [];
   const editRedo: MockEdit[] = [];
 
-  const views = new Map<number, { order: Uint32Array; gen: number }>();
+  const views = new Map<number, { order: Uint32Array; trackNos?: Uint32Array; gen: number }>();
   // A folder's rows, held whole: a folder is a few files here and a few
   // thousand at most on a disk, which is why the real backend keeps the list
   // and pages it out rather than sending it.
@@ -1612,7 +1612,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
         });
       }
 
-      const order = Uint32Array.from(candidates);
+      const order = candidates.map((row, position) => ({ row, trackNo: position + 1 }));
       const rows = all;
       // `trackNo` is not a column to rank by: it means "leave them in the
       // order this view produced them", which for a playlist is its
@@ -1621,17 +1621,21 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // a reordered playlist came out looking untouched.
       const sorted =
         spec.sort === "trackNo"
-          ? (spec.descending ? Array.from(order).reverse() : Array.from(order))
-          : Array.from(order).sort((x, y) => {
-              const rx = rows[x];
-              const ry = rows[y];
+          ? (spec.descending ? order.reverse() : order)
+          : order.sort((x, y) => {
+              const rx = rows[x.row];
+              const ry = rows[y.row];
               if (!rx || !ry) return 0;
               const c = compare(rx, ry, spec.sort);
               return spec.descending ? -c : c;
             });
 
       const viewId = nextViewId++;
-      views.set(viewId, { order: Uint32Array.from(sorted), gen: 1 });
+      views.set(viewId, {
+        order: Uint32Array.from(sorted.map(({ row }) => row)),
+        ...(spec.source.kind === "playlist" ? { trackNos: Uint32Array.from(sorted.map(({ trackNo }) => trackNo)) } : {}),
+        gen: 1,
+      });
       return wait<ViewHandle>({ viewId, len: sorted.length, gen: 1 });
     },
 
@@ -1653,11 +1657,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       const end = Math.min(view.order.length, offset + len);
       for (let i = Math.max(0, offset); i < end; i++) {
         const row = all[view.order[i] ?? 0];
-        // The position in *this* view, which is what the `#` column shows and
-        // what the real backend computes in `rows_to_dto`. Handing back the
-        // row's stored number would show the collection's order inside a
-        // playlist.
-        if (row) out.push(project({ ...row, trackNo: i + 1 }));
+        // A playlist keeps its own stored track order when sorted or filtered;
+        // every other view numbers the visible rows.
+        if (row) out.push(project({ ...row, trackNo: view.trackNos?.[i] ?? i + 1 }));
       }
       return wait(out);
     },

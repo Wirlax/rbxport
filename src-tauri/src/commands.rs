@@ -326,6 +326,9 @@ pub async fn fetch_rows(
             let offset = offset as usize;
             let window = view.window(offset, len as usize);
             let mut rows = rows_to_dto(&library, window, offset);
+            for (position, row) in rows.iter_mut().enumerate() {
+                row.track_no = view.track_no_at(offset.saturating_add(position));
+            }
             if !extra_columns.is_empty() { enrich_rows(&handle, &mut rows, &extra_columns)?; }
             Ok(rows)
         })

@@ -905,6 +905,8 @@ function AppBody() {
         refuse(refusal(true));
         return;
       }
+      const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
+      report(`Importing ${files.length} track${files.length === 1 ? "" : "s"} into ${name}…`);
       void (async () => {
         try {
           // Resolve immediately, before any other async work: macOS's drag
@@ -915,7 +917,6 @@ function AppBody() {
           if (imported.tracks.length > 0) {
             await backend.edits.addTracksToPlaylist(playlistId, imported.tracks.map((t) => t.id));
           }
-          const name = tree.find((n) => n.id === playlistId)?.name ?? "the playlist";
           const total = imported.imported + imported.skipped.length;
           report(
             imported.skipped.length === 0
