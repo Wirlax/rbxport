@@ -1011,6 +1011,7 @@ fn secondary_column(
     row: rbl_index::Row,
     column: TrackColumn,
     preserve_cached_text: bool,
+    key_name: &str,
     details: Option<&rbl_db::details::TrackDetails>,
 ) -> (String, u32) {
     let at = row as usize;
@@ -1056,14 +1057,13 @@ fn secondary_column(
             |d| named(&d.label, d.label_id),
         ),
         TrackColumn::Key => {
-            let key = IndexCatalog::key_id(library, row);
             let value = details.map_or(0, |d| d.key_id);
-            let text = if key == 0 {
+            let text = if key_name.is_empty() {
                 String::new()
             } else if bpm == 0 || !preserve_cached_text {
-                camelot_name(key)
+                key_name.to_owned()
             } else {
-                format!("{} - {}", camelot_name(key), format_bpm(bpm))
+                format!("{} - {}", key_name, format_bpm(bpm))
             };
             (text, value)
         }
@@ -1159,14 +1159,22 @@ impl Catalog for IndexCatalog {
         let configured_column = self.source.track_column();
         let column = column.unwrap_or(configured_column);
         let details = self.source.details(&id.to_string());
+        let key = Self::key_id(&library, row);
+        let key_name = if key == 0 {
+            String::new()
+        } else if self.source.alphabetical_keys() {
+            library.key_name(row).to_owned()
+        } else {
+            camelot_name(key)
+        };
         let (secondary_text, column_value) = secondary_column(
             &library,
             row,
             column,
             column == configured_column,
+            &key_name,
             details.as_ref(),
         );
-        let key = Self::key_id(&library, row);
         Some(TrackRow {
             id,
             title: library.title.get(at).to_owned(),
@@ -1175,11 +1183,7 @@ impl Catalog for IndexCatalog {
             column_value,
             key,
             key_id: details.as_ref().map_or(0, |details| details.key_id),
-            key_name: if column == TrackColumn::Key {
-                camelot_name(key)
-            } else {
-                library.key_name(row).to_owned()
-            },
+            key_name,
             bpm_x100: library.bpm_x100.get(at).copied().unwrap_or(0),
         })
     }
@@ -1599,6 +1603,9 @@ mod tests {
         let keys = c.key_ids();
         assert_eq!(keys.first().copied().map(keys::name), Some("A"));
         assert_eq!(keys.iter().position(|id| *id == 1), Some(2));
+        let row = c.track_row(10, Some(TrackColumn::Key)).unwrap();
+        assert_eq!(row.key_name, "Am");
+        assert_eq!(row.secondary_text, "Am");
         assert_eq!(catalog().key_ids(), (1..=24).collect::<Vec<_>>());
     }
 
