@@ -86,6 +86,7 @@ fn load_lookup(
     table: &str,
     name_column: &str,
     interner: &mut crate::strings::Interner,
+    wire_ids: &mut Vec<u32>,
 ) -> rusqlite::Result<HashMap<String, u32>> {
     // Identifiers come from the constants below, never from user input.
     let sql = format!("SELECT ID, {name_column} FROM {table}");
@@ -100,6 +101,7 @@ fn load_lookup(
     for row in rows {
         let (Some(id), name) = row? else { continue };
         let dense = interner.push(name.as_deref().unwrap_or(""));
+        wire_ids.push(id.parse::<u32>().unwrap_or(0));
         map.insert(id, dense);
     }
     Ok(map)
@@ -176,11 +178,36 @@ pub fn load_with_cue_reader(
     let cloud_root = rbl_db::cloud_contents_root();
     let mut stats = LoadStats::default();
 
-    let artists = load_lookup(conn, "djmdArtist", "Name", &mut lib.artists)?;
-    let albums = load_lookup(conn, "djmdAlbum", "Name", &mut lib.albums)?;
-    let genres = load_lookup(conn, "djmdGenre", "Name", &mut lib.genres)?;
-    let labels = load_lookup(conn, "djmdLabel", "Name", &mut lib.labels)?;
-    let keys = load_lookup(conn, "djmdKey", "ScaleName", &mut lib.keys)?;
+    let artists = load_lookup(
+        conn,
+        "djmdArtist",
+        "Name",
+        &mut lib.artists,
+        &mut lib.artist_ids,
+    )?;
+    let albums = load_lookup(
+        conn,
+        "djmdAlbum",
+        "Name",
+        &mut lib.albums,
+        &mut lib.album_ids,
+    )?;
+    let genres = load_lookup(
+        conn,
+        "djmdGenre",
+        "Name",
+        &mut lib.genres,
+        &mut lib.genre_ids,
+    )?;
+    let labels = load_lookup(
+        conn,
+        "djmdLabel",
+        "Name",
+        &mut lib.labels,
+        &mut lib.label_ids,
+    )?;
+    let mut key_ids = Vec::new();
+    let keys = load_lookup(conn, "djmdKey", "ScaleName", &mut lib.keys, &mut key_ids)?;
 
     let mut stmt = conn.prepare(
         "SELECT ID, Title, ArtistID, AlbumID, GenreID, LabelID, KeyID,

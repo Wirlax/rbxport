@@ -6,10 +6,9 @@
 //! hold — bit rate, file size, the original artist — come from a point read
 //! of the database through the [`Source`].
 //!
-//! Ids on the wire are ours to choose as long as a player can hand them
-//! back: tracks go out as `djmdContent.ID`, which fits a `u32` in every
-//! library measured; artists, albums, genres and labels as their interner
-//! index plus one (0 means "none" in an album row); artwork as the track's
+//! IDs on the wire preserve their `djmd*` database values so requests remain
+//! stable across reloads. Tracks fit a `u32` in every library measured;
+//! 0 means "none" in an album row. Artwork uses the track's
 //! row plus two (1 means "no artwork" to a player). A CDJ-3000 asks for
 //! artwork by the track's or album's id instead, and is answered that way.
 
@@ -260,13 +259,16 @@ impl IndexCatalog {
 
     /// The row a menu item's id names: the track with that id, or the first
     /// track with artwork on the album with that id. The two id spaces
-    /// overlap for small numbers (an album's is its index plus one), and a
+    /// overlap for small numbers, and a
     /// track wins: it is what a player asks about far more often.
     fn item_row(library: &Library, id: u32) -> Option<rbl_index::Row> {
         if let Some(row) = Self::row_of(library, id) {
             return Some(row);
         }
-        let album = id.checked_sub(1)?;
+        let album = Self::dense_id(&library.album_ids, id);
+        if album == NO_ID {
+            return None;
+        }
         library
             .album
             .iter()
@@ -406,10 +408,10 @@ impl IndexCatalog {
                 .into_iter()
                 .map(Row::Date)
                 .collect(),
-            Query::Genres(_) => Self::named(&library.genre, &library.genres),
+            Query::Genres(_) => Self::named(&library.genre, &library.genres, &library.genre_ids),
             Query::GenreArtists(genre) => Self::genre_artists(library, *genre),
             Query::GenreArtistAlbums { genre, artist } => Self::genre_albums(library, *genre, *artist),
-            Query::Labels(_) => Self::named(&library.label, &library.labels),
+            Query::Labels(_) => Self::named(&library.label, &library.labels, &library.label_ids),
             Query::LabelArtists(label) => Self::label_artists(library, *label),
             Query::LabelArtistAlbums { label, artist } => Self::label_albums(library, *label, *artist),
             Query::ArtistRoleArtists(role) => self
@@ -420,8 +422,8 @@ impl IndexCatalog {
                 .map(|(id, name)| Row::Named { id, name })
                 .collect(),
             Query::ArtistRoleAlbums { role, artist } => self.role_albums(library, *role, *artist),
-            Query::Artists(_) => Self::named(&library.artist, &library.artists),
-            Query::Albums(_) => Self::named(&library.album, &library.albums),
+            Query::Artists(_) => Self::named(&library.artist, &library.artists, &library.artist_ids),
+            Query::Albums(_) => Self::named(&library.album, &library.albums, &library.album_ids),
             Query::ArtistAlbums(artist) => Self::artist_albums(library, *artist),
             Query::Folder(parent) => Self::folder(&library.playlists(), *parent),
             Query::Histories => Self::histories(library),
@@ -448,6 +450,22 @@ impl IndexCatalog {
             u32::MAX => 0,
             rank => rank + 1,
         }
+    }
+
+    fn dense_id(wire_ids: &[u32], wire_id: u32) -> u32 {
+        wire_ids
+            .iter()
+            .position(|&id| id == wire_id)
+            .and_then(|id| u32::try_from(id).ok())
+            .unwrap_or(NO_ID)
+    }
+
+    fn wire_id(wire_ids: &[u32], dense_id: u32) -> u32 {
+        if dense_id == NO_ID {
+            return 0;
+        }
+
+        wire_ids.get(dense_id as usize).copied().unwrap_or(0)
     }
 
     fn sort_column(sort: Sort, scope: &TrackScope, alphabetical_keys: bool) -> Option<SortColumn> {
@@ -539,9 +557,9 @@ impl IndexCatalog {
                 artist,
                 album,
             } => {
-                let genre = genre.wrapping_sub(1);
-                let artist = artist.map(|id| id.wrapping_sub(1));
-                let album = album.map(|id| id.wrapping_sub(1));
+                let genre = Self::dense_id(&library.genre_ids, *genre);
+                let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
+                let album = album.map(|id| Self::dense_id(&library.album_ids, id));
                 all()
                     .filter(|&(row, _)| {
                         let at = row as usize;
@@ -556,9 +574,9 @@ impl IndexCatalog {
                 artist,
                 album,
             } => {
-                let label = label.wrapping_sub(1);
-                let artist = artist.map(|id| id.wrapping_sub(1));
-                let album = album.map(|id| id.wrapping_sub(1));
+                let label = Self::dense_id(&library.label_ids, *label);
+                let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
+                let album = album.map(|id| Self::dense_id(&library.album_ids, id));
                 all()
                     .filter(|&(row, _)| {
                         let at = row as usize;
@@ -569,7 +587,7 @@ impl IndexCatalog {
                     .collect()
             }
             TrackScope::ArtistRole { role, artist, album } => {
-                let album = album.map(|id| id.wrapping_sub(1));
+                let album = album.map(|id| Self::dense_id(&library.album_ids, id));
                 self.source.artist_role_track_ids(*role, *artist).into_iter()
                     .filter_map(|id| library.row_of_id(u64::from(id)))
                     .filter(|&row| album.is_none_or(|id| library.album.get(row as usize) == Some(&id)))
@@ -577,8 +595,8 @@ impl IndexCatalog {
                     .collect()
             }
             TrackScope::Artist { artist, album } => {
-                let artist = artist.wrapping_sub(1);
-                let album = album.map(|a| a.wrapping_sub(1));
+                let artist = Self::dense_id(&library.artist_ids, *artist);
+                let album = album.map(|id| Self::dense_id(&library.album_ids, id));
                 all()
                     .filter(|&(row, _)| {
                         library.artist.get(row as usize) == Some(&artist)
@@ -587,7 +605,7 @@ impl IndexCatalog {
                     .collect()
             }
             TrackScope::Album(album) => {
-                let album = album.wrapping_sub(1);
+                let album = Self::dense_id(&library.album_ids, *album);
                 all()
                     .filter(|&(row, _)| library.album.get(row as usize) == Some(&album))
                     .collect()
@@ -693,7 +711,11 @@ impl IndexCatalog {
 
     /// The names of a lookup column that at least one track uses, sorted
     /// as the browser sorts them, as `(id, name)` rows.
-    fn named(column: &[u32], interner: &rbl_index::strings::Interner) -> Vec<Row> {
+    fn named(
+        column: &[u32],
+        interner: &rbl_index::strings::Interner,
+        wire_ids: &[u32],
+    ) -> Vec<Row> {
         let mut used = vec![false; interner.len()];
         for &id in column {
             if let Some(slot) = used.get_mut(id as usize) {
@@ -713,14 +735,14 @@ impl IndexCatalog {
         });
         ids.into_iter()
             .map(|id| Row::Named {
-                id: id + 1,
+                id: Self::wire_id(wire_ids, id),
                 name: interner.name(id).to_owned(),
             })
             .collect()
     }
 
     fn artist_albums(library: &Library, artist: u32) -> Vec<Row> {
-        let artist = artist.wrapping_sub(1);
+        let artist = Self::dense_id(&library.artist_ids, artist);
         let albums: Vec<u32> = library
             .artist
             .iter()
@@ -748,7 +770,7 @@ impl IndexCatalog {
             .into_iter()
             .filter(|&album| album == NO_ID || !library.albums.name(album).is_empty())
             .map(|album| Row::Named {
-                id: if album == NO_ID { 0 } else { album + 1 },
+                id: Self::wire_id(&library.album_ids, album),
                 name: if album == NO_ID {
                     "Unknown".to_owned()
                 } else {
@@ -759,7 +781,7 @@ impl IndexCatalog {
     }
 
     fn genre_artists(library: &Library, genre: u32) -> Vec<Row> {
-        let genre = genre.wrapping_sub(1);
+        let genre = Self::dense_id(&library.genre_ids, genre);
         let artists: Vec<u32> = library
             .genre
             .iter()
@@ -767,12 +789,12 @@ impl IndexCatalog {
             .filter(|&(&track_genre, &artist)| track_genre == genre && artist != NO_ID)
             .map(|(_, &artist)| artist)
             .collect();
-        Self::named(&artists, &library.artists)
+        Self::named(&artists, &library.artists, &library.artist_ids)
     }
 
     fn genre_albums(library: &Library, genre: u32, artist: Option<u32>) -> Vec<Row> {
-        let genre = genre.wrapping_sub(1);
-        let artist = artist.map(|id| id.wrapping_sub(1));
+        let genre = Self::dense_id(&library.genre_ids, genre);
+        let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
         let albums: Vec<u32> = library
             .genre
             .iter()
@@ -787,7 +809,7 @@ impl IndexCatalog {
     }
 
     fn label_artists(library: &Library, label: u32) -> Vec<Row> {
-        let label = label.wrapping_sub(1);
+        let label = Self::dense_id(&library.label_ids, label);
         let artists: Vec<u32> = library
             .label
             .iter()
@@ -795,12 +817,12 @@ impl IndexCatalog {
             .filter(|&(&track_label, &artist)| track_label == label && artist != NO_ID)
             .map(|(_, &artist)| artist)
             .collect();
-        Self::named(&artists, &library.artists)
+        Self::named(&artists, &library.artists, &library.artist_ids)
     }
 
     fn label_albums(library: &Library, label: u32, artist: Option<u32>) -> Vec<Row> {
-        let label = label.wrapping_sub(1);
-        let artist = artist.map(|id| id.wrapping_sub(1));
+        let label = Self::dense_id(&library.label_ids, label);
+        let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
         let albums: Vec<u32> = library
             .label
             .iter()
@@ -1159,9 +1181,10 @@ impl Catalog for IndexCatalog {
         let library = self.source.library()?;
         let row = Self::row_of(&library, id)?;
         let at = row as usize;
-        let lookup_id = |ids: &[u32]| {
-            ids.get(at)
-                .map_or(0, |&v| if v == NO_ID { 0 } else { v + 1 })
+        let lookup_id = |column: &[u32], wire_ids: &[u32]| {
+            column
+                .get(at)
+                .map_or(0, |&dense| Self::wire_id(wire_ids, dense))
         };
         let path = library.folder_path.get(at).to_owned();
         // The database's row for what the index leaves out; a read that
@@ -1180,19 +1203,19 @@ impl Catalog for IndexCatalog {
             key_name: details
                 .as_ref()
                 .map_or_else(|| library.key_name(row).to_owned(), |d| d.key.clone()),
-            artist_id: lookup_id(&library.artist),
+            artist_id: lookup_id(&library.artist, &library.artist_ids),
             artist: library.artist_name(row).to_owned(),
-            album_id: lookup_id(&library.album),
+            album_id: lookup_id(&library.album, &library.album_ids),
             album: library.album_name(row).to_owned(),
             duration_s: library.length_sec.get(at).copied().unwrap_or(0),
             rating: u32::from(library.rating.get(at).copied().unwrap_or(0)),
             colour: u32::from(library.color.get(at).copied().unwrap_or(0)),
-            genre_id: lookup_id(&library.genre),
+            genre_id: lookup_id(&library.genre, &library.genre_ids),
             genre: library.genre_name(row).to_owned(),
             date_added: library.date_added.get(at).to_owned(),
             year: details.as_ref().map_or(0, |d| d.year),
             bit_rate_kbps: details.as_ref().map_or(0, |d| d.bitrate),
-            label_id: lookup_id(&library.label),
+            label_id: lookup_id(&library.label, &library.label_ids),
             label: library.label_name(row).to_owned(),
             original_artist: details
                 .as_ref()
@@ -1598,41 +1621,44 @@ mod tests {
     }
 
     #[test]
-    fn artists_and_their_albums_carry_interner_ids_plus_one() {
+    fn artists_and_their_albums_preserve_database_ids() {
         // The test builder interns one row per track, as `djmdArtist` can:
         // a name under two ids is two menu rows, which is what rekordbox
         // sends too ("Aaliyah" and "Aaliyah ft. Dash!e" were separate ids).
-        let c = catalog();
+        let mut lib = library();
+        lib.artist_ids = vec![5001, 5002, 5003];
+        lib.album_ids = vec![6001, 6002, 6003];
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
         let artists = c.list(&Query::Artists(Sort::Default));
         assert_eq!(
             artists,
             vec![
                 Row::Named {
-                    id: 2,
+                    id: 5002,
                     name: "Alice".into()
                 },
                 Row::Named {
-                    id: 1,
+                    id: 5001,
                     name: "Bob".into()
                 },
                 Row::Named {
-                    id: 3,
+                    id: 5003,
                     name: "Carol".into()
                 },
             ]
         );
         assert_eq!(
-            c.list(&Query::ArtistAlbums(2)),
+            c.list(&Query::ArtistAlbums(5002)),
             vec![Row::Named {
-                id: 2,
+                id: 6002,
                 name: "First".into()
             }]
         );
         assert_eq!(
             ids(&c.list(&Query::Tracks {
                 scope: TrackScope::Artist {
-                    artist: 2,
-                    album: Some(2)
+                    artist: 5002,
+                    album: Some(6002)
                 },
                 sort: Sort::Default
             })),
@@ -1641,7 +1667,7 @@ mod tests {
         assert_eq!(
             ids(&c.list(&Query::Tracks {
                 scope: TrackScope::Artist {
-                    artist: 2,
+                    artist: 5002,
                     album: None
                 },
                 sort: Sort::Default
@@ -1650,7 +1676,7 @@ mod tests {
         );
         assert_eq!(
             ids(&c.list(&Query::Tracks {
-                scope: TrackScope::Album(1),
+                scope: TrackScope::Album(6001),
                 sort: Sort::Default
             })),
             [10]

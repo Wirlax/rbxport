@@ -96,6 +96,11 @@ pub struct Library {
     pub genres: Interner,
     pub labels: Interner,
     pub keys: Interner,
+    /// Original rekordbox lookup IDs, indexed by the corresponding interner ID.
+    pub artist_ids: Vec<u32>,
+    pub album_ids: Vec<u32>,
+    pub genre_ids: Vec<u32>,
+    pub label_ids: Vec<u32>,
 
     /// The playlist tree.
     ///
@@ -179,6 +184,10 @@ impl Clone for Library {
             genres: self.genres.clone(),
             labels: self.labels.clone(),
             keys: self.keys.clone(),
+            artist_ids: self.artist_ids.clone(),
+            album_ids: self.album_ids.clone(),
+            genre_ids: self.genre_ids.clone(),
+            label_ids: self.label_ids.clone(),
             playlists: RwLock::new(self.playlists.read().clone()),
             histories: RwLock::new(self.histories.read().clone()),
             tag_list: RwLock::new(self.tag_list.read().clone()),
@@ -606,6 +615,11 @@ impl Library {
                 + self.bpm_x100.capacity()
                 + self.length_sec.capacity()
                 + self.play_count.capacity())
+                * 4
+            + (self.artist_ids.capacity()
+                + self.album_ids.capacity()
+                + self.genre_ids.capacity()
+                + self.label_ids.capacity())
                 * 4
             + self.year.capacity() * 2
             + self.rating.capacity()

@@ -40,10 +40,18 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.analysis_path.push("");
         lib.date_added.push(t.date_added);
         lib.release_date.push("");
-        lib.artist.push(lib.artists.push(t.artist));
-        lib.album.push(lib.albums.push(t.album));
-        lib.genre.push(lib.genres.push(t.genre));
-        lib.label.push(lib.labels.push(t.label));
+        let artist = lib.artists.push(t.artist);
+        let album = lib.albums.push(t.album);
+        let genre = lib.genres.push(t.genre);
+        let label = lib.labels.push(t.label);
+        lib.artist.push(artist);
+        lib.album.push(album);
+        lib.genre.push(genre);
+        lib.label.push(label);
+        lib.artist_ids.push(artist + 1);
+        lib.album_ids.push(album + 1);
+        lib.genre_ids.push(genre + 1);
+        lib.label_ids.push(label + 1);
         // One interner entry per track, names repeating, which is what
         // `djmdKey` does on the reference library (`A` under two ids).
         lib.key.push(lib.keys.push(t.key));

@@ -6,7 +6,7 @@
 //! columns are written to disk once and read back whole, which turns the same
 //! start into a sequential read of a few tens of megabytes.
 //!
-//! Format 9 includes sort ranks and the search arena. A checksum over the
+//! Format 10 includes lookup-table database IDs. A checksum over the
 //! complete payload rejects accidental corruption; rank permutations and
 //! column lengths are checked before the derived indexes can be used.
 //!
@@ -42,8 +42,9 @@ use crate::{Cue, Cues, Library, Playlists, Row, TagCategory};
 /// was built from: formats 1 to 6 keyed on the change counter alone, so a
 /// different `master.db` with the same counter — a test fixture rebuilt
 /// under another folder — was served the old one's file paths. 9 adds file
-/// metadata, derived indexes and a checksum; earlier caches rebuild once.
-pub const FORMAT: u32 = 9;
+/// metadata, derived indexes and a checksum; earlier caches rebuild once. 10
+/// preserves the database IDs of named lookup rows for Link Export.
+pub const FORMAT: u32 = 10;
 
 const MAGIC: &[u8; 4] = b"RBLX";
 
@@ -233,6 +234,14 @@ pub fn encode(library: &Library, fingerprint: Fingerprint) -> Vec<u8> {
         &library.keys,
     ] {
         w.interner(interner);
+    }
+    for ids in [
+        &library.artist_ids,
+        &library.album_ids,
+        &library.genre_ids,
+        &library.label_ids,
+    ] {
+        w.u32s(ids);
     }
 
     write_lists(&mut w, &library.playlists());
@@ -426,6 +435,10 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
     lib.genres = r.interner()?;
     lib.labels = r.interner()?;
     lib.keys = r.interner()?;
+    lib.artist_ids = r.u32s()?;
+    lib.album_ids = r.u32s()?;
+    lib.genre_ids = r.u32s()?;
+    lib.label_ids = r.u32s()?;
 
     let playlists = read_lists(&mut r)?;
     let histories = read_lists(&mut r)?;
@@ -472,6 +485,10 @@ pub fn decode(data: &[u8], want: Fingerprint) -> Option<Library> {
         || lib.artist.len() != count
         || lib.rating.len() != count
         || lib.play_count.len() != count
+        || lib.artist_ids.len() != lib.artists.len()
+        || lib.album_ids.len() != lib.albums.len()
+        || lib.genre_ids.len() != lib.genres.len()
+        || lib.label_ids.len() != lib.labels.len()
         || cue_index.len() != count + 1
     {
         return None;

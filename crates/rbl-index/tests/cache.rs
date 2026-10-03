@@ -54,6 +54,10 @@ fn a_snapshot_reproduces_the_library_it_came_from() {
 
     assert_eq!(restored.len(), original.len());
     assert_eq!(restored.ids, original.ids);
+    assert_eq!(restored.artist_ids, original.artist_ids);
+    assert_eq!(restored.album_ids, original.album_ids);
+    assert_eq!(restored.genre_ids, original.genre_ids);
+    assert_eq!(restored.label_ids, original.label_ids);
     for row in 0..original.len() {
         assert_eq!(restored.title.get(row), original.title.get(row));
         assert_eq!(restored.comment.get(row), original.comment.get(row));
