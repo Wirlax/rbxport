@@ -46,6 +46,31 @@ test("clicking LINK joins the network and shows the players either side of the m
   expect(order).toEqual(["Player 1", "Mixer 33", "Player 2"]);
 });
 
+test("the mixer's MASTER and LINK CUE lamps share one compact row", async ({ page }) => {
+  await page.goto("/?link=on");
+  await expect(page.getByRole("grid")).toBeVisible();
+
+  const mixer = page.getByLabel("Mixer 33");
+  const master = mixer.getByText("MASTER", { exact: true });
+  const linkCue = mixer.getByText("LINK CUE", { exact: true });
+  const [masterBox, cueBox, sameParent] = await Promise.all([
+    master.boundingBox(),
+    linkCue.boundingBox(),
+    mixer.evaluate((element) => {
+      const spans = [...element.querySelectorAll("span")];
+      const masterLamp = spans.find((span) => span.textContent === "MASTER");
+      const cueLamp = spans.find((span) => span.textContent === "LINK CUE");
+      return masterLamp?.parentElement === cueLamp?.parentElement;
+    }),
+  ]);
+
+  expect(masterBox).not.toBeNull();
+  expect(cueBox).not.toBeNull();
+  expect(sameParent).toBe(true);
+  expect(masterBox?.y).toBeCloseTo(cueBox?.y ?? 0, 0);
+  expect(masterBox?.x ?? 0).toBeLessThan(cueBox?.x ?? 0);
+});
+
 test("a deck takes a track dragged from the library; the mixer does not", async ({ page }) => {
   await page.goto("/?link=on");
   await expect(page.getByRole("grid")).toBeVisible();

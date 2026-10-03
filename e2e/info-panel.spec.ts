@@ -53,6 +53,25 @@ test("Summary shows the record the row does not carry", async ({ page }) => {
   await expect(panel.getByText(/^\/Volumes\/MUSIC\//)).toBeVisible();
 });
 
+test("artwork hue only tints the empty-record placeholder", async ({ page }) => {
+  const panel = await openPanel(page);
+  const summarySleeve = panel.locator('[style*="--hue"]').first();
+  const summaryRecord = summarySleeve.locator("svg");
+
+  // Applying the filter to the sleeve itself also hue-rotates real artwork.
+  // Only the fallback record should inherit the per-track tint.
+  await expect(summaryRecord).toBeVisible();
+  expect(await summarySleeve.evaluate((element) => getComputedStyle(element).filter)).toBe("none");
+  expect(await summaryRecord.evaluate((element) => getComputedStyle(element).filter)).not.toBe("none");
+
+  await panel.getByRole("tab", { name: "Artwork" }).click();
+  const artworkWell = panel.locator('[style*="--hue"]').first();
+  const artworkRecord = artworkWell.locator("svg");
+  await expect(artworkRecord).toBeVisible();
+  expect(await artworkWell.evaluate((element) => getComputedStyle(element).filter)).toBe("none");
+  expect(await artworkRecord.evaluate((element) => getComputedStyle(element).filter)).not.toBe("none");
+});
+
 test("Info edits a title, and the row in the table follows", async ({ page }) => {
   const panel = await openPanel(page, "/?writable");
   await panel.getByRole("tab", { name: "Info" }).click();

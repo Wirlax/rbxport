@@ -865,20 +865,29 @@ test("the # column sorts a playlist by its own order, and back", async ({ page }
   await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("treeitem").filter({ hasText: "Melodic Vox" }).first().click();
   const titles = page.locator('[role="gridcell"][data-col="title"]');
+  const trackNos = page.locator('[role="gridcell"][data-col="trackNo"]');
   await expect(page.getByTestId("browser-title")).toContainText("Melodic Vox");
   const first = (await titles.first().innerText()).trim();
   const second = (await titles.nth(1).innerText()).trim();
 
+  // These are the entries' stored playlist positions, not visible row numbers.
+  await expect(trackNos.first()).toHaveText("1");
+  await expect(trackNos.nth(1)).toHaveText("2");
+
   // The order it opens in is its own, and the heading says so.
   const head = page.getByRole("columnheader", { name: /^#/ });
   await head.click();
-  // Reversed: what was first is now last, and the numbers still count down the list.
+  // Reversed: what was first is now last, and each entry keeps its stored
+  // playlist position instead of being renumbered for the visible rows.
   await expect(titles.first()).not.toHaveText(first);
   await expect(titles.last()).toHaveText(first);
-  await expect(page.locator('[role="gridcell"][data-col="trackNo"]').first()).toHaveText("1");
+  await expect(trackNos.first()).toHaveText("30");
+  await expect(trackNos.last()).toHaveText("1");
   await head.click();
   await expect(titles.first()).toHaveText(first);
   await expect(titles.nth(1)).toHaveText(second);
+  await expect(trackNos.first()).toHaveText("1");
+  await expect(trackNos.nth(1)).toHaveText("2");
 });
 
 test("the Layout tab hides the Explorer and shows playlist counts", async ({ page }) => {
@@ -1472,6 +1481,35 @@ test("settings has the LINK switch, and says why a browser cannot turn it on", a
   await expect(section).toContainText("browser has no access to the network");
   // A LINK that cannot be turned on offers no button; the reason stands in its place.
   await expect(section.getByRole("button", { name: "Connect to PRO DJ LINK" })).toHaveCount(0);
+});
+
+test("the automatic LINK switch sits at the right edge with left-aligned help", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Preferences" });
+  await dialog.getByRole("tab", { name: "PRO DJ LINK" }).click();
+
+  const toggle = dialog.getByRole("switch", { name: "Auto-join LINK when available" });
+  const label = toggle.locator("xpath=parent::label");
+  const labelText = label.locator("span");
+  const help = dialog.getByText("Turn on PRO DJ LINK automatically when a player or mixer is detected.");
+  const [toggleBox, labelBox, textBox, helpBox] = await Promise.all([
+    toggle.boundingBox(),
+    label.boundingBox(),
+    labelText.boundingBox(),
+    help.boundingBox(),
+  ]);
+
+  expect(toggleBox).not.toBeNull();
+  expect(labelBox).not.toBeNull();
+  expect(textBox).not.toBeNull();
+  expect(helpBox).not.toBeNull();
+  expect(toggleBox?.x ?? 0).toBeGreaterThan(textBox?.x ?? 0);
+  expect((toggleBox?.x ?? 0) + (toggleBox?.width ?? 0)).toBeCloseTo(
+    (labelBox?.x ?? 0) + (labelBox?.width ?? 0),
+    0,
+  );
+  expect(helpBox?.x).toBeCloseTo(textBox?.x ?? 0, 0);
 });
 
 test("the detail waveform shows a window, not the whole track again", async ({ page }) => {
