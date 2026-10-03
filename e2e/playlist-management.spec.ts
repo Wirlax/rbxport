@@ -33,6 +33,43 @@ async function chooseFromTreeMenu(page: Page, node: Locator, entry: string) {
 
 const rows = (page: Page) => page.getByRole("row").filter({ has: page.getByRole("gridcell") });
 
+function collection(page: Page): Locator {
+  return page.locator('[role="treeitem"][data-kind="collection"]');
+}
+
+async function openCollectionMenu(page: Page) {
+  await collection(page).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Playlists" });
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+test("RBX-23: an empty library exposes creation from the Playlists collection", async ({ page }) => {
+  await page.goto("/?writable=1&playlistFixture=empty");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await expect(page.locator('[role="treeitem"][data-kind="playlist"], [role="treeitem"][data-kind="folder"]')).toHaveCount(0);
+
+  const menu = await openCollectionMenu(page);
+  await expect(menu.getByRole("menuitem", { name: "Create New Playlist" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "Create New Folder" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "Create New Playlist" }).click();
+
+  await expect(page.getByRole("contentinfo")).toContainText("Created New playlist.");
+  await expect(item(page, "New playlist")).toBeVisible();
+});
+
+test("RBX-22: deleting the last CUE playlist leaves collection creation available", async ({ page }) => {
+  await page.goto("/?writable=1&playlistFixture=cueOnly");
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
+  await chooseFromTreeMenu(page, item(page, "CUE"), "Delete Playlist");
+  await expect(item(page, "CUE")).toHaveCount(0);
+
+  const menu = await openCollectionMenu(page);
+  await menu.getByRole("menuitem", { name: "Create New Folder" }).click();
+  await expect(page.getByRole("contentinfo")).toContainText("Created New folder.");
+  await expect(item(page, "New folder")).toBeVisible();
+});
+
 test("a playlist made from another's menu lands in the same folder, empty", async ({ page }) => {
   await open(page);
   const sibling = item(page, "Melodic Vox");

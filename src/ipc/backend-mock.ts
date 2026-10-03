@@ -268,26 +268,32 @@ function mockPlaylistSize(id: string): number {
   return 14 + (seed % 30);
 }
 
-function makeTree(): TreeNode[] {
+type PlaylistFixture = "default" | "empty" | "cueOnly";
+
+function makeTree(playlistFixture: PlaylistFixture): TreeNode[] {
   const nodes: TreeNode[] = [
     { id: "all", name: "All Tracks", kind: "allTracks", depth: 0 },
     { id: "playlists", name: "Playlists", kind: "collection", depth: 0, expanded: true },
   ];
-  let n = 0;
-  for (const [fi, folder] of FOLDERS.entries()) {
-    nodes.push({ id: `folder-${fi}`, name: folder, kind: "folder", depth: 1, expanded: fi < 2 });
-    if (fi >= 2) continue;
-    const take = fi === 0 ? 3 : PLAYLISTS.length - 3;
-    for (let i = 0; i < take; i++) {
-      const name = PLAYLISTS[n++ % PLAYLISTS.length] ?? "";
-      const id = `pl-${fi}-${i}`;
-      // The count the real tree carries, from the same seed `openView` uses.
-      nodes.push({ id, name, kind: "playlist", depth: 2, childCount: mockPlaylistSize(id) });
-    }
-    // One intelligent playlist in the first folder, as a library with rules
-    // shows: no count, since a rule's count is only known once it is opened.
-    if (fi === 0) {
-      nodes.push({ id: "smart-0", name: "Fresh 128s", kind: "smartPlaylist", depth: 2 });
+  if (playlistFixture === "cueOnly") {
+    nodes.push({ id: "cue", name: "CUE", kind: "playlist", depth: 1, childCount: mockPlaylistSize("cue") });
+  } else if (playlistFixture === "default") {
+    let n = 0;
+    for (const [fi, folder] of FOLDERS.entries()) {
+      nodes.push({ id: `folder-${fi}`, name: folder, kind: "folder", depth: 1, expanded: fi < 2 });
+      if (fi >= 2) continue;
+      const take = fi === 0 ? 3 : PLAYLISTS.length - 3;
+      for (let i = 0; i < take; i++) {
+        const name = PLAYLISTS[n++ % PLAYLISTS.length] ?? "";
+        const id = `pl-${fi}-${i}`;
+        // The count the real tree carries, from the same seed `openView` uses.
+        nodes.push({ id, name, kind: "playlist", depth: 2, childCount: mockPlaylistSize(id) });
+      }
+      // One intelligent playlist in the first folder, as a library with rules
+      // shows: no count, since a rule's count is only known once it is opened.
+      if (fi === 0) {
+        nodes.push({ id: "smart-0", name: "Fresh 128s", kind: "smartPlaylist", depth: 2 });
+      }
     }
   }
   // Histories, filed as rekordbox files them: a folder per year, one per month
@@ -338,6 +344,8 @@ export function fold(s: string): string {
 
 export interface MockOptions {
   trackCount?: number;
+  /** The playlist-tree fixture used by focused browser tests. */
+  playlistFixture?: PlaylistFixture;
   /** Simulated IPC latency in ms; 0 keeps tests fast. */
   latencyMs?: number;
   /**
@@ -352,6 +360,7 @@ export interface MockOptions {
 export function createMockBackend(options: MockOptions = {}): Backend {
   const trackCount = options.trackCount ?? readCountFromUrl() ?? 2000;
   const latency = options.latencyMs ?? readLatencyFromUrl() ?? 0;
+  const playlistFixture = options.playlistFixture ?? readPlaylistFixtureFromUrl();
   const all = makeRows(trackCount);
   const colors = makeColors(trackCount);
   const rowPositions = new Map(all.map((row, index) => [row.id, index]));
@@ -475,7 +484,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     if (q) candidates = candidates.filter((i) => all[i] && matchesSearch(all[i], q, spec.searchField ?? "all"));
     return candidates;
   };
-  const tree = makeTree();
+  const tree = makeTree(playlistFixture);
   type MockEdit = { label: string; undo: () => void; redo: () => void };
   const editUndo: MockEdit[] = [];
   const editRedo: MockEdit[] = [];
@@ -2559,6 +2568,13 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 function readFlagFromUrl(name: string): boolean {
   if (typeof location === "undefined") return false;
   return new URLSearchParams(location.search).has(name);
+}
+
+/** Focused tree fixtures for browser regressions; ordinary mock use stays full. */
+function readPlaylistFixtureFromUrl(): PlaylistFixture {
+  if (typeof location === "undefined") return "default";
+  const fixture = new URLSearchParams(location.search).get("playlistFixture");
+  return fixture === "empty" || fixture === "cueOnly" ? fixture : "default";
 }
 
 /**
