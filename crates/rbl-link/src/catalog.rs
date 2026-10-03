@@ -446,10 +446,7 @@ impl IndexCatalog {
     /// The Camelot key id a player uses, 1–24, or 0 for a key the wheel does
     /// not know.
     fn key_id(library: &Library, row: rbl_index::Row) -> u32 {
-        match camelot_rank(library.key_name(row)) {
-            u32::MAX => 0,
-            rank => rank + 1,
-        }
+        player_key_id(library.key_name(row))
     }
 
     fn dense_id(wire_ids: &[u32], wire_id: u32) -> u32 {
@@ -1058,9 +1055,7 @@ fn secondary_column(
         ),
         TrackColumn::Key => {
             let value = details.map_or(0, |d| d.key_id);
-            let text = if key_name.is_empty() {
-                String::new()
-            } else if bpm == 0 || !preserve_cached_text {
+            let text = if bpm == 0 || !preserve_cached_text {
                 key_name.to_owned()
             } else {
                 format!("{} - {}", key_name, format_bpm(bpm))
@@ -1119,6 +1114,26 @@ fn camelot_name(id: u32) -> String {
     format!("{}{side}", id.div_ceil(2))
 }
 
+/// The key id rekordbox puts on a track row. Besides exact key names it
+/// accepts a case-sensitive musical-key prefix after folding fullwidth ASCII.
+fn player_key_id(name: &str) -> u32 {
+    let rank = camelot_rank(name);
+    if rank != u32::MAX {
+        return rank + 1;
+    }
+
+    let normalized: String = name
+        .chars()
+        .map(|character| match character {
+            '\u{ff01}'..='\u{ff5e}' => char::from_u32(u32::from(character) - 0xfee0).unwrap_or(character),
+            _ => character,
+        })
+        .collect();
+    (1..=24)
+        .find(|&id| normalized.starts_with(keys::name(id)))
+        .unwrap_or(0)
+}
+
 /// `YYYY`, `YYYY-MM` or `YYYY-MM-DD` as a prefix of `StockDate`.
 fn date_prefix(year: u32, month: Option<u32>, day: Option<u32>) -> String {
     match (month, day) {
@@ -1160,10 +1175,10 @@ impl Catalog for IndexCatalog {
         let column = column.unwrap_or(configured_column);
         let details = self.source.details(&id.to_string());
         let key = Self::key_id(&library, row);
-        let key_name = if key == 0 {
-            String::new()
-        } else if self.source.alphabetical_keys() {
+        let key_name = if self.source.alphabetical_keys() {
             library.key_name(row).to_owned()
+        } else if key == 0 {
+            String::new()
         } else {
             camelot_name(key)
         };
@@ -1182,7 +1197,9 @@ impl Catalog for IndexCatalog {
             column,
             column_value,
             key,
-            key_id: details.as_ref().map_or(0, |details| details.key_id),
+            key_id: details
+                .filter(|_| !library.key_name(row).is_empty())
+                .map_or(0, |details| details.key_id),
             key_name,
             bpm_x100: library.bpm_x100.get(at).copied().unwrap_or(0),
         })
@@ -1896,6 +1913,10 @@ mod tests {
         assert_eq!(c.track_row(11, None).unwrap().key, 1);
         assert_eq!(c.track_row(12, None).unwrap().key, 2);
         assert_eq!(c.track_row(10, None).unwrap().key, 15);
+        assert_eq!(player_key_id("Alpha"), 22);
+        assert_eq!(player_key_id("Beta Alpha"), 2);
+        assert_eq!(player_key_id("alpha"), 0);
+        assert_eq!(player_key_id("Ａｌｐｈａ"), 22);
         assert_eq!(
             ids(&c.list(&Query::Tracks {
                 scope: TrackScope::Key {
