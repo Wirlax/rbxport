@@ -419,7 +419,7 @@ impl CompiledItem {
 impl CompiledCondition {
     fn from(condition: &Condition, library: &Library, today: &Date) -> Self {
         let (low, high) = match condition.property {
-            Property::Bpm => (bpm_x100(&condition.left), bpm_x100(&condition.right)),
+            Property::Bpm => (whole(&condition.left), whole(&condition.right)),
             Property::Duration => (seconds(&condition.left), seconds(&condition.right)),
             Property::Rating | Property::PlayCount | Property::Year => {
                 (whole(&condition.left), whole(&condition.right))
@@ -551,7 +551,7 @@ impl CompiledCondition {
             Operator::NotEqual => value != self.low,
             Operator::Greater => value > self.low,
             Operator::Less => value < self.low,
-            Operator::InRange => value >= self.low.min(self.high) && value <= self.low.max(self.high),
+            Operator::InRange => value >= self.low && value <= self.high,
             Operator::InLast
             | Operator::NotInLast
             | Operator::Contains
@@ -580,18 +580,6 @@ impl CompiledCondition {
     }
 }
 
-/// A BPM as the library stores it, x100. Written as `128` or `128.5`
-/// [ASSUME]; a value already past a thousand is taken as x100 already.
-#[allow(clippy::cast_possible_truncation, reason = "a rounded BPM is nowhere near i64's range")]
-fn bpm_x100(text: &str) -> i64 {
-    let value: f64 = text.trim().parse().unwrap_or(0.0);
-    if value >= 1000.0 {
-        value.round() as i64
-    } else {
-        (value * 100.0).round() as i64
-    }
-}
-
 /// A duration in whole seconds, from `300` or `5:00`.
 fn seconds(text: &str) -> i64 {
     let text = text.trim();
@@ -601,10 +589,14 @@ fn seconds(text: &str) -> i64 {
     whole(text)
 }
 
-#[allow(clippy::cast_possible_truncation, reason = "a rounded rule value is nowhere near i64's range")]
+/// A numeric rule value, truncated and clamped to rekordbox's signed range.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the clamp defines the conversion range"
+)]
 fn whole(text: &str) -> i64 {
-    let text = text.trim();
-    text.parse::<i64>().or_else(|_| text.parse::<f64>().map(|v| v.round() as i64)).unwrap_or(0)
+    let value = text.trim().parse::<f64>().unwrap_or(0.0);
+    (value.trunc() as i64).clamp(i64::from(i32::MIN), i64::from(i32::MAX))
 }
 
 /// A colour by its `ColorID`, or by name for a rule written with one.
@@ -805,9 +797,11 @@ mod tests {
 
     #[test]
     fn values_are_read_the_way_rekordbox_writes_them() {
-        assert_eq!(bpm_x100("128"), 12_800);
-        assert_eq!(bpm_x100("128.5"), 12_850);
-        assert_eq!(bpm_x100("12800"), 12_800);
+        assert_eq!(whole("128"), 128);
+        assert_eq!(whole("128.5"), 128);
+        assert_eq!(whole("12800"), 12_800);
+        assert_eq!(whole("0.5"), 0);
+        assert_eq!(whole("2147483648"), i64::from(i32::MAX));
         assert_eq!(seconds("5:30"), 330);
         assert_eq!(seconds("330"), 330);
         assert_eq!(color_id("Aqua"), 6);

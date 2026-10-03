@@ -161,11 +161,11 @@ fn text_conditions_compare_without_case_or_accents() {
 fn number_conditions_read_the_columns() {
     let lib = library_from(&tracks());
     assert_eq!(
-        rows_of(&lib, &rule(1, &[("bpm", 5, "122", "125", "")])),
+        rows_of(&lib, &rule(1, &[("bpm", 5, "12200", "12500", "")])),
         vec![1, 3]
     );
     assert_eq!(
-        rows_of(&lib, &rule(1, &[("bpm", 3, "125", "", "")])),
+        rows_of(&lib, &rule(1, &[("bpm", 3, "12500", "", "")])),
         vec![2]
     );
     assert_eq!(
