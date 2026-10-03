@@ -137,9 +137,56 @@ pub fn fold(s: &str) -> String {
     out
 }
 
+/// Case and width folding for Smart Playlist string comparisons.
+///
+/// Unlike search folding, punctuation and whitespace remain significant.
+/// Rekordbox's rule comparator ignores ASCII case, precomposed accents,
+/// combining marks, and full-width ASCII differences.
+pub(crate) fn fold_smart(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.split('\0').next().unwrap_or("").chars() {
+        if ('\u{0300}'..='\u{036f}').contains(&ch) {
+            continue;
+        }
+
+        let ch = match ch {
+            '\u{ff01}'..='\u{ff5e}' => char::from_u32(u32::from(ch) - 0xfee0).unwrap_or(ch),
+            '\u{3000}' => ' ',
+            '\u{30a1}'..='\u{30f6}' => char::from_u32(u32::from(ch) - 0x60).unwrap_or(ch),
+            '\u{03c2}' => '\u{03c3}',
+            '\u{212b}' => 'a',
+            '\u{0130}' => 'i',
+            _ => ch,
+        };
+
+        match ch {
+            'A'..='Z' => out.push(ch.to_ascii_lowercase()),
+            '\u{fb00}' => out.push_str("ff"),
+            '\u{fb01}' => out.push_str("fi"),
+            '\u{fb02}' => out.push_str("fl"),
+            '\u{fb03}' => out.push_str("ffi"),
+            '\u{fb04}' => out.push_str("ffl"),
+            '\u{fb05}' | '\u{fb06}' => out.push_str("st"),
+            'œ' | 'Œ' => out.push_str("oe"),
+            _ => {
+                let deaccented = deaccent(ch);
+                if deaccented.is_empty() {
+                    out.extend(ch.to_lowercase());
+                } else {
+                    out.extend(deaccented.iter().copied());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Maps the accented Latin-1/Latin-A range onto ASCII; anything else is kept
 /// lowercased so non-Latin titles still sort and match consistently.
-#[allow(clippy::match_same_arms, reason = "one arm per vowel group reads better than a merged arm")]
+#[allow(
+    clippy::match_same_arms,
+    reason = "one arm per vowel group reads better than a merged arm"
+)]
 fn deaccent(ch: char) -> &'static [char] {
     match ch {
         'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => &['a'],
@@ -184,6 +231,14 @@ mod tests {
     #[test]
     fn folding_drops_punctuation_so_search_ignores_it() {
         assert_eq!(fold("Wh0 - House (Remix)"), "wh0  house remix");
+    }
+
+    #[test]
+    fn smart_folding_preserves_punctuation_and_normalizes_width() {
+        assert_eq!(fold_smart("Ａlphá-Beta"), "alpha-beta");
+        assert_eq!(fold_smart("カタカナ"), fold_smart("かたかな"));
+        assert_eq!(fold_smart("Straße"), "strasse");
+        assert_eq!(fold_smart("before\0after"), "before");
     }
 
     #[test]

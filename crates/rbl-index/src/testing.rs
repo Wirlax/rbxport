@@ -9,6 +9,11 @@ pub struct TestTrack {
     pub title: &'static str,
     pub artist: &'static str,
     pub album: &'static str,
+    pub album_artist: &'static str,
+    pub original_artist: &'static str,
+    pub composer: &'static str,
+    pub remixer: &'static str,
+    pub mix_name: &'static str,
     pub label: &'static str,
     pub comment: &'static str,
     pub bpm_x100: u32,
@@ -35,8 +40,22 @@ pub fn library_from(tracks: &[TestTrack]) -> Library {
         lib.title.push(t.title);
         lib.title_folded.push(&fold(t.title));
         lib.comment.push(t.comment);
+        for (column, value) in lib.search_extra.iter_mut().zip([
+            t.composer,
+            t.album_artist,
+            t.remixer,
+            t.original_artist,
+            t.mix_name,
+        ]) {
+            column.push(value);
+        }
         lib.folder_path.push(t.path);
-        lib.file_name.push(std::path::Path::new(t.path).file_name().and_then(|n| n.to_str()).unwrap_or(""));
+        lib.file_name.push(
+            std::path::Path::new(t.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(""),
+        );
         lib.analysis_path.push("");
         lib.date_added.push(t.date_added);
         lib.release_date.push("");

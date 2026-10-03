@@ -29,7 +29,7 @@
 
 use rbl_core::xml::{attribute, tags, Tag};
 
-use crate::strings::fold;
+use crate::strings::fold_smart;
 use crate::{Library, Row, NO_ID};
 
 /// How a group combines its conditions.
@@ -101,6 +101,11 @@ impl Operator {
 pub enum Property {
     Artist,
     Album,
+    AlbumArtist,
+    OriginalArtist,
+    Composer,
+    Remixer,
+    MixName,
     Genre,
     Label,
     Key,
@@ -116,8 +121,7 @@ pub enum Property {
     DateAdded,
     DateCreated,
     DateReleased,
-    /// A property the index does not hold: album artist, original artist,
-    /// remixer, composer, mix name, My Tag. Never matches.
+    /// A property the index does not hold. Never matches.
     Unsupported,
 }
 
@@ -129,6 +133,11 @@ impl Property {
         match self {
             Self::Artist => "artist",
             Self::Album => "album",
+            Self::AlbumArtist => "albumArtist",
+            Self::OriginalArtist => "originalArtist",
+            Self::Composer => "producer",
+            Self::Remixer => "remixedBy",
+            Self::MixName => "mixName",
             Self::Genre => "genre",
             Self::Label => "label",
             Self::Key => "key",
@@ -154,6 +163,11 @@ impl Property {
         match name.trim() {
             "artist" => Self::Artist,
             "album" => Self::Album,
+            "albumArtist" => Self::AlbumArtist,
+            "originalArtist" => Self::OriginalArtist,
+            "producer" => Self::Composer,
+            "remixedBy" => Self::Remixer,
+            "mixName" => Self::MixName,
             "genre" => Self::Genre,
             "label" => Self::Label,
             "key" => Self::Key,
@@ -429,52 +443,105 @@ impl CompiledCondition {
             // A key is picked from the library's own names, so the folded
             // name is what to compare [ASSUME: rekordbox writes the name,
             // not the `djmdKey` id, into `ValueLeft`].
-            Property::Key => fold(condition.left.trim()),
-            _ => fold(&condition.left),
+            Property::Key => fold_smart(condition.left.trim()),
+            _ => fold_smart(&condition.left),
         };
         let _ = library;
-        Self { property: condition.property, operator: condition.operator, text, low, high }
+        Self {
+            property: condition.property,
+            operator: condition.operator,
+            text,
+            low,
+            high,
+        }
     }
 
     #[inline]
     fn matches(&self, lib: &Library, row: Row) -> bool {
         let index = row as usize;
         match self.property {
-            Property::Artist => self.text_matches(lib.artists.folded(lib.artist.get(index).copied().unwrap_or(NO_ID))),
-            Property::Album => self.text_matches(lib.albums.folded(lib.album.get(index).copied().unwrap_or(NO_ID))),
-            Property::Genre => self.text_matches(lib.genres.folded(lib.genre.get(index).copied().unwrap_or(NO_ID))),
-            Property::Label => self.text_matches(lib.labels.folded(lib.label.get(index).copied().unwrap_or(NO_ID))),
-            Property::Key => self.text_matches(lib.keys.folded(lib.key.get(index).copied().unwrap_or(NO_ID))),
-            Property::Title => self.text_matches(lib.title_folded.get(index)),
+            Property::Artist => self.text_matches(
+                lib.artists
+                    .name(lib.artist.get(index).copied().unwrap_or(NO_ID)),
+            ),
+            Property::Album => self.text_matches(
+                lib.albums
+                    .name(lib.album.get(index).copied().unwrap_or(NO_ID)),
+            ),
+            Property::AlbumArtist => self.text_matches(lib.search_extra[1].get(index)),
+            Property::OriginalArtist => self.text_matches(lib.search_extra[3].get(index)),
+            Property::Composer => self.text_matches(lib.search_extra[0].get(index)),
+            Property::Remixer => self.text_matches(lib.search_extra[2].get(index)),
+            Property::MixName => self.text_matches(lib.search_extra[4].get(index)),
+            Property::Genre => self.text_matches(
+                lib.genres
+                    .name(lib.genre.get(index).copied().unwrap_or(NO_ID)),
+            ),
+            Property::Label => self.text_matches(
+                lib.labels
+                    .name(lib.label.get(index).copied().unwrap_or(NO_ID)),
+            ),
+            Property::Key => {
+                self.text_matches(lib.keys.name(lib.key.get(index).copied().unwrap_or(NO_ID)))
+            }
+            Property::Title => self.text_matches(lib.title.get(index)),
             // Not folded ahead of time: comments and file names are searched
             // by the query through the haystack, not compared on their own,
             // so a rule on them folds per row. A few milliseconds over the
             // whole library, once per open, not per keystroke.
-            Property::Comment => self.text_matches(&fold(lib.comment.get(index))),
-            Property::FileName => self.text_matches(&fold(lib.file_name.get(index))),
-            Property::Bpm => self.number_matches(i64::from(lib.bpm_x100.get(index).copied().unwrap_or(0))),
-            Property::Rating => self.number_matches(i64::from(lib.rating.get(index).copied().unwrap_or(0))),
-            Property::Color => self.number_matches(i64::from(lib.color.get(index).copied().unwrap_or(0))),
-            Property::PlayCount => self.number_matches(i64::from(lib.play_count.get(index).copied().unwrap_or(0))),
-            Property::Duration => self.number_matches(i64::from(lib.length_sec.get(index).copied().unwrap_or(0))),
-            Property::Year => self.number_matches(i64::from(lib.year.get(index).copied().unwrap_or(0))),
-            Property::DateAdded | Property::DateCreated => self.date_matches(lib.date_added.get(index)),
+            Property::Comment => self.text_matches(lib.comment.get(index)),
+            Property::FileName => self.text_matches(lib.file_name.get(index)),
+            Property::Bpm => {
+                self.number_matches(i64::from(lib.bpm_x100.get(index).copied().unwrap_or(0)))
+            }
+            Property::Rating => {
+                self.number_matches(i64::from(lib.rating.get(index).copied().unwrap_or(0)))
+            }
+            Property::Color => {
+                self.number_matches(i64::from(lib.color.get(index).copied().unwrap_or(0)))
+            }
+            Property::PlayCount => {
+                self.number_matches(i64::from(lib.play_count.get(index).copied().unwrap_or(0)))
+            }
+            Property::Duration => {
+                self.number_matches(i64::from(lib.length_sec.get(index).copied().unwrap_or(0)))
+            }
+            Property::Year => {
+                self.number_matches(i64::from(lib.year.get(index).copied().unwrap_or(0)))
+            }
+            Property::DateAdded | Property::DateCreated => {
+                self.date_matches(lib.date_added.get(index))
+            }
             Property::DateReleased => self.date_matches(lib.release_date.get(index)),
             Property::Unsupported => false,
         }
     }
 
-    fn text_matches(&self, folded: &str) -> bool {
+    fn text_matches(&self, text: &str) -> bool {
+        let folded = fold_smart(text);
+        let folded = folded.as_str();
         let wanted = self.text.as_str();
         match self.operator {
             Operator::Equal => folded == wanted,
             Operator::NotEqual => folded != wanted,
-            Operator::Contains => folded.contains(wanted),
-            Operator::NotContains => !folded.contains(wanted),
-            Operator::StartsWith => folded.starts_with(wanted),
-            Operator::EndsWith => folded.ends_with(wanted),
+            Operator::Contains => {
+                !folded.is_empty() && !wanted.is_empty() && folded.contains(wanted)
+            }
+            Operator::NotContains => {
+                !folded.is_empty() && !wanted.is_empty() && !folded.contains(wanted)
+            }
+            Operator::StartsWith => {
+                !folded.is_empty() && !wanted.is_empty() && folded.starts_with(wanted)
+            }
+            Operator::EndsWith => {
+                !folded.is_empty() && !wanted.is_empty() && folded.ends_with(wanted)
+            }
             // Ordering a name makes no sense; rekordbox does not offer it.
-            Operator::Greater | Operator::Less | Operator::InRange | Operator::InLast | Operator::NotInLast => false,
+            Operator::Greater
+            | Operator::Less
+            | Operator::InRange
+            | Operator::InLast
+            | Operator::NotInLast => false,
         }
     }
 
