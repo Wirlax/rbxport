@@ -794,8 +794,9 @@ impl IndexCatalog {
 
     fn genre_albums(library: &Library, genre: u32, artist: Option<u32>) -> Vec<Row> {
         let genre = Self::dense_id(&library.genre_ids, genre);
+        let include_unknown = artist.is_some();
         let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
-        let albums: Vec<u32> = library
+        let mut albums: Vec<u32> = library
             .genre
             .iter()
             .zip(&library.artist)
@@ -805,6 +806,9 @@ impl IndexCatalog {
             })
             .map(|(_, &album)| album)
             .collect();
+        if !include_unknown {
+            albums.retain(|&album| album != NO_ID);
+        }
         Self::album_rows(library, albums)
     }
 
@@ -822,8 +826,9 @@ impl IndexCatalog {
 
     fn label_albums(library: &Library, label: u32, artist: Option<u32>) -> Vec<Row> {
         let label = Self::dense_id(&library.label_ids, label);
+        let include_unknown = artist.is_some();
         let artist = artist.map(|id| Self::dense_id(&library.artist_ids, id));
-        let albums: Vec<u32> = library
+        let mut albums: Vec<u32> = library
             .label
             .iter()
             .zip(&library.artist)
@@ -833,6 +838,9 @@ impl IndexCatalog {
             })
             .map(|(_, &album)| album)
             .collect();
+        if !include_unknown {
+            albums.retain(|&album| album != NO_ID);
+        }
         Self::album_rows(library, albums)
     }
 
@@ -847,7 +855,7 @@ impl IndexCatalog {
         Self::album_rows(library, albums)
     }
 
-    /// A folder's children — folders and lists alike — in `Seq` order.
+    /// A folder's children, folders first and then lists, in `Seq` order.
     fn folder(lists: &rbl_index::Playlists, parent: u32) -> Vec<Row> {
         let parent_index = if parent == 0 {
             NO_ID
@@ -860,7 +868,12 @@ impl IndexCatalog {
         let mut children: Vec<usize> = (0..lists.len())
             .filter(|&i| lists.parent.get(i).copied() == Some(parent_index))
             .collect();
-        children.sort_by_key(|&i| lists.seq.get(i).copied().unwrap_or(0));
+        children.sort_by_key(|&i| {
+            (
+                !lists.is_folder(i),
+                lists.seq.get(i).copied().unwrap_or(0),
+            )
+        });
         children
             .into_iter()
             .filter_map(|i| {
@@ -1728,6 +1741,13 @@ mod tests {
         assert_eq!(
             ids(&c.list(&Query::LabelArtistAlbums {
                 label: 2,
+                artist: None,
+            })),
+            [2]
+        );
+        assert_eq!(
+            ids(&c.list(&Query::LabelArtistAlbums {
+                label: 2,
                 artist: Some(2),
             })),
             [2, 0]
@@ -1909,6 +1929,32 @@ mod tests {
                     id: 10,
                     position: 2
                 }
+            ]
+        );
+    }
+
+    #[test]
+    fn playlist_folders_sort_before_lists_regardless_of_sequence() {
+        let mut lib = library_from(&[]);
+        add_playlist(&mut lib, "First sequence", &[]);
+        add_folder(&mut lib, "Later folder");
+        let c = IndexCatalog::new(Arc::new(Fixed(Arc::new(lib))), Played::default());
+
+        assert_eq!(
+            c.list(&Query::Folder(0)),
+            vec![
+                Row::List {
+                    id: 1001,
+                    name: "Later folder".into(),
+                    folder: true,
+                    position: 1,
+                },
+                Row::List {
+                    id: 1000,
+                    name: "First sequence".into(),
+                    folder: false,
+                    position: 0,
+                },
             ]
         );
     }
