@@ -77,7 +77,9 @@ concurrency:
   # Real releases must never overlap: they update dev, main, the tag, and the
   # public update feed in that order. Validation-only callers may be superseded.
   group: ${{ inputs.validate_only && format('validate-{0}', github.ref) || 'release-installers' }}
-  cancel-in-progress: ${{ inputs.validate_only }}
+  # `inputs.validate_only` is unset for a manual dispatch. Actions requires a
+  # Boolean here, so give that path the safe, non-cancelling default.
+  cancel-in-progress: ${{ inputs.validate_only || false }}
 
 permissions:
   contents: write
