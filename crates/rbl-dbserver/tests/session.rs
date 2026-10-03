@@ -1059,13 +1059,42 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
     );
     assert_eq!(page[1].arguments[0], Argument::Number(51));
     assert_eq!(page[25].arguments[0], Argument::Number(75));
-    // Beyond the end: header and footer only.
+    // Beyond the end clamps to the final row.
     let past = s.handle(&numbers(
         kind::RENDER,
         3,
         &[CTX, 100, 25, 0, 100, 0xc, 1, 0],
     ));
-    assert_eq!(past.len(), 2);
+    assert_eq!(past.len(), 3);
+    assert_eq!(past[0].arguments[1], Argument::Number(99));
+    assert_eq!(past[1].arguments[0], Argument::Number(100));
+
+    // An overrun is right-aligned to preserve the requested page size.
+    let overrun = s.handle(&numbers(
+        kind::RENDER,
+        4,
+        &[CTX, 95, 25, 0, 100, 0xc, 1, 0],
+    ));
+    assert_eq!(overrun.len(), 27);
+    assert_eq!(overrun[0].arguments[1], Argument::Number(75));
+    assert_eq!(overrun[1].arguments[0], Argument::Number(76));
+    assert_eq!(overrun[25].arguments[0], Argument::Number(100));
+
+    // A zero count renders one row, while the maximum offset gets no reply.
+    let zero = s.handle(&numbers(
+        kind::RENDER,
+        5,
+        &[CTX, 0, 0, 0, 100, 0xc, 1, 0],
+    ));
+    assert_eq!(zero.len(), 3);
+    assert_eq!(zero[1].arguments[0], Argument::Number(1));
+
+    let maximum = s.handle(&numbers(
+        kind::RENDER,
+        6,
+        &[CTX, u32::MAX, 1, 0, 100, 0xc, 1, 0],
+    ));
+    assert!(maximum.is_empty());
 }
 
 #[test]

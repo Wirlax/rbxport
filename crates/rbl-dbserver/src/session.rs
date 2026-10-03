@@ -224,8 +224,15 @@ impl LinkSession {
     }
 
     fn render(&self, message: &Message) -> Vec<Message> {
-        let offset = Self::number(message, 1);
-        let limit = Self::number(message, 2);
+        let location = Self::menu_location(message);
+        let total = self.menus.get(&location).map_or(0, Menu::len);
+        let Some((offset, limit)) = render_window(
+            total,
+            Self::number(message, 1),
+            Self::number(message, 2),
+        ) else {
+            return Vec::new();
+        };
         let column = (Self::number(message, 6) != 0 && Self::number(message, 7) != 0)
             .then(|| TrackColumn::from_id(Self::number(message, 7)));
         let use_sort_column = message.arguments.len() == 6;
@@ -236,7 +243,7 @@ impl LinkSession {
         )];
         out.extend(
             self.items(
-                Self::menu_location(message),
+                location,
                 offset,
                 limit,
                 column,
@@ -1003,6 +1010,27 @@ impl LinkSession {
             _ => Vec::new(),
         }
     }
+}
+
+fn render_window(total: u32, offset: u32, count: u32) -> Option<(u32, u32)> {
+    if offset == u32::MAX {
+        return None;
+    }
+
+    if total == 0 {
+        return Some((0, 0));
+    }
+
+    let count = count.max(1).min(total);
+    let offset = if offset >= total {
+        total - 1
+    } else if offset.saturating_add(count) > total {
+        total - count
+    } else {
+        offset
+    };
+
+    Some((offset, count))
 }
 
 fn prepend_all_if_multiple(rows: &mut Vec<Row>) {
