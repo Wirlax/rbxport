@@ -6,6 +6,48 @@
 
 use crate::item::TrackRow;
 
+/// One configured `djmdCategory` row and its `djmdMenuItems` record.
+///
+/// Rekordbox 7.2.11 orders these by `Seq`, applies the player's root-menu
+/// mask to `menu_item_id`, and sends `id` back as the row identifier
+/// [OBS static 2026-10-03].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootCategory {
+    pub id: u32,
+    pub menu_item_id: u32,
+    pub disable: u32,
+    pub name: String,
+    pub item_type: u32,
+}
+
+impl RootCategory {
+    /// The rows enabled by a stock rekordbox library, in configured order
+    /// [OBS 7.2.11/7.2.14].
+    pub fn defaults() -> Vec<Self> {
+        [
+            (2, 2, 0, "ARTIST", 0x81),
+            (3, 3, 0, "ALBUM", 0x82),
+            (4, 4, 0, "TRACK", 0x83),
+            (12, 11, 0, "KEY", 0x8b),
+            (5, 17, 0, "PLAYLIST", 0x84),
+            (22, 19, 0, "HISTORY", 0x95),
+            (18, 20, 0, "SEARCH", 0x91),
+            (26, 27, 2, "MATCHING", 0xaa),
+            (17, 24, 0, "FOLDER", 0x90),
+            (27, 22, 0, "DATE ADDED", 0x8c),
+        ]
+        .into_iter()
+        .map(|(id, menu_item_id, disable, name, item_type)| Self {
+            id,
+            menu_item_id,
+            disable,
+            name: name.to_owned(),
+            item_type,
+        })
+        .collect()
+    }
+}
+
 /// How a track list is ordered: the ids of the sort menu (`1400`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sort {
@@ -344,6 +386,11 @@ pub enum Analysis {
 
 /// The library, as a player browses it.
 pub trait Catalog: Send + Sync {
+    /// Rekordbox's configured root categories, in `Seq` order.
+    fn root_categories(&self) -> Vec<RootCategory> {
+        RootCategory::defaults()
+    }
+
     /// Sort menu entries, in display order.
     fn sorts(&self) -> Vec<Sort> {
         Sort::DEFAULTS.to_vec()

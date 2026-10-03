@@ -122,6 +122,39 @@ pub struct HotCueBankCue {
     pub cue_microsec: u32,
 }
 
+/// One root-browser category joined to the menu item that describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootCategory {
+    pub id: u32,
+    pub menu_item_id: u32,
+    pub disable: u32,
+    pub name: String,
+    pub item_type: u32,
+}
+
+/// Reads the category configuration in the order rekordbox presents it.
+pub fn root_categories(conn: &Connection) -> Result<Vec<RootCategory>> {
+    let mut statement = conn.prepare(
+        "SELECT c.ID, c.MenuItemID, COALESCE(c.Disable, 0),
+                COALESCE(m.Name, ''), COALESCE(m.Class, 0)
+         FROM djmdCategory c
+         JOIN djmdMenuItems m ON m.ID = c.MenuItemID
+         WHERE c.rb_local_deleted = 0 AND m.rb_local_deleted = 0
+         ORDER BY c.Seq",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let class: i64 = row.get(4)?;
+        Ok(RootCategory {
+            id: small(number(row, 0)),
+            menu_item_id: small(number(row, 1)),
+            disable: small(number(row, 2)),
+            name: text(row, 3),
+            item_type: u32::try_from(class.rem_euclid(256)).unwrap_or(0),
+        })
+    })?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
 /// Lists live Hot Cue Banks below `parent`; `None` selects rekordbox's root.
 pub fn hot_cue_banks(conn: &Connection, parent: Option<u32>) -> Result<Vec<HotCueBank>> {
     let parent = parent.map_or_else(|| "root".to_owned(), |id| id.to_string());
@@ -488,6 +521,30 @@ mod tests {
         assert_eq!(notes["1"], "136 BPM");
         assert_eq!(notes["2"], "136-128 BPM");
         assert_eq!(notes["3"], "");
+    }
+
+    #[test]
+    fn root_categories_join_menu_items_in_configured_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE djmdCategory (
+                ID TEXT, MenuItemID TEXT, Seq INTEGER, Disable INTEGER, rb_local_deleted INTEGER
+             );
+             CREATE TABLE djmdMenuItems (
+                ID TEXT, Class INTEGER, Name TEXT, rb_local_deleted INTEGER
+             );
+             INSERT INTO djmdMenuItems VALUES
+                ('2', -127, 'ARTIST', 0), ('17', -124, 'PLAYLIST', 0), ('99', -1, 'GONE', 1);
+             INSERT INTO djmdCategory VALUES
+                ('5', '17', 2, 0, 0), ('2', '2', 1, 0, 0), ('9', '99', 0, 0, 0),
+                ('10', '2', 3, 0, 1);",
+        )
+        .unwrap();
+
+        let rows = root_categories(&conn).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].id, rows[0].menu_item_id, rows[0].item_type), (2, 2, 0x81));
+        assert_eq!((rows[1].id, rows[1].menu_item_id, rows[1].item_type), (5, 17, 0x84));
     }
 
     #[test]

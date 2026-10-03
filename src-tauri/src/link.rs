@@ -162,6 +162,26 @@ struct StateSource(Weak<AppState>, Arc<dyn Fn(&'static str, u32) + Send + Sync>,
 
 impl Source for StateSource {
     fn alphabetical_keys(&self) -> bool { self.2 }
+    fn root_categories(&self) -> Vec<rbl_link::RootCategory> {
+        let Some(state) = self.0.upgrade() else {
+            return rbl_link::RootCategory::defaults();
+        };
+        state
+            .read_db(|db| rbl_db::details::root_categories(db.connection()))
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| rbl_link::RootCategory {
+                        id: row.id,
+                        menu_item_id: row.menu_item_id,
+                        disable: row.disable,
+                        name: row.name,
+                        item_type: row.item_type,
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|_| rbl_link::RootCategory::defaults())
+    }
+
     fn edit(&self, edit: &rbl_link::Edit) -> bool {
         let Some(state) = self.0.upgrade() else { return false; };
         if let rbl_link::Edit::GridOffset { track, offset_ms } = edit {

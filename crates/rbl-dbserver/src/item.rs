@@ -340,22 +340,41 @@ fn track_item_type(column: TrackColumn, value: u32) -> u32 {
     (secondary << 8) | item_type::TITLE
 }
 
-/// The nine categories rekordbox 7.2.11 advertised to a CDJ-3000 [OBS].
-///
-/// The root request's third argument was `0x05cf_ffff` in that capture, but
-/// rekordbox did not expand those set bits into twenty category rows.
-pub fn root_menu() -> Vec<Item> {
-    vec![
-        Item::heading(0x02, "ARTIST", item_type::MENU_ARTIST),
-        Item::heading(0x03, "ALBUM", item_type::MENU_ALBUM),
-        Item::heading(0x04, "TRACK", item_type::MENU_TRACK),
-        Item::heading(0x0c, "KEY", item_type::MENU_KEY),
-        Item::heading(0x05, "PLAYLIST", item_type::MENU_PLAYLIST),
-        Item::heading(0x16, "HISTORY", item_type::MENU_HISTORY),
-        Item::heading(0x12, "SEARCH", item_type::MENU_SEARCH),
-        Item::heading(0x1a, "MATCHING", item_type::MENU_MATCHING),
-        Item::heading(0x1b, "DATE ADDED", item_type::MENU_DATE_ADDED),
-    ]
+/// Applies rekordbox 7.2.11's decompiled `WhereCategory_Enable` predicate to
+/// the configured rows and the capability mask supplied by the player
+/// [OBS static 2026-10-03].
+pub fn root_menu(categories: &[crate::catalog::RootCategory], capabilities: u32) -> Vec<Item> {
+    let mut menu = Vec::new();
+    let mut has_hot_cue_bank = false;
+
+    for category in categories {
+        // `GetRootMenu` deliberately omits the configured Folder row.
+        if category.menu_item_id == 24 {
+            continue;
+        }
+        let enabled = match category.menu_item_id {
+            27 => category.disable & 1 == 0,
+            22 => category.disable != 1,
+            _ => category.disable == 0,
+        };
+        let bit = if category.menu_item_id == 22 {
+            24
+        } else {
+            category.menu_item_id.saturating_sub(1)
+        };
+        if !enabled || bit >= 32 || capabilities & (1 << bit) == 0 {
+            continue;
+        }
+        has_hot_cue_bank |= category.menu_item_id == 18;
+        menu.push(Item::heading(category.id, &category.name, category.item_type));
+    }
+
+    // `GetRootMenu` adds this compatibility row when the old all-24-bits mask
+    // is used and the configured loop did not produce it [OBS static].
+    if capabilities == 0x00ff_ffff && !has_hot_cue_bank {
+        menu.push(Item::heading(23, "HOT CUE BANK", item_type::MENU_HOT_CUE_BANK));
+    }
+    menu
 }
 
 /// The sort options a track list offers, in rekordbox's order. The id is

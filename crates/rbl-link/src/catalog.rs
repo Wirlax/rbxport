@@ -20,7 +20,8 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use rbl_anlz::Anlz;
 use rbl_dbserver::catalog::{
-    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackColumn,
+    Analysis as Wanted, ArtistRole, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
+    TrackColumn,
     TrackDetails, TrackScope, UsbCue,
 };
 use rbl_dbserver::item::TrackRow;
@@ -40,6 +41,9 @@ pub trait Source: Send + Sync {
     }
     fn sorts(&self) -> Vec<Sort> {
         Sort::DEFAULTS.to_vec()
+    }
+    fn root_categories(&self) -> Vec<RootCategory> {
+        RootCategory::defaults()
     }
     /// The field shown beside track titles in browse lists.
     fn track_column(&self) -> TrackColumn {
@@ -1088,6 +1092,10 @@ fn date_prefix(year: u32, month: Option<u32>, day: Option<u32>) -> String {
 }
 
 impl Catalog for IndexCatalog {
+    fn root_categories(&self) -> Vec<RootCategory> {
+        self.source.root_categories()
+    }
+
     fn sorts(&self) -> Vec<Sort> {
         self.source.sorts()
     }

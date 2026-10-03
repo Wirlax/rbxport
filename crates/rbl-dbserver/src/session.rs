@@ -705,7 +705,13 @@ impl LinkSession {
     #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
     fn handle_menu(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
-            kind::ROOT_MENU => self.menu(message, Menu::Root(root_menu())),
+            kind::ROOT_MENU => {
+                let capabilities = Self::number(message, 2);
+                self.menu(
+                    message,
+                    Menu::Root(root_menu(&self.catalog.root_categories(), capabilities)),
+                )
+            }
             kind::GENRE_MENU => {
                 let sort = Sort::from_id(Self::number(message, 1));
                 self.library(message, Query::Genres(sort))

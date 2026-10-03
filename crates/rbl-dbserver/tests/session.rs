@@ -12,10 +12,10 @@
 use std::sync::Arc;
 
 use rbl_dbserver::catalog::{
-    Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, Row, Sort, TrackColumn,
-    TrackDetails, TrackScope, UsbCue,
+    Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
+    TrackColumn, TrackDetails, TrackScope, UsbCue,
 };
-use rbl_dbserver::item::TrackRow;
+use rbl_dbserver::item::{root_menu, TrackRow};
 use rbl_dbserver::net::{Handler, Session};
 use rbl_dbserver::session::CatalogHandler;
 use rbl_dbserver::{kind, setup_request, Argument, Message};
@@ -345,6 +345,59 @@ fn the_root_menu_matches_the_captured_cdj_3000_rekordbox_response() {
         captured.encode(),
         hex("11872349ae11000001801041010f101400000010060606020602060606060606060602061100000000110000000211000000122600000009fffa004100520054004900530054fffb000011000000022600000001000011000000811100000000110000000011000000001100000000110000000011000000001100000002260000000100001100000000")
     );
+}
+
+#[test]
+fn the_root_menu_filters_configured_rows_with_the_players_mask() {
+    let expected = [
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (10, 12),
+        (16, 5),
+        (18, 22),
+        (19, 18),
+        (26, 26),
+        (24, 27),
+    ];
+
+    for (bit, id) in expected {
+        let (count, items) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << bit]);
+        assert_eq!(count, 1, "capability bit {bit}");
+        assert_eq!(items[0].arguments[1], Argument::Number(id));
+    }
+
+    let (count, items) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 1 << 0 | 1 << 23]);
+    assert_eq!(count, 0);
+    assert!(items.is_empty());
+}
+
+#[test]
+fn the_legacy_root_mask_appends_hot_cue_bank_like_rekordbox() {
+    let (count, items) = browse(&mut session(), kind::ROOT_MENU, &[CTX, 0, 0x00ff_ffff]);
+    assert_eq!(count, 8);
+    assert_eq!(items.last().unwrap().arguments[1], Argument::Number(23));
+    assert_eq!(items.last().unwrap().arguments[6], Argument::Number(0x98));
+}
+
+#[test]
+fn the_root_menu_uses_rekordboxs_special_disable_rules() {
+    let category = |id, menu_item_id, disable| RootCategory {
+        id,
+        menu_item_id,
+        disable,
+        name: "TEST".into(),
+        item_type: 0,
+    };
+    let categories = [
+        category(1, 2, 2),
+        category(2, 22, 2),
+        category(3, 27, 2),
+        category(4, 27, 3),
+        category(5, 24, 0),
+    ];
+    let items = root_menu(&categories, (1 << 1) | (1 << 24) | (1 << 26));
+    assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), vec![2, 3]);
 }
 
 #[test]
