@@ -29,14 +29,31 @@ use rbl_index::{Library, NO_ID, SortColumn, TrackSource, ViewSpec, key::camelot_
 
 use crate::blobs::{self, Analysis, ExtendedCue};
 
+/// How keys are written on player screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyNotation {
+    Classic,
+    Alphanumeric,
+}
+
+/// How keys are ordered in track lists and the KEY browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyOrder {
+    Musical,
+    Alphabetical,
+}
+
 /// Where the catalog reads from. The app implements this over its state so a
 /// library reloaded behind a running link session is what the next request
 /// sees, and so `rbl-link` needs nothing from the webview.
 pub trait Source: Send + Sync {
     /// The library as it is now.
     fn library(&self) -> Option<Arc<Library>>;
-    fn alphabetical_keys(&self) -> bool {
-        false
+    fn key_notation(&self) -> KeyNotation {
+        KeyNotation::Alphanumeric
+    }
+    fn key_order(&self) -> KeyOrder {
+        KeyOrder::Musical
     }
     fn sorts(&self) -> Vec<Sort> {
         Sort::DEFAULTS.to_vec()
@@ -431,7 +448,7 @@ impl IndexCatalog {
             Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
             Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
             Query::Tracks { scope, sort } => {
-                self.tracks(library, scope, *sort, self.source.alphabetical_keys())
+                self.tracks(library, scope, *sort, self.source.key_order())
             }
         }
     }
@@ -447,6 +464,20 @@ impl IndexCatalog {
     /// not know.
     fn key_id(library: &Library, row: rbl_index::Row) -> u32 {
         player_key_id(library.key_name(row))
+    }
+
+    fn displayed_key_name(&self, library: &Library, row: rbl_index::Row) -> String {
+        let name = library.key_name(row);
+        if self.source.key_notation() == KeyNotation::Classic {
+            return name.to_owned();
+        }
+
+        let key = player_key_id(name);
+        if key == 0 {
+            String::new()
+        } else {
+            camelot_name(key)
+        }
     }
 
     fn dense_id(wire_ids: &[u32], wire_id: u32) -> u32 {
@@ -465,7 +496,7 @@ impl IndexCatalog {
         wire_ids.get(dense_id as usize).copied().unwrap_or(0)
     }
 
-    fn sort_column(sort: Sort, scope: &TrackScope, alphabetical_keys: bool) -> Option<SortColumn> {
+    fn sort_column(sort: Sort, scope: &TrackScope, key_order: KeyOrder) -> Option<SortColumn> {
         Some(match sort {
             // A playlist or history keeps its own order; every other list
             // is alphabetical, which is what rekordbox sent for TRACK.
@@ -487,7 +518,7 @@ impl IndexCatalog {
             Sort::DateAdded => SortColumn::DateAdded,
             Sort::DjPlayCount => SortColumn::PlayCount,
             Sort::Key => {
-                if alphabetical_keys {
+                if key_order == KeyOrder::Alphabetical {
                     SortColumn::Key
                 } else {
                     SortColumn::KeyCamelot
@@ -671,7 +702,7 @@ impl IndexCatalog {
         library: &Library,
         scope: &TrackScope,
         sort: Sort,
-        alphabetical_keys: bool,
+        key_order: KeyOrder,
     ) -> Vec<Row> {
         let mut rows = self.scope_rows(library, scope);
         if track_number_visible(scope) {
@@ -685,7 +716,7 @@ impl IndexCatalog {
         if album_constrained(scope) && sort == Sort::Default {
             rows.sort_by_key(|&(row, position)| (position == 0, position, row));
         }
-        if let Some(column) = Self::sort_column(sort, scope, alphabetical_keys) {
+        if let Some(column) = Self::sort_column(sort, scope, key_order) {
             let mut order: Vec<rbl_index::Row> = rows.iter().map(|&(row, _)| row).collect();
             library.sort_rows(&mut order, column, false);
             // Positions travel with their rows; the sort reorders the pairs.
@@ -1156,10 +1187,18 @@ impl Catalog for IndexCatalog {
 
     fn key_ids(&self) -> Vec<u32> {
         let mut ids: Vec<_> = (1..=24).collect();
-        if self.source.alphabetical_keys() {
+        if self.source.key_order() == KeyOrder::Alphabetical {
             ids.sort_by(|a, b| rbl_index::key::cmp_names(keys::name(*a), keys::name(*b)));
         }
         ids
+    }
+
+    fn key_name(&self, id: u32) -> String {
+        match self.source.key_notation() {
+            KeyNotation::Classic => keys::name(id).to_owned(),
+            KeyNotation::Alphanumeric if (1..=24).contains(&id) => camelot_name(id),
+            KeyNotation::Alphanumeric => String::new(),
+        }
     }
 
     fn list(&self, query: &Query) -> Vec<Row> {
@@ -1177,13 +1216,7 @@ impl Catalog for IndexCatalog {
         let column = column.unwrap_or(configured_column);
         let details = self.source.details(&id.to_string());
         let key = Self::key_id(&library, row);
-        let key_name = if self.source.alphabetical_keys() {
-            library.key_name(row).to_owned()
-        } else if key == 0 {
-            String::new()
-        } else {
-            camelot_name(key)
-        };
+        let key_name = self.displayed_key_name(&library, row);
         let (secondary_text, column_value) = secondary_column(
             &library,
             row,
@@ -1234,13 +1267,13 @@ impl Catalog for IndexCatalog {
             .filter(|&size| size > 0)
             .or_else(|| std::fs::metadata(&path).ok().map(|m| m.len()))
             .unwrap_or(0);
+        let track_row = self.track_row(id, None)?;
+        let key_name = track_row.key_name.clone();
         Some(TrackDetails {
-            row: self.track_row(id, None)?,
+            row: track_row,
             comment: library.comment.get(at).to_owned(),
             key_id: details.as_ref().map_or(0, |d| d.key_id),
-            key_name: details
-                .as_ref()
-                .map_or_else(|| library.key_name(row).to_owned(), |d| d.key.clone()),
+            key_name,
             artist_id: lookup_id(&library.artist, &library.artist_ids),
             artist: library.artist_name(row).to_owned(),
             album_id: lookup_id(&library.album, &library.album_ids),
@@ -1615,40 +1648,156 @@ mod tests {
     }
 
     #[test]
-    fn alphabetical_key_order_changes_display_order_not_ids() {
-        struct Alphabetical(Fixed);
-        impl Source for Alphabetical {
-            fn alphabetical_keys(&self) -> bool {
-                true
+    fn key_notation_and_order_are_independent() {
+        struct Configured {
+            fixed: Fixed,
+            notation: KeyNotation,
+            order: KeyOrder,
+        }
+        impl Source for Configured {
+            fn key_notation(&self) -> KeyNotation {
+                self.notation
+            }
+            fn key_order(&self) -> KeyOrder {
+                self.order
             }
             fn library(&self) -> Option<Arc<Library>> {
-                self.0.library()
+                self.fixed.library()
             }
             fn share_root(&self) -> PathBuf {
-                self.0.share_root()
+                self.fixed.share_root()
             }
             fn details(&self, id: &str) -> Option<rbl_db::details::TrackDetails> {
-                self.0.details(id)
+                self.fixed.details(id)
             }
         }
-        let c = IndexCatalog::new(
-            Arc::new(Alphabetical(Fixed(Arc::new(library())))),
+
+        for notation in [KeyNotation::Classic, KeyNotation::Alphanumeric] {
+            for order in [KeyOrder::Musical, KeyOrder::Alphabetical] {
+                let c = IndexCatalog::new(
+                    Arc::new(Configured {
+                        fixed: Fixed(Arc::new(library())),
+                        notation,
+                        order,
+                    }),
+                    Played::default(),
+                );
+                let expected_tracks = match order {
+                    KeyOrder::Musical => [11, 12, 10],
+                    KeyOrder::Alphabetical => [11, 10, 12],
+                };
+                assert_eq!(
+                    ids(&c.list(&Query::Tracks {
+                        scope: TrackScope::All,
+                        sort: Sort::Key,
+                    })),
+                    expected_tracks,
+                    "{notation:?} notation with {order:?} order",
+                );
+
+                let key_ids = c.key_ids();
+                match order {
+                    KeyOrder::Musical => assert_eq!(key_ids, (1..=24).collect::<Vec<_>>()),
+                    KeyOrder::Alphabetical => {
+                        assert_eq!(key_ids.first().copied().map(keys::name), Some("A"));
+                        assert_eq!(key_ids.iter().position(|id| *id == 1), Some(2));
+                    }
+                }
+
+                let expected_name = match notation {
+                    KeyNotation::Classic => "Am",
+                    KeyNotation::Alphanumeric => "8A",
+                };
+                assert_eq!(c.key_name(15), expected_name);
+                let row = c.track_row(10, Some(TrackColumn::Key)).unwrap();
+                assert_eq!(row.key_name, expected_name);
+                assert_eq!(row.secondary_text, expected_name);
+                assert_eq!(c.track(10).unwrap().key_name, expected_name);
+            }
+        }
+    }
+
+    #[test]
+    fn custom_key_names_keep_their_notation_behavior() {
+        struct Notation {
+            library: Arc<Library>,
+            notation: KeyNotation,
+        }
+        impl Source for Notation {
+            fn library(&self) -> Option<Arc<Library>> {
+                Some(Arc::clone(&self.library))
+            }
+            fn key_notation(&self) -> KeyNotation {
+                self.notation
+            }
+            fn share_root(&self) -> PathBuf {
+                PathBuf::from("/nonexistent")
+            }
+            fn details(&self, _: &str) -> Option<rbl_db::details::TrackDetails> {
+                None
+            }
+        }
+        let library = || {
+            Arc::new(library_from(&[
+                TestTrack {
+                    id: 20,
+                    key: "Alpha",
+                    ..TestTrack::default()
+                },
+                TestTrack {
+                    id: 21,
+                    key: "Beta Alpha",
+                    ..TestTrack::default()
+                },
+                TestTrack {
+                    id: 22,
+                    key: "alpha",
+                    ..TestTrack::default()
+                },
+                TestTrack {
+                    id: 23,
+                    key: "Ａｌｐｈａ",
+                    ..TestTrack::default()
+                },
+            ]))
+        };
+
+        let classic = IndexCatalog::new(
+            Arc::new(Notation {
+                library: library(),
+                notation: KeyNotation::Classic,
+            }),
+            Played::default(),
+        );
+        assert_eq!(classic.track_row(20, None).unwrap().key_name, "Alpha");
+        assert_eq!(classic.track_row(21, None).unwrap().key_name, "Beta Alpha");
+        assert_eq!(classic.track_row(22, None).unwrap().key_name, "alpha");
+        assert_eq!(classic.track_row(23, None).unwrap().key_name, "Ａｌｐｈａ");
+
+        let alphanumeric = IndexCatalog::new(
+            Arc::new(Notation {
+                library: library(),
+                notation: KeyNotation::Alphanumeric,
+            }),
             Played::default(),
         );
         assert_eq!(
-            ids(&c.list(&Query::Tracks {
-                scope: TrackScope::All,
-                sort: Sort::Key
-            })),
-            [11, 10, 12]
+            alphanumeric.track_row(20, None).unwrap().key_name,
+            "11B"
         );
-        let keys = c.key_ids();
-        assert_eq!(keys.first().copied().map(keys::name), Some("A"));
-        assert_eq!(keys.iter().position(|id| *id == 1), Some(2));
-        let row = c.track_row(10, Some(TrackColumn::Key)).unwrap();
-        assert_eq!(row.key_name, "Am");
-        assert_eq!(row.secondary_text, "Am");
-        assert_eq!(catalog().key_ids(), (1..=24).collect::<Vec<_>>());
+        assert_eq!(
+            alphanumeric.track_row(21, None).unwrap().key_name,
+            "1B"
+        );
+        assert_eq!(
+            alphanumeric.track_row(22, None).unwrap().key_name,
+            ""
+        );
+        assert_eq!(
+            alphanumeric.track_row(23, None).unwrap().key_name,
+            "11B"
+        );
+        assert_eq!(alphanumeric.track(20).unwrap().key_name, "11B");
     }
 
     #[test]

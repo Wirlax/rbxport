@@ -493,7 +493,7 @@ export interface Backend {
    * interface (the first one when none is given) and serves the library to
    * every player that asks. Refused, with the reason, while rekordbox runs.
    */
-  startLinkExport(iface?: string, keySort?: "alphabetical" | "musical"): Promise<LinkStatus>;
+  startLinkExport(iface?: string, keyDisplay?: KeyDisplay, keySort?: "alphabetical" | "musical"): Promise<LinkStatus>;
   stopLinkExport(): Promise<LinkStatus>;
   /** Tells a CDJ on the link to load a specific track from our library. */
   loadTrackOnLink(playerNumber: number, trackId: string): Promise<void>;

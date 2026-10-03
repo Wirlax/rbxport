@@ -158,10 +158,20 @@ pub fn interfaces() -> Vec<InterfaceDto> {
 
 /// The app's library, as the link reads it. Weak so the state does not own
 /// a session that owns the state.
-struct StateSource(Weak<AppState>, Arc<dyn Fn(&'static str, u32) + Send + Sync>, bool);
+struct StateSource(
+    Weak<AppState>,
+    Arc<dyn Fn(&'static str, u32) + Send + Sync>,
+    rbl_link::KeyNotation,
+    rbl_link::KeyOrder,
+);
 
 impl Source for StateSource {
-    fn alphabetical_keys(&self) -> bool { self.2 }
+    fn key_notation(&self) -> rbl_link::KeyNotation {
+        self.2
+    }
+    fn key_order(&self) -> rbl_link::KeyOrder {
+        self.3
+    }
     fn root_categories(&self) -> Vec<rbl_link::RootCategory> {
         let Some(state) = self.0.upgrade() else {
             return rbl_link::RootCategory::defaults();
@@ -359,7 +369,14 @@ impl Session {
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
-    pub fn start<F>(state: &Arc<AppState>, interface: Option<&str>, alphabetical_keys: bool, report: F, library_changed: Arc<dyn Fn(&'static str, u32) + Send + Sync>) -> Result<Self, String>
+    pub fn start<F>(
+        state: &Arc<AppState>,
+        interface: Option<&str>,
+        key_notation: rbl_link::KeyNotation,
+        key_order: rbl_link::KeyOrder,
+        report: F,
+        library_changed: Arc<dyn Fn(&'static str, u32) + Send + Sync>,
+    ) -> Result<Self, String>
     where
         F: Fn(LinkStatusDto) + Send + 'static,
     {
@@ -407,7 +424,12 @@ impl Session {
         })?;
         tracing::info!(interface = %chosen.name, address = %chosen.address, "LINK running on an interface");
 
-        let source: Arc<dyn Source> = Arc::new(StateSource(Arc::downgrade(state), library_changed, alphabetical_keys));
+        let source: Arc<dyn Source> = Arc::new(StateSource(
+            Arc::downgrade(state),
+            library_changed,
+            key_notation,
+            key_order,
+        ));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
         let rx3_activation = match rx3 {
             Some(rx3) => match rx3.activate() {
@@ -683,9 +705,14 @@ mod grid_offset_tests {
         let original = state.library().unwrap();
         let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received = notifications.clone();
-        let source = StateSource(Arc::downgrade(&state), Arc::new(move |event, generation| {
-            received.lock().unwrap().push((event, generation));
-        }), false);
+        let source = StateSource(
+            Arc::downgrade(&state),
+            Arc::new(move |event, generation| {
+                received.lock().unwrap().push((event, generation));
+            }),
+            rbl_link::KeyNotation::Classic,
+            rbl_link::KeyOrder::Musical,
+        );
         let spec = |source| rbl_index::ViewSpec { source, sort: rbl_index::SortColumn::Title, descending: false, query: String::new(), filter: rbl_index::TrackFilter::default() };
         let id = rbl_db::fixture::track_id(1);
         let track = id.parse().unwrap();
@@ -739,9 +766,14 @@ mod grid_offset_tests {
         crate::backups::create(&state).unwrap();
         let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received = notifications.clone();
-        let source = StateSource(Arc::downgrade(&state), Arc::new(move |event, generation| {
-            received.lock().unwrap().push((event, generation));
-        }), false);
+        let source = StateSource(
+            Arc::downgrade(&state),
+            Arc::new(move |event, generation| {
+                received.lock().unwrap().push((event, generation));
+            }),
+            rbl_link::KeyNotation::Classic,
+            rbl_link::KeyOrder::Musical,
+        );
         let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
         // The fixture's own histories are not the menu.
         assert!(!state.library().unwrap().histories().is_empty());
@@ -788,7 +820,12 @@ mod grid_offset_tests {
         let (library, _) = rbl_index::load(&db).unwrap();
         let state = Arc::new(AppState::with_backups(dir.path().join("backups")));
         state.set_library(library, false, db.schema().db_version, 0, location);
-        let source = StateSource(Arc::downgrade(&state), Arc::new(|_, _| {}), false);
+        let source = StateSource(
+            Arc::downgrade(&state),
+            Arc::new(|_, _| {}),
+            rbl_link::KeyNotation::Classic,
+            rbl_link::KeyOrder::Musical,
+        );
 
         assert_eq!(source.matching_ids(first.parse().unwrap()), [second.parse::<u32>().unwrap()]);
     }

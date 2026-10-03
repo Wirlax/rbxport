@@ -817,6 +817,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     interface: Option<String>,
+    alphanumeric_keys: Option<bool>,
     alphabetical_keys: Option<bool>,
 ) -> AppResult<LinkStatusDto> {
     if let Some(status) = state.link_status() {
@@ -832,11 +833,28 @@ pub async fn start_link_export<R: tauri::Runtime>(
     let emitter = app.clone();
     let library_emitter = app.clone();
     let started = blocking("start_link_export", move || {
-        Ok(crate::link::Session::start(&owner, interface.as_deref(), alphabetical_keys.unwrap_or(false), move |status| {
-            let _ = tauri::Emitter::emit(&emitter, "link:status", status);
-        }, Arc::new(move |event, generation| {
-            let _ = tauri::Emitter::emit(&library_emitter, event, generation);
-        })))
+        let key_notation = if alphanumeric_keys.unwrap_or(false) {
+            rbl_link::KeyNotation::Alphanumeric
+        } else {
+            rbl_link::KeyNotation::Classic
+        };
+        let key_order = if alphabetical_keys.unwrap_or(false) {
+            rbl_link::KeyOrder::Alphabetical
+        } else {
+            rbl_link::KeyOrder::Musical
+        };
+        Ok(crate::link::Session::start(
+            &owner,
+            interface.as_deref(),
+            key_notation,
+            key_order,
+            move |status| {
+                let _ = tauri::Emitter::emit(&emitter, "link:status", status);
+            },
+            Arc::new(move |event, generation| {
+                let _ = tauri::Emitter::emit(&library_emitter, event, generation);
+            }),
+        ))
     })
     .await?;
     match started {

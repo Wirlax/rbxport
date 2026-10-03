@@ -305,7 +305,7 @@ pub struct TrackDetails {
     pub comment: String,
     /// Opaque `djmdContent.KeyID`, used by metadata replies.
     pub key_id: u32,
-    /// `djmdKey.ScaleName`, independent of the browse-list sub-column.
+    /// The configured display name, independent of the browse-list sub-column.
     pub key_name: String,
     pub artist_id: u32,
     pub artist: String,
@@ -400,6 +400,12 @@ pub trait Catalog: Send + Sync {
     fn key_ids(&self) -> Vec<u32> {
         (1..=24).collect()
     }
+
+    /// Display label for a protocol key identifier.
+    fn key_name(&self, id: u32) -> String {
+        crate::keys::name(id).to_owned()
+    }
+
     /// The rows of a menu, whole and in order.
     fn list(&self, query: &Query) -> Vec<Row>;
 

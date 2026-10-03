@@ -665,13 +665,17 @@ function AppBody() {
     setLinkBusy(true);
     const backend = await getBackend();
     try {
-      const status = on ? await backend.startLinkExport(linkInterface ?? undefined, stickDefaults.linkKeySort) : await backend.stopLinkExport();
+      const status = on ? await backend.startLinkExport(
+        linkInterface ?? undefined,
+        stickDefaults.keyDisplay,
+        stickDefaults.linkKeySort,
+      ) : await backend.stopLinkExport();
       setLink(status);
       return status;
     } finally {
       setLinkBusy(false);
     }
-  }, [linkInterface, stickDefaults.linkKeySort]);
+  }, [linkInterface, stickDefaults.keyDisplay, stickDefaults.linkKeySort]);
   const toggleLink = useCallback(() => {
     void setLinkOn(!link?.on);
   }, [link?.on, setLinkOn]);

@@ -608,6 +608,63 @@ fn the_key_menus_match_the_capture() {
 }
 
 #[test]
+fn key_menus_use_catalog_display_names() {
+    struct Alphanumeric;
+    impl Catalog for Alphanumeric {
+        fn key_name(&self, id: u32) -> String {
+            let side = if id % 2 == 1 { 'A' } else { 'B' };
+            format!("{}{side}", id.div_ceil(2))
+        }
+        fn list(&self, _: &Query) -> Vec<Row> {
+            Vec::new()
+        }
+        fn track_row(&self, _: u32, _: Option<TrackColumn>) -> Option<TrackRow> {
+            None
+        }
+        fn track(&self, _: u32) -> Option<TrackDetails> {
+            None
+        }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> {
+            None
+        }
+        fn analysis(&self, _: u32, _: &Analysis) -> Option<Vec<u8>> {
+            None
+        }
+    }
+
+    let handler = CatalogHandler::new(Arc::new(Alphanumeric));
+    let mut session = handler.open();
+    session.handle(&setup_request(1));
+
+    let (_, keys) = browse(&mut session, kind::KEY_MENU, &[CTX, 0]);
+    assert_eq!(
+        keys[0].arguments[3],
+        Argument::String("1A".to_owned())
+    );
+    assert_eq!(
+        keys[23].arguments[3],
+        Argument::String("12B".to_owned())
+    );
+
+    let (_, related) = browse(&mut session, kind::RELATED_KEYS, &[0x0102_0301, 0, 1]);
+    assert_eq!(
+        related[0].arguments[3],
+        Argument::String("1A".to_owned())
+    );
+    assert_eq!(
+        related[1].arguments[3],
+        Argument::String("1A, 1B".to_owned())
+    );
+    assert_eq!(
+        related[2].arguments[3],
+        Argument::String("1A, 1B, 12A, 2A".to_owned())
+    );
+}
+
+#[test]
 fn rx3_legacy_key_tracks_are_exact_key_matches() {
     struct Spy(std::sync::Mutex<Option<Query>>);
     impl Catalog for Spy {

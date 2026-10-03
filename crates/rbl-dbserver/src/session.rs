@@ -189,7 +189,10 @@ impl LinkSession {
                 self.catalog
                     .key_ids()
                     .into_iter()
-                    .map(|id| Item::named(id, keys::name(id), item_type::KEY))
+                    .map(|id| {
+                        let name = self.catalog.key_name(id);
+                        Item::named(id, &name, item_type::KEY)
+                    })
                     .collect(),
             ),
             // `[distance, key, text]`: the distance is what a later
@@ -199,7 +202,11 @@ impl LinkSession {
                     .map(|distance| Item {
                         a: distance,
                         id: *key,
-                        text: keys::related_text(*key, distance),
+                        text: keys::related(*key, distance)
+                            .into_iter()
+                            .map(|id| self.catalog.key_name(id))
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         item_type: item_type::KEY,
                         ..Item::default()
                     })

@@ -358,7 +358,11 @@ async function realBackend(): Promise<Backend> {
     linkStatus: () => invoke<LinkStatus>("link_status"),
     linkPeers: () => invoke<LinkPeerSeen[]>("link_peers"),
     onLinkPeers: (listener) => subscribe<LinkPeerSeen[]>("link:peers", listener),
-    startLinkExport: (iface, keySort) => invoke<LinkStatus>("start_link_export", { interface: iface ?? null, alphabeticalKeys: keySort === "alphabetical" }),
+    startLinkExport: (iface, keyDisplay, keySort) => invoke<LinkStatus>("start_link_export", {
+      interface: iface ?? null,
+      alphanumericKeys: keyDisplay === "alphanumeric",
+      alphabeticalKeys: keySort === "alphabetical",
+    }),
     stopLinkExport: () => invoke<LinkStatus>("stop_link_export"),
     loadTrackOnLink: (playerNumber, trackId) => invoke<void>("link_load_track", { playerNumber, trackId }),
     setLinkMaster: (on) => invoke<LinkStatus>("link_set_master", { on }),

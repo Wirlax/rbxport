@@ -95,7 +95,11 @@ export function LinkPane() {
     void (async () => {
       try {
         const backend = await getBackend();
-        const next = link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(linkInterface ?? undefined, preferences.djSystem.linkKeySort);
+        const next = link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(
+          linkInterface ?? undefined,
+          preferences.djSystem.keyDisplay,
+          preferences.djSystem.linkKeySort,
+        );
         revision.current += 1;
         setLink(next);
         setStatusError(null);
