@@ -351,14 +351,10 @@ impl LinkSession {
                 if use_sort_column {
                     track.format_sort_column();
                 }
-                let listed = match scope {
-                    TrackScope::Genre { .. }
-                    | TrackScope::Label { .. }
-                    | TrackScope::Artist { .. }
-                    | TrackScope::Album(_)
-                    | TrackScope::Playlist(_)
-                    | TrackScope::TagList => track_flags::LISTED,
-                    _ => 0,
+                let listed = if self.catalog.listed(scope) {
+                    track_flags::LISTED
+                } else {
+                    0
                 };
                 // A history's rows are all played; elsewhere only the tracks
                 // a player has loaded this session are, or every row of a

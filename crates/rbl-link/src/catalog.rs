@@ -1368,6 +1368,29 @@ impl Catalog for IndexCatalog {
         })
     }
 
+    fn listed(&self, scope: &TrackScope) -> bool {
+        if let TrackScope::Playlist(id) = scope {
+            let Some(library) = self.source.library() else {
+                return true;
+            };
+            let playlists = library.playlists();
+            let Some(index) = playlists.index_of(u64::from(*id)) else {
+                return true;
+            };
+
+            return !playlists.is_smart(index);
+        }
+
+        matches!(
+            scope,
+            TrackScope::Genre { .. }
+                | TrackScope::Label { .. }
+                | TrackScope::Artist { .. }
+                | TrackScope::Album(_)
+                | TrackScope::TagList
+        )
+    }
+
     fn filter_rows(&self, rows: &mut Vec<Row>, filter: &rbl_dbserver::filter::TrackFilter) {
         if !filter.enabled {
             return;
@@ -1968,6 +1991,7 @@ mod tests {
                 position: 1,
             }]
         );
+        assert!(!c.listed(&TrackScope::Playlist(playlist)));
     }
 
     #[test]

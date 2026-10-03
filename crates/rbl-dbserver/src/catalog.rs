@@ -403,6 +403,19 @@ pub trait Catalog: Send + Sync {
     /// The rows of a menu, whole and in order.
     fn list(&self, query: &Query) -> Vec<Row>;
 
+    /// Whether rows in this scope carry rekordbox's listed-track flag.
+    fn listed(&self, scope: &TrackScope) -> bool {
+        matches!(
+            scope,
+            TrackScope::Genre { .. }
+                | TrackScope::Label { .. }
+                | TrackScope::Artist { .. }
+                | TrackScope::Album(_)
+                | TrackScope::Playlist(_)
+                | TrackScope::TagList
+        )
+    }
+
     /// A track row by id, optionally using a render-time column override.
     fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow>;
 
