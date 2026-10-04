@@ -248,11 +248,10 @@ fn all_and_any_combine_and_invalid_rules_admit_nothing() {
         "<NODE LogicalOperator=\"1\"><CONDITION PropertyName=\"genre\" Operator=\"99\"/></NODE>"
     )
     .is_empty());
-    assert!(rows_of(
-        &lib,
+    assert!(SmartRule::parse(
         "<CONDITION PropertyName=\"genre\" Operator=\"1\" ValueLeft=\"House\"/><NODE LogicalOperator=\"1\"/>"
     )
-    .is_empty());
+    .is_none());
 }
 
 #[test]

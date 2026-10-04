@@ -219,54 +219,53 @@ pub struct SmartRule {
 }
 
 impl SmartRule {
-    /// Parses the XML. `None` when there is no `NODE` in it at all.
+    /// Parses the XML. `None` when its first element is not a complete `NODE`.
     #[must_use]
     pub fn parse(xml: &str) -> Option<Self> {
-        let mut stack: Vec<Group> = Vec::new();
-        let mut root: Option<Group> = None;
-        for tag in tags(xml) {
+        let mut tags = tags(smart_document(xml)?).into_iter();
+        let Tag::Open { name, attributes, closed } = tags.next()? else {
+            return None;
+        };
+        if !name.eq_ignore_ascii_case("NODE") {
+            return None;
+        }
+
+        let logic = if attribute(&attributes, "LogicalOperator").trim() == "2" {
+            Logic::Any
+        } else {
+            Logic::All
+        };
+        let mut root = Group { logic, items: Vec::new() };
+        if closed {
+            return Some(Self { root });
+        }
+
+        let mut open = vec![name];
+        for tag in tags {
             match tag {
-                Tag::Open { name, attributes, closed } if name.eq_ignore_ascii_case("NODE") => {
-                    let logic = if attribute(&attributes, "LogicalOperator").trim() == "2" {
-                        Logic::Any
-                    } else {
-                        Logic::All
-                    };
-                    let group = Group { logic, items: Vec::new() };
-                    if closed {
-                        close_group(&mut stack, &mut root, group);
-                    } else {
-                        stack.push(group);
+                Tag::Open { name, attributes, closed } => {
+                    if open.len() == 1 && name.eq_ignore_ascii_case("CONDITION") {
+                        if let Some(condition) = condition(&attributes) {
+                            root.items.push(Item::Condition(condition));
+                        }
+                    }
+
+                    if !closed {
+                        open.push(name);
                     }
                 }
-                Tag::Open { name, attributes, .. } if name.eq_ignore_ascii_case("CONDITION") => {
-                    let Some(operator) = Operator::from_code(&attribute(&attributes, "Operator")) else {
-                        continue;
-                    };
-                    let condition = Condition {
-                        property: Property::from_name(&attribute(&attributes, "PropertyName")),
-                        operator,
-                        left: attribute(&attributes, "ValueLeft"),
-                        right: attribute(&attributes, "ValueRight"),
-                        unit: attribute(&attributes, "ValueUnit"),
-                    };
-                    if let Some(group) = stack.last_mut() {
-                        group.items.push(Item::Condition(condition));
+                Tag::Close { .. } if open.len() == 1 => {
+                    return Some(Self { root });
+                }
+                Tag::Close { name } => {
+                    let opened = open.pop()?;
+                    if !opened.eq_ignore_ascii_case(&name) {
+                        return None;
                     }
                 }
-                Tag::Close { name } if name.eq_ignore_ascii_case("NODE") => {
-                    if let Some(group) = stack.pop() {
-                        close_group(&mut stack, &mut root, group);
-                    }
-                }
-                Tag::Open { .. } | Tag::Close { .. } => {}
             }
         }
-        // An unterminated document keeps what was read.
-        while let Some(group) = stack.pop() {
-            close_group(&mut stack, &mut root, group);
-        }
-        root.map(|root| Self { root })
+        None
     }
 
     /// The rule as `djmdPlaylist.SmartList` holds it, for the playlist with
@@ -346,15 +345,35 @@ impl SmartRule {
     }
 }
 
-fn close_group(stack: &mut [Group], root: &mut Option<Group>, group: Group) {
-    match stack.last_mut() {
-        Some(parent) => parent.items.push(Item::Group(group)),
-        None => {
-            if root.is_none() {
-                *root = Some(group);
-            }
+fn smart_document(mut xml: &str) -> Option<&str> {
+    loop {
+        xml = xml.trim_start_matches(char::is_whitespace);
+        if let Some(comment) = xml.strip_prefix("<!--") {
+            let end = comment.find("-->")?;
+            xml = comment.get(end + 3..)?;
+            continue;
         }
+        if let Some(instruction) = xml.strip_prefix("<?") {
+            let end = instruction.find("?>")?;
+            xml = instruction.get(end + 2..)?;
+            continue;
+        }
+
+        return xml.starts_with('<').then_some(xml);
     }
+}
+
+fn condition(attributes: &[(String, String)]) -> Option<Condition> {
+    let Some(operator) = Operator::from_code(&attribute(attributes, "Operator")) else {
+        return None;
+    };
+    Some(Condition {
+        property: Property::from_name(&attribute(attributes, "PropertyName")),
+        operator,
+        left: attribute(attributes, "ValueLeft"),
+        right: attribute(attributes, "ValueRight"),
+        unit: attribute(attributes, "ValueUnit"),
+    })
 }
 
 // ---------------------------------------------------------------- evaluation
@@ -801,18 +820,37 @@ mod tests {
     }
 
     #[test]
-    fn a_nested_group_and_an_unknown_property_are_kept() {
+    fn only_direct_conditions_of_the_first_node_are_kept() {
         let rule = SmartRule::parse(
             r#"<?xml version="1.0"?><NODE LogicalOperator="1"><NODE LogicalOperator="2">
                <CONDITION PropertyName="myTag" Operator="1" ValueLeft="7" ValueRight=""/>
                </NODE><CONDITION PropertyName="rating" Operator="3" ValueLeft="3" ValueRight=""/></NODE>"#,
         )
         .unwrap();
-        assert_eq!(rule.root.items.len(), 2);
-        assert!(matches!(rule.root.items[0], Item::Group(_)));
-        assert_eq!(rule.unsupported(), 1);
+        assert_eq!(rule.root.items.len(), 1);
+        let Item::Condition(condition) = &rule.root.items[0] else { panic!() };
+        assert_eq!(condition.property, Property::Rating);
+        assert_eq!(rule.unsupported(), 0);
+
+        let wrapped = SmartRule::parse(
+            r#"<NODE LogicalOperator="1"><WRAP><CONDITION PropertyName="rating" Operator="3" ValueLeft="3"/></WRAP></NODE>"#,
+        )
+        .unwrap();
+        assert_eq!(wrapped.root.items.len(), 0);
+    }
+
+    #[test]
+    fn a_smart_document_requires_a_complete_first_node() {
         assert!(SmartRule::parse("").is_none());
         assert!(SmartRule::parse("<NODE/>").is_some());
+        assert!(SmartRule::parse("\u{feff}<NODE/>").is_none());
+        assert!(SmartRule::parse("leading<NODE/>").is_none());
+        assert!(SmartRule::parse("\0<NODE/>").is_none());
+        assert!(SmartRule::parse("<ROOT><NODE/></ROOT>").is_none());
+        assert!(SmartRule::parse("<CONDITION/><NODE/>").is_none());
+        assert!(SmartRule::parse("<NODE><CONDITION/>").is_none());
+        assert!(SmartRule::parse("<NODE><CONDITION></NODE>").is_none());
+        assert!(SmartRule::parse("<!--before--><?probe?><NODE></NODES>").is_some());
     }
 
     #[test]
@@ -828,15 +866,12 @@ mod tests {
                         right: String::new(),
                         unit: String::new(),
                     }),
-                    Item::Group(Group {
-                        logic: Logic::All,
-                        items: vec![Item::Condition(Condition {
-                            property: Property::DateAdded,
-                            operator: Operator::InLast,
-                            left: "30".to_owned(),
-                            right: String::new(),
-                            unit: "day".to_owned(),
-                        })],
+                    Item::Condition(Condition {
+                        property: Property::DateAdded,
+                        operator: Operator::InLast,
+                        left: "30".to_owned(),
+                        right: String::new(),
+                        unit: "day".to_owned(),
                     }),
                 ],
             },
