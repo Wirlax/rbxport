@@ -14,7 +14,7 @@
  * reading the stick.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, LoaderCircle, Search, X } from "lucide-react";
 
 import { EjectIcon, FolderIcon, ListIcon } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
@@ -779,6 +779,7 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
               const read = states.get(device.path);
               const job = exportJobs.get(device.path);
               const fileSystem = device.fileSystem?.toUpperCase().replace(/^VFAT$|^MSDOS$/, "FAT") || "Unknown filesystem";
+              const fat32Recommended = device.fileSystem?.trim().toUpperCase() !== "FAT32";
               const free = device.totalBytes > 0 ? `${device.freeBytes === 0 ? "0.0 GB" : formatSpace(device.freeBytes)} free (${Math.round(device.freeBytes / device.totalBytes * 100)}%)` : "Space unknown";
               const freePercent = device.totalBytes > 0 ? Math.max(0, Math.min(100, device.freeBytes / device.totalBytes * 100)) : null;
               const usedPercent = freePercent === null ? null : 100 - freePercent;
@@ -792,6 +793,9 @@ export function SyncManager({ windowed = false, onClose, onSynced, onReady }: Sy
                     }} />
                   <label className={styles.rowSelection}>
                   <span className={styles.name} title={device.path}>{device.name}</span>
+                  {fat32Recommended ? <span className={styles.filesystemWarning} title={t("Pioneer DJ recommends FAT32")}>
+                    <AlertTriangle aria-label={t("Pioneer DJ recommends FAT32")} />
+                  </span> : null}
                   <TickBox state={on ? "on" : "off"} label={device.name} disabled={busy} onChange={(next) => tickDevice(device.path, next)} />
                   </label>
                   <button type="button" className={styles.ejectButton}

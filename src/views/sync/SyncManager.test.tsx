@@ -37,6 +37,7 @@ const stick = (name: string): Device => ({
   path: `/Volumes/${name}`,
   totalBytes: 32 * 1024 ** 3,
   freeBytes: 24 * 1024 ** 3,
+  fileSystem: "FAT32",
   removable: true,
   volumeId: "dev:1",
   export: null,
@@ -354,6 +355,18 @@ describe("SyncManager", () => {
     expect(meter?.getAttribute("aria-valuenow")).toBe("25");
     expect(meter?.getAttribute("aria-valuetext")).toBe("8.0 GB used; 24.0 GB free (75%)");
     expect(meter?.querySelector("span")?.style.width).toBe("25%");
+  });
+
+  it("warns beside a USB stick that is not FAT32", async () => {
+    listDevices.mockResolvedValueOnce([{ ...stick("USB A"), fileSystem: "exFAT" }]);
+    act(() => root.unmount());
+    root = createRoot(host);
+    act(() => root.render(<SyncManager onClose={onClose} />));
+    await settle();
+
+    const warning = host.querySelector('[title="Pioneer DJ recommends FAT32"]');
+    expect(warning?.querySelector("svg")).not.toBeNull();
+    expect(warning?.querySelector("svg")?.getAttribute("aria-label")).toBe("Pioneer DJ recommends FAT32");
   });
 
   it("requests post-sync ejection and distinguishes eject errors from sync errors", async () => {
