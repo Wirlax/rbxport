@@ -380,6 +380,10 @@ struct CompiledCondition {
     /// or the two ends of a range, or the earliest day of "in the last".
     low: i64,
     high: i64,
+    /// Whether the date operands needed by this operator converted. rekordbox
+    /// excludes an invalid rule value except that a valid track date remains
+    /// unequal to it.
+    date_bounds_valid: bool,
 }
 
 impl CompiledGroup {
@@ -418,6 +422,7 @@ impl CompiledItem {
 
 impl CompiledCondition {
     fn from(condition: &Condition, library: &Library, today: &Date) -> Self {
+        let mut date_bounds_valid = true;
         let (low, high) = match condition.property {
             Property::Bpm => (whole(&condition.left), whole(&condition.right)),
             Property::Duration => (seconds(&condition.left), seconds(&condition.right)),
@@ -431,10 +436,17 @@ impl CompiledCondition {
                         let back = whole(&condition.left).max(0);
                         (today.minus(back, &condition.unit).days(), today.days())
                     }
-                    _ => (
-                        Date::parse(&condition.left).map_or(i64::MIN, Date::days),
-                        Date::parse(&condition.right).map_or(i64::MAX, Date::days),
-                    ),
+                    Operator::InRange => {
+                        let low = smart_date(&condition.left);
+                        let high = smart_date(&condition.right);
+                        date_bounds_valid = low.is_some() && high.is_some();
+                        (low.unwrap_or_default(), high.unwrap_or_default())
+                    }
+                    _ => {
+                        let low = smart_date(&condition.left);
+                        date_bounds_valid = low.is_some();
+                        (low.unwrap_or_default(), 0)
+                    }
                 }
             }
             _ => (0, 0),
@@ -453,6 +465,7 @@ impl CompiledCondition {
             text,
             low,
             high,
+            date_bounds_valid,
         }
     }
 
@@ -562,12 +575,12 @@ impl CompiledCondition {
     }
 
     fn date_matches(&self, text: &str) -> bool {
-        let Some(date) = Date::parse(text) else {
-            // A track with no date is outside every window, and equal to
-            // nothing.
-            return matches!(self.operator, Operator::NotEqual | Operator::NotInLast);
+        let Some(days) = smart_date(text) else {
+            return false;
         };
-        let days = date.days();
+        if !self.date_bounds_valid {
+            return self.operator == Operator::NotEqual;
+        }
         match self.operator {
             Operator::Equal => days == self.low,
             Operator::NotEqual => days != self.low,
@@ -578,6 +591,43 @@ impl CompiledCondition {
             Operator::Contains | Operator::NotContains | Operator::StartsWith | Operator::EndsWith => false,
         }
     }
+}
+
+/// Convert the ten-character date values used by Smart Playlists.
+///
+/// rekordbox reads the year, month and day from fixed positions, ignores the
+/// two separators, and lets the C calendar routines normalize overflowing
+/// fields. The conversion reports only positive `_mktime64` values, whose
+/// supported calendar ends in 3000.
+fn smart_date(text: &str) -> Option<i64> {
+    if text.contains('\0') {
+        return None;
+    }
+
+    let mut chars = text.chars();
+    let year = positional_number(&mut chars, 4)?;
+    chars.next()?;
+    let month = positional_number(&mut chars, 2)?;
+    chars.next()?;
+    let day = positional_number(&mut chars, 2)?;
+    if chars.next().is_some() {
+        return None;
+    }
+
+    let total_months = year.checked_mul(12)?.checked_add(month)?.checked_sub(1)?;
+    let normalized_year = total_months.div_euclid(12);
+    let normalized_month = total_months.rem_euclid(12) + 1;
+    let days = days_from_civil(normalized_year, normalized_month, 1).checked_add(day - 1)?;
+    let normalized = Date::from_days(days);
+
+    (days > 0 && normalized.year <= 3000).then_some(days)
+}
+
+fn positional_number(chars: &mut impl Iterator<Item = char>, width: usize) -> Option<i64> {
+    (0..width).try_fold(0_i64, |value, _| {
+        let character = chars.next()?;
+        Some(value * 10 + i64::from(u32::from(character)) - i64::from(u32::from('0')))
+    })
 }
 
 /// A duration in whole seconds, from `300` or `5:00`.
@@ -793,6 +843,54 @@ mod tests {
         assert_eq!(d.minus(31, "day"), Date { year: 2026, month: 2, day: 28 });
         assert_eq!(Date::parse("2024-02-29").unwrap().days(), 19_782);
         assert!(Date::parse("not a date").is_none());
+    }
+
+    #[test]
+    fn smart_dates_use_fixed_positions_and_normalize_the_calendar() {
+        let january_31 = smart_date("2025-01-31").unwrap();
+        assert_eq!(smart_date("2025/01/31"), Some(january_31));
+        assert_eq!(smart_date("2025Ω01Ω31"), Some(january_31));
+        assert_eq!(smart_date("2025-02-29"), smart_date("2025-03-01"));
+        assert_eq!(smart_date("2025-13-01"), smart_date("2026-01-01"));
+        assert_eq!(smart_date("2025-01-00"), smart_date("2024-12-31"));
+        assert_eq!(smart_date("202A-01-31"), smart_date("2037-01-31"));
+    }
+
+    #[test]
+    fn smart_dates_reject_values_outside_rekordbox_conversion() {
+        assert!(smart_date("1970-01-01").is_none());
+        assert!(smart_date("1969-12-31").is_none());
+        assert!(smart_date("9999-12-31").is_none());
+        assert!(smart_date("2025-1-31").is_none());
+        assert!(smart_date("2025-01-31T00:00").is_none());
+        assert!(smart_date(" 2025-01-31").is_none());
+        assert!(smart_date("２０２５-０１-３１").is_none());
+        assert!(smart_date("2025-0\0-31").is_none());
+    }
+
+    #[test]
+    fn smart_date_comparisons_require_a_valid_track_date() {
+        let condition = |operator: Operator, left: &str| {
+            CompiledCondition::from(
+                &Condition {
+                    property: Property::DateAdded,
+                    operator,
+                    left: left.to_owned(),
+                    right: String::new(),
+                    unit: String::new(),
+                },
+                &Library::default(),
+                &Date {
+                    year: 2025,
+                    month: 1,
+                    day: 31,
+                },
+            )
+        };
+
+        assert!(!condition(Operator::NotEqual, "2025-01-31").date_matches("not-a-date"));
+        assert!(condition(Operator::NotEqual, "not-a-date").date_matches("2025-01-31"));
+        assert!(!condition(Operator::Equal, "not-a-date").date_matches("2025-01-31"));
     }
 
     #[test]
