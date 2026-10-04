@@ -7,7 +7,7 @@ export default defineConfig({
     environment: "node",
     // `.tsx` for the few tests that mount a component. Those opt into jsdom
     // with a docblock of their own, so everything else stays in node.
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "design/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "design/**/*.test.ts", "scripts/cleanup.test.mjs"],
     reporters: "dot",
   },
 });

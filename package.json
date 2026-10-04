@@ -11,6 +11,7 @@
     "dev:mock": "cross-env RBL_MOCK=1 vite",
     "build": "tsc --noEmit && vite build",
     "build:mock": "cross-env RBL_MOCK=1 vite build --outDir design/sketch/dist --emptyOutDir",
+    "clean": "node scripts/cleanup.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint src e2e --max-warnings 0",

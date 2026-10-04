@@ -32,6 +32,16 @@ pnpm dev:web      # the interface alone in a browser, against the mock backend
 `src/ipc/backend-mock.ts` stands in for every command, and the Playwright
 suite runs against it too.
 
+Generated Rust artifacts can grow large after repeated desktop builds. Run
+`pnpm clean` to remove regenerable build and test output from this checkout.
+Use `pnpm clean -- --dry-run` to inspect it first. `--dependencies` also removes
+`node_modules`; `--app-data` additionally removes RBXport caches and abandoned
+partial backup work after the app is closed. Completed backups, preferences,
+logs, recovery journals, and rekordbox libraries are not removed. `--git`
+prunes worktree registrations whose directories are already gone and deletes
+local branches merged into `HEAD`; it preserves `main`, `dev`, the current
+branch, and every branch checked out in a worktree.
+
 **Before you run anything that writes, back up your library.** See
 [Working with a real library](#working-with-a-real-library).
 
