@@ -179,10 +179,17 @@ that is not tagged yet, it rewrites those files back to the tagged version,
 so don't commit them from a `pnpm dev` session.
 
 `.github/workflows/ci.yml` runs the complete non-publishing release gate for
-same-repository pull requests to `dev`: pinned-current Rust/Clippy, a separate
-Rust 1.89 MSRV compile check, Windows compilation, and the frontend lint,
-build, unit, budget, generated-file, and Playwright checks. Fork pull requests
-intentionally do not run on the self-hosted runners.
+same-repository pull requests to `dev` or `main`: pinned-current Rust/Clippy,
+a separate Rust 1.89 MSRV compile check, Windows compilation, and the frontend
+lint, build, unit, budget, generated-file, and Playwright checks. Fork pull
+requests intentionally do not run on the self-hosted runners.
+
+Before validating a same-repository pull request, CI applies Clippy's safe
+machine fixes and fills any missing locale catalog entries with their English
+source text. It commits those deterministic changes to the PR branch, then
+validates the updated SHA in the same run. Translation fallbacks keep the
+catalog complete but should be replaced with native wording when one is
+available.
 
 Releases are server-side and manual. In GitHub, open **Actions → Release → Run
 workflow**, select `dev`, and enter one release note beginning with `(New)`,
