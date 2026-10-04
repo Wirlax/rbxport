@@ -35,8 +35,8 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      skip_validation:
-        description: "Reuse this exact dev head only when it was already validated; skip every validation gate."
+      skip_tests:
+        description: "Skip tests and start at Validation complete. Use only for an already validated dev head."
         required: false
         default: false
         type: boolean
@@ -72,7 +72,7 @@ jobs:
       release: ${{ steps.candidate.outputs.release }}
       source_ref: ${{ steps.candidate.outputs.source_ref }}
       release_tag: ${{ steps.candidate.outputs.release_tag }}
-      skip_validation: ${{ steps.candidate.outputs.skip_validation }}
+      skip_tests: ${{ steps.candidate.outputs.skip_tests }}
       version: ${{ steps.candidate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           source="$(git rev-parse HEAD)"
-          skip_validation="${{ inputs.skip_validation || false }}"
+          skip_tests="${{ inputs.skip_tests || false }}"
           if [ "${{ inputs.validate_only }}" = true ]; then
             {
               echo "release=false"
@@ -130,14 +130,14 @@ jobs:
             echo "release=true"
             echo "source_ref=$source"
             echo "release_tag=v$version"
-            echo "skip_validation=$skip_validation"
+            echo "skip_tests=$skip_tests"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
   release-source:
     name: Verify release source
     needs: prepare
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
@@ -164,7 +164,7 @@ jobs:
   rust:
     name: Rust tests
     needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       # Tests must never be able to open the installed library read-write.
@@ -236,7 +236,7 @@ jobs:
     # Run after it so apt, rustup, and the host cargo cache are never mutated
     # concurrently by two jobs from the same validation run.
     needs: [prepare, rust]
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       RB_LITE_TEST: "1"
@@ -286,7 +286,7 @@ jobs:
   windows:
     name: Win compile check
     needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, windows, x64]
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
@@ -395,7 +395,7 @@ jobs:
     # The Linux ARC host is shared with the Rust and MSRV gates. Run after
     # both rather than competing with them for apt, cargo and WebKit resources.
     needs: [prepare, msrv]
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       RB_LITE_TEST: "1"
@@ -470,7 +470,7 @@ jobs:
   frontend:
     name: UI tests
     needs: [prepare, release-source]
-    if: needs.prepare.outputs.skip_validation != 'true'
+    if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, macos, arm64]
     steps:
       - uses: actions/checkout@v4
@@ -593,21 +593,21 @@ jobs:
     needs: [prepare, rust, msrv, windows, linux-window, frontend]
     if: >-
       always() && needs.prepare.result == 'success' &&
-      (needs.prepare.outputs.skip_validation == 'true' ||
+      (needs.prepare.outputs.skip_tests == 'true' ||
       (needs.rust.result == 'success' && needs.msrv.result == 'success' &&
       needs.windows.result == 'success' && needs.linux-window.result == 'success' &&
       needs.frontend.result == 'success'))
     runs-on: [self-hosted, linux, x64]
     steps:
       - run: |
-          if [ "${{ needs.prepare.outputs.skip_validation }}" = true ]; then
-            echo "Validation was explicitly skipped for previously validated ${{ needs.prepare.outputs.source_ref }}."
+          if [ "${{ needs.prepare.outputs.skip_tests }}" = true ]; then
+            echo "Tests were explicitly skipped for previously validated ${{ needs.prepare.outputs.source_ref }}."
           else
             echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
           fi
 
   record:
-    name: Record and tag the validated dev release
+    name: Record and tag version number
     if: needs.prepare.outputs.release == 'true' && needs.validated.result == 'success'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
