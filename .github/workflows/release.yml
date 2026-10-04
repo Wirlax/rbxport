@@ -35,8 +35,13 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      skip_version_bump:
+        description: "Use current version"
+        required: false
+        default: false
+        type: boolean
       skip_tests:
-        description: "Skip tests and start at Validation complete. Use only for an already validated dev head."
+        description: "Skip tests"
         required: false
         default: false
         type: boolean
@@ -73,6 +78,7 @@ jobs:
       source_ref: ${{ steps.candidate.outputs.source_ref }}
       release_tag: ${{ steps.candidate.outputs.release_tag }}
       skip_tests: ${{ steps.candidate.outputs.skip_tests }}
+      skip_version_bump: ${{ steps.candidate.outputs.skip_version_bump }}
       version: ${{ steps.candidate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -91,6 +97,7 @@ jobs:
           set -euo pipefail
           source="$(git rev-parse HEAD)"
           skip_tests="${{ inputs.skip_tests || false }}"
+          skip_version_bump="${{ inputs.skip_version_bump || false }}"
           if [ "${{ inputs.validate_only }}" = true ]; then
             {
               echo "release=false"
@@ -114,6 +121,10 @@ jobs:
             const text = fs.readFileSync("Cargo.toml", "utf8");
             const current = /\[workspace\.package\][\s\S]*?^version\s*=\s*"(\d+\.\d+\.\d+)-rc\.(\d+)"/m.exec(text);
             if (!current) throw new Error("workspace version must be an RC");
+            if ("${{ inputs.skip_version_bump || false }}" === "true") {
+              process.stdout.write(`${current[1]}-rc.${current[2]}`);
+              process.exit(0);
+            }
             const prefix = current[1];
             const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
           const numbers = tags
@@ -122,7 +133,11 @@ jobs:
           const highest = Math.max(Number(current[2]), ...numbers);
           process.stdout.write(`${prefix}-rc.${highest + 1}`);
           ')"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+          if [ "$skip_version_bump" = true ]; then
+            git rev-parse --verify "refs/tags/v$version^{commit}"
+            git merge-base --is-ancestor "v$version" "$source"
+            node scripts/release-preflight.mjs --version "$version"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
             echo "::error::v$version already exists; tags are immutable."
             exit 1
           fi
@@ -131,6 +146,7 @@ jobs:
             echo "source_ref=$source"
             echo "release_tag=v$version"
             echo "skip_tests=$skip_tests"
+            echo "skip_version_bump=$skip_version_bump"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
@@ -612,7 +628,8 @@ jobs:
     # skipping the release chain. Only successful required jobs may advance.
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success'
+      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success' &&
+      needs.prepare.outputs.skip_version_bump != 'true'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
     permissions:
@@ -669,13 +686,16 @@ jobs:
     name: Fast-forward main
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.record.result == 'success'
-    needs: [prepare, record]
+      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success' &&
+      (needs.record.result == 'success' ||
+      (needs.prepare.outputs.skip_version_bump == 'true' && needs.record.result == 'skipped'))
+    needs: [prepare, validated, record]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
     outputs:
       source_ref: ${{ steps.promote.outputs.source_ref }}
+      release_tag: ${{ steps.promote.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -685,7 +705,8 @@ jobs:
 
       - id: promote
         env:
-          SOURCE_REF: ${{ needs.record.outputs.source_ref }}
+          SOURCE_REF: ${{ needs.record.outputs.source_ref || needs.prepare.outputs.source_ref }}
+          RELEASE_TAG: ${{ needs.record.outputs.release_tag || needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
           git fetch origin dev main
@@ -695,6 +716,7 @@ jobs:
           git merge --ff-only "$SOURCE_REF"
           git push origin main
           echo "source_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   build-macos:
     name: Build ${{ matrix.platform }}
@@ -703,9 +725,9 @@ jobs:
     # the whole run pending, which arc does not currently discover).
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.prepare.outputs.release == 'true' &&
       needs.promote.result == 'success'
-    needs: [prepare, record, promote]
+    needs: [prepare, promote]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -729,7 +751,7 @@ jobs:
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
       source_ref: ${{ needs.promote.outputs.source_ref }}
-      release_tag: ${{ needs.record.outputs.release_tag }}
+      release_tag: ${{ needs.promote.outputs.release_tag }}
       preview: false
 
   build-other:
@@ -737,9 +759,9 @@ jobs:
     # Windows and Linux build alongside the serialized Mac jobs.
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.prepare.outputs.release == 'true' &&
       needs.promote.result == 'success'
-    needs: [prepare, record, promote]
+    needs: [prepare, promote]
     strategy:
       fail-fast: false
       matrix:
@@ -762,20 +784,20 @@ jobs:
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
       source_ref: ${{ needs.promote.outputs.source_ref }}
-      release_tag: ${{ needs.record.outputs.release_tag }}
+      release_tag: ${{ needs.promote.outputs.release_tag }}
       preview: false
 
   publish:
     name: Publish to R2
     if: >-
       !cancelled() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.prepare.outputs.release == 'true' &&
       needs.promote.result == 'success' && needs.build-macos.result == 'success' &&
       needs.build-other.result == 'success'
-    needs: [prepare, record, promote, build-macos, build-other]
+    needs: [prepare, promote, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     env:
-      RELEASE_TAG: ${{ needs.record.outputs.release_tag }}
+      RELEASE_TAG: ${{ needs.promote.outputs.release_tag }}
     steps:
       # The checked-in release notes feed the app, website, and Discord.
       # Nothing else here needs the tree. FIRST, before
