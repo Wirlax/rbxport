@@ -46,3 +46,14 @@ it("names read-only as a library state", () => {
   expect(badge?.textContent).toBe("Library read-only");
   expect(badge?.title).toContain("Editing is locked while rekordbox is running");
 });
+
+it("offers the support action when it is available", () => {
+  const onSupport = vi.fn();
+  act(() => root.render(<StatusBar onSupport={onSupport} />));
+
+  const button = Array.from(host.querySelectorAll("button")).find(candidate => candidate.textContent?.includes("Support rbxport"));
+  act(() => button?.click());
+
+  expect(button).toBeDefined();
+  expect(onSupport).toHaveBeenCalledOnce();
+});

@@ -87,9 +87,7 @@ const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => 
 const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
 const SmartPlaylistEditor = lazy(() => import("@/views/tree/SmartPlaylistEditor").then(m => ({ default: m.SmartPlaylistEditor })));
 
-// Keep the main-page support affordance wired but hidden for now. Support
-// remains available from Preferences › About.
-const SHOW_MAIN_SUPPORT = false;
+const SHOW_MAIN_SUPPORT = true;
 
 function ConnectedPreferences(props: Omit<React.ComponentProps<typeof Preferences>, "reduction" | "vu" | "peakLeft" | "peakRight">) {
   const master = useMasterDisplay();
