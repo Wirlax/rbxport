@@ -168,7 +168,7 @@ impl Source for StateSource {
         };
         state
             .read_db(|db| rbl_db::details::root_categories(db.connection()))
-            .map(|rows| {
+            .map_or_else(|_| rbl_link::RootCategory::defaults(), |rows| {
                 rows.into_iter()
                     .map(|row| rbl_link::RootCategory {
                         id: row.id,
@@ -179,7 +179,6 @@ impl Source for StateSource {
                     })
                     .collect()
             })
-            .unwrap_or_else(|_| rbl_link::RootCategory::defaults())
     }
 
     fn edit(&self, edit: &rbl_link::Edit) -> bool {

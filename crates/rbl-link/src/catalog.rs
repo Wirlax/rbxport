@@ -1031,22 +1031,24 @@ fn secondary_column(
         ),
         TrackColumn::Rating => {
             let rating = u32::from(library.rating.get(at).copied().unwrap_or(0));
-            let text = preserve_cached_text
-                .then(|| "★".repeat(rating as usize))
-                .unwrap_or_default();
+            let text = if preserve_cached_text {
+                "★".repeat(rating as usize)
+            } else {
+                String::new()
+            };
             (text, rating)
         }
         TrackColumn::Duration => {
             let seconds = library.length_sec.get(at).copied().unwrap_or(0);
-            let text = preserve_cached_text
-                .then(|| format!("{}:{:02}", seconds / 60, seconds % 60))
-                .unwrap_or_default();
+            let text = if preserve_cached_text {
+                format!("{}:{:02}", seconds / 60, seconds % 60)
+            } else {
+                String::new()
+            };
             (text, seconds)
         }
         TrackColumn::Bpm => (
-            preserve_cached_text
-                .then(|| format_bpm(bpm))
-                .unwrap_or_default(),
+            if preserve_cached_text { format_bpm(bpm) } else { String::new() },
             bpm,
         ),
         TrackColumn::Label => details.map_or_else(
@@ -1064,9 +1066,11 @@ fn secondary_column(
         }
         TrackColumn::Bitrate => {
             let bitrate = library.bitrate.get(at).copied().unwrap_or(0);
-            let text = preserve_cached_text
-                .then(|| format_nonzero(bitrate, " kbps"))
-                .unwrap_or_default();
+            let text = if preserve_cached_text {
+                format_nonzero(bitrate, " kbps")
+            } else {
+                String::new()
+            };
             (text, bitrate)
         }
         TrackColumn::Color => {
@@ -1083,9 +1087,7 @@ fn secondary_column(
         }
         TrackColumn::DjPlayCount => {
             let count = u32::from(library.play_count.get(at).copied().unwrap_or(0));
-            let text = preserve_cached_text
-                .then(|| count.to_string())
-                .unwrap_or_default();
+            let text = if preserve_cached_text { count.to_string() } else { String::new() };
             (text, count)
         }
         TrackColumn::DateAdded => (library.date_added.get(at).to_owned(), 0),
