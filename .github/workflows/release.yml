@@ -14,8 +14,9 @@ name: Release
 # publication target also makes retention and `latest.json` updates atomic.
 #
 # Nothing builds until the shared validation gate passes: pinned Clippy, the
-# Rust test suite and MSRV check, a Windows-native `cargo check`, and the
-# frontend's lint, typecheck, unit tests, bundle budget and Playwright e2e.
+# Rust test suite and MSRV check, a Windows-native compile and desktop-path
+# check, a Linux Tauri-window smoke test, and the frontend's lint, typecheck,
+# unit tests, bundle budget, Playwright e2e and Intel-macOS runtime smoke.
 # `.github/workflows/ci.yml` calls this workflow in validation-only mode when
 # manually dispatched; a release still owns the dependency directly,
 # so a separate CI run can never accidentally authorize publication.
@@ -368,8 +369,9 @@ jobs:
       - name: Check the declared MSRV
         run: cargo +1.89.0 check --workspace --all-targets
 
-  # Check Windows-specific code on the same tags that trigger release builds.
-  # `check` catches the platform-specific code; the release builds the installer.
+  # Check Windows-specific code on the same candidates that may be released.
+  # The Rust check catches native code, while the focused frontend test verifies
+  # that a WebView2 File path such as C:\\Music\\track.mp3 reaches IPC unchanged.
   #
   # It has to run on Windows. Cross-checking from macOS gets as far as the
   # audio and protocol crates — `cargo check -p rbl-deck -p rbl-core
@@ -462,6 +464,95 @@ jobs:
       - name: Check
         run: cargo check --workspace --all-targets
 
+      - uses: pnpm/action-setup@v4
+        with:
+          # ARC hosts are shared; keep pnpm's setup outside the host-global
+          # default directory so this validation cannot race another job.
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check Windows desktop file paths
+        # Do not invoke the full suite here: the browser/UI lane below owns it.
+        # This is a Windows-native assertion of the exact File.path bridge
+        # behavior that a WebView2 drop supplies.
+        run: pnpm exec vitest run src/ipc/file-drop.test.ts
+
+  # Linux's WebKitGTK shell is distinct from both browser E2E and macOS
+  # WKWebView. Build the real binary with tauri.linux.conf.json auto-merged,
+  # then require its native window to appear in an isolated Xvfb display.
+  linux-window:
+    name: Linux Tauri window smoke
+    # The Linux ARC host is shared with the Rust and MSRV gates. Run after
+    # both rather than competing with them for apt, cargo and WebKit resources.
+    needs: [prepare, msrv]
+    runs-on: [self-hosted, linux, x64]
+    env:
+      RB_LITE_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
+      - name: Install Linux window dependencies
+        run: |
+          sudo flock /var/lock/rbxport-ci-apt.lock bash -c '\
+            apt-get update && \
+            apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+              librsvg2-dev patchelf libgtk-3-dev libasound2-dev xvfb x11-utils'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Ensure rustup
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Give cargo a home of its own
+        run: echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Build the Linux shell without bundling
+        run: pnpm tauri build --debug --no-bundle --ci
+
+      - name: Require a native Linux window
+        run: |
+          set -euo pipefail
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/xdg-config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/xdg-data"
+          log="$RUNNER_TEMP/rbxport-linux-window.log"
+          # shellcheck disable=SC2016 # $1/$2 expand in the child shell below.
+          xvfb-run -a bash -c '
+            set -euo pipefail
+            "$1" >"$2" 2>&1 &
+            pid=$!
+            trap "kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true" EXIT
+            for _ in $(seq 1 20); do
+              if xwininfo -root -tree | grep -Fq "rbxport"; then exit 0; fi
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            cat "$2"
+            echo "::error::rbxport did not create a Linux window"
+            exit 1
+          ' _ target/debug/rbxport "$log"
+
   # On the Mac, not the Linux host, because of one test. `e2e/frames.spec.ts`
   # asserts that two playing decks cost under 3 ms more per frame than an idle
   # window, and WebKit on the Linux VM is software-rendered: it measures 10-13 ms
@@ -533,6 +624,55 @@ jobs:
           trap 'rmdir "$lock"' EXIT
           E2E_PORT="$((20000 + GITHUB_RUN_NUMBER % 10000))" pnpm e2e
 
+      - name: Prepare the Intel macOS runtime smoke
+        # The only macOS ARC host is Apple Silicon. Rosetta is therefore the
+        # runtime gate for the x86_64 build; an arm64 build alone cannot prove
+        # that an Intel user can launch the binary we ship.
+        env:
+          RB_LITE_TEST: "1"
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
+        run: |
+          set -euo pipefail
+          if ! arch -x86_64 /usr/bin/true; then
+            echo "::error::Rosetta is required to validate the Intel macOS build."
+            exit 1
+          fi
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "CARGO_HOME=$RUNNER_TEMP/cargo-home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-apple-darwin
+
+      - name: Build the Intel macOS shell without bundling
+        run: pnpm tauri build --target x86_64-apple-darwin --debug --no-bundle --ci
+
+      - name: Require the Intel macOS shell to stay running
+        env:
+          RB_LITE_TEST: "1"
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-apple-darwin/debug/rbxport
+          log="$RUNNER_TEMP/rbxport-intel-window.log"
+          arch -x86_64 "$binary" >"$log" 2>&1 &
+          pid=$!
+          # shellcheck disable=SC2064 # pid must be resolved when the trap runs.
+          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            cat "$log"
+            echo "::error::Intel macOS shell exited before the runtime smoke completed"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -543,7 +683,7 @@ jobs:
   promote:
     name: Promote validated candidate
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, rust, msrv, windows, frontend]
+    needs: [prepare, rust, msrv, windows, linux-window, frontend]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
