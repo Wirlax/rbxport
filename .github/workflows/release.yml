@@ -608,7 +608,11 @@ jobs:
 
   record:
     name: Record and tag version number
-    if: needs.prepare.outputs.release == 'true' && needs.validated.result == 'success'
+    # Explicit status checks prevent skipped test ancestors from implicitly
+    # skipping the release chain. Only successful required jobs may advance.
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.validated.result == 'success'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
     permissions:
@@ -686,7 +690,9 @@ jobs:
 
   promote:
     name: Fast-forward main
-    if: needs.prepare.outputs.release == 'true'
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.record.result == 'success'
     needs: [prepare, record]
     runs-on: [self-hosted, linux, x64]
     permissions:
@@ -718,7 +724,10 @@ jobs:
     # Serialize only the Macs: both may share a signing keychain search list.
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
-    if: needs.prepare.outputs.release == 'true'
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.promote.result == 'success'
     needs: [prepare, record, promote]
     strategy:
       fail-fast: false
@@ -749,7 +758,10 @@ jobs:
   build-other:
     name: Build ${{ matrix.platform }}
     # Windows and Linux build alongside the serialized Mac jobs.
-    if: needs.prepare.outputs.release == 'true'
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.promote.result == 'success'
     needs: [prepare, record, promote]
     strategy:
       fail-fast: false
@@ -778,7 +790,11 @@ jobs:
 
   publish:
     name: Publish to R2
-    if: needs.prepare.outputs.release == 'true'
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.release == 'true' && needs.record.result == 'success' &&
+      needs.promote.result == 'success' && needs.build-macos.result == 'success' &&
+      needs.build-other.result == 'success'
     needs: [prepare, record, promote, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     env:
