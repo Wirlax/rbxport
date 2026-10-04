@@ -29,13 +29,13 @@ use unicode_normalization::UnicodeNormalization as _;
 /// A file handle is a fixed 32 opaque bytes in `NFSv2`.
 pub const HANDLE_LEN: usize = 32;
 
-/// The most a single `READ` may return: rekordbox's libFilSiNE caps a read
-/// at 0xfc00 (`docs/pre-release/rekordbox/link-export-internals.md`). A
-/// CDJ-3000 asks for 32 KB at a time (679 of 694 reads in the 2026-09-12
-/// capture; the rest were the tail of the file), and the reply goes out as
-/// one UDP datagram in IP fragments. `NFSv2`'s nominal 8 KB ceiling is not
-/// what the players use.
-pub const MAX_READ: usize = 0xfc00;
+/// The most a single `READ` may return. A CDJ-3000 asks for 32 KB, but an
+/// `NFSv2` client accepts a short successful read and continues at its end.
+/// Keeping replies at the protocol's 8 KB ceiling materially reduces IP
+/// fragmentation: physical-CDJ testing on 2026-10-04 saw 761 retransmits in
+/// 2,170 reads and recurring five-second load stalls with 32 KB datagrams.
+/// `[OBS]` The 1 MB read-ahead cache still amortizes the underlying file I/O.
+pub const MAX_READ: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {

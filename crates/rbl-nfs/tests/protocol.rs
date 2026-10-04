@@ -435,16 +435,17 @@ fn attributes_describe_a_read_only_tree() {
     assert_eq!(reader.u32().unwrap(), 0o040_755, "rekordbox's export root showed 041ed");
 }
 
-/// Reads a whole file the way a player does: as much as a read may carry
-/// at a time, until the read at the end is answered `IO`, as rekordbox's
-/// libFilSiNE answers one at or past the end.
+/// Reads a whole file the way a player does: it asks for 32 KB, accepts the
+/// server's shorter fragmentation-safe replies, and continues at their end
+/// until the read at EOF is answered `IO`.
 fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
+    const PLAYER_READ: u32 = 32 * 1024;
     let mut out = Vec::new();
     loop {
         let mut args = Writer::new();
         args.opaque_fixed(handle.as_bytes())
             .u32(u32::try_from(out.len()).unwrap())
-            .u32(u32::try_from(MAX_READ).unwrap())
+            .u32(PLAYER_READ)
             .u32(0);
         let reply = ask(server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
         let mut reader = ok_reader(&reply);
@@ -488,8 +489,7 @@ fn a_read_is_capped_at_the_protocol_limit_however_much_is_asked_for() {
     for _ in 0..17 {
         reader.u32().unwrap();
     }
-    // The cap is rekordbox's 0xfc00; the fixture's file is shorter.
-    assert_eq!(MAX_READ, 0xfc00);
+    assert_eq!(MAX_READ, 8 * 1024);
     assert_eq!(reader.opaque().unwrap().len(), 40_000.min(MAX_READ));
 }
 

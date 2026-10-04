@@ -32,10 +32,9 @@ const POLL: Duration = Duration::from_millis(200);
 /// datagram, or one from a peer that has gone away, is counted and skipped.
 pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -> io::Result<()> {
     socket.set_read_timeout(Some(POLL))?;
-    // A 32 KB `READ` reply is one datagram. macOS refuses a datagram larger
-    // than the socket's send buffer, which defaults to 9,216 bytes
-    // (`net.inet.udp.maxdgram`); raising the buffer is what lets it go out
-    // in IP fragments, as rekordbox's do.
+    // Even an 8 KB `READ` reply is larger than one Ethernet frame. Keep the
+    // buffer roomy enough for bursts from several player source ports rather
+    // than making `send_to` wait for each fragmented datagram to drain.
     socket2::SockRef::from(socket).set_send_buffer_size(SEND_BUFFER)?;
     let mut buffer = vec![0_u8; DATAGRAM];
     while !stop.load(Ordering::Relaxed) {
