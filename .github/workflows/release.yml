@@ -132,7 +132,7 @@ jobs:
             echo "::error::Run Release from the dev branch."
             exit 1
           fi
-          git fetch --no-tags origin dev main --tags
+          git fetch origin dev main --tags
           if [ -n "$RETRY_TAG" ]; then
             if [ -n "$RELEASE_NOTE$REQUESTED_VERSION" ] || ! [[ "$RETRY_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
               echo "::error::retry_tag must be an existing RC tag and cannot be combined with a note or version."
