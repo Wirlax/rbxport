@@ -27,7 +27,7 @@
 //! this, so the value conventions marked `[ASSUME]` below want checking
 //! against a recorded rule the first time one is to hand.
 
-use rbl_core::xml::{attribute, tags, Tag};
+use rbl_core::xml::{tags, Tag};
 
 use crate::strings::fold_smart;
 use crate::{Library, Row, NO_ID};
@@ -79,18 +79,18 @@ impl Operator {
     /// The operator with this number.
     #[must_use]
     pub fn from_code(code: &str) -> Option<Self> {
-        Some(match code.trim() {
-            "1" => Self::Equal,
-            "2" => Self::NotEqual,
-            "3" => Self::Greater,
-            "4" => Self::Less,
-            "5" => Self::InRange,
-            "6" => Self::InLast,
-            "7" => Self::NotInLast,
-            "8" => Self::Contains,
-            "9" => Self::NotContains,
-            "10" => Self::StartsWith,
-            "11" => Self::EndsWith,
+        Some(match integer(code)? {
+            1 => Self::Equal,
+            2 => Self::NotEqual,
+            3 => Self::Greater,
+            4 => Self::Less,
+            5 => Self::InRange,
+            6 => Self::InLast,
+            7 => Self::NotInLast,
+            8 => Self::Contains,
+            9 => Self::NotContains,
+            10 => Self::StartsWith,
+            11 => Self::EndsWith,
             _ => return None,
         })
     }
@@ -160,31 +160,36 @@ impl Property {
     /// The property rekordbox calls `name` in the XML.
     #[must_use]
     pub fn from_name(name: &str) -> Self {
-        match name.trim() {
-            "artist" => Self::Artist,
-            "album" => Self::Album,
-            "albumArtist" => Self::AlbumArtist,
-            "originalArtist" => Self::OriginalArtist,
-            "producer" => Self::Composer,
-            "remixedBy" => Self::Remixer,
-            "mixName" => Self::MixName,
-            "genre" => Self::Genre,
-            "label" => Self::Label,
-            "key" => Self::Key,
-            "name" => Self::Title,
-            "comments" => Self::Comment,
-            "fileName" => Self::FileName,
-            "bpm" => Self::Bpm,
-            "rating" => Self::Rating,
-            "grouping" => Self::Color,
-            "counter" => Self::PlayCount,
-            "duration" => Self::Duration,
-            "year" => Self::Year,
-            "stockDate" => Self::DateAdded,
-            "dateCreated" => Self::DateCreated,
-            "dateReleased" => Self::DateReleased,
-            _ => Self::Unsupported,
+        for (candidate, property) in [
+            ("artist", Self::Artist),
+            ("album", Self::Album),
+            ("albumArtist", Self::AlbumArtist),
+            ("originalArtist", Self::OriginalArtist),
+            ("producer", Self::Composer),
+            ("remixedBy", Self::Remixer),
+            ("mixName", Self::MixName),
+            ("genre", Self::Genre),
+            ("label", Self::Label),
+            ("key", Self::Key),
+            ("name", Self::Title),
+            ("comments", Self::Comment),
+            ("fileName", Self::FileName),
+            ("bpm", Self::Bpm),
+            ("rating", Self::Rating),
+            ("grouping", Self::Color),
+            ("counter", Self::PlayCount),
+            ("duration", Self::Duration),
+            ("year", Self::Year),
+            ("stockDate", Self::DateAdded),
+            ("dateCreated", Self::DateCreated),
+            ("dateReleased", Self::DateReleased),
+        ] {
+            if name.eq_ignore_ascii_case(candidate) {
+                return property;
+            }
         }
+
+        Self::Unsupported
     }
 }
 
@@ -230,7 +235,7 @@ impl SmartRule {
             return None;
         }
 
-        let logic = if attribute(&attributes, "LogicalOperator").trim() == "2" {
+        let logic = if integer(attribute(&attributes, "LogicalOperator")) == Some(2) {
             Logic::Any
         } else {
             Logic::All
@@ -364,16 +369,26 @@ fn smart_document(mut xml: &str) -> Option<&str> {
 }
 
 fn condition(attributes: &[(String, String)]) -> Option<Condition> {
-    let Some(operator) = Operator::from_code(&attribute(attributes, "Operator")) else {
-        return None;
-    };
+    let operator = Operator::from_code(attribute(attributes, "Operator"))?;
     Some(Condition {
-        property: Property::from_name(&attribute(attributes, "PropertyName")),
+        property: Property::from_name(attribute(attributes, "PropertyName")),
         operator,
-        left: attribute(attributes, "ValueLeft"),
-        right: attribute(attributes, "ValueRight"),
-        unit: attribute(attributes, "ValueUnit"),
+        left: attribute(attributes, "ValueLeft").to_owned(),
+        right: attribute(attributes, "ValueRight").to_owned(),
+        unit: attribute(attributes, "ValueUnit").to_owned(),
     })
+}
+
+fn attribute<'a>(attributes: &'a [(String, String)], name: &str) -> &'a str {
+    attributes
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+        .unwrap_or_default()
+}
+
+fn integer(text: &str) -> Option<i32> {
+    text.trim().parse().ok()
 }
 
 // ---------------------------------------------------------------- evaluation
@@ -851,6 +866,27 @@ mod tests {
         assert!(SmartRule::parse("<NODE><CONDITION/>").is_none());
         assert!(SmartRule::parse("<NODE><CONDITION></NODE>").is_none());
         assert!(SmartRule::parse("<!--before--><?probe?><NODE></NODES>").is_some());
+    }
+
+    #[test]
+    fn attributes_follow_rekordbox_case_and_integer_rules() {
+        let rule = SmartRule::parse(
+            r#"<NODE LogicalOperator="+2"><CONDITION PropertyName="GENRE" Operator="0001" ValueLeft="House"/></NODE>"#,
+        )
+        .unwrap();
+        assert_eq!(rule.root.logic, Logic::Any);
+        let Item::Condition(condition) = &rule.root.items[0] else { panic!() };
+        assert_eq!(condition.property, Property::Genre);
+        assert_eq!(condition.operator, Operator::Equal);
+
+        let rule = SmartRule::parse(
+            r#"<NODE logicaloperator="2"><CONDITION PropertyName=" genre " Operator="+1" ValueLeft="House"/></NODE>"#,
+        )
+        .unwrap();
+        assert_eq!(rule.root.logic, Logic::All);
+        let Item::Condition(condition) = &rule.root.items[0] else { panic!() };
+        assert_eq!(condition.property, Property::Unsupported);
+        assert_eq!(condition.operator, Operator::Equal);
     }
 
     #[test]
