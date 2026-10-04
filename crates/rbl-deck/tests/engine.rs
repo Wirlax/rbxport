@@ -353,12 +353,16 @@ fn a_start_held_for_the_beat_is_silent_for_exactly_that_long_and_then_sounds() {
     assert_eq!(h.engine.snapshot().a.start_in_frames, 0);
     let first_sound = third.chunks_exact(2).position(|f| f[0] != 0.0);
     assert!(first_sound.is_some(), "no sound after the wait: {:?}", h.events());
-    // When the third pull was the one the wait ran out in, the sound starts
-    // 276 frames into it, give or take the first step of the fade from
-    // silence over the join.
+    // When the third pull was the one the wait ran out in, the source starts
+    // 276 frames into it. The master limiter adds its fixed lookahead before
+    // that first audible frame, with a couple of frames for the fade-in.
     if !retried {
         let at = first_sound.unwrap();
-        assert!((276..=278).contains(&at), "the first sound was {at} frames in, not 276");
+        let expected = 276 + LIMITER_TAIL;
+        assert!(
+            (expected..=expected + 2).contains(&at),
+            "the first sound was {at} frames in, not {expected}"
+        );
     }
     assert!(h.position(Deck::A) > 2_048, "the clock did not move once the wait was over");
 
