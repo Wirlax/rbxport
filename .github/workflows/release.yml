@@ -651,30 +651,7 @@ jobs:
           fi
           previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | head -n1)"
           node scripts/sync-version.mjs --version "$version"
-          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node --input-type=module <<'NODE'
-          import { execFileSync } from "node:child_process";
-          import fs from "node:fs";
-          const range = process.env.PREVIOUS ? `${process.env.PREVIOUS}..${process.env.SOURCE_REF}` : process.env.SOURCE_REF;
-          const commits = execFileSync("git", ["log", "--format=%s%x1f%b%x1e", range], { encoding: "utf8" })
-            .split("\x1e").filter(Boolean).map(entry => {
-              const [subject, body = ""] = entry.split("\x1f");
-              return { subject: subject.trim(), body };
-            }).filter(({ subject }) => subject && !subject.startsWith("chore(release):"));
-          const changes = commits.map(({ subject, body }) => {
-            const match = /^(feat|fix)(?:\([^)]*\))?:\s*(.+)$/i.exec(subject);
-            const tickets = [...new Set(`${subject}\n${body}`.match(/\bRBX-\d+\b/gi) ?? [])].map(ticket => ticket.toUpperCase());
-            const text = match ? match[2] : subject.replace(/^[^:]+:\s*/, "");
-            if (tickets.length) return `(Fixed) ${tickets.join(", ")}: ${text}`;
-            if (match) return `(${match[1].toLowerCase() === "feat" ? "New" : "Fixed"}) ${text}`;
-            return `(Improved) ${text}`;
-          });
-          if (!changes.length) changes.push("(Improved) Release maintenance.");
-          const file = "release-notes.json";
-          const notes = JSON.parse(fs.readFileSync(file, "utf8"));
-          if (notes.some(entry => entry.version === process.env.VERSION)) throw new Error(`release notes already contain ${process.env.VERSION}`);
-          notes.unshift({ version: process.env.VERSION, date: new Date().toISOString().slice(0, 10), changes });
-          fs.writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
-          NODE
+          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node scripts/generate-release-notes.mjs
           node scripts/release-preflight.mjs --version "$version" --expect-untagged
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
