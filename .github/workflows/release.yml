@@ -577,16 +577,16 @@ jobs:
     steps:
       - run: echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
 
-  tag:
-    name: Tag the validated dev source
+  record:
+    name: Record and tag the validated dev release
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
     outputs:
-      source_ref: ${{ steps.tag.outputs.source_ref }}
-      release_tag: ${{ steps.tag.outputs.release_tag }}
+      source_ref: ${{ steps.record.outputs.source_ref }}
+      release_tag: ${{ steps.record.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -594,7 +594,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - id: tag
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - id: record
         env:
           SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
@@ -607,46 +611,8 @@ jobs:
             echo "::error::$RELEASE_TAG already exists; tags are immutable."
             exit 1
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$RELEASE_TAG" -m "rbxport ${RELEASE_TAG#v}" "$SOURCE_REF"
-          git push origin "$RELEASE_TAG"
-          {
-            echo "source_ref=$SOURCE_REF"
-            echo "release_tag=$RELEASE_TAG"
-          } >> "$GITHUB_OUTPUT"
-
-  notes:
-    name: Generate release notes on dev
-    if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag]
-    runs-on: [self-hosted, linux, x64]
-    permissions:
-      contents: write
-    outputs:
-      source_ref: ${{ steps.notes.outputs.source_ref }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - id: notes
-        env:
-          SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
-          RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-          git fetch origin dev --tags
-          test "$SOURCE_REF" = "$(git rev-parse HEAD)"
-          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
           version="${RELEASE_TAG#v}"
-          previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | grep -vx "$RELEASE_TAG" | head -n1 || true)"
+          previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | head -n1)"
           node scripts/sync-version.mjs --version "$version"
           VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
@@ -676,15 +642,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
-          git commit -m "chore(release): cut $version" -m "Generate release notes after validating the dev source."
+          git commit -m "chore(release): cut $version" -m "Record the version and generated release notes after validation passed."
           final="$(git rev-parse HEAD)"
-          git push origin HEAD:dev
-          echo "source_ref=$final" >> "$GITHUB_OUTPUT"
+          git tag -a "$RELEASE_TAG" -m "rbxport $version" "$final"
+          git push --atomic origin HEAD:dev "$RELEASE_TAG"
+          {
+            echo "source_ref=$final"
+            echo "release_tag=$RELEASE_TAG"
+          } >> "$GITHUB_OUTPUT"
 
   promote:
     name: Fast-forward main
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, notes]
+    needs: [prepare, record]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
@@ -699,7 +669,7 @@ jobs:
 
       - id: promote
         env:
-          SOURCE_REF: ${{ needs.notes.outputs.source_ref }}
+          SOURCE_REF: ${{ needs.record.outputs.source_ref }}
         run: |
           set -euo pipefail
           git fetch origin dev main
@@ -716,7 +686,7 @@ jobs:
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag, promote]
+    needs: [prepare, record, promote]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -740,14 +710,14 @@ jobs:
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
       source_ref: ${{ needs.promote.outputs.source_ref }}
-      release_tag: ${{ needs.tag.outputs.release_tag }}
+      release_tag: ${{ needs.record.outputs.release_tag }}
       preview: false
 
   build-other:
     name: Build ${{ matrix.platform }}
     # Windows and Linux build alongside the serialized Mac jobs.
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag, promote]
+    needs: [prepare, record, promote]
     strategy:
       fail-fast: false
       matrix:
@@ -770,16 +740,16 @@ jobs:
       bundles: ${{ matrix.bundles }}
       slug: ${{ matrix.slug }}
       source_ref: ${{ needs.promote.outputs.source_ref }}
-      release_tag: ${{ needs.tag.outputs.release_tag }}
+      release_tag: ${{ needs.record.outputs.release_tag }}
       preview: false
 
   publish:
     name: Publish to R2
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag, promote, build-macos, build-other]
+    needs: [prepare, record, promote, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     env:
-      RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
+      RELEASE_TAG: ${{ needs.record.outputs.release_tag }}
     steps:
       # The checked-in release notes feed the app, website, and Discord.
       # Nothing else here needs the tree. FIRST, before
