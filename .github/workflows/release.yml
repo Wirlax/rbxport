@@ -1,6 +1,6 @@
 name: Release
 
-# A push to dev is the release authority. It validates the exact source,
+# A manual dispatch from dev is the release authority. It validates the exact source,
 # creates its immutable version tag and release notes on dev, then
 # fast-forwards main. Builders use only that promoted main commit before R2
 # publication, verification, retention, and the Discord announcement.
@@ -33,8 +33,7 @@ name: Release
 # Discord release announcements use the channel-bound
 # `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 on:
-  push:
-    branches: [dev]
+  workflow_dispatch:
   workflow_call:
     inputs:
       # CI passes an immutable SHA so its validation cannot drift while a
@@ -90,6 +89,10 @@ jobs:
               echo "source_ref=$source"
             } >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [ "${{ github.ref_name }}" != dev ]; then
+            echo "::error::Run Release from the dev branch."
+            exit 1
           fi
           git fetch origin dev --tags
           if [ "$source" != "$(git rev-parse origin/dev)" ]; then

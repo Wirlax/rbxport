@@ -191,7 +191,8 @@ validates the updated SHA in the same run. Translation fallbacks keep the
 catalog complete but should be replaced with native wording when one is
 available.
 
-Pushing to `dev` starts the release workflow. It validates the exact source,
+Run `make deploy` from a clean, pushed `dev` branch to start the release. A
+normal push to `dev` never releases. The workflow validates the exact source,
 creates the next immutable version tag and generated release notes on `dev`,
 then fast-forwards `main`. It builds and signs installers only from that
 promoted `main` commit, publishes and re-fetches the public update feed,
