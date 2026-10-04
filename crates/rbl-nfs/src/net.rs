@@ -18,9 +18,10 @@ use crate::Server;
 /// a generous `READDIR` budget, not for data.
 const DATAGRAM: usize = 16 * 1024;
 
-/// Room for a `READ` reply — the data, its attributes and the RPC header —
-/// with headroom; see [`serve`].
-const SEND_BUFFER: usize = 64 * 1024;
+/// Room for a burst of complete `READ` replies. A CDJ uses several source
+/// ports while walking a file; this avoids making `send_to` wait for each
+/// fragmented datagram to drain. The OS may clamp this to its platform limit.
+const SEND_BUFFER: usize = 1024 * 1024;
 
 /// How long a socket blocks before checking whether it has been asked to stop.
 const POLL: Duration = Duration::from_millis(200);
@@ -57,8 +58,17 @@ pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -
         let Some(reply) = server.handle_from(buffer.get(..len).unwrap_or(&[]), peer, from.port()) else {
             continue;
         };
-        if let Err(error) = socket.send_to(&reply, from) {
-            tracing::warn!(%from, %error, len = reply.len(), "could not send an RPC reply");
+        let started = std::time::Instant::now();
+        match socket.send_to(&reply, from) {
+            Ok(sent) => tracing::trace!(
+                %from,
+                sent,
+                elapsed_us = started.elapsed().as_micros(),
+                "RPC reply sent"
+            ),
+            Err(error) => {
+                tracing::warn!(%from, %error, len = reply.len(), "could not send an RPC reply");
+            }
         }
     }
     Ok(())

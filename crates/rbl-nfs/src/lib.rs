@@ -217,6 +217,8 @@ struct OpenFile {
     path: PathBuf,
     file: File,
     used: std::time::Instant,
+    window_offset: u64,
+    window: Vec<u8>,
 }
 
 /// How many files stay open between reads: a player keeps two mounts and
@@ -225,6 +227,15 @@ const OPEN_FILES: usize = 8;
 /// A handle unused for this long is closed, so a file replaced on disk is
 /// read afresh rather than from the old inode for as long as it is cached.
 const OPEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+/// Bytes fetched together on a cache miss. Players request at most 63 KiB at
+/// a time, but preview playback commonly walks a track in adjacent 32 KiB
+/// reads. Coalescing those reads avoids making removable and network-backed
+/// storage service hundreds of tiny operations while keeping memory bounded
+/// to `OPEN_FILES * CACHE_WINDOW`.
+const READ_AHEAD: usize = 1024 * 1024;
+/// Extra room keeps the largest legal request whole when it starts just
+/// before the next read-ahead boundary.
+const CACHE_WINDOW: usize = READ_AHEAD + MAX_READ;
 
 impl Server {
     pub fn new(exports: Exports, nfs_port: u16, mount_port: u16) -> Self {
@@ -297,18 +308,35 @@ impl Server {
             if open.len() >= OPEN_FILES {
                 open.remove(0);
             }
-            open.push(OpenFile { path: path.to_path_buf(), file: File::open(path)?, used: now });
+            open.push(OpenFile {
+                path: path.to_path_buf(),
+                file: File::open(path)?,
+                used: now,
+                window_offset: 0,
+                window: Vec::new(),
+            });
             open.len() - 1
         };
         let mut entry = open.remove(at);
-        let outcome = read_at(&entry.file, offset, len);
+        let started = std::time::Instant::now();
+        let outcome = entry.read_at(offset, len);
+        let elapsed = started.elapsed();
         // A read that failed drops the handle: the file may have been
         // replaced, and the next read opens whatever is there now.
-        if outcome.is_ok() {
+        if let Ok((_, hit, prefetched)) = &outcome {
+            tracing::trace!(
+                file = %path.display(),
+                offset,
+                len,
+                cache_hit = hit,
+                prefetched,
+                elapsed_us = elapsed.as_micros(),
+                "file read completed"
+            );
             entry.used = now;
             open.push(entry);
         }
-        outcome
+        outcome.map(|(data, _, _)| data)
     }
 
     pub fn exports(&self) -> &Exports {
@@ -828,6 +856,35 @@ fn read_at(mut file: &File, offset: u64, len: usize) -> std::io::Result<Vec<u8>>
     Ok(out)
 }
 
+impl OpenFile {
+    /// Returns exactly the requested slice while fetching a larger aligned
+    /// window on misses. This is deliberately implemented with portable
+    /// `std::fs` I/O so removable media behaves consistently on macOS,
+    /// Windows and Linux.
+    fn read_at(&mut self, offset: u64, len: usize) -> std::io::Result<(Vec<u8>, bool, usize)> {
+        let end = offset.saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
+        let window_end = self
+            .window_offset
+            .saturating_add(u64::try_from(self.window.len()).unwrap_or(u64::MAX));
+        if !self.window.is_empty() && offset >= self.window_offset && end <= window_end {
+            let start = usize::try_from(offset - self.window_offset).unwrap_or(usize::MAX);
+            let finish = start.saturating_add(len).min(self.window.len());
+            return Ok((self.window.get(start..finish).unwrap_or(&[]).to_vec(), true, 0));
+        }
+
+        let read_ahead = u64::try_from(READ_AHEAD).unwrap_or(1);
+        let window_offset = offset / read_ahead * read_ahead;
+        let window = read_at(&self.file, window_offset, CACHE_WINDOW)?;
+        let prefetched = window.len();
+        self.window_offset = window_offset;
+        self.window = window;
+
+        let start = usize::try_from(offset - self.window_offset).unwrap_or(usize::MAX);
+        let finish = start.saturating_add(len).min(self.window.len());
+        Ok((self.window.get(start..finish).unwrap_or(&[]).to_vec(), false, prefetched))
+    }
+}
+
 /// Splits an absolute path into the export a player mounts and the path within
 /// it, following rekordbox's own convention.
 ///
@@ -850,4 +907,42 @@ pub fn split_export(path: &str) -> Option<(String, String)> {
         format!("/{}/", drive.to_ascii_uppercase()),
         rest.replace('\\', "/"),
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
+mod read_cache_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn read_ahead_returns_exact_slices_and_covers_a_boundary() {
+        let mut source = tempfile::NamedTempFile::new().unwrap();
+        let bytes: Vec<u8> = (0..(CACHE_WINDOW * 2)).map(|at| (at % 251) as u8).collect();
+        source.write_all(&bytes).unwrap();
+        source.flush().unwrap();
+
+        let mut open = OpenFile {
+            path: source.path().to_path_buf(),
+            file: File::open(source.path()).unwrap(),
+            used: std::time::Instant::now(),
+            window_offset: 0,
+            window: Vec::new(),
+        };
+
+        let (first, hit, prefetched) = open.read_at(100, 64).unwrap();
+        assert!(!hit);
+        assert_eq!(prefetched, CACHE_WINDOW);
+        assert_eq!(first, bytes[100..164]);
+
+        let (nearby, hit, prefetched) = open.read_at(200, 64).unwrap();
+        assert!(hit);
+        assert_eq!(prefetched, 0);
+        assert_eq!(nearby, bytes[200..264]);
+
+        let offset = READ_AHEAD - 32;
+        let (across_boundary, hit, _) = open.read_at(offset as u64, MAX_READ).unwrap();
+        assert!(hit);
+        assert_eq!(across_boundary, bytes[offset..offset + MAX_READ]);
+    }
 }
