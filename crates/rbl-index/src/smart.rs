@@ -402,8 +402,10 @@ impl CompiledGroup {
     }
 
     fn matches(&self, library: &Library, row: Row) -> bool {
-        // A group with nothing in it admits everything under "all", which is
-        // what an empty rule shows in rekordbox: the whole collection.
+        if self.items.is_empty() {
+            return false;
+        }
+
         match self.logic {
             Logic::All => self.items.iter().all(|item| item.matches(library, row)),
             Logic::Any => self.items.iter().any(|item| item.matches(library, row)),

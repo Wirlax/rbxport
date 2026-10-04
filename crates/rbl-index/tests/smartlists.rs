@@ -223,7 +223,7 @@ fn date_conditions_count_back_from_today() {
 }
 
 #[test]
-fn all_and_any_combine_and_an_unsupported_condition_admits_nothing() {
+fn all_and_any_combine_and_invalid_rules_admit_nothing() {
     let lib = library_from(&tracks());
     let both = rule(
         1,
@@ -241,11 +241,18 @@ fn all_and_any_combine_and_an_unsupported_condition_admits_nothing() {
     let tagged = rule(1, &[("myTag", 1, "7", "", "")]);
     assert!(rows_of(&lib, &tagged).is_empty());
     assert_eq!(SmartRule::parse(&tagged).unwrap().unsupported(), 1);
-    // An empty rule is the whole collection, as rekordbox shows it.
-    assert_eq!(
-        rows_of(&lib, "<NODE LogicalOperator=\"1\"/>"),
-        vec![1, 2, 3]
-    );
+    assert!(rows_of(&lib, "<NODE LogicalOperator=\"1\"/>").is_empty());
+    assert!(rows_of(&lib, "<NODE LogicalOperator=\"2\"/>").is_empty());
+    assert!(rows_of(
+        &lib,
+        "<NODE LogicalOperator=\"1\"><CONDITION PropertyName=\"genre\" Operator=\"99\"/></NODE>"
+    )
+    .is_empty());
+    assert!(rows_of(
+        &lib,
+        "<CONDITION PropertyName=\"genre\" Operator=\"1\" ValueLeft=\"House\"/><NODE LogicalOperator=\"1\"/>"
+    )
+    .is_empty());
 }
 
 #[test]
