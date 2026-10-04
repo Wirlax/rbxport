@@ -34,6 +34,12 @@ name: Release
 # `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 on:
   workflow_dispatch:
+    inputs:
+      skip_validation:
+        description: "Reuse this exact dev head only when it was already validated; skip every validation gate."
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       # CI passes an immutable SHA so its validation cannot drift while a
@@ -66,6 +72,7 @@ jobs:
       release: ${{ steps.candidate.outputs.release }}
       source_ref: ${{ steps.candidate.outputs.source_ref }}
       release_tag: ${{ steps.candidate.outputs.release_tag }}
+      skip_validation: ${{ steps.candidate.outputs.skip_validation }}
       version: ${{ steps.candidate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           source="$(git rev-parse HEAD)"
+          skip_validation="${{ inputs.skip_validation || false }}"
           if [ "${{ inputs.validate_only }}" = true ]; then
             {
               echo "release=false"
@@ -108,8 +116,11 @@ jobs:
             if (!current) throw new Error("workspace version must be an RC");
             const prefix = current[1];
             const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
-            const highest = tags.reduce((max, tag) => Math.max(max, Number(tag.slice((`v${prefix}-rc.`).length))), Number(current[2]));
-            process.stdout.write(`${prefix}-rc.${highest + 1}`);
+          const numbers = tags
+            .map(tag => Number(tag.slice((`v${prefix}-rc.`).length)))
+            .filter(Number.isSafeInteger);
+          const highest = Math.max(Number(current[2]), ...numbers);
+          process.stdout.write(`${prefix}-rc.${highest + 1}`);
           ')"
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
             echo "::error::v$version already exists; tags are immutable."
@@ -119,12 +130,14 @@ jobs:
             echo "release=true"
             echo "source_ref=$source"
             echo "release_tag=v$version"
+            echo "skip_validation=$skip_validation"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
 
   release-source:
     name: Verify release source
     needs: prepare
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
@@ -151,6 +164,7 @@ jobs:
   rust:
     name: Rust tests
     needs: [prepare, release-source]
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       # Tests must never be able to open the installed library read-write.
@@ -222,6 +236,7 @@ jobs:
     # Run after it so apt, rustup, and the host cargo cache are never mutated
     # concurrently by two jobs from the same validation run.
     needs: [prepare, rust]
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       RB_LITE_TEST: "1"
@@ -271,6 +286,7 @@ jobs:
   windows:
     name: Win compile check
     needs: [prepare, release-source]
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, windows, x64]
     steps:
       # `shell: bash` resolves bash from PATH, and on a Windows desktop the
@@ -379,6 +395,7 @@ jobs:
     # The Linux ARC host is shared with the Rust and MSRV gates. Run after
     # both rather than competing with them for apt, cargo and WebKit resources.
     needs: [prepare, msrv]
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
       RB_LITE_TEST: "1"
@@ -453,6 +470,7 @@ jobs:
   frontend:
     name: UI tests
     needs: [prepare, release-source]
+    if: needs.prepare.outputs.skip_validation != 'true'
     runs-on: [self-hosted, macos, arm64]
     steps:
       - uses: actions/checkout@v4
@@ -573,13 +591,24 @@ jobs:
   validated:
     name: Validation complete
     needs: [prepare, rust, msrv, windows, linux-window, frontend]
+    if: >-
+      always() && needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.skip_validation == 'true' ||
+      (needs.rust.result == 'success' && needs.msrv.result == 'success' &&
+      needs.windows.result == 'success' && needs.linux-window.result == 'success' &&
+      needs.frontend.result == 'success'))
     runs-on: [self-hosted, linux, x64]
     steps:
-      - run: echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
+      - run: |
+          if [ "${{ needs.prepare.outputs.skip_validation }}" = true ]; then
+            echo "Validation was explicitly skipped for previously validated ${{ needs.prepare.outputs.source_ref }}."
+          else
+            echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
+          fi
 
   record:
     name: Record and tag the validated dev release
-    if: needs.prepare.outputs.release == 'true'
+    if: needs.prepare.outputs.release == 'true' && needs.validated.result == 'success'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
     permissions:
@@ -612,6 +641,10 @@ jobs:
             exit 1
           fi
           version="${RELEASE_TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "::error::Release candidates must have a numeric rc suffix; got $version."
+            exit 1
+          fi
           previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | head -n1)"
           node scripts/sync-version.mjs --version "$version"
           VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node --input-type=module <<'NODE'
