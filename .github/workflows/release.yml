@@ -1,8 +1,9 @@
 name: Release
 
-# A push to main is the release authority. It validates the exact source
-# commit first, then creates the immutable version tag that the builders stamp
-# into the installers. Only those tagged builds can be published to R2 as
+# A push to dev is the release authority. It validates the exact source,
+# creates its immutable version tag and release notes on dev, then
+# fast-forwards main. Builders use only that promoted main commit before R2
+# publication, verification, retention, and the Discord announcement.
 # `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
 # name — plus `latest.json`, so a page can find the newest version without
 # a folder listing. Only the 5 most recently published versions are kept;
@@ -33,7 +34,7 @@ name: Release
 # `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 on:
   push:
-    branches: [main]
+    branches: [dev]
   workflow_call:
     inputs:
       # CI passes an immutable SHA so its validation cannot drift while a
@@ -49,7 +50,7 @@ on:
         type: boolean
 
 concurrency:
-  group: ${{ inputs.validate_only && format('validate-{0}', inputs.source_ref) || 'release-main' }}
+  group: ${{ inputs.validate_only && format('validate-{0}', inputs.source_ref) || 'release-dev' }}
   cancel-in-progress: ${{ inputs.validate_only || false }}
 
 permissions:
@@ -90,9 +91,9 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch origin main --tags
-          if [ "$source" != "$(git rev-parse origin/main)" ]; then
-            echo "::error::main changed before this release started; its newer push owns the release."
+          git fetch origin dev --tags
+          if [ "$source" != "$(git rev-parse origin/dev)" ]; then
+            echo "::error::dev changed before this release started; its newer push owns the release."
             exit 1
           fi
           # shellcheck disable=SC2016 # Node owns the quoted JavaScript.
@@ -100,7 +101,7 @@ jobs:
             const { execFileSync } = require("child_process");
             const fs = require("fs");
             const text = fs.readFileSync("Cargo.toml", "utf8");
-            const current = /\\[workspace\\.package\\][\\s\\S]*?^version\\s*=\\s*"(\\d+\\.\\d+\\.\\d+)-rc\\.(\\d+)"/m.exec(text);
+            const current = /\[workspace\.package\][\s\S]*?^version\s*=\s*"(\d+\.\d+\.\d+)-rc\.(\d+)"/m.exec(text);
             if (!current) throw new Error("workspace version must be an RC");
             const prefix = current[1];
             const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
@@ -574,7 +575,7 @@ jobs:
       - run: echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
 
   tag:
-    name: Tag the validated source
+    name: Tag the validated dev source
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
@@ -596,9 +597,9 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
-          git fetch origin main --tags
+          git fetch origin dev --tags
           test "$SOURCE_REF" = "$(git rev-parse HEAD)"
-          test "$SOURCE_REF" = "$(git rev-parse origin/main)"
+          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "::error::$RELEASE_TAG already exists; tags are immutable."
             exit 1
@@ -612,111 +613,38 @@ jobs:
             echo "release_tag=$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
 
-  build-macos:
-    name: Build ${{ matrix.platform }}
-    # Serialize only the Macs: both may share a signing keychain search list.
-    # Matrix limits keep the run discoverable by arc (job concurrency marks
-    # the whole run pending, which arc does not currently discover).
+  notes:
+    name: Generate release notes on dev
     if: needs.prepare.outputs.release == 'true'
     needs: [prepare, tag]
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - host: [self-hosted, macos, arm64]
-            target: aarch64-apple-darwin
-            bundles: app,dmg
-            slug: darwin-aarch64
-            platform: Mac ARM
-          - host: [self-hosted, macos, arm64]
-            target: x86_64-apple-darwin
-            bundles: app,dmg
-            slug: darwin-x86_64
-            platform: Mac Intel
-    uses: ./.github/workflows/build-installer.yml
-    secrets: inherit
-    with:
-      host: ${{ toJSON(matrix.host) }}
-      target: ${{ matrix.target }}
-      bundles: ${{ matrix.bundles }}
-      slug: ${{ matrix.slug }}
-      source_ref: ${{ needs.prepare.outputs.source_ref }}
-      release_tag: ${{ needs.prepare.outputs.release_tag }}
-      preview: false
-
-  build-other:
-    name: Build ${{ matrix.platform }}
-    # Windows and Linux build alongside the serialized Mac jobs.
-    if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - host: [self-hosted, windows, x64]
-            target: x86_64-pc-windows-msvc
-            bundles: nsis
-            slug: windows-x86_64
-            platform: Windows
-          - host: [self-hosted, linux, x64]
-            target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb
-            slug: linux-x86_64
-            platform: Linux
-    uses: ./.github/workflows/build-installer.yml
-    secrets: inherit
-    with:
-      host: ${{ toJSON(matrix.host) }}
-      target: ${{ matrix.target }}
-      bundles: ${{ matrix.bundles }}
-      slug: ${{ matrix.slug }}
-      source_ref: ${{ needs.prepare.outputs.source_ref }}
-      release_tag: ${{ needs.prepare.outputs.release_tag }}
-      preview: false
-
-  publish:
-    name: Publish to R2
-    if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, tag, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
-    env:
-      RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
+    permissions:
+      contents: write
+    outputs:
+      source_ref: ${{ steps.notes.outputs.source_ref }}
     steps:
-      # The checked-in release notes feed the app, website, and Discord.
-      # Nothing else here needs the tree. FIRST, before
-      # the installers are downloaded: checkout cleans the workspace, and
-      # placed after the download it deleted `out/` — 0.5.1's publish died
-      # on `ls: cannot access 'out'` after both builds had passed.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.tag.outputs.source_ref }}
+          ref: ${{ needs.prepare.outputs.source_ref }}
           fetch-depth: 0
-          sparse-checkout: |
-            release-notes.json
-            scripts/release-notes.mjs
-          sparse-checkout-cone-mode: false
+          persist-credentials: true
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: installers-*
-          merge-multiple: true
-          path: out
-
-      # The steps below build and read latest.json with node. The checkout
-      # above puts nothing on PATH, and the arc Linux host's own node is not
-      # something a job should depend on.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - name: Generate release notes from the tagged source
+      - id: notes
         env:
-          SOURCE_REF: ${{ needs.tag.outputs.source_ref }}
+          SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
+          RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
         run: |
           set -euo pipefail
+          git fetch origin dev --tags
+          test "$SOURCE_REF" = "$(git rev-parse HEAD)"
+          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
           version="${RELEASE_TAG#v}"
           previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | grep -vx "$RELEASE_TAG" | head -n1 || true)"
+          node scripts/sync-version.mjs --version "$version"
           VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
           import fs from "node:fs";
@@ -741,7 +669,141 @@ jobs:
           notes.unshift({ version: process.env.VERSION, date: new Date().toISOString().slice(0, 10), changes });
           fs.writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
           NODE
-          node scripts/release-notes.mjs validate release-notes.json "$version"
+          node scripts/release-preflight.mjs --version "$version" --expect-untagged
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
+          git commit -m "chore(release): cut $version" -m "Generate release notes after validating the dev source."
+          final="$(git rev-parse HEAD)"
+          git push origin HEAD:dev
+          echo "source_ref=$final" >> "$GITHUB_OUTPUT"
+
+  promote:
+    name: Fast-forward main
+    if: needs.prepare.outputs.release == 'true'
+    needs: [prepare, notes]
+    runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: write
+    outputs:
+      source_ref: ${{ steps.promote.outputs.source_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - id: promote
+        env:
+          SOURCE_REF: ${{ needs.notes.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin dev main
+          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
+          git merge-base --is-ancestor origin/main "$SOURCE_REF"
+          git switch main
+          git merge --ff-only "$SOURCE_REF"
+          git push origin main
+          echo "source_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    name: Build ${{ matrix.platform }}
+    # Serialize only the Macs: both may share a signing keychain search list.
+    # Matrix limits keep the run discoverable by arc (job concurrency marks
+    # the whole run pending, which arc does not currently discover).
+    if: needs.prepare.outputs.release == 'true'
+    needs: [prepare, tag, promote]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - host: [self-hosted, macos, arm64]
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            slug: darwin-aarch64
+            platform: Mac ARM
+          - host: [self-hosted, macos, arm64]
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            slug: darwin-x86_64
+            platform: Mac Intel
+    uses: ./.github/workflows/build-installer.yml
+    secrets: inherit
+    with:
+      host: ${{ toJSON(matrix.host) }}
+      target: ${{ matrix.target }}
+      bundles: ${{ matrix.bundles }}
+      slug: ${{ matrix.slug }}
+      source_ref: ${{ needs.promote.outputs.source_ref }}
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      preview: false
+
+  build-other:
+    name: Build ${{ matrix.platform }}
+    # Windows and Linux build alongside the serialized Mac jobs.
+    if: needs.prepare.outputs.release == 'true'
+    needs: [prepare, tag, promote]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: [self-hosted, windows, x64]
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            slug: windows-x86_64
+            platform: Windows
+          - host: [self-hosted, linux, x64]
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+            slug: linux-x86_64
+            platform: Linux
+    uses: ./.github/workflows/build-installer.yml
+    secrets: inherit
+    with:
+      host: ${{ toJSON(matrix.host) }}
+      target: ${{ matrix.target }}
+      bundles: ${{ matrix.bundles }}
+      slug: ${{ matrix.slug }}
+      source_ref: ${{ needs.promote.outputs.source_ref }}
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      preview: false
+
+  publish:
+    name: Publish to R2
+    if: needs.prepare.outputs.release == 'true'
+    needs: [prepare, tag, promote, build-macos, build-other]
+    runs-on: [self-hosted, linux, x64]
+    env:
+      RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
+    steps:
+      # The checked-in release notes feed the app, website, and Discord.
+      # Nothing else here needs the tree. FIRST, before
+      # the installers are downloaded: checkout cleans the workspace, and
+      # placed after the download it deleted `out/` — 0.5.1's publish died
+      # on `ls: cannot access 'out'` after both builds had passed.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.promote.outputs.source_ref }}
+          fetch-depth: 0
+          sparse-checkout: |
+            release-notes.json
+            scripts/release-notes.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: out
+
+      # The steps below build and read latest.json with node. The checkout
+      # above puts nothing on PATH, and the arc Linux host's own node is not
+      # something a job should depend on.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - name: Ensure the AWS CLI
         # A hosted Ubuntu image ships it; the arc Linux host does not. Into

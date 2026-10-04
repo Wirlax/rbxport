@@ -191,11 +191,11 @@ validates the updated SHA in the same run. Translation fallbacks keep the
 catalog complete but should be replaced with native wording when one is
 available.
 
-Pushing to `main` starts the release workflow. It validates the exact source
-commit, creates the next immutable version tag only after validation passes,
-builds and signs the installers from that tag, then publishes and re-fetches
-the public update feed before announcing it on Discord. Release notes are
-generated during publication from the commits since the prior tag; any
+Pushing to `dev` starts the release workflow. It validates the exact source,
+creates the next immutable version tag and generated release notes on `dev`,
+then fast-forwards `main`. It builds and signs installers only from that
+promoted `main` commit, publishes and re-fetches the public update feed,
+removes old artifacts, and only then announces the release on Discord. Any
 `RBX-<number>` bug reference is called out as fixed. A failed validation creates
 no version tag or release notes. The pipeline creates no GitHub Release.
 
