@@ -1,9 +1,8 @@
 name: Release
 
-# This manual workflow is the release authority. It creates the version commit
-# and immutable tag only after the candidate passes every validation gate, then
-# builds macOS, Windows and Linux, signs the first two where the signing secrets
-# exist, and publishes the installers to the R2 bucket as
+# A push to main is the release authority. It validates the exact source
+# commit first, then creates the immutable version tag that the builders stamp
+# into the installers. Only those tagged builds can be published to R2 as
 # `rbxport-1.2.3-<platform>.<ext>` — flat keys, the version in the
 # name — plus `latest.json`, so a page can find the newest version without
 # a folder listing. Only the 5 most recently published versions are kept;
@@ -17,9 +16,9 @@ name: Release
 # Rust test suite and MSRV check, a Windows-native compile and desktop-path
 # check, a Linux Tauri-window smoke test, and the frontend's lint, typecheck,
 # unit tests, bundle budget, Playwright e2e and Intel-macOS runtime smoke.
-# `.github/workflows/ci.yml` calls this workflow in validation-only mode when
-# manually dispatched; a release still owns the dependency directly,
-# so a separate CI run can never accidentally authorize publication.
+# `.github/workflows/ci.yml` calls this workflow in validation-only mode for
+# pull requests. That path has no release authority and never creates metadata
+# or a tag.
 #
 # Every job runs on the `arc` self-hosted fleet (`self-hosted, <os>, <arch>`),
 # one host per platform: an Apple Silicon Mac, a Windows desktop and a Linux
@@ -33,11 +32,12 @@ name: Release
 # Discord release announcements use the channel-bound
 # `DISCORD_RELEASE_WEBHOOK_URL` repository secret.
 on:
+  push:
+    branches: [main]
   workflow_call:
     inputs:
       # CI passes an immutable SHA so its validation cannot drift while a
-      # branch is being updated. Release dispatches continue to use a tag or
-      # their selected ref below.
+      # pull request branch is being updated.
       source_ref:
         required: false
         type: string
@@ -47,39 +47,9 @@ on:
         required: false
         default: false
         type: boolean
-      release_note:
-        required: false
-        default: ""
-        type: string
-      version:
-        required: false
-        default: ""
-        type: string
-      retry_tag:
-        required: false
-        default: ""
-        type: string
-  workflow_dispatch:
-    inputs:
-      release_note:
-        description: "One release note beginning with (New), (Improved), or (Fixed)"
-        required: false
-        type: string
-      version:
-        description: "Optional explicit version (for example 1.0.0-rc.13); blank chooses the next RC"
-        required: false
-        type: string
-      retry_tag:
-        description: "Existing immutable tag to rebuild and republish after a transient failure"
-        required: false
-        type: string
 
 concurrency:
-  # Real releases must never overlap: they update dev, main, the tag, and the
-  # public update feed in that order. Validation-only callers may be superseded.
-  group: ${{ inputs.validate_only && format('validate-{0}', github.ref) || 'release-installers' }}
-  # `inputs.validate_only` is unset for a manual dispatch. Actions requires a
-  # Boolean here, so give that path the safe, non-cancelling default.
+  group: ${{ inputs.validate_only && format('validate-{0}', inputs.source_ref) || 'release-main' }}
   cancel-in-progress: ${{ inputs.validate_only || false }}
 
 permissions:
@@ -90,22 +60,17 @@ env:
 
 jobs:
   prepare:
-    name: Prepare release candidate
+    name: Resolve release source
     runs-on: [self-hosted, linux, x64]
     outputs:
       release: ${{ steps.candidate.outputs.release }}
-      promote: ${{ steps.candidate.outputs.promote }}
       source_ref: ${{ steps.candidate.outputs.source_ref }}
       release_tag: ${{ steps.candidate.outputs.release_tag }}
       version: ${{ steps.candidate.outputs.version }}
-    env:
-      RELEASE_NOTE: ${{ inputs.release_note }}
-      REQUESTED_VERSION: ${{ inputs.version }}
-      RETRY_TAG: ${{ inputs.retry_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -114,119 +79,40 @@ jobs:
           node-version: 24
 
       - id: candidate
-        name: Create or recover the release candidate
+        name: Resolve the source and next version
         run: |
           set -euo pipefail
           source="$(git rev-parse HEAD)"
-          run_attempt="${{ github.run_attempt }}"
           if [ "${{ inputs.validate_only }}" = true ]; then
             {
               echo "release=false"
-              echo "promote=false"
               echo "source_ref=$source"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          if [ "${{ github.ref_name }}" != dev ]; then
-            echo "::error::Run Release from the dev branch."
+          git fetch origin main --tags
+          if [ "$source" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::main changed before this release started; its newer push owns the release."
             exit 1
           fi
-          git fetch origin dev main --tags
-          if [ -n "$RETRY_TAG" ]; then
-            if [ -n "$RELEASE_NOTE$REQUESTED_VERSION" ] || ! [[ "$RETRY_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
-              echo "::error::retry_tag must be an existing RC tag and cannot be combined with a note or version."
-              exit 1
-            fi
-            source="$(git rev-parse "$RETRY_TAG^{}")"
-            if ! git merge-base --is-ancestor "$source" origin/main; then
-              echo "::error::$RETRY_TAG is not on main."
-              exit 1
-            fi
-            {
-              echo "release=true"
-              echo "promote=false"
-              echo "source_ref=$source"
-              echo "release_tag=$RETRY_TAG"
-              echo "version=${RETRY_TAG#v}"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$source" != "$(git rev-parse origin/dev)" ]; then
-            echo "::error::dev changed before this release started; start a new run."
-            exit 1
-          fi
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::The release checkout is not clean."
-            exit 1
-          fi
-
-          current="$(node -e 'const fs=require("fs"); const text=fs.readFileSync("Cargo.toml", "utf8"); const match=/\\[workspace\\.package\\][\\s\\S]*?^version\\s*=\\s*"([^"]+)"/m.exec(text); if (!match) process.exit(1); process.stdout.write(match[1])')"
-          if [ "$run_attempt" -gt 1 ] && git tag --points-at HEAD --list "v$current" | grep -qx "v$current"; then
-            {
-              echo "release=true"
-              echo "promote=false"
-              echo "source_ref=$source"
-              echo "release_tag=v$current"
-              echo "version=$current"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          version="$REQUESTED_VERSION"
-          if [ -z "$version" ]; then
-            # shellcheck disable=SC2016 # Node owns the quoted JavaScript.
-            version="$(node -e '
-              const { execFileSync } = require("child_process");
-              const fs = require("fs");
-              const text = fs.readFileSync("Cargo.toml", "utf8");
-              const current = /\\[workspace\\.package\\][\\s\\S]*?^version\\s*=\\s*"(\\d+\\.\\d+\\.\\d+)-rc\\.(\\d+)"/m.exec(text);
-              if (!current) throw new Error("workspace version must be an RC");
-              const prefix = current[1];
-              const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
-              const highest = tags.reduce((max, tag) => Math.max(max, Number(tag.slice((`v${prefix}-rc.`).length))), Number(current[2]));
-              process.stdout.write(`${prefix}-rc.${highest + 1}`);
-            ')"
-          fi
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
-            echo "::error::version must be an RC such as 1.0.0-rc.13"
-            exit 1
-          fi
+          # shellcheck disable=SC2016 # Node owns the quoted JavaScript.
+          version="$(node -e '
+            const { execFileSync } = require("child_process");
+            const fs = require("fs");
+            const text = fs.readFileSync("Cargo.toml", "utf8");
+            const current = /\\[workspace\\.package\\][\\s\\S]*?^version\\s*=\\s*"(\\d+\\.\\d+\\.\\d+)-rc\\.(\\d+)"/m.exec(text);
+            if (!current) throw new Error("workspace version must be an RC");
+            const prefix = current[1];
+            const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
+            const highest = tags.reduce((max, tag) => Math.max(max, Number(tag.slice((`v${prefix}-rc.`).length))), Number(current[2]));
+            process.stdout.write(`${prefix}-rc.${highest + 1}`);
+          ')"
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
             echo "::error::v$version already exists; tags are immutable."
             exit 1
           fi
-          if ! [[ "$RELEASE_NOTE" =~ ^\((New|Improved|Fixed)\)[[:space:]]+.+ ]]; then
-            echo "::error::release_note must begin with (New), (Improved), or (Fixed)."
-            exit 1
-          fi
-
-          node scripts/sync-version.mjs --version "$version"
-          VERSION="$version" node --input-type=module <<'NODE'
-          import fs from "node:fs";
-          const version = process.env.VERSION;
-          const note = process.env.RELEASE_NOTE;
-          const file = "release-notes.json";
-          const notes = JSON.parse(fs.readFileSync(file, "utf8"));
-          if (notes.some((entry) => entry.version === version)) throw new Error(`release notes already contain ${version}`);
-          const date = new Date().toISOString().slice(0, 10);
-          notes.unshift({ version, date, changes: [note] });
-          fs.writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
-          NODE
-          node scripts/release-preflight.mjs --version "$version" --expect-untagged
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
-          git commit -m "chore(release): cut $version" -m "Prepare the validated candidate through the manual Release workflow."
-          source="$(git rev-parse HEAD)"
-          git push origin HEAD:dev
-          if [ "$source" != "$(git ls-remote origin refs/heads/dev | cut -f1)" ]; then
-            echo "::error::dev did not advance to the prepared candidate."
-            exit 1
-          fi
           {
             echo "release=true"
-            echo "promote=true"
             echo "source_ref=$source"
             echo "release_tag=v$version"
             echo "version=$version"
@@ -680,15 +566,23 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  promote:
-    name: Promote validated candidate
-    if: needs.prepare.outputs.release == 'true'
+  validated:
+    name: Validation complete
     needs: [prepare, rust, msrv, windows, linux-window, frontend]
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - run: echo "All validation gates passed for ${{ needs.prepare.outputs.source_ref }}."
+
+  tag:
+    name: Tag the validated source
+    if: needs.prepare.outputs.release == 'true'
+    needs: [prepare, validated]
     runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
-    env:
-      PROMOTE: ${{ needs.prepare.outputs.promote }}
+    outputs:
+      source_ref: ${{ steps.tag.outputs.source_ref }}
+      release_tag: ${{ steps.tag.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -696,31 +590,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Fast-forward main and create the immutable tag
+      - id: tag
         env:
           SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
-          if [ "$PROMOTE" != true ]; then
-            echo "Rebuilding existing immutable release tag; branch promotion is not needed."
-            exit 0
-          fi
-          git fetch origin dev main --tags
-          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
-          git merge-base --is-ancestor origin/main "$SOURCE_REF"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch main
-          git merge --ff-only "$SOURCE_REF"
-          git push origin main
-          test "$SOURCE_REF" = "$(git ls-remote origin refs/heads/main | cut -f1)"
+          git fetch origin main --tags
+          test "$SOURCE_REF" = "$(git rev-parse HEAD)"
+          test "$SOURCE_REF" = "$(git rev-parse origin/main)"
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "::error::$RELEASE_TAG already exists; tags are immutable."
             exit 1
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$RELEASE_TAG" -m "rbxport ${RELEASE_TAG#v}" "$SOURCE_REF"
           git push origin "$RELEASE_TAG"
+          {
+            echo "source_ref=$SOURCE_REF"
+            echo "release_tag=$RELEASE_TAG"
+          } >> "$GITHUB_OUTPUT"
 
   build-macos:
     name: Build ${{ matrix.platform }}
@@ -728,7 +618,7 @@ jobs:
     # Matrix limits keep the run discoverable by arc (job concurrency marks
     # the whole run pending, which arc does not currently discover).
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, promote]
+    needs: [prepare, tag]
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -759,7 +649,7 @@ jobs:
     name: Build ${{ matrix.platform }}
     # Windows and Linux build alongside the serialized Mac jobs.
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, promote]
+    needs: [prepare, tag]
     strategy:
       fail-fast: false
       matrix:
@@ -788,10 +678,10 @@ jobs:
   publish:
     name: Publish to R2
     if: needs.prepare.outputs.release == 'true'
-    needs: [prepare, build-macos, build-other]
+    needs: [prepare, tag, build-macos, build-other]
     runs-on: [self-hosted, linux, x64]
     env:
-      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      RELEASE_TAG: ${{ needs.tag.outputs.release_tag }}
     steps:
       # The checked-in release notes feed the app, website, and Discord.
       # Nothing else here needs the tree. FIRST, before
@@ -800,7 +690,8 @@ jobs:
       # on `ls: cannot access 'out'` after both builds had passed.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
+          ref: ${{ needs.tag.outputs.source_ref }}
+          fetch-depth: 0
           sparse-checkout: |
             release-notes.json
             scripts/release-notes.mjs
@@ -818,6 +709,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: Generate release notes from the tagged source
+        env:
+          SOURCE_REF: ${{ needs.tag.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | grep -vx "$RELEASE_TAG" | head -n1 || true)"
+          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import fs from "node:fs";
+          const range = process.env.PREVIOUS ? `${process.env.PREVIOUS}..${process.env.SOURCE_REF}` : process.env.SOURCE_REF;
+          const commits = execFileSync("git", ["log", "--format=%s%x1f%b%x1e", range], { encoding: "utf8" })
+            .split("\x1e").filter(Boolean).map(entry => {
+              const [subject, body = ""] = entry.split("\x1f");
+              return { subject: subject.trim(), body };
+            }).filter(({ subject }) => subject && !subject.startsWith("chore(release):"));
+          const changes = commits.map(({ subject, body }) => {
+            const match = /^(feat|fix)(?:\([^)]*\))?:\s*(.+)$/i.exec(subject);
+            const tickets = [...new Set(`${subject}\n${body}`.match(/\bRBX-\d+\b/gi) ?? [])].map(ticket => ticket.toUpperCase());
+            const text = match ? match[2] : subject.replace(/^[^:]+:\s*/, "");
+            if (tickets.length) return `(Fixed) ${tickets.join(", ")}: ${text}`;
+            if (match) return `(${match[1].toLowerCase() === "feat" ? "New" : "Fixed"}) ${text}`;
+            return `(Improved) ${text}`;
+          });
+          if (!changes.length) changes.push("(Improved) Release maintenance.");
+          const file = "release-notes.json";
+          const notes = JSON.parse(fs.readFileSync(file, "utf8"));
+          if (notes.some(entry => entry.version === process.env.VERSION)) throw new Error(`release notes already contain ${process.env.VERSION}`);
+          notes.unshift({ version: process.env.VERSION, date: new Date().toISOString().slice(0, 10), changes });
+          fs.writeFileSync(file, `${JSON.stringify(notes, null, 2)}\n`);
+          NODE
+          node scripts/release-notes.mjs validate release-notes.json "$version"
 
       - name: Ensure the AWS CLI
         # A hosted Ubuntu image ships it; the arc Linux host does not. Into

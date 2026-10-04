@@ -191,15 +191,13 @@ validates the updated SHA in the same run. Translation fallbacks keep the
 catalog complete but should be replaced with native wording when one is
 available.
 
-Releases are server-side and manual. In GitHub, open **Actions → Release → Run
-workflow**, select `dev`, and enter one release note beginning with `(New)`,
-`(Improved)`, or `(Fixed)`. The workflow chooses the next unused release
-candidate unless an explicit version is supplied; commits the version and
-notes; validates that exact SHA; fast-forwards `main`; creates the immutable
-tag; builds, signs, publishes, and verifies the public update feed. To retry a
-transient failure after tagging, run the same workflow from `dev` with only the
-existing `retry_tag`; it rebuilds and republishes that immutable candidate
-without choosing another version. The pipeline creates no GitHub Release.
+Pushing to `main` starts the release workflow. It validates the exact source
+commit, creates the next immutable version tag only after validation passes,
+builds and signs the installers from that tag, then publishes and re-fetches
+the public update feed before announcing it on Discord. Release notes are
+generated during publication from the commits since the prior tag; any
+`RBX-<number>` bug reference is called out as fixed. A failed validation creates
+no version tag or release notes. The pipeline creates no GitHub Release.
 
 `pnpm build` obfuscates the app's own JavaScript and omits source maps.
 `pnpm dev` stays readable. Obfuscation makes the bundle harder to read but
