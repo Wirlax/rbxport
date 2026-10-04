@@ -70,6 +70,23 @@ $manifest = @"
   </Properties>
   <Resources>
     <Resource Language="en-us" />
+    <Resource Language="fr-fr" />
+    <Resource Language="de-de" />
+    <Resource Language="es-es" />
+    <Resource Language="it-it" />
+    <Resource Language="nl-nl" />
+    <Resource Language="ru-ru" />
+    <Resource Language="pt-pt" />
+    <Resource Language="sv-se" />
+    <Resource Language="da-dk" />
+    <Resource Language="tr-tr" />
+    <Resource Language="el-gr" />
+    <Resource Language="hu-hu" />
+    <Resource Language="cs-cz" />
+    <Resource Language="zh-cn" />
+    <Resource Language="zh-tw" />
+    <Resource Language="ko-kr" />
+    <Resource Language="ja-jp" />
   </Resources>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />

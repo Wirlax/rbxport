@@ -555,6 +555,14 @@ jobs:
           if ($manifest.Package.Properties.PublisherDisplayName -ne "TRIODE") {
             throw "Unexpected publisher display name: $($manifest.Package.Properties.PublisherDisplayName)"
           }
+          $expectedLanguages = @(
+            "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
+            "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
+          )
+          $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
+          if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
+            throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
+          }
 
       - name: The disk image is notarised too, not just the app inside it
         # Tauri notarises and staples the `.app`, then puts it in a `.dmg` and

@@ -72,6 +72,14 @@ jobs:
           if ($identity.ProcessorArchitecture -ne "x64") {
             throw "Unexpected MSIX architecture: $($identity.ProcessorArchitecture)"
           }
+          $expectedLanguages = @(
+            "en-us", "fr-fr", "de-de", "es-es", "it-it", "nl-nl", "ru-ru", "pt-pt", "sv-se",
+            "da-dk", "tr-tr", "el-gr", "hu-hu", "cs-cz", "zh-cn", "zh-tw", "ko-kr", "ja-jp"
+          )
+          $actualLanguages = @($manifest.Package.Resources.Resource | ForEach-Object { $_.Language })
+          if ((Compare-Object $expectedLanguages $actualLanguages).Count -ne 0) {
+            throw "Unexpected MSIX languages: $($actualLanguages -join ', ')"
+          }
 
           "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Staging $($packages[0].Name), version $($identity.Version)"
