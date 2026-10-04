@@ -190,9 +190,10 @@ impl beacon::LibraryFacts for Facts {
 impl LinkExport {
     /// Binds every port and starts serving `source`'s library on `interface`.
     ///
-    /// The database and file servers listen on every address, as the beacon
-    /// must: which interface a player is on decides nothing about which
-    /// socket its connection arrives at.
+    /// The database and file servers listen only on the selected interface.
+    /// LINK discovery still binds on every address and is interface-pinned,
+    /// because macOS and Linux do not deliver broadcasts to a socket bound
+    /// directly to one address.
     pub fn start(
         source: Arc<dyn Source>,
         interface: Interface,
@@ -226,11 +227,7 @@ impl LinkExport {
 
         let handler: Arc<dyn rbl_dbserver::net::Handler> =
             Arc::new(CatalogHandler::new(catalog.clone()).with_device(Arc::clone(&number)));
-        let listen_on = if interface.address.is_loopback() {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        } else {
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-        };
+        let listen_on = service_bind_address(&interface);
         let database =
             rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)
                 .map_err(|e| LinkError::Bind(explain(&e, "TCP", ports.query)))?;
@@ -363,6 +360,12 @@ impl LinkExport {
     }
 }
 
+/// The library services are unicast: bind them to the address advertised to
+/// players, rather than exposing them on the host's unrelated interfaces.
+fn service_bind_address(interface: &Interface) -> IpAddr {
+    IpAddr::V4(interface.address)
+}
+
 /// A fixed library, for tests and tools.
 pub struct StaticSource {
     pub library: Arc<Library>,
@@ -413,4 +416,24 @@ fn computer_name() -> String {
         }
     }
     rbl_prolink::REKORDBOX_NAME.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn library_services_bind_to_the_selected_interface_address() {
+        let interface = Interface {
+            name: "link0".into(),
+            address: Ipv4Addr::new(192, 168, 22, 7),
+            netmask: Ipv4Addr::new(255, 255, 255, 0),
+            mac: [0; 6],
+        };
+
+        assert_eq!(
+            service_bind_address(&interface),
+            IpAddr::V4(interface.address)
+        );
+    }
 }
