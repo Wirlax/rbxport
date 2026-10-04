@@ -7,7 +7,7 @@
 //! related to nothing but itself.
 
 use crate::key::camelot_rank;
-use crate::smart::{today, Date};
+use crate::smart::Date;
 use crate::view::RelatedCriterion;
 use crate::{Library, Row};
 
@@ -77,7 +77,7 @@ impl Library {
                 if genre == 0 {
                     return Vec::new();
                 }
-                let since = today().minus(RECENT_DAYS, "days").days();
+                let since = Date::today().days_ago(RECENT_DAYS).days();
                 rows.filter(|&r| {
                     if r == track {
                         return false;

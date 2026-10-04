@@ -289,13 +289,20 @@ impl Library {
     /// are counted over when a caller already has them.
     #[must_use]
     pub fn source_rows(&self, source: &TrackSource) -> Vec<Row> {
+        self.source_rows_on(source, &crate::smart::Date::today())
+    }
+
+    /// [`source_rows`](Self::source_rows) with an explicit date for relative
+    /// Smart Playlist conditions.
+    #[must_use]
+    pub fn source_rows_on(&self, source: &TrackSource, today: &crate::smart::Date) -> Vec<Row> {
         match source {
             TrackSource::History(index) => {
                 self.histories().members.get(*index).cloned().unwrap_or_default()
             }
             TrackSource::Collection | TrackSource::Playlist(_) | TrackSource::PlaylistFolder(_) | TrackSource::SmartPlaylist(_) => {
                 let playlists = self.playlists();
-                self.source_rows_unlocked(&playlists, source)
+                self.source_rows_unlocked_on(&playlists, source, today)
             }
             TrackSource::Related { track, criterion } => self.related_rows(*track, *criterion),
             TrackSource::TagList => self.tag_list(),
@@ -307,6 +314,18 @@ impl Library {
     /// source is not answered here.
     #[must_use]
     pub fn source_rows_unlocked(&self, playlists: &crate::Playlists, source: &TrackSource) -> Vec<Row> {
+        self.source_rows_unlocked_on(playlists, source, &crate::smart::Date::today())
+    }
+
+    /// [`source_rows_unlocked`](Self::source_rows_unlocked) with an explicit
+    /// date for relative Smart Playlist conditions.
+    #[must_use]
+    pub fn source_rows_unlocked_on(
+        &self,
+        playlists: &crate::Playlists,
+        source: &TrackSource,
+        today: &crate::smart::Date,
+    ) -> Vec<Row> {
         match source {
             TrackSource::Collection | TrackSource::History(_) => {
                 (0..u32::try_from(self.len()).unwrap_or(u32::MAX)).collect()
@@ -327,7 +346,10 @@ impl Library {
                     while parent != NO_ID && depth < playlists.len() {
                         if parent as usize == *folder {
                             let members = if playlists.is_smart(index) {
-                                playlists.smart_rule(index).map(|rule| rule.evaluate(self)).unwrap_or_default()
+                                playlists
+                                    .smart_rule(index)
+                                    .map(|rule| rule.evaluate_on(self, today))
+                                    .unwrap_or_default()
                             } else {
                                 playlists.members.get(index).cloned().unwrap_or_default()
                             };
@@ -343,7 +365,10 @@ impl Library {
             // A rule that does not parse admits nothing, which is what
             // rekordbox shows for a rule it cannot read.
             TrackSource::SmartPlaylist(index) => {
-                playlists.smart_rule(*index).map(|rule| rule.evaluate(self)).unwrap_or_default()
+                playlists
+                    .smart_rule(*index)
+                    .map(|rule| rule.evaluate_on(self, today))
+                    .unwrap_or_default()
             }
             TrackSource::Related { track, criterion } => self.related_rows(*track, *criterion),
             TrackSource::TagList => self.tag_list(),

@@ -333,7 +333,7 @@ impl SmartRule {
     /// The rows of the library the rule admits, in collection order.
     #[must_use]
     pub fn evaluate(&self, library: &Library) -> Vec<Row> {
-        self.evaluate_on(library, &today())
+        self.evaluate_on(library, &Date::today())
     }
 
     /// As [`evaluate`](Self::evaluate), with the date the relative
@@ -433,7 +433,7 @@ impl CompiledCondition {
             Property::DateAdded | Property::DateCreated | Property::DateReleased => {
                 match condition.operator {
                     Operator::InLast | Operator::NotInLast => {
-                        let back = whole(&condition.left).max(0);
+                        let back = relative_count(&condition.left);
                         (today.minus(back, &condition.unit).days(), today.days())
                     }
                     Operator::InRange => {
@@ -585,9 +585,9 @@ impl CompiledCondition {
             Operator::Equal => days == self.low,
             Operator::NotEqual => days != self.low,
             Operator::Greater => days > self.low,
-            Operator::Less => days < self.low,
-            Operator::InRange | Operator::InLast => days >= self.low && days <= self.high,
-            Operator::NotInLast => days < self.low || days > self.high,
+            Operator::Less | Operator::NotInLast => days < self.low,
+            Operator::InRange => days >= self.low && days <= self.high,
+            Operator::InLast => days >= self.low,
             Operator::Contains | Operator::NotContains | Operator::StartsWith | Operator::EndsWith => false,
         }
     }
@@ -649,6 +649,12 @@ fn whole(text: &str) -> i64 {
     (value.trunc() as i64).clamp(i64::from(i32::MIN), i64::from(i32::MAX))
 }
 
+/// A relative-date count. Unlike the other numeric fields, rekordbox accepts
+/// only a whole integer here and treats invalid or negative input as zero.
+fn relative_count(text: &str) -> i64 {
+    text.trim().parse::<i64>().unwrap_or(0).max(0)
+}
+
 /// A colour by its `ColorID`, or by name for a rule written with one.
 fn color_id(text: &str) -> i64 {
     let text = text.trim();
@@ -670,6 +676,16 @@ pub struct Date {
 }
 
 impl Date {
+    /// The machine's local calendar date.
+    #[must_use]
+    pub fn today() -> Self {
+        Self::parse(&rbl_core::time::local_date()).unwrap_or(Self {
+            year: 1970,
+            month: 1,
+            day: 1,
+        })
+    }
+
     /// The first ten characters of a rekordbox date: `YYYY-MM-DD`, whatever
     /// follows.
     #[must_use]
@@ -691,21 +707,20 @@ impl Date {
         days_from_civil(self.year, self.month, self.day)
     }
 
-    /// This date `count` units earlier. Months and years step the calendar,
-    /// clamping the day to the month's length, as rekordbox's "in the last
-    /// 3 months" means the same day three months back.
+    /// The inclusive start of a relative-date window. A case-insensitive
+    /// singular `month` steps the calendar; every other spelling counts days,
+    /// with today as the first day.
     #[must_use]
     pub fn minus(self, count: i64, unit: &str) -> Self {
-        let unit = unit.trim().to_ascii_lowercase();
-        let unit = unit.trim_end_matches('s');
-        match unit {
-            "week" => Self::from_days(self.days() - count * 7),
-            "month" => self.months_back(count),
-            "year" => self.months_back(count * 12),
-            // Days, and the unit nobody has seen, which is read as days
-            // rather than as no window at all.
-            _ => Self::from_days(self.days() - count),
+        if unit.eq_ignore_ascii_case("month") {
+            return self.months_back(count);
         }
+
+        self.days_ago(count.max(1) - 1)
+    }
+
+    pub(crate) fn days_ago(self, count: i64) -> Self {
+        Self::from_days(self.days() - count)
     }
 
     fn months_back(self, count: i64) -> Self {
@@ -719,11 +734,6 @@ impl Date {
         let (year, month, day) = civil_from_days(days);
         Self { year, month, day }
     }
-}
-
-/// The machine's date today, for the relative conditions.
-pub(crate) fn today() -> Date {
-    Date::parse(&rbl_core::time::local_date()).unwrap_or(Date { year: 1970, month: 1, day: 1 })
 }
 
 fn days_in_month(year: i64, month: i64) -> i64 {
@@ -835,14 +845,24 @@ mod tests {
     }
 
     #[test]
-    fn dates_step_back_by_the_calendar() {
+    fn relative_dates_only_treat_singular_month_as_a_calendar_unit() {
         let d = Date::parse("2026-03-31 10:00:00").unwrap();
         assert_eq!(d.minus(1, "month"), Date { year: 2026, month: 2, day: 28 });
-        assert_eq!(d.minus(2, "weeks"), Date { year: 2026, month: 3, day: 17 });
-        assert_eq!(d.minus(1, "year"), Date { year: 2025, month: 3, day: 31 });
-        assert_eq!(d.minus(31, "day"), Date { year: 2026, month: 2, day: 28 });
+        assert_eq!(d.minus(2, "weeks"), Date { year: 2026, month: 3, day: 30 });
+        assert_eq!(d.minus(1, "MONTH"), Date { year: 2026, month: 2, day: 28 });
+        assert_eq!(d.minus(1, "year"), d);
+        assert_eq!(d.minus(31, "day"), Date { year: 2026, month: 3, day: 1 });
         assert_eq!(Date::parse("2024-02-29").unwrap().days(), 19_782);
         assert!(Date::parse("not a date").is_none());
+    }
+
+    #[test]
+    fn relative_date_counts_require_nonnegative_integers() {
+        assert_eq!(relative_count("2"), 2);
+        assert_eq!(relative_count("0"), 0);
+        assert_eq!(relative_count("-1"), 0);
+        assert_eq!(relative_count("1.5"), 0);
+        assert_eq!(relative_count("not-a-number"), 0);
     }
 
     #[test]

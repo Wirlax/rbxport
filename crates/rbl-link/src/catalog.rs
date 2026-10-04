@@ -25,7 +25,7 @@ use rbl_dbserver::catalog::{
 };
 use rbl_dbserver::item::TrackRow;
 use rbl_dbserver::keys;
-use rbl_index::{Library, NO_ID, SortColumn, TrackSource, ViewSpec, key::camelot_rank};
+use rbl_index::{Library, NO_ID, SortColumn, TrackSource, ViewSpec, key::camelot_rank, smart::Date};
 
 use crate::blobs::{self, Analysis, ExtendedCue};
 
@@ -54,6 +54,10 @@ pub trait Source: Send + Sync {
     }
     fn key_order(&self) -> KeyOrder {
         KeyOrder::Musical
+    }
+    /// The date relative Smart Playlist conditions count back from.
+    fn today(&self) -> Date {
+        Date::today()
     }
     fn sorts(&self) -> Vec<Sort> {
         Sort::DEFAULTS.to_vec()
@@ -119,6 +123,7 @@ const ARTWORK_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 struct QueryCacheEntry {
     library: Weak<Library>,
+    today: Date,
     query: Query,
     rows: Arc<[Row]>,
 }
@@ -351,6 +356,7 @@ impl IndexCatalog {
     }
 
     fn cached_list(&self, library: &Arc<Library>, query: &Query) -> Vec<Row> {
+        let today = self.source.today();
         // Link history changes independently of the indexed library, so its
         // menu intentionally remains live rather than cacheable.
         if matches!(
@@ -361,12 +367,13 @@ impl IndexCatalog {
                     ..
                 }
         ) {
-            return self.list_uncached(library, query);
+            return self.list_uncached(library, query, &today);
         }
         {
             let mut cache = self.browse.lock();
             if let Some(at) = cache.queries.iter().position(|entry| {
                 entry.query == *query
+                    && entry.today == today
                     && entry
                         .library
                         .upgrade()
@@ -378,26 +385,28 @@ impl IndexCatalog {
                 return rows;
             }
             cache.queries.retain(|entry| {
-                entry
-                    .library
-                    .upgrade()
-                    .is_some_and(|cached| Arc::ptr_eq(&cached, library))
+                entry.today == today
+                    && entry
+                        .library
+                        .upgrade()
+                        .is_some_and(|cached| Arc::ptr_eq(&cached, library))
             });
         }
-        let rows = self.list_uncached(library, query);
+        let rows = self.list_uncached(library, query, &today);
         let mut cache = self.browse.lock();
         if cache.queries.len() >= QUERY_CACHE {
             cache.queries.remove(0);
         }
         cache.queries.push(QueryCacheEntry {
             library: Arc::downgrade(library),
+            today,
             query: query.clone(),
             rows: Arc::from(rows.clone()),
         });
         rows
     }
 
-    fn list_uncached(&self, library: &Library, query: &Query) -> Vec<Row> {
+    fn list_uncached(&self, library: &Library, query: &Query, today: &Date) -> Vec<Row> {
         match query {
             Query::BpmBuckets => library.bpm_buckets().into_iter().map(Row::Date).collect(),
             Query::Ratings => library.ratings().into_iter().map(Row::Date).collect(),
@@ -448,7 +457,7 @@ impl IndexCatalog {
             Query::Months(year) => Self::date_parts(library, &date_prefix(*year, None, None), 5..7, false),
             Query::Days { year, month } => Self::date_parts(library, &date_prefix(*year, Some(*month), None), 8..10, false),
             Query::Tracks { scope, sort } => {
-                self.tracks(library, scope, *sort, self.source.key_order())
+                self.tracks(library, scope, *sort, self.source.key_order(), today)
             }
         }
     }
@@ -530,7 +539,12 @@ impl IndexCatalog {
     /// The rows of a scope, in the order the library holds them, each with
     /// the position a list gives it (0 where the list has none).
     #[allow(clippy::too_many_lines, reason = "one match arm per protocol track scope")]
-    fn scope_rows(&self, library: &Library, scope: &TrackScope) -> Vec<(rbl_index::Row, u32)> {
+    fn scope_rows(
+        &self,
+        library: &Library,
+        scope: &TrackScope,
+        today: &Date,
+    ) -> Vec<(rbl_index::Row, u32)> {
         let all = || (0..u32::try_from(library.len()).unwrap_or(u32::MAX)).map(|row| (row, 0));
         match scope {
             TrackScope::All => all().collect(),
@@ -650,9 +664,10 @@ impl IndexCatalog {
                     return Vec::new();
                 };
                 let rows = if playlists.is_smart(index) {
-                    library.source_rows_unlocked(
+                    library.source_rows_unlocked_on(
                         &playlists,
                         &TrackSource::SmartPlaylist(index),
+                        today,
                     )
                 } else {
                     playlists.members.get(index).cloned().unwrap_or_default()
@@ -703,8 +718,9 @@ impl IndexCatalog {
         scope: &TrackScope,
         sort: Sort,
         key_order: KeyOrder,
+        today: &Date,
     ) -> Vec<Row> {
-        let mut rows = self.scope_rows(library, scope);
+        let mut rows = self.scope_rows(library, scope, today);
         if track_number_visible(scope) {
             for (row, position) in &mut rows {
                 *position = Self::track_id(library, *row)
@@ -1519,6 +1535,26 @@ mod tests {
         }
     }
 
+    struct Clocked {
+        library: Arc<Library>,
+        today: Mutex<Date>,
+    }
+
+    impl Source for Clocked {
+        fn library(&self) -> Option<Arc<Library>> {
+            Some(Arc::clone(&self.library))
+        }
+        fn today(&self) -> Date {
+            *self.today.lock()
+        }
+        fn share_root(&self) -> PathBuf {
+            PathBuf::from("/nonexistent")
+        }
+        fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+            None
+        }
+    }
+
     fn library() -> Library {
         let t = |id, title, artist, album, genre, label, key, bpm, date, play_count| TestTrack {
             id,
@@ -2164,6 +2200,40 @@ mod tests {
             }]
         );
         assert!(!c.listed(&TrackScope::Playlist(playlist)));
+    }
+
+    #[test]
+    fn smart_playlists_use_the_source_date_and_expire_cached_rows() {
+        let mut lib = library();
+        let rule = concat!(
+            "<NODE Id=\"1\" LogicalOperator=\"1\" AutomaticUpdate=\"1\">",
+            "<CONDITION PropertyName=\"stockDate\" Operator=\"6\" ValueUnit=\"day\" ",
+            "ValueLeft=\"1\" ValueRight=\"\"/>",
+            "</NODE>"
+        );
+        let index = add_smart_playlist_with_members(&mut lib, "Recent", &[], rule);
+        let playlist = u32::try_from(lib.playlists().ids[index]).unwrap();
+        let source = Arc::new(Clocked {
+            library: Arc::new(lib),
+            today: Mutex::new(Date {
+                year: 2026,
+                month: 1,
+                day: 20,
+            }),
+        });
+        let c = IndexCatalog::new(source.clone(), Played::default());
+        let query = Query::Tracks {
+            scope: TrackScope::Playlist(playlist),
+            sort: Sort::Default,
+        };
+
+        assert_eq!(ids(&c.list(&query)), [12]);
+        *source.today.lock() = Date {
+            year: 2026,
+            month: 1,
+            day: 9,
+        };
+        assert_eq!(ids(&c.list(&query)), [11, 12]);
     }
 
     #[test]

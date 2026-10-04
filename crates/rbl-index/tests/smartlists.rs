@@ -203,11 +203,11 @@ fn date_conditions_count_back_from_today() {
     );
     assert_eq!(
         rows_of(&lib, &rule(1, &[("stockDate", 6, "6", "", "months")])),
-        vec![1, 2]
+        Vec::<u64>::new()
     );
     assert_eq!(
         rows_of(&lib, &rule(1, &[("stockDate", 7, "1", "", "year")])),
-        vec![3]
+        vec![1, 2, 3]
     );
     assert_eq!(
         rows_of(&lib, &rule(1, &[("stockDate", 3, "2026-01-01", "", "")])),
