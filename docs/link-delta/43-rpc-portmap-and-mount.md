@@ -76,3 +76,20 @@ source/destination and map/mount state. Smallest check:
 `RB_LITE_TEST=1 cargo test -p rbl-nfs`.
 Version matching, loopback result and mount procedure distinctions can be
 isolated; full dynamic-map lifecycle remains unresolved.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: GETPORT matches program, service version and UDP
+transport; unknown tuples return zero. Remote SET/UNSET (including 127.0.0.2)
+return accepted false without mutation. Exactly 127.0.0.1 registration remains
+explicitly unsupported until the dynamic-map lifetime contract is recovered.
+Mount DUMP is PROC_UNAVAIL; EXPORTALL uses the same bounded export builder
+as EXPORT.
+
+Fixtures compare complete XDR replies for version/transport tuples, both
+remote registration procedures, unchanged real mappings, DUMP and identical
+EXPORT/EXPORTALL output. `RB_LITE_TEST=1 cargo test -p rbl-nfs` passed
+**57 tests**.
+Local registration semantics, dynamic DUMP/map initialization/shutdown,
+vendor malformed-argument policy and broader mount/VFS lifecycle remain
+blocked; export roots and filesystem protections were not broadened.

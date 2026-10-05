@@ -210,9 +210,9 @@ fn a_wrong_program_version_names_the_version_we_serve() {
 #[test]
 fn portmap_reports_where_each_program_listens() {
     let (_dir, server) = fixture();
-    for (program, expected) in [(PROGRAM_NFS, NFS_PORT), (PROGRAM_MOUNT, MOUNT_PORT)] {
+    for (program, version, expected) in [(PROGRAM_NFS, VERSION_NFS, NFS_PORT), (PROGRAM_MOUNT, VERSION_MOUNT, MOUNT_PORT)] {
         let mut args = Writer::new();
-        args.u32(program).u32(2).u32(IPPROTO_UDP).u32(0);
+        args.u32(program).u32(version).u32(IPPROTO_UDP).u32(0);
         let reply = ask(
             &server,
             PROGRAM_PORTMAP,
@@ -251,11 +251,9 @@ fn rekordbox_answers_portmap_on_its_own_port() {
 }
 
 #[test]
-fn portmap_set_and_unset_are_refused_so_no_host_can_hijack_the_mapping() {
-    // libFilSiNE honours SET and UNSET from any host with no credential, which
-    // lets a machine on the LAN redirect a player's file reads to itself. We
-    // answer both PROC_UNAVAIL and leave the real mapping untouched. SET is
-    // procedure 1, UNSET 2 in portmap v2.
+fn local_dynamic_portmap_registration_is_explicitly_unsupported() {
+    // Source-proven local registration needs dynamic-map lifetime work. Do
+    // not acknowledge it as successful while maintaining only static maps.
     let (_dir, server) = fixture();
     for procedure in [1_u32, 2] {
         let mut args = Writer::new();
@@ -274,6 +272,58 @@ fn portmap_set_and_unset_are_refused_so_no_host_can_hijack_the_mapping() {
     assert_eq!(ok_reader(&reply).u32().unwrap(), u32::from(NFS_PORT));
 }
 
+#[test]
+fn getport_matches_program_service_version_and_transport_exactly() {
+    let (_dir, server) = fixture();
+    for (program, version, expected) in [(PROGRAM_NFS, VERSION_NFS, NFS_PORT),
+        (PROGRAM_MOUNT, VERSION_MOUNT, MOUNT_PORT)] {
+        for requested in [0, 1, 2, 3, u32::MAX] {
+            for protocol in [IPPROTO_UDP, IPPROTO_TCP, 0] {
+                let mut args = Writer::new();
+                args.u32(program).u32(requested).u32(protocol).u32(0);
+                let request = call(PROGRAM_PORTMAP, VERSION_PORTMAP, portmap_proc::GETPORT, args.into_bytes());
+                let xid = Call::decode(&request).unwrap().xid;
+                let reply = server.handle(&request).unwrap();
+                let port = if requested == version && protocol == IPPROTO_UDP { u32::from(expected) } else { 0 };
+                let mut exact = rpc::accepted(xid, rpc::accept::SUCCESS);
+                exact.u32(port);
+                assert_eq!(reply, exact.into_bytes());
+            }
+        }
+    }
+}
+
+#[test]
+fn remote_portmap_registration_returns_false_without_changing_maps() {
+    let (_dir, server) = fixture();
+    for from in [std::net::Ipv4Addr::new(127, 0, 0, 2), std::net::Ipv4Addr::new(192, 168, 1, 20)] {
+        for procedure in [portmap_proc::SET, portmap_proc::UNSET] {
+            let mut args = Writer::new();
+            args.u32(PROGRAM_NFS).u32(VERSION_NFS).u32(IPPROTO_UDP).u32(9999);
+            let request = call(PROGRAM_PORTMAP, VERSION_PORTMAP, procedure, args.into_bytes());
+            let xid = Call::decode(&request).unwrap().xid;
+            let mut expected = rpc::accepted(xid, rpc::accept::SUCCESS);
+            expected.u32(0);
+            assert_eq!(server.handle_from(&request, from, 40000), Some(expected.into_bytes()));
+        }
+    }
+    let mut args = Writer::new();
+    args.u32(PROGRAM_NFS).u32(VERSION_NFS).u32(IPPROTO_UDP).u32(0);
+    let reply = ask(&server, PROGRAM_PORTMAP, VERSION_PORTMAP, portmap_proc::GETPORT, args.into_bytes());
+    assert_eq!(ok_reader(&reply).u32().unwrap(), u32::from(NFS_PORT));
+}
+
+#[test]
+fn mount_dump_is_unavailable_and_exportall_is_the_same_bounded_list() {
+    let (_dir, server) = fixture();
+    let request = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::DUMP, vec![]);
+    let xid = Call::decode(&request).unwrap().xid;
+    assert_eq!(server.handle(&request), Some(rpc::accepted_empty(xid, rpc::accept::PROC_UNAVAIL)));
+    let export = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORT, vec![]);
+    let mut export_all = ask(&server, PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::EXPORTALL, vec![]);
+    export_all[..4].copy_from_slice(&export[..4]);
+    assert_eq!(export_all, export);
+}
 
 #[test]
 fn malformed_specific_unmount_keeps_every_host_and_export() {

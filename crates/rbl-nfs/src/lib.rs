@@ -57,6 +57,8 @@ pub const IPPROTO_UDP: u32 = 17;
 /// Portmap procedures.
 pub mod portmap_proc {
     pub const NULL: u32 = 0;
+    pub const SET: u32 = 1;
+    pub const UNSET: u32 = 2;
     pub const GETPORT: u32 = 3;
 }
 
@@ -68,6 +70,7 @@ pub mod mount_proc {
     pub const UMNT: u32 = 3;
     pub const UMNTALL: u32 = 4;
     pub const EXPORT: u32 = 5;
+    pub const EXPORTALL: u32 = 6;
 }
 
 /// What a call is, for a log line: `mount MNT`, `nfs READ`, `portmap
@@ -424,7 +427,7 @@ impl Server {
         );
 
         let reply = match call.program {
-            PROGRAM_PORTMAP => self.portmap(&call),
+            PROGRAM_PORTMAP => self.portmap(&call, from),
             PROGRAM_MOUNT => self.mount(&call, from),
             PROGRAM_NFS => self.nfs(&call),
             // The lock and status monitors: rekordbox says nothing at all
@@ -442,16 +445,22 @@ impl Server {
         Some(reply)
     }
 
-    fn portmap(&self, call: &rpc::Call<'_>) -> Vec<u8> {
+    fn portmap(&self, call: &rpc::Call<'_>, from: Ipv4Addr) -> Vec<u8> {
         if call.version != VERSION_PORTMAP {
             return rpc::program_mismatch(call.xid, VERSION_PORTMAP, VERSION_PORTMAP);
         }
         match call.procedure {
             portmap_proc::NULL => rpc::accepted_empty(call.xid, rpc::accept::SUCCESS),
-            // The mapping table, as libFilSiNE lists it. SET and UNSET, which
-            // it honours from any host with no credential, are not: a host
-            // on the LAN redirecting a player's file reads is nothing a
-            // player needs.
+            // V7 registration is allowed only from exactly 127.0.0.1.
+            // Local dynamic registration is not implemented: retain explicit
+            // PROC_UNAVAIL there while answering remote refusal as false.
+            portmap_proc::SET | portmap_proc::UNSET if from != Ipv4Addr::LOCALHOST => {
+                let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
+                writer.u32(0);
+                writer.into_bytes()
+            }
+            // Static mapping list; dynamic lifecycle and dump-length parity
+            // remain separate evidence tasks.
             PORTMAP_DUMP => {
                 let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
                 for (program, version, port) in [
@@ -466,7 +475,7 @@ impl Server {
             }
             portmap_proc::GETPORT => {
                 let mut reader = call.reader();
-                let (Ok(program), Ok(_version), Ok(protocol)) =
+                let (Ok(program), Ok(version), Ok(protocol)) =
                     (reader.u32(), reader.u32(), reader.u32())
                 else {
                     return rpc::accepted_empty(call.xid, rpc::accept::GARBAGE_ARGS);
@@ -475,8 +484,8 @@ impl Server {
                 // a program we do not serve, and for TCP, which we do not bind.
                 let port = if protocol == IPPROTO_UDP {
                     match program {
-                        PROGRAM_NFS => self.nfs_port,
-                        PROGRAM_MOUNT => self.mount_port,
+                        PROGRAM_NFS if version == VERSION_NFS => self.nfs_port,
+                        PROGRAM_MOUNT if version == VERSION_MOUNT => self.mount_port,
                         _ => 0,
                     }
                 } else {
@@ -551,7 +560,7 @@ impl Server {
                 }
                 writer.into_bytes()
             }
-            mount_proc::DUMP | mount_proc::EXPORT => {
+            mount_proc::EXPORT | mount_proc::EXPORTALL => {
                 tracing::debug!(
                     xid = call.xid,
                     exports = ?self.exports.names(),
