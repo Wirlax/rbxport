@@ -202,9 +202,22 @@ pub struct Server {
 /// What tells one call from another in the reply cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReplyKey {
+    receiver: Receiver,
     from: Ipv4Addr,
     port: u16,
     head: Vec<u8>,
+}
+
+/// Identity of one receiving socket for the lifetime of its serving loop.
+/// Fresh tokens keep cache entries distinct even after a socket is rebound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Receiver(u64);
+
+impl Default for Receiver {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
 }
 
 /// How many replies are kept for retransmits.
@@ -357,9 +370,14 @@ impl Server {
     /// reply, because silence is what a client times out on. A call seen
     /// before from the same peer gets the reply it got then.
     pub fn handle_from(&self, datagram: &[u8], from: Ipv4Addr, port: u16) -> Option<Vec<u8>> {
+        self.handle_on(datagram, from, port, Receiver(0))
+    }
+
+    /// Handles a datagram on the explicitly identified receiving socket.
+    pub fn handle_on(&self, datagram: &[u8], from: Ipv4Addr, port: u16, receiver: Receiver) -> Option<Vec<u8>> {
         let key = datagram
             .get(..REPLY_KEY_LEN)
-            .map(|head| ReplyKey { from, port, head: head.to_vec() });
+            .map(|head| ReplyKey { receiver, from, port, head: head.to_vec() });
         if let Some(key) = &key {
             let replies = self.replies.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some((_, reply)) = replies.iter().find(|(k, _)| k == key) {

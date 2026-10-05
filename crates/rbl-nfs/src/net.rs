@@ -31,6 +31,7 @@ const POLL: Duration = Duration::from_millis(200);
 /// Returns only on an error that is not worth continuing through; a malformed
 /// datagram, or one from a peer that has gone away, is counted and skipped.
 pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -> io::Result<()> {
+    let socket_id = crate::Receiver::default();
     socket.set_read_timeout(Some(POLL))?;
     // Even an 8 KB `READ` reply is larger than one Ethernet frame. Keep the
     // buffer roomy enough for bursts from several player source ports rather
@@ -54,7 +55,7 @@ pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -
             SocketAddr::V4(v4) => *v4.ip(),
             SocketAddr::V6(v6) => v6.ip().to_ipv4_mapped().unwrap_or(std::net::Ipv4Addr::UNSPECIFIED),
         };
-        let Some(reply) = server.handle_from(buffer.get(..len).unwrap_or(&[]), peer, from.port()) else {
+        let Some(reply) = server.handle_on(buffer.get(..len).unwrap_or(&[]), peer, from.port(), socket_id) else {
             continue;
         };
         let started = std::time::Instant::now();

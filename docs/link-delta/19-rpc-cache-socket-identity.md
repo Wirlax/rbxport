@@ -79,3 +79,19 @@ implementation choice; avoid a token reused across rebinding in the same
 cache lifetime.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-nfs`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented an explicit receiving-socket token in `ReplyKey`. Each
+serving loop allocates a fresh token, so rebinding cannot reuse another loop's
+cached replies. Existing direct handler APIs share a reserved direct-test
+identity; callers testing multiple receivers can use `handle_on`. Peer
+IP/port, the first 24 request bytes and the 20-entry bound are preserved.
+
+A real two-socket UDP fixture sends MNT, clears mount state with UMNTALL,
+then replays the original request: the same receiver replays its complete
+reply without repeating the mutation; the second receiver executes MNT
+independently. Exact response bytes, mount state, original peer destination
+and reply source socket are asserted.
+`RB_LITE_TEST=1 cargo test -p rbl-nfs` passed **57 tests**.
+No actual cross-socket player incident or broader cache redesign is claimed.

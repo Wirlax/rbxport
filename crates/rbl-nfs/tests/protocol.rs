@@ -274,6 +274,50 @@ fn portmap_set_and_unset_are_refused_so_no_host_can_hijack_the_mapping() {
     assert_eq!(ok_reader(&reply).u32().unwrap(), u32::from(NFS_PORT));
 }
 
+
+#[test]
+fn duplicate_mounts_are_scoped_to_the_actual_receiving_socket() {
+    use std::net::{Ipv4Addr, UdpSocket};
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let (_dir, server) = fixture();
+    let server = Arc::new(server);
+    let stop = Arc::new(AtomicBool::new(false));
+    let first = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let second = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let peer = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    peer.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    let first_addr = first.local_addr().unwrap();
+    let second_addr = second.local_addr().unwrap();
+    let workers: Vec<_> = [first, second].into_iter().map(|socket| {
+        let server = Arc::clone(&server);
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || rbl_nfs::net::serve(&server, &socket, &stop).unwrap())
+    }).collect();
+    let exchange = |request: &[u8], receiver| {
+        peer.send_to(request, receiver).unwrap();
+        let mut response = [0; 256];
+        let (length, source) = peer.recv_from(&mut response).unwrap();
+        assert_eq!(source, receiver, "reply originates on the receiving socket");
+        response[..length].to_vec()
+    };
+    let mut path = Writer::new();
+    path.utf16("/");
+    let mount = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, path.into_bytes());
+    let original = exchange(&mount, first_addr);
+    assert_eq!(ok_reader(&original).u32().unwrap(), nfs_status::OK);
+    assert!(server.is_mounted(Ipv4Addr::LOCALHOST));
+    let unmount = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::UMNTALL, vec![]);
+    let xid = Call::decode(&unmount).unwrap().xid;
+    assert_eq!(exchange(&unmount, first_addr), rpc::accepted_empty(xid, rpc::accept::SUCCESS));
+    assert!(!server.is_mounted(Ipv4Addr::LOCALHOST));
+    assert_eq!(exchange(&mount, first_addr), original);
+    assert!(!server.is_mounted(Ipv4Addr::LOCALHOST), "true retransmission replays without repeating MNT");
+    assert_eq!(exchange(&mount, second_addr), original);
+    assert!(server.is_mounted(Ipv4Addr::LOCALHOST), "a different receiver executes independently");
+    stop.store(true, Ordering::Relaxed);
+    for worker in workers { worker.join().unwrap(); }
+}
+
 // ---------------------------------------------------------------- mount
 
 #[test]
