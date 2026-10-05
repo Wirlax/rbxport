@@ -81,3 +81,21 @@ writes are required.
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-dbserver`; then
 `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon` plus the relevant
 existing Link socket test once the lifecycle policy is evidenced.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: network session creation calls `Handler::open_ready`.
+`CatalogHandler` overrides it with one atomic assigned-number snapshot:
+zero returns no session; nonzero creates a session with that exact identity.
+The direct open path no longer substitutes 17 for zero. An unready network
+connection closes before any greeting/setup response, matching the existing
+RBX query-gate safety policy.
+
+Controlled snapshots cover 0→17→18→0 and retained identities of already-open
+sessions. Real direct TCP-port fixtures check unanswered pre-ready/reset
+connections, exact greeting/setup bytes with 17 and 18, and successful later
+reconnection. `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session`
+passed **46 tests**.
+Unanswered close is an RBX safety choice, not vendor refusal-timing proof.
+Already-open sessions retain their current snapshot; vendor teardown/
+reacquisition policy and the full lifecycle issue remain blocked.

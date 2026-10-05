@@ -1862,3 +1862,54 @@ fn unsupported_command_keeps_filter_selection_and_enable_state() {
     exchange_wire(&mut s, &numbers(0x3007, 0x8103, &[CTX, 1]).encode());
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
 }
+
+#[test]
+fn ready_open_uses_one_assigned_number_snapshot_without_a_fallback() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    let number = Arc::new(AtomicU8::new(0));
+    let handler = CatalogHandler::new(Arc::new(Small(false))).with_device(Arc::clone(&number));
+    assert!(handler.open_ready().is_none());
+    assert!(!handler.serving());
+    number.store(17, Ordering::Relaxed);
+    let mut first = handler.open_ready().unwrap();
+    number.store(18, Ordering::Relaxed);
+    let mut second = handler.open_ready().unwrap();
+    number.store(0, Ordering::Relaxed);
+    assert!(handler.open_ready().is_none());
+    // Already-open sessions retain their assigned snapshot. A different
+    // reacquisition teardown policy remains an evidence task, not a guess.
+    assert_eq!(exchange_wire(&mut first, &setup_request(1).encode()),
+        vec![hex("11872349ae11fffffffe1000000f021400000002060611000000111100000014")]);
+    assert_eq!(exchange_wire(&mut second, &setup_request(1).encode()),
+        vec![hex("11872349ae11fffffffe1000000f021400000002060611000000121100000014")]);
+}
+
+#[test]
+fn direct_database_socket_closes_unready_and_uses_negotiated_setup_identity() {
+    use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, TcpStream};
+    use std::sync::atomic::{AtomicU8, Ordering};
+    let number = Arc::new(AtomicU8::new(0));
+    let handler = Arc::new(CatalogHandler::new(Arc::new(Small(false))).with_device(Arc::clone(&number)));
+    let bound = rbl_dbserver::net::Bound::start(handler, IpAddr::V4(Ipv4Addr::LOCALHOST), 0, 0).unwrap();
+    for assigned in [0, 17, 18, 0, 18] {
+        number.store(assigned, Ordering::Relaxed);
+        let mut client = TcpStream::connect(bound.database_address()).unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        if assigned == 0 {
+            let mut reply = [0; 64];
+            assert!(matches!(client.read(&mut reply), Ok(0)), "unready sessions close without greeting or invented identity");
+        } else {
+            let mut request = rbl_dbserver::GREETING.to_vec();
+            request.extend_from_slice(&setup_request(1).encode());
+            client.write_all(&request).unwrap();
+            let mut expected = rbl_dbserver::GREETING.to_vec();
+            expected.extend_from_slice(&hex(&format!(
+                "11872349ae11fffffffe1000000f021400000002060611000000{assigned:02x}1100000014")));
+            let mut reply = vec![0; expected.len()];
+            client.read_exact(&mut reply).unwrap();
+            assert_eq!(reply, expected);
+        }
+    }
+    bound.shutdown();
+}

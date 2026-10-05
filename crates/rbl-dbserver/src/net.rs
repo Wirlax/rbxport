@@ -34,6 +34,12 @@ const MAX_PENDING: usize = 64 * 1024;
 pub trait Handler: Send + Sync {
     fn open(&self) -> Box<dyn Session>;
 
+    /// Opens a ready network session. Stateful handlers should override this
+    /// to select readiness and session identity from one coherent snapshot.
+    fn open_ready(&self) -> Option<Box<dyn Session>> {
+        self.serving().then(|| self.open())
+    }
+
     /// Whether the server is up for players: rekordbox starts its database
     /// server after its link is up and its exports are in, so before that
     /// a port query gets no answer. Serving from the start by default.
@@ -68,7 +74,11 @@ pub fn serve_session(
         .map_or_else(|_| "?".to_owned(), |a| a.to_string());
     tracing::debug!(%peer, "player connected to the database server");
 
-    let mut session = handler.open();
+    let Some(mut session) = handler.open_ready() else {
+        // RBX safety policy: close unanswered before any greeting/setup when
+        // no negotiated identity exists. Vendor refusal timing is unproved.
+        return Ok(());
+    };
     let mut pending: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0_u8; 4096];
     // Both sides open with the same five bytes before any message (measured);

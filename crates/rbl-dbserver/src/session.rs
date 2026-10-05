@@ -17,8 +17,8 @@ use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
 use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
 
-/// Our device number on the link when nothing has settled one: rekordbox's
-/// first choice, so a player treats us as it treats rekordbox.
+/// Default identity for a standalone handler. A live Link handler uses its
+/// negotiated number and refuses network sessions while that number is zero.
 pub const DEVICE: u8 = 0x11;
 
 /// Serves a catalog to every player that connects.
@@ -48,11 +48,14 @@ impl CatalogHandler {
 
 impl Handler for CatalogHandler {
     fn open(&self) -> Box<dyn Session> {
-        let device = match self.device.load(Ordering::Relaxed) {
-            0 => DEVICE,
-            number => number,
-        };
+        let device = self.device.load(Ordering::Relaxed);
         Box::new(LinkSession::new(Arc::clone(&self.catalog)).as_device(device))
+    }
+
+    fn open_ready(&self) -> Option<Box<dyn Session>> {
+        let device = self.device.load(Ordering::Relaxed);
+        if device == 0 { return None; }
+        Some(Box::new(LinkSession::new(Arc::clone(&self.catalog)).as_device(device)))
     }
 
     fn serving(&self) -> bool {
