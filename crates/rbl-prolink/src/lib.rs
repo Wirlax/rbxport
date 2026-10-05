@@ -43,6 +43,8 @@ pub enum PacketError {
     WrongKind(u8),
     #[error("unexpected packet subtype {0:#04x}")]
     WrongSubtype(u8),
+    #[error("unexpected payload length {0}")]
+    WrongLength(u16),
 }
 
 pub type Result<T> = std::result::Result<T, PacketError>;
@@ -985,8 +987,30 @@ pub fn beat_packet(name: &str, device_number: u8, bpm_x100: u16, bar_beat: u8) -
 /// The kind of the Load Track command rekordbox sends to a CDJ.
 pub const LOAD_TRACK_KIND: u8 = 0x19;
 
-/// The kind of the reply a player sends once it accepts a Load Track command.
+/// The kind of a player's Load Track response; status semantics are unknown.
 pub const LOAD_TRACK_ACK_KIND: u8 = 0x1a;
+
+/// Raw fields of the evidenced 40-byte `MusicDD` response. No field is named
+/// "accepted": neither its enum meaning nor request correlation is proved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadTrackResponse {
+    pub name: String,
+    pub fields: [u8; 4],
+}
+
+impl LoadTrackResponse {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < 40 { return Err(PacketError::TooShort(packet.len())); }
+        let kind = packet_kind(packet)?;
+        if kind != LOAD_TRACK_ACK_KIND { return Err(PacketError::WrongKind(kind)); }
+        let length = u16::from_be_bytes([packet[34], packet[35]]);
+        if length != 4 { return Err(PacketError::WrongLength(length)); }
+        Ok(Self {
+            name: status_device_name(packet)?,
+            fields: [packet[36], packet[37], packet[38], packet[39]],
+        })
+    }
+}
 
 /// Byte length of a Load Track command.
 pub const LOAD_TRACK_LEN: usize = 0x58;

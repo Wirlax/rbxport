@@ -214,6 +214,36 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
     beacon.stop();
 }
 
+#[test]
+fn load_response_fields_do_not_establish_a_loaded_or_playing_track() {
+    let (beacon, player, facts) = start_on(None);
+    join(&beacon, &player);
+    let status = SocketAddrV4::new(Ipv4Addr::LOCALHOST, beacon.status_port());
+    let captured = hex("5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000");
+    player.send_to(&captured, status).unwrap();
+    let mut unknown = captured.clone();
+    unknown[36..40].copy_from_slice(&[255, 255, 17, 42]);
+    player.send_to(&unknown, status).unwrap();
+    player.send_to(&captured[..39], status).unwrap();
+    // A same-socket media request acts as the processing barrier, without
+    // interpreting any response fields as an accepted load or deck number.
+    let mut query = hex(MEDIA_QUERY);
+    query[0x24..0x28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+    query[0x2b] = LINK_DEVICE_NUMBER;
+    player.send_to(&query, status).unwrap();
+    receive(&player, 6);
+    let players = beacon.players();
+    assert_eq!(players.len(), 1);
+    assert_eq!(players[0].loaded, None);
+    assert!(!players[0].playing);
+    assert!(facts.0.lock().unwrap().is_empty());
+    player.send_to(&status_playing_ours(), status).unwrap();
+    let players = wait_for(&beacon, |players| players.iter().any(|p| p.loaded.is_some() && p.playing));
+    assert!(players.iter().any(|p| p.loaded.is_some() && p.playing));
+    assert_eq!(facts.0.lock().unwrap().len(), 1);
+    beacon.stop();
+}
+
 /// Pinned to an interface, the beacon still hears the player and answers
 /// it: the pin is how a command leaves from the announced address on a
 /// machine with two interfaces on the players' subnet, and it must not cost

@@ -606,6 +606,27 @@ fn a_cdj_3000_acknowledges_a_load_track_command() {
     }
 }
 
+#[test]
+fn load_track_response_preserves_raw_fields_and_rejects_malformed_frames() {
+    use rbl_prolink::{LoadTrackResponse, PacketError};
+    let mut wire = hex(CAPTURED_LOAD_TRACK_ACK);
+    let response = LoadTrackResponse::decode(&wire).unwrap();
+    assert_eq!(response.name, "CDJ-3000");
+    assert_eq!(response.fields, [3, 1, 0, 0]);
+    for cut in 0..40 {
+        assert_eq!(LoadTrackResponse::decode(&wire[..cut]), Err(PacketError::TooShort(cut)));
+    }
+    wire[36..40].copy_from_slice(&[255, 0, 17, 42]);
+    assert_eq!(LoadTrackResponse::decode(&wire).unwrap().fields, [255, 0, 17, 42]);
+    wire[35] = 5;
+    assert_eq!(LoadTrackResponse::decode(&wire), Err(PacketError::WrongLength(5)));
+    wire[35] = 4;
+    wire[10] = 0x19;
+    assert_eq!(LoadTrackResponse::decode(&wire), Err(PacketError::WrongKind(0x19)));
+    wire[0] = 0;
+    assert_eq!(LoadTrackResponse::decode(&wire), Err(PacketError::BadMagic));
+}
+
 /// A DJM-V5's keep-alive, verbatim from the wire (2026-09-13, device 33 at
 /// 192.168.1.66): it announces device type `03`, not the community-documented
 /// `02`, and must still be read as a mixer or it shows up as a nameless

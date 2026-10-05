@@ -81,3 +81,27 @@ truncated prefix, wrong kind/length, unknown values, mismatched deck,
 repeated ACK, and subsequent status naming the actual content. Smallest
 validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then the beacon
 test. Do not introduce a success UI from unproven values.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: `LoadTrackResponse` decodes the established
+40-byte kind-`1a` response and retains all four raw payload bytes.
+The status loop logs neutral numeric fields rather than claiming acceptance;
+neither loaded nor playing state is mutated by this response. Bad magic/kind,
+truncation and an unexpected declared payload length are refused safely.
+
+Tests retain the full frame-37 fixture, verify raw `03 01 00 00` and unknown
+values, and reject every truncated prefix and wrong kind/length/magic.
+A UDP Beacon regression sends captured, unknown and truncated responses,
+uses a same-socket query as a processing barrier, and checks no loaded/playing
+state or load event occurs; subsequent player status establishes the load.
+Acceptance/rejection enum meanings, request correlation and client semantics
+remain blocked. These are parsing/socket fixtures, not fresh device proof.
+
+Validation: the focused
+`RB_LITE_TEST=1 cargo test -p rbl-link --test beacon load_response_fields_do_not_establish_a_loaded_or_playing_track`
+passed; `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon` passed
+**6 tests, 2 existing ignores**. The initial barrier fixture retained the
+captured query's asker IPv4 address, so its reply went outside the loopback
+receiver; correcting that test payload to localhost resolved the failure.
+No production response-destination or ACK behavior was changed for the fix.

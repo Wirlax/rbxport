@@ -1045,10 +1045,15 @@ fn status_loop(
                     "handshake reply",
                 );
             }
-            // A player that accepts a load command says so with `1a`; the
-            // load itself shows up in its next status packets.
+            // Preserve raw response fields without assigning unknown enum
+            // semantics. Only later status can establish the loaded track.
             LOAD_TRACK_ACK_KIND => {
-                tracing::info!(from = %from.ip(), "player accepted a load track command");
+                if let Ok(response) = rbl_prolink::LoadTrackResponse::decode(packet) {
+                    tracing::info!(from = %from.ip(), name = %response.name, fields = ?response.fields,
+                        "player replied to a load track command");
+                } else {
+                    tracing::debug!(%from, len = packet.len(), "malformed load track response ignored");
+                }
             }
             PLAYER_STATUS_KIND => {
                 hear_player_status(packet, from, socket, config, shared, facts, ours);
