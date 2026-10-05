@@ -1,6 +1,6 @@
 # Link parity worklist
 
-These are proposed tasks, not implemented fixes. Numbered filenames are recommended execution priority, based on connection/state correctness first, load-data correctness next, and end-to-end proof last. The ordering is an engineering judgment—not evidence that every difference has caused a player failure.
+These issues describe the required outcomes. Dated investigation and implementation sections record progress and remaining evidence gaps. Numbered filenames are recommended execution priority, based on connection/state correctness first, load-data correctness next, and end-to-end proof last. The ordering is an engineering judgment—not evidence that every difference has caused a player failure.
 
 Source: [link-delta.md](link-delta.md). The historical source report is stored alongside this worklist; the dated investigations below recheck its findings against the current checkout.
 
@@ -22,6 +22,18 @@ inspection contradicts them. No production code or installed library was
 changed in this pass.
 
 ## Tasks
+
+Step 2 work and remaining blockers are tracked in the
+[implementation record](implementation.md). The dated implementation
+sections state which portions were changed; acceptance remains a separate
+evidence gate.
+
+The [Step 3 review and remediation](review.md) is complete: all three P2
+findings are fixed and closed by Astra re-review. The bounded patch is
+approved against its established contracts. The review retains the initial
+findings, current dispositions and validation record; full-parity and device
+acceptance gates remain open. The [Step 4 commit ledger](commits.md) records
+the 22 bounded issue commits and their validation.
 
 | Priority | One specific outcome |
 |---|---|
