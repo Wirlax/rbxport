@@ -74,3 +74,29 @@ No database fixture is needed.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-link join::tests`,
 then `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented probing-state keepalive occupancy with the evidenced number
+1–80/type 1–9 guards. Each of 17/18/41–44 maps to its own existing candidate
+bit; repetitions are idempotent, unrelated numbers do not alter occupancy,
+and local IP+MAC echoes are ignored. Keepalive decoding rejects a nonzero
+subtype before the dispatcher can use it.
+
+Controlled-clock tests cover each candidate bit, invalid type, unrelated
+number, repeat, local echo and the ordinary waiting path. With no probe reply,
+an announced 17 is skipped and 18 is chosen; complete outgoing probe bytes
+continue to use the established ladder. `RB_LITE_TEST=1 cargo test -p rbl-link
+join::tests` and `RB_LITE_TEST=1 cargo test -p rbl-prolink` passed.
+This closes the established state mutation, without a measured collision-rate
+or full wireless-selection claim.
+
+### Review remediation — F2 (2026-10-05)
+
+V5 `messageReceived` (1354–1367) now guards the announcement dispatcher
+before keepalives can set occupancy or replies can change acquisition.
+Own-address and off-subnet traffic is inert after known-mode NetIF
+initialization; same-subnet traffic retains the established behavior.
+Controlled acquisition regressions cover both rejected occupancy and
+accepted candidate skipping. Fresh/uninitialized and Unknown-mode context
+is unchanged. See [review.md](review.md) for remediation validation.

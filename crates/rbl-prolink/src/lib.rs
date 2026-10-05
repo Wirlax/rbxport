@@ -325,6 +325,9 @@ impl KeepAlive {
         if AnnounceKind::from_u8(kind) != AnnounceKind::KeepAlive {
             return Err(PacketError::WrongKind(kind));
         }
+        if packet[0x0b] != 0 {
+            return Err(PacketError::WrongSubtype(packet[0x0b]));
+        }
         let at = |i: usize| packet.get(i).copied().unwrap_or(0);
         let mut mac = [0_u8; 6];
         for (slot, byte) in mac.iter_mut().zip(packet.get(0x26..0x2c).unwrap_or(&[])) {

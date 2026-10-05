@@ -328,6 +328,13 @@ fn occupancy_block_has_distinct_masks_counter_and_truncation_boundary() {
 }
 
 #[test]
+fn a_wrong_keepalive_subtype_cannot_mark_probing_occupancy() {
+    let mut wire = hex(CAPTURED_CDJ_KEEP_ALIVE);
+    wire[11] = 1;
+    assert_eq!(rbl_prolink::KeepAlive::decode(&wire), Err(rbl_prolink::PacketError::WrongSubtype(1)));
+}
+
+#[test]
 fn a_peer_that_goes_quiet_is_dropped() {
     let mut table = DeviceTable::new();
     table.observe(&sample(), 0);

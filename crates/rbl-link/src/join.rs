@@ -143,6 +143,17 @@ impl Join {
     /// A keep-alive from another device: the first from a player or mixer
     /// starts the join.
     pub fn hear_keep_alive(&mut self, keep_alive: &KeepAlive, now: Instant) {
+        if keep_alive.ip == self.ip && keep_alive.mac == self.mac {
+            return;
+        }
+        if !(1..=80).contains(&keep_alive.device_number) || !(1..=9).contains(&keep_alive.device_type.to_u8()) {
+            return;
+        }
+        if matches!(self.state, State::Probing { .. }) {
+            if let Some(index) = REKORDBOX_CLAIM_NUMBERS.iter().position(|number| *number == keep_alive.device_number) {
+                self.in_use[index] = true;
+            }
+        }
         if self.state == State::Waiting
             && rbl_prolink::brings_link_up_on(keep_alive, ConnectionMode::Wired)
             && self.mode != ConnectionMode::Unknown
@@ -557,6 +568,36 @@ mod tests {
     }
 
     #[test]
+    fn probing_keepalives_mark_all_candidates_without_a_probe_reply() {
+        let now = Instant::now();
+        let mut join = Join::new(MAC, IP, now).with_mode(ConnectionMode::Wired);
+        join.hear_keep_alive(&player(), now);
+        run(&mut join, now, 3);
+        let mut packet = player();
+        packet.device_type = DeviceType::Rekordbox;
+        for number in [17, 41, 42, 43, 44] {
+            packet.device_number = number;
+            let decoded = KeepAlive::decode(&packet.encode()).unwrap();
+            join.hear_keep_alive(&decoded, now);
+            join.hear_keep_alive(&decoded, now);
+        }
+        assert_eq!(join.in_use, [true, false, true, true, true, true]);
+        packet.device_number = 18;
+        packet.ip = IP;
+        packet.mac = MAC;
+        join.hear_keep_alive(&packet, now);
+        assert!(!join.in_use[1]);
+        packet.ip = player().ip;
+        packet.mac = player().mac;
+        packet.device_type = DeviceType::Other(10);
+        join.hear_keep_alive(&packet, now);
+        assert!(!join.in_use[1]);
+        let (out, _) = run(&mut join, now, 100);
+        assert!(out.iter().all(|request| request.packet[46] == 18));
+        assert_eq!(join.number(), Some(18));
+    }
+
+    #[test]
     fn original_players_join_only_on_a_known_wired_interface() {
         let now = Instant::now();
         for name in ["CDJ-2000", "CDJ-900"] {
@@ -595,6 +636,23 @@ mod tests {
             let mut assign = wire;
             assign[11] = PROBE_SUBTYPE_ASSIGN;
             assert_eq!(join.hear_probe(&NumberProbe::decode(&assign).unwrap()), None);
+        }
+    }
+
+    #[test]
+    fn each_candidate_keepalive_sets_exactly_one_occupancy_bit() {
+        let now = Instant::now();
+        for (index, number) in REKORDBOX_CLAIM_NUMBERS.iter().copied().enumerate() {
+            let mut join = Join::new(MAC, IP, now).test_state(State::Probing { round: 1, index: 0 });
+            let mut announcement = player();
+            announcement.device_number = number;
+            join.hear_keep_alive(&KeepAlive::decode(&announcement.encode()).unwrap(), now);
+            let mut expected = [false; 6];
+            expected[index] = true;
+            assert_eq!(join.in_use, expected);
+            announcement.device_number = 33;
+            join.hear_keep_alive(&announcement, now);
+            assert_eq!(join.in_use, expected);
         }
     }
 }
