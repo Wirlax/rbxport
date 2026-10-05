@@ -1892,6 +1892,47 @@ fn played_state_wire_uses_context_four_and_preserves_pending_menu() {
     }
 }
 
+#[test]
+fn filter_set_failure_is_32_and_keeps_existing_conditions_and_menu() {
+    let mut s = session();
+    browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+    let render = numbers(kind::RENDER, 0x8100, &[CTX, 0, 1]);
+    let menu = exchange_wire(&mut s, &render.encode());
+    let get = numbers(kind::FILTER_GET, 0x8101, &[CTX]);
+    let before = exchange_wire(&mut s, &get.encode());
+    let mut blob = vec![1, 6, 2, 0];
+    blob.extend_from_slice(&12_000_u32.to_le_bytes());
+    blob.extend_from_slice(&13_000_u32.to_le_bytes());
+    let valid = vec![Argument::Number(CTX), Argument::Number(6), Argument::Number(0),
+        Argument::Number(12), Argument::Blob(blob)];
+    let mut invalid: Vec<Vec<Argument>> = vec![vec![]];
+    for (index, value) in [(0, Argument::String("context".into())), (1, Argument::Number(99)), (2, Argument::Number(1)),
+        (2, Argument::String("reserved".into())), (3, Argument::Number(3)),
+        (3, Argument::Number(11)), (4, Argument::Blob(vec![1,6,2,0])),
+        (4, Argument::String("blob".into()))] {
+        let mut arguments = valid.clone();
+        arguments[index] = value;
+        invalid.push(arguments);
+    }
+    for arguments in invalid {
+        let request = Message::new(0x8131, kind::FILTER_SET, arguments);
+        assert_eq!(exchange_wire(&mut s, &request.encode()),
+            vec![hex("11872349ae11000081311040000f021400000002060611000032071100000032")]);
+        assert_eq!(exchange_wire(&mut s, &get.encode()), before);
+        assert_eq!(exchange_wire(&mut s, &render.encode()), menu);
+    }
+    assert_eq!(exchange_wire(&mut s, &Message::new(0x8131, kind::FILTER_SET, valid).encode()),
+        vec![hex("11872349ae11000081311040000f021400000002060611000032071100000000")]);
+    assert_ne!(exchange_wire(&mut s, &get.encode()), before);
+    assert_eq!(exchange_wire(&mut s, &render.encode()), menu);
+    // Preserve the currently accepted typed foreign-context path without
+    // inventing requester ownership or reconnect persistence semantics.
+    let foreign = vec![Argument::Number(0x0208_0302), Argument::Number(6), Argument::Number(0),
+        Argument::Number(4), Argument::Blob(vec![0, 0, 0, 0])];
+    assert_eq!(exchange_wire(&mut s, &Message::new(0x8131, kind::FILTER_SET, foreign).encode()),
+        vec![hex("11872349ae11000081311040000f021400000002060611000032071100000000")]);
+}
+
 #[derive(Default)]
 struct AnalysisBoundaryCatalog {
     edits: std::sync::atomic::AtomicUsize,

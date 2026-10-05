@@ -1229,15 +1229,14 @@ impl Session for LinkSession {
                 Some(4),
             ),
             kind::FILTER_SET => {
-                let valid = match message.arguments.get(4) {
-                    Some(Argument::Blob(bytes))
-                        if bytes.len() == Self::number(message, 3) as usize =>
-                    {
-                        self.filter.update(Self::number(message, 1), bytes)
-                    }
+                let valid = match (message.arguments.first(), message.arguments.get(1), message.arguments.get(2),
+                    message.arguments.get(3), message.arguments.get(4)) {
+                    (Some(Argument::Number(_)), Some(Argument::Number(property)), Some(Argument::Number(0)),
+                        Some(Argument::Number(length)), Some(Argument::Blob(bytes)))
+                        if *length > 3 && bytes.len() == *length as usize => self.filter.update(*property, bytes),
                     _ => false,
                 };
-                vec![menu_header(tx, u32::from(message.kind), u32::from(!valid))]
+                vec![menu_header(tx, u32::from(message.kind), if valid { 0 } else { 0x32 })]
             }
             kind::CHANGE_TAG | kind::CLEAR_TAGS | kind::CHANGE_RATING => {
                 let track = Self::number(message, 1);

@@ -74,3 +74,19 @@ reserved fields/operator/length, two requesters, disabled snapshots,
 delete-all, unavailable category, reconnect and write failure in temporary
 storage. Smallest check: `RB_LITE_TEST=1 cargo test -p rbl-dbserver filter`.
 Do not pick session or disk lifetime by convenience.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: existing `3207` property setters now require
+typed context/property/reserved/length/blob fields, reserved argument 2 equal
+to zero and length >3 matching the blob. Established setter failure emits
+scalar 0x32; success emits 0. The existing parser and session ownership are
+otherwise preserved.
+
+Encoded tests cover wrong-typed context/reserved/blob, absent arguments,
+unknown property, reserved nonzero and inconsistent lengths. Failures preserve
+the complete property-get response and pending menu render; valid and currently
+accepted typed foreign-context requests retain their existing path.
+`RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session` passed.
+MyTag operations, requester ownership, cache invalidation and save/reconnect
+lifetime remain blocked; no disk persistence policy was selected.
