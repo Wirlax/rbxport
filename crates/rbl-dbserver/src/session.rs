@@ -1020,9 +1020,9 @@ impl LinkSession {
                     ))),
                 )
             }
-            kind::CUES => {
+            kind::VBR => {
                 let track = Self::number(message, 1);
-                self.analysis(message, track, &Analysis::CueList, kind::CUES_REPLY, None)
+                self.analysis(message, track, &Analysis::Vbr, kind::VBR_REPLY, None)
             }
             kind::WAVEFORM_DETAIL => {
                 let track = Self::number(message, 1);
@@ -1315,7 +1315,7 @@ impl Session for LinkSession {
             | kind::CONTENT_ARTWORK
             | kind::WAVEFORM_PREVIEW
             | kind::BEAT_GRID
-            | kind::CUES
+            | kind::VBR
             | kind::WAVEFORM_DETAIL
             | kind::EXTENDED_CUES
             | kind::ANLZ_TAG

@@ -86,15 +86,11 @@ fn analysis_tags_match_the_capture_including_the_padding() {
 }
 
 #[test]
-fn the_plain_cue_list_matches_the_capture() {
-    // rekordbox's 2504 reply is a fixed 1,604-byte buffer, zero for a track
-    // with no old-format cues. The fixture is the captured blob with the three
-    // uninitialised tail bytes rekordbox leaked (0x640..0x643) cleared, since
-    // they vary between captures and carry no cue data.
-    assert_eq!(
-        blobs::cue_list_blob(),
-        include_bytes!("fixtures/captured-cue-list.bin")
-    );
+fn the_vbr_compatibility_placeholder_keeps_its_existing_bytes() {
+    // The old fixture normalized the final VBR scalar as alleged cue padding.
+    // It is not a vendor oracle. Assert the retained zero-filled compatibility
+    // policy directly, pending track-specific and unavailable-data evidence.
+    assert_eq!(blobs::vbr_compatibility_blob(), vec![0; 1604]);
 }
 
 #[test]

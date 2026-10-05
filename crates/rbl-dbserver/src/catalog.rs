@@ -378,7 +378,8 @@ pub enum Analysis {
         extension: [u8; 3],
     },
     BeatGrid,
-    CueList,
+    /// The 400-word VBR table and trailing scalar requested by `2504`.
+    Vbr,
     ExtendedCueList,
     WaveformPreview,
     WaveformDetail,

@@ -1863,6 +1863,48 @@ fn unsupported_command_keeps_filter_selection_and_enable_state() {
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
 }
 
+#[derive(Default)]
+struct AnalysisBoundaryCatalog {
+    edits: std::sync::atomic::AtomicUsize,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+impl Catalog for AnalysisBoundaryCatalog {
+    fn list(&self, query: &Query) -> Vec<Row> { Small(false).list(query) }
+    fn track_row(&self, id: u32, column: Option<TrackColumn>) -> Option<TrackRow> {
+        Small(false).track_row(id, column)
+    }
+    fn track(&self, id: u32) -> Option<TrackDetails> { Small(false).track(id) }
+    fn artwork(&self, id: u32) -> Option<Vec<u8>> { Small(false).artwork(id) }
+    fn item_artwork(&self, id: u32) -> Option<Vec<u8>> { Small(false).item_artwork(id) }
+    fn analysis(&self, track: u32, what: &Analysis) -> Option<Vec<u8>> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        (track == TRACK && matches!(what, Analysis::Vbr)).then(|| vec![0; 1604])
+    }
+    fn edit(&self, _edit: &Edit) -> bool {
+        self.edits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        false
+    }
+}
+
+#[test]
+fn vbr_compatibility_placeholder_keeps_existing_complete_envelope_and_menu() {
+    for extended in [false, true] {
+        let handler = CatalogHandler::new(Arc::new(AnalysisBoundaryCatalog::default()));
+        let mut s = handler.open();
+        let setup = if extended { vec![5,20] } else { vec![5] };
+        exchange_wire(&mut s, &numbers(kind::SETUP, 0xffff_fffe, &setup).encode());
+        exchange_wire(&mut s, &numbers(kind::ROOT_MENU, 0x8100, &[CTX, 0, 0x5cf_ffff]).encode());
+        let render = numbers(kind::RENDER, 0x8102, &[CTX, 0, 9]);
+        let before = exchange_wire(&mut s, &render.encode());
+        // Synthetic preservation fixture, not a vendor VBR-content oracle.
+        let mut expected = hex("11872349ae11000081351045020f041400000004060606031100002504110000000011000006441400000644");
+        expected.extend_from_slice(&[0; 1604]);
+        assert_eq!(exchange_wire(&mut s, &numbers(kind::VBR, 0x8135, &[CTX, TRACK]).encode()), vec![expected]);
+        assert_eq!(exchange_wire(&mut s, &render.encode()), before);
+    }
+}
+
 #[test]
 fn ready_open_uses_one_assigned_number_snapshot_without_a_fallback() {
     use std::sync::atomic::{AtomicU8, Ordering};

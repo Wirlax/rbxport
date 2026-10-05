@@ -1334,12 +1334,10 @@ impl Catalog for IndexCatalog {
         let library = self.source.library()?;
         let row = Self::row_of(&library, track)?;
         match what {
-            // rekordbox's plain cue-list reply (2504) is a fixed 1,604-byte
-            // buffer, all zero for a track with no old-format cues. A player
-            // reads its real cues from the extended list (2b04); the plain
-            // reply must still arrive with these bytes and a success status,
-            // or a CDJ-3000 hangs mid-load waiting for it (`blobs`).
-            Wanted::CueList => Some(blobs::cue_list_blob()),
+            // [ASSUME] Preserve the existing VBR compatibility placeholder.
+            // Track-specific retrieval and unavailable/client behavior remain
+            // blocked in issue 13; this does not describe the track's cues.
+            Wanted::Vbr => Some(blobs::vbr_compatibility_blob()),
             Wanted::ExtendedCueList => {
                 let cues: Vec<ExtendedCue> =
                     library.cues_of(row).iter().map(ExtendedCue::from).collect();
@@ -1357,7 +1355,7 @@ impl Catalog for IndexCatalog {
                     Wanted::WaveformPreview => analysis.waveform_preview(),
                     Wanted::WaveformDetail => analysis.waveform_detail(),
                     Wanted::Tag { fourcc, extension } => analysis.tag(fourcc, extension),
-                    Wanted::CueList | Wanted::ExtendedCueList => None,
+                    Wanted::Vbr | Wanted::ExtendedCueList => None,
                 }
             }
         }
@@ -2464,10 +2462,8 @@ mod tests {
     fn a_track_without_analysis_has_no_blobs() {
         let c = catalog();
         assert!(c.analysis(10, &Wanted::BeatGrid).is_none());
-        // The plain cue list (2504) is a fixed 1,604-byte buffer rekordbox
-        // sends for every track, zero here because there are no old-format
-        // cues; the extended list (2b04) carries the real ones.
-        assert_eq!(c.analysis(10, &Wanted::CueList).unwrap(), vec![0_u8; 1604]);
+        // Retained compatibility policy, not a claim about the track's VBR.
+        assert_eq!(c.analysis(10, &Wanted::Vbr).unwrap(), vec![0_u8; 1604]);
         assert_eq!(
             c.analysis(10, &Wanted::ExtendedCueList).unwrap(),
             Vec::<u8>::new()

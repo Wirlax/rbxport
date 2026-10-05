@@ -1,7 +1,7 @@
 //! The per-track blobs a player asks a database server for, built from the
 //! analysis files and the cue table in the layouts rekordbox 7.2.11 sends
-//! (measured against a CDJ-3000; `tests/blobs.rs` compares every builder
-//! here with the captured bytes for the same track).
+//! (measured against a CDJ-3000 where captured fixtures are available).
+//! The VBR compatibility placeholder is retained behavior, not a vendor oracle.
 
 use rbl_anlz::{Anlz, Beat, Section};
 use rbl_index::Cue;
@@ -140,20 +140,18 @@ pub fn extended_cues_blob(cues: &[ExtendedCue]) -> (Vec<u8>, u32) {
     )
 }
 
-/// The length of the plain cue-list reply (`4502`): rekordbox always sends
-/// this many bytes.
-const CUE_LIST_LEN: usize = 1604;
+/// [OBS] V6 `GetVbrInf` returns 400 32-bit words and a trailing scalar.
+const VBR_BLOB_LEN: usize = 1604;
 
-/// The plain cue-list reply (`4502`): the pre-nexus2 cue format, which a
-/// CDJ-3000 reads only for its `chunks_exact(0x24)` entries and takes its
-/// real cues from the extended list (`4e02`). rekordbox sends a fixed
-/// 1,604-byte buffer — 44 thirty-six-byte slots and a 20-byte tail — left
-/// zero for a track with no old-format cues, which is every track it was
-/// captured serving; the entries there are all zero, so a player parses no
-/// cues from it. The reply must still carry these bytes with a success
-/// status: an empty "unavailable" reply hangs a CDJ-3000 mid-load.
-pub fn cue_list_blob() -> Vec<u8> {
-    vec![0_u8; CUE_LIST_LEN]
+/// The existing zero-filled `2504` / `4502` compatibility placeholder.
+///
+/// [OBS] This request carries VBR analysis, separately from cue reads.
+/// [ASSUME] Retain the existing bytes until the unavailable-data/client
+/// contract is established. These zeros do not establish that a track is
+/// CBR or lacks VBR data. [UNKNOWN] Track-specific contents, unavailable reply
+/// delivery and load/seek effects remain issue 13's evidence tasks.
+pub fn vbr_compatibility_blob() -> Vec<u8> {
+    vec![0_u8; VBR_BLOB_LEN]
 }
 
 /// One entry: a fixed head to `0x48`, the comment's UTF-16LE byte length,

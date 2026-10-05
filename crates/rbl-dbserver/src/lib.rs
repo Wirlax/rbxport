@@ -478,8 +478,8 @@ pub mod kind {
     /// info below has been answered. Captured from rekordbox 7.2.11
     /// (`verification/link/kuvo-delivery-20260919.txt`).
     pub const DELIVERY_INFO: u16 = 0x2602;
-    /// Cues and loops.
-    pub const CUES: u16 = 0x2504;
+    /// Track-specific variable-bitrate analysis information, not cue records.
+    pub const VBR: u16 = 0x2504;
     /// The waveform detail.
     pub const WAVEFORM_DETAIL: u16 = 0x2904;
     /// Cues and loops with names and colours.
@@ -548,7 +548,7 @@ pub mod kind {
     /// End of a menu.
     pub const MENU_FOOTER: u16 = 0x4201;
     pub const WAVEFORM_PREVIEW_REPLY: u16 = 0x4402;
-    pub const CUES_REPLY: u16 = 0x4502;
+    pub const VBR_REPLY: u16 = 0x4502;
     pub const BEAT_GRID_REPLY: u16 = 0x4602;
     /// The USB and Hot Cue Bank cue-record envelope.
     pub const HOT_CUE_BANK_REPLY: u16 = 0x4702;
@@ -629,7 +629,7 @@ pub mod kind {
             BEAT_GRID => "beat grid".to_owned(),
             SAVE_GRID_OFFSET => "save grid offset".to_owned(),
             GRID_OFFSET => "grid offset".to_owned(),
-            CUES => "cues".to_owned(),
+            VBR => "VBR".to_owned(),
             WAVEFORM_DETAIL => "waveform detail".to_owned(),
             EXTENDED_CUES => "extended cues".to_owned(),
             ANLZ_TAG => "anlz tag (EXT)".to_owned(),
@@ -655,7 +655,7 @@ pub mod kind {
             MENU_ITEM => "menu item".to_owned(),
             MENU_FOOTER => "menu footer".to_owned(),
             WAVEFORM_PREVIEW_REPLY => "waveform preview reply".to_owned(),
-            CUES_REPLY => "cues reply".to_owned(),
+            VBR_REPLY => "VBR reply".to_owned(),
             BEAT_GRID_REPLY => "beat grid reply".to_owned(),
             WAVEFORM_DETAIL_REPLY => "waveform detail reply".to_owned(),
             EXTENDED_CUES_REPLY => "extended cues reply".to_owned(),

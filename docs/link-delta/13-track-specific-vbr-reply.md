@@ -88,3 +88,26 @@ existing compatibility until the missing failure/client evidence is resolved.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-link --test blobs`,
 then `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session`.
+
+## Step 2 — implementation (2026-10-05)
+
+Isolated the established naming correction: `2504`/`4502` are now named
+`VBR`/`VBR_REPLY`, with `Analysis::Vbr` and
+`blobs::vbr_compatibility_blob`. The existing 1604 zero bytes and response
+envelope remain unchanged. Comments identify this as retained compatibility
+policy; they no longer describe legacy cue records or assert an unavailable
+reply hangs a device. Unrelated cue handlers are unchanged.
+
+The old normalized fixture cleared the final VBR scalar as alleged cue
+padding and cannot support a vendor-parity assertion. Its misleading
+comparison was replaced with a direct regression for the existing placeholder
+bytes. A complete encoded session regression checks `4502 [2504,0,1604,blob]`
+and unchanged pending menus in both setup forms. These are preservation tests,
+not a reference VBR oracle.
+
+Validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink -p rbl-link --lib
+--test packets --test blobs` passed (102 tests), as did the focused encoded
+session regression and `cargo clippy -p rbl-prolink -p rbl-link
+-p rbl-dbserver --all-targets -- -D warnings`. Track-specific retrieval, failure reply
+delivery, final-scalar interpretation and device load/seek validation retain
+the Step 1 evidence gates; this bounded correction does not complete issue 13.
