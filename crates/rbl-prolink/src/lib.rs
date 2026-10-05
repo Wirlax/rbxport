@@ -41,6 +41,8 @@ pub enum PacketError {
     BadMagic,
     #[error("unexpected packet kind {0:#04x} for this port")]
     WrongKind(u8),
+    #[error("unexpected packet subtype {0:#04x}")]
+    WrongSubtype(u8),
 }
 
 pub type Result<T> = std::result::Result<T, PacketError>;
@@ -530,7 +532,7 @@ pub const PROBE_SUBTYPE_BLOCK: u8 = 0x02;
 /// reads it: who is asking (IP, MAC), which number, which round.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NumberProbe {
-    /// `PROBE_SUBTYPE_PROBE`, `PROBE_SUBTYPE_ASSIGN` or `PROBE_SUBTYPE_BLOCK`.
+    /// `PROBE_SUBTYPE_PROBE` or `PROBE_SUBTYPE_ASSIGN`.
     pub subtype: u8,
     pub name: String,
     pub ip: Ipv4Addr,
@@ -557,6 +559,9 @@ impl NumberProbe {
             return Err(PacketError::WrongKind(kind));
         }
         let at = |i: usize| packet.get(i).copied().unwrap_or(0);
+        if ![PROBE_SUBTYPE_PROBE, PROBE_SUBTYPE_ASSIGN].contains(&at(0x0b)) {
+            return Err(PacketError::WrongSubtype(at(0x0b)));
+        }
         let mut mac = [0_u8; 6];
         for (slot, byte) in mac.iter_mut().zip(packet.get(0x28..0x2e).unwrap_or(&[])) {
             *slot = *byte;
@@ -574,6 +579,47 @@ impl NumberProbe {
     }
 }
 
+/// Subtype-2 occupancy request. It is not the 50-byte single-number probe.
+/// [OBS] V1/V6 readIdBlkRequset consume masks at 0x30/0x33 and counter 0x43.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberBlock {
+    pub ip: Ipv4Addr,
+    pub mac: [u8; 6],
+    pub wired_mask: u8,
+    pub wireless_mask: u8,
+    pub counter: u8,
+}
+
+impl NumberBlock {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < 68 {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if kind != 2 {
+            return Err(PacketError::WrongKind(kind));
+        }
+        if packet[11] != PROBE_SUBTYPE_BLOCK {
+            return Err(PacketError::WrongSubtype(packet[11]));
+        }
+        Ok(Self {
+            ip: Ipv4Addr::new(packet[36], packet[37], packet[38], packet[39]),
+            mac: [packet[40], packet[41], packet[42], packet[43], packet[44], packet[45]],
+            wired_mask: packet[48],
+            wireless_mask: packet[51],
+            counter: packet[67],
+        })
+    }
+
+    pub fn names(&self, number: u8, mode: ConnectionMode) -> bool {
+        match mode {
+            ConnectionMode::Wired if (17..=18).contains(&number) => self.wired_mask & (1 << (number - 17)) != 0,
+            ConnectionMode::Wireless if (41..=44).contains(&number) => self.wireless_mask & (1 << (number - 41)) != 0,
+            _ => false,
+        }
+    }
+}
+
 /// rekordbox's request to be assigned `number` (`02` subtype `01`, 50
 /// bytes), sent when every number it probes is taken; the same bytes as a
 /// probe but for the subtype.
@@ -588,18 +634,23 @@ pub fn rekordbox_assign_request(mac: [u8; 6], ip: Ipv4Addr, number: u8, counter:
 /// The answer to a probe of a number the answering device holds (`03`
 /// subtype `00`, 39 bytes): the number at `0x24`, `01` at `0x26`. rekordbox
 /// both sends this for its own number and reads it to mark a number in use
-/// (`readIdUseRequest`, `readIdUseResponse`). `[ASSUME]` byte `0x25` is
-/// zero: the decompilation names `0x24` and `0x26` only.
+/// (`readIdUseRequest`, `readIdUseResponse`). Byte `0x25` echoes the request
+/// counter; the convenience constructor below uses zero.
 pub const NUMBER_IN_USE_LEN: usize = 0x27;
 
 /// The status byte (`0x26`) of a `03` reply: `01` in use / accepted.
 pub const NUMBER_REPLY_IN_USE: u8 = 0x01;
 
 pub fn number_in_use_reply(name: &str, number: u8) -> Vec<u8> {
+    number_in_use_reply_with_counter(name, number, 0)
+}
+
+/// [OBS] Both subtype-0 and subtype-2 requests echo their counter in 0x25.
+pub fn number_in_use_reply_with_counter(name: &str, number: u8, counter: u8) -> Vec<u8> {
     let mut out = Vec::with_capacity(NUMBER_IN_USE_LEN);
     write_header(&mut out, 0x03, PROBE_SUBTYPE_PROBE, name);
     out.extend_from_slice(&[0x01, 0x03, 0x00, 0x27]);
-    out.extend_from_slice(&[number, 0x00, NUMBER_REPLY_IN_USE]);
+    out.extend_from_slice(&[number, counter, NUMBER_REPLY_IN_USE]);
     debug_assert_eq!(out.len(), NUMBER_IN_USE_LEN);
     out
 }

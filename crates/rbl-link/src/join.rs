@@ -24,9 +24,9 @@
 use std::time::{Duration, Instant};
 
 use rbl_prolink::{
-    number_in_use_reply, rekordbox_assign_request, rekordbox_claim_stage1, rekordbox_claim_stage2,
-    ConnectionMode, KeepAlive, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
-    PROBE_SUBTYPE_BLOCK, PROBE_SUBTYPE_PROBE, REKORDBOX_CLAIM_NUMBERS, REKORDBOX_NAME,
+    number_in_use_reply_with_counter, rekordbox_assign_request, rekordbox_claim_stage1, rekordbox_claim_stage2,
+    ConnectionMode, KeepAlive, NumberBlock, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
+    PROBE_SUBTYPE_PROBE, REKORDBOX_CLAIM_NUMBERS, REKORDBOX_NAME,
 };
 
 /// The discovery and probe timer, and the spacing of assign requests.
@@ -77,6 +77,8 @@ pub struct Join {
     /// Which of the six numbers a device answered for, by index.
     in_use: [bool; 6],
     next_at: Instant,
+    /// Network access keeps its selected address after runtime clearing.
+    network_ip: Option<std::net::Ipv4Addr>,
     /// V1's runtime +0x1a1 gate, distinct from selected interface mode.
     exclude_original_models: bool,
 }
@@ -90,6 +92,7 @@ impl Join {
             state: State::Waiting,
             in_use: [false; 6],
             next_at: now,
+            network_ip: None,
             exclude_original_models: false,
         }
     }
@@ -104,6 +107,12 @@ impl Join {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+
     /// Our number, once there is one.
     pub const fn number(&self) -> Option<u8> {
         match self.state {
@@ -113,6 +122,15 @@ impl Join {
     }
 
     pub(crate) const fn excludes_original_models(&self) -> bool { self.exclude_original_models }
+
+    /// V5 messageReceived's guard precedes every announcement dispatch.
+    /// Before `NetIF` setup there is no subnet restriction; Unknown does
+    /// not initialize that cache under RBX's existing evidence boundary.
+    pub(crate) fn announcement_sender_allowed(&self, sender: std::net::Ipv4Addr, mask: std::net::Ipv4Addr) -> bool {
+        let own = self.network_ip.unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
+        sender != own && (own.octets()[0] == 0
+            || u32::from(sender) & u32::from(mask) == u32::from(own) & u32::from(mask))
+    }
 
     /// Back to listening, as rekordbox goes on a compatibility response or
     /// a link-down: the number is given up.
@@ -131,6 +149,7 @@ impl Join {
         {
             // V1 linkUpFunc sets the interface, IP and configured candidate
             // before it excludes original minor-0 players on wireless.
+            self.network_ip = Some(self.ip);
             self.exclude_original_models = self.mode == ConnectionMode::Wireless;
         }
         if self.state == State::Waiting && rbl_prolink::brings_link_up_on(keep_alive, self.mode) {
@@ -186,17 +205,29 @@ impl Join {
         if probe.ip == self.ip && probe.mac == self.mac {
             return None; // our own, echoed back
         }
-        // `[ASSUME]` a block request names the numbers the way a probe
-        // does; the decompilation calls it a bitmask and says no more.
-        let names_ours = [PROBE_SUBTYPE_PROBE, PROBE_SUBTYPE_BLOCK].contains(&probe.subtype)
-            && probe.number == number;
+        let names_ours = probe.subtype == PROBE_SUBTYPE_PROBE && probe.number == number;
         if !names_ours {
             return None;
         }
         tracing::debug!(number, prober = %probe.name, ip = %probe.ip, "our number probed; answering in use");
         Some(Outgoing {
-            packet: number_in_use_reply(REKORDBOX_NAME, number),
+            packet: number_in_use_reply_with_counter(REKORDBOX_NAME, number, probe.round),
             to: Some(probe.ip),
+            what: "number in use",
+        })
+    }
+
+    /// The distinct subtype-2 occupancy masks, valid only while running.
+    pub fn hear_block(&mut self, block: &NumberBlock) -> Option<Outgoing> {
+        let State::Running { number } = self.state else {
+            return None;
+        };
+        if (block.ip == self.ip && block.mac == self.mac) || !block.names(number, self.mode) {
+            return None;
+        }
+        Some(Outgoing {
+            packet: number_in_use_reply_with_counter(REKORDBOX_NAME, number, block.counter),
+            to: Some(block.ip),
             what: "number in use",
         })
     }
@@ -297,7 +328,7 @@ impl Join {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use rbl_prolink::DeviceType;
+    use rbl_prolink::{DeviceType, number_in_use_reply};
 
     const MAC: [u8; 6] = [0, 0xe0, 0x4c, 0xcf, 0x63, 0x2e];
     const IP: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 168, 1, 14);
@@ -459,7 +490,7 @@ mod tests {
             NumberProbe::decode(&rekordbox_claim_stage2(other_mac, other_ip, 0x11, 1)).unwrap();
         let answer = join.hear_probe(&probe).unwrap();
         assert_eq!(answer.to, Some(other_ip));
-        assert_eq!(answer.packet, number_in_use_reply("rekordbox", 0x11));
+        assert_eq!(answer.packet, number_in_use_reply_with_counter("rekordbox", 0x11, 1));
         let reply = NumberReply::decode(&answer.packet).unwrap();
         assert_eq!(
             (reply.number, reply.status, reply.subtype),
@@ -474,6 +505,55 @@ mod tests {
 
         join.reset(now);
         assert_eq!(join.state(), &State::Waiting);
+    }
+
+    #[test]
+    fn occupancy_masks_echo_counters_only_in_the_established_mode_and_state() {
+        let now = Instant::now();
+        let other_ip = std::net::Ipv4Addr::new(192, 168, 1, 20);
+        for (mode, choices) in [(ConnectionMode::Wired, vec![17, 18]),
+            (ConnectionMode::Wireless, vec![41, 42, 43, 44])] {
+            for number in choices {
+                for counter in [0, 1, 255] {
+                    let mut join = Join::new(MAC, IP, now).with_mode(mode);
+                    // Explicit state fixture: this is a running reply contract,
+                    // not evidence of wireless candidate selection timing.
+                    join.state = State::Running { number };
+                    let mut request = rekordbox_claim_stage2([1; 6], other_ip, 0, 0);
+                    request.resize(68, 0);
+                    request[11] = rbl_prolink::PROBE_SUBTYPE_BLOCK;
+                    request[34..36].copy_from_slice(&68_u16.to_be_bytes());
+                    request[48] = if mode == ConnectionMode::Wired { 1 << (number - 17) } else { 0 };
+                    request[51] = if mode == ConnectionMode::Wireless { 1 << (number - 41) } else { 0 };
+                    request[67] = counter;
+                    let block = NumberBlock::decode(&request).unwrap();
+                    let before = join.state.clone();
+                    let response = join.hear_block(&block).unwrap();
+                    assert_eq!(response.to, Some(other_ip));
+                    let mut expected = vec![0x51,0x73,0x70,0x74,0x31,0x57,0x6d,0x4a,0x4f,0x4c,3,0,
+                        b'r',b'e',b'k',b'o',b'r',b'd',b'b',b'o',b'x'];
+                    expected.resize(32, 0);
+                    expected.extend_from_slice(&[1,3,0,39,number,counter,1]);
+                    assert_eq!(response.packet, expected);
+                    assert_eq!(join.state(), &before);
+                    let mut absent = block.clone();
+                    absent.wired_mask = 0;
+                    absent.wireless_mask = 0;
+                    assert_eq!(join.hear_block(&absent), None);
+                    join.mode = ConnectionMode::Unknown;
+                    assert_eq!(join.hear_block(&block), None);
+                    join.mode = mode;
+                    let mut echo = block.clone();
+                    echo.ip = IP;
+                    echo.mac = MAC;
+                    assert_eq!(join.hear_block(&echo), None);
+                    for state in [State::Waiting, State::Probing { round: 1, index: 0 }, State::Assigning { sent: 1 }] {
+                        join.state = state;
+                        assert_eq!(join.hear_block(&block), None);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -496,6 +576,25 @@ mod tests {
                     assert_eq!(join.state(), &State::Discovery { sent: 0 });
                 }
             }
+        }
+    }
+
+    #[test]
+    fn single_number_probe_echoes_every_counter_and_does_not_answer_assignment() {
+        let now = Instant::now();
+        let mut join = Join::new(MAC, IP, now).test_state(State::Running { number: 17 });
+        let destination = std::net::Ipv4Addr::new(192, 168, 1, 20);
+        for counter in [0, 1, 255] {
+            let wire = rekordbox_claim_stage2([1; 6], destination, 17, counter);
+            let probe = NumberProbe::decode(&wire).unwrap();
+            let response = join.hear_probe(&probe).unwrap();
+            assert_eq!(response.to, Some(destination));
+            assert_eq!(response.packet, number_in_use_reply_with_counter(REKORDBOX_NAME, 17, counter));
+            assert_eq!(response.packet[37], counter);
+            assert_eq!(join.state(), &State::Running { number: 17 });
+            let mut assign = wire;
+            assign[11] = PROBE_SUBTYPE_ASSIGN;
+            assert_eq!(join.hear_probe(&NumberProbe::decode(&assign).unwrap()), None);
         }
     }
 }

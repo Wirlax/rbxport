@@ -693,6 +693,13 @@ fn hear_announce(
     let SocketAddr::V4(from) = from else {
         return None;
     };
+    // V5 messageReceived rejects own/off-subnet senders using cached NetIF
+    // before dispatch, not just in the rejection handler. Fresh/Unknown
+    // sessions retain their uninitialized cache boundary.
+    if !shared.lock().join.as_ref().map_or(*from.ip() != Ipv4Addr::UNSPECIFIED, |join|
+        join.announcement_sender_allowed(*from.ip(), config.netmask)) {
+        return None;
+    }
     // V1 frameRead checks runtime mode, initially 0xff. Known wireless
     // becomes active only on the first LinkUp attempt; Unknown keeps RBX's
     // conservative existing exclusion without pretending it is vendor 0xff.
@@ -708,6 +715,10 @@ fn hear_announce(
     }
     match kind.map(AnnounceKind::from_u8) {
         Some(AnnounceKind::ClaimStage2) => {
+            if packet.get(11) == Some(&rbl_prolink::PROBE_SUBTYPE_BLOCK) {
+                let block = rbl_prolink::NumberBlock::decode(packet).ok()?;
+                return shared.lock().join.as_mut().and_then(|join| join.hear_block(&block));
+            }
             let probe = NumberProbe::decode(packet).ok()?;
             return shared
                 .lock()

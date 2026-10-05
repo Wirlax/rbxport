@@ -81,3 +81,31 @@ datagrams plus exact destination and unchanged state.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then
 `RB_LITE_TEST=1 cargo test -p rbl-link join::tests`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented distinct `NumberBlock` decoding for `02/02`, explicit
+selected-interface `ConnectionMode`, mode-specific occupancy masks, and echoed
+counter bytes for both block and ordinary `02/00` probes. Assignment remains a
+separate format. Running-state replies retain the payload IPv4 destination;
+unknown mode, unset masks, nonrunning states and local echoes remain silent.
+The old assumed 50-byte block interpretation/counter-zero comments were removed.
+
+Fixture validation: the encoded mask/decoder tests cover both masks, every
+truncated prefix, wrong kind/subtype/magic and counters 0/1/255; controlled
+Join tests compare complete 39-byte replies, destination and unchanged state.
+`RB_LITE_TEST=1 cargo test -p rbl-prolink` and
+`RB_LITE_TEST=1 cargo test -p rbl-link join::tests` passed.
+Mode 23/out-of-range shifts and full wireless candidate timing remain outside
+the implemented contract; wireless reply tests use explicit running-state
+fixtures. No new vendor packet/device trace was performed.
+
+### Review remediation — F2 (2026-10-05)
+
+The shared announcement dispatcher now applies V5 `messageReceived`
+(1354–1367) before decoding probes or blocks: reject the cached NetIF's own
+address and, after nonzero-first-octet initialization, off-subnet senders.
+Fresh/uninitialized and Unknown-mode boundaries are preserved. This does
+not change the 39-byte reply or its payload-IP destination. Regression
+coverage includes own/off-subnet silence and the same-subnet reply path;
+see the remediation validation in [review.md](review.md).

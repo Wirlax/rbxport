@@ -291,6 +291,43 @@ fn the_table_records_and_updates_a_peer() {
 }
 
 #[test]
+fn occupancy_block_has_distinct_masks_counter_and_truncation_boundary() {
+    use rbl_prolink::{ConnectionMode, NumberBlock, NumberProbe, PacketError};
+    let mut wire = rbl_prolink::rekordbox_claim_stage2([1, 2, 3, 4, 5, 6],
+        Ipv4Addr::new(192, 168, 1, 20), 99, 7);
+    wire.resize(68, 0);
+    wire[11] = 2;
+    wire[34..36].copy_from_slice(&68_u16.to_be_bytes());
+    wire[48] = 0b10;
+    wire[51] = 0b0101;
+    wire[67] = 255;
+    let block = NumberBlock::decode(&wire).unwrap();
+    assert_eq!(block.ip, Ipv4Addr::new(192, 168, 1, 20));
+    assert_eq!(block.mac, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(block.counter, 255);
+    assert!(!block.names(17, ConnectionMode::Wired));
+    assert!(block.names(18, ConnectionMode::Wired));
+    assert!(block.names(41, ConnectionMode::Wireless));
+    assert!(!block.names(42, ConnectionMode::Wireless));
+    assert!(block.names(43, ConnectionMode::Wireless));
+    assert!(!block.names(44, ConnectionMode::Wireless));
+    for number in 0..=255 {
+        assert!(!block.names(number, ConnectionMode::Unknown));
+    }
+    assert_eq!(NumberProbe::decode(&wire), Err(PacketError::WrongSubtype(2)));
+    for cut in 0..68 {
+        assert_eq!(NumberBlock::decode(&wire[..cut]), Err(PacketError::TooShort(cut)));
+    }
+    wire[11] = 0;
+    assert_eq!(NumberBlock::decode(&wire), Err(PacketError::WrongSubtype(0)));
+    wire[11] = 2;
+    wire[10] = 6;
+    assert_eq!(NumberBlock::decode(&wire), Err(PacketError::WrongKind(6)));
+    wire[0] = 0;
+    assert_eq!(NumberBlock::decode(&wire), Err(PacketError::BadMagic));
+}
+
+#[test]
 fn a_peer_that_goes_quiet_is_dropped() {
     let mut table = DeviceTable::new();
     table.observe(&sample(), 0);
