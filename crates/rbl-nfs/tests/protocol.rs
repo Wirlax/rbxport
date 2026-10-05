@@ -276,6 +276,42 @@ fn portmap_set_and_unset_are_refused_so_no_host_can_hijack_the_mapping() {
 
 
 #[test]
+fn malformed_specific_unmount_keeps_every_host_and_export() {
+    let mut exports = Exports::new();
+    exports.insert(Vfs::new("/"));
+    exports.insert(Vfs::new("/other"));
+    let server = Server::new(exports, NFS_PORT, MOUNT_PORT);
+    let first = std::net::Ipv4Addr::new(192, 168, 1, 20);
+    let second = std::net::Ipv4Addr::new(192, 168, 1, 21);
+    for from in [first, second] {
+        for path in ["/", "/other"] {
+            let mut args = Writer::new();
+            args.utf16(path);
+            let request = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::MNT, args.into_bytes());
+            let reply = server.handle_from(&request, from, 40000).unwrap();
+            assert_eq!(ok_reader(&reply).u32().unwrap(), nfs_status::OK);
+        }
+    }
+    for args in [vec![], vec![0, 0, 0, 8, b'/', 0, 0, 0], vec![0, 0, 0, 1, b'/', 0, 0, 0]] {
+        let request = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::UMNT, args);
+        let xid = Call::decode(&request).unwrap().xid;
+        assert_eq!(server.handle_from(&request, first, 40000), Some(rpc::accepted_empty(xid, rpc::accept::SUCCESS)));
+        assert!(server.is_mounted(first));
+        assert!(server.is_mounted(second));
+    }
+    let mut args = Writer::new();
+    args.utf16("/");
+    let request = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::UMNT, args.into_bytes());
+    server.handle_from(&request, first, 40000);
+    assert!(server.is_mounted(first), "the same host still holds /other");
+    assert!(server.is_mounted(second));
+    let request = call(PROGRAM_MOUNT, VERSION_MOUNT, mount_proc::UMNTALL, vec![]);
+    server.handle_from(&request, first, 40000);
+    assert!(!server.is_mounted(first));
+    assert!(server.is_mounted(second));
+}
+
+#[test]
 fn duplicate_mounts_are_scoped_to_the_actual_receiving_socket() {
     use std::net::{Ipv4Addr, UdpSocket};
     use std::sync::{Arc, atomic::{AtomicBool, Ordering}};

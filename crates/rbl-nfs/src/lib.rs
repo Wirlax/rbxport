@@ -500,8 +500,17 @@ impl Server {
             // rekordbox takes the caller off the export's host list; with
             // nothing held per mount here, the list is the whole of it.
             mount_proc::UMNT | mount_proc::UMNTALL => {
+                let path = if call.procedure == mount_proc::UMNT {
+                    let Ok(path) = call.reader().utf16() else {
+                        // V7 emits a void success but does not remove hosts
+                        // when decoding a specific UMNT path fails.
+                        return rpc::accepted_empty(call.xid, rpc::accept::SUCCESS);
+                    };
+                    Some(path)
+                } else {
+                    None
+                };
                 let mut mounts = self.mounts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                let path = if call.procedure == mount_proc::UMNT { call.reader().utf16().ok() } else { None };
                 for (export, hosts) in mounts.iter_mut() {
                     if path.as_deref().is_none_or(|p| p == export) && hosts.contains(&from) {
                         hosts.retain(|h| *h != from);

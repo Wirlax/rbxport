@@ -66,3 +66,17 @@ complete XDR replies and storage/map effects; no installed-library writes.
 Smallest check: `RB_LITE_TEST=1 cargo test -p rbl-nfs`.
 The malformed-UMNT distinction is source-backed; automatic Link cleanup
 remains blocked pending its callback evidence.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: malformed specific UMNT now emits the established
+accepted void reply without removing any host. Valid specific UMNT retains
+path-specific removal, while UMNTALL remains host-wide across exports.
+
+A two-host/two-export fixture covers absent, truncated and odd-length UTF-16
+arguments, complete void envelopes, valid path removal, one host's surviving
+second export and another host's independent mounts.
+`RB_LITE_TEST=1 cargo test -p rbl-nfs` passed **57 tests**.
+Automatic Link-disconnect cleanup, last-host VFS handle invalidation and
+outstanding-read shutdown remain blocked; this does not fabricate that
+cross-service lifecycle.
