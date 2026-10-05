@@ -6,9 +6,9 @@ decks, writes USB exports a CDJ can read, and serves the library to players
 over Pro DJ Link ("LINK"). It runs on macOS, Windows and Linux, built with
 Tauri 2, Rust and React.
 
-This README is for working on the code. What the app does for its users is in
-[docs/](docs/): [USB export](docs/usb-export.md), [backups](docs/backups.md),
-[AppleScript](docs/applescript.md), [analysis settings](docs/analysis-settings.md)
+This README covers development. User documentation lives in [docs/](docs/),
+including [USB export](docs/usb-export.md), [backups](docs/backups.md),
+[AppleScript](docs/applescript.md), [analysis settings](docs/analysis-settings.md),
 and [waveform scrubbing](docs/waveform-scrubbing.md).
 
 ## Quick start
@@ -32,16 +32,6 @@ pnpm dev:web      # the interface alone in a browser, against the mock backend
 `src/ipc/backend-mock.ts` stands in for every command, and the Playwright
 suite runs against it too.
 
-Generated Rust artifacts can grow large after repeated desktop builds. Run
-`pnpm clean` to remove regenerable build and test output from this checkout.
-Use `pnpm clean -- --dry-run` to inspect it first. `--dependencies` also removes
-`node_modules`; `--app-data` additionally removes RBXport caches and abandoned
-partial backup work after the app is closed. Completed backups, preferences,
-logs, recovery journals, and rekordbox libraries are not removed. `--git`
-prunes worktree registrations whose directories are already gone and deletes
-local branches merged into `HEAD`; it preserves `main`, `dev`, the current
-branch, and every branch checked out in a worktree.
-
 **Before you run anything that writes, back up your library.** See
 [Working with a real library](#working-with-a-real-library).
 
@@ -55,7 +45,7 @@ branch, and every branch checked out in a worktree.
 | `e2e/` | Playwright tests, run in Chromium and WebKit against the mock backend. |
 | `docs/` | User documentation and notes on formats. |
 | `design/` | Design tokens and reference material. `src/styles/tokens.css` is generated from `design/tokens/theme.json`. |
-| `scripts/` | Version sync, locale build, icon and token generation, bundle-size check, release notes. |
+| `scripts/` | Development utilities for cleanup, deployment, versioning, generated files, bundle checks, and release notes. |
 | `public/locales/` | Generated translations. |
 
 ### The crates
@@ -137,6 +127,23 @@ CI also runs `pnpm tokens` and `pnpm icons` and fails if
 `src/styles/tokens.css` or `src/components/icons.tsx` changes. Regenerate and
 commit them when you change their sources.
 
+## Cleanup
+
+Run `npm run clean` to remove generated build and test output from the current
+checkout. Preview the files first with `npm run clean -- --dry-run`.
+
+Optional flags extend the cleanup:
+
+- `--dependencies` removes `node_modules`.
+- `--app-data` removes app caches and abandoned partial backups. Close rbxport
+  before using it.
+- `--git` prunes missing worktrees and deletes local branches already merged
+  into `HEAD`. It preserves `main`, `dev`, the current branch, and branches
+  checked out in a worktree.
+
+Cleanup never removes completed backups, preferences, logs, recovery journals,
+or rekordbox libraries.
+
 ## Conventions
 
 - **Rust lints are strict.** `unwrap`, `expect` and `panic!` are errors
@@ -164,7 +171,7 @@ commit them when you change their sources.
 
 The app logs to stdout and to a daily file under
 `~/Library/Application Support/rbxport/logs` (macOS) or
-`%APPDATA%\rbxport\logs` (Windows). The last seven days are kept.
+`%APPDATA%\rbxport\logs` (Windows). The newest five daily log files are kept.
 
 | Variable | Effect |
 | --- | --- |
@@ -177,11 +184,11 @@ The app logs to stdout and to a daily file under
 
 ## Releases
 
-The version lives in `Cargo.toml` (`[workspace.package]`), `package.json` and
+The version lives in `Cargo.toml` (`[workspace.package]`), `package.json`, and
 `src-tauri/tauri.conf.json`. `node scripts/sync-version.mjs --version X.Y.Z`
-sets all three, and the workspace crates in `Cargo.lock`. Then add an entry
-to `release-notes.json`. Each change starts with `(New)`,
-`(Improved)` or `(Fixed)`, and the app shows these notes before it updates.
+updates all three and the workspace crates in `Cargo.lock`. Release notes live
+in `release-notes.json`; each change starts with `(New)`, `(Improved)`, or
+`(Fixed)`. The app shows these notes before it updates.
 
 `pnpm dev` runs `sync-version.mjs` without arguments first, which sets the
 version from the newest `v*` tag merged into your checkout. After a bump
@@ -201,14 +208,16 @@ validates the updated SHA in the same run. Translation fallbacks keep the
 catalog complete but should be replaced with native wording when one is
 available.
 
-Run `make deploy` from a clean, pushed `dev` branch to start the release. A
-normal push to `dev` never releases. The workflow validates the exact source,
-creates the next immutable version tag and generated release notes on `dev`,
-then fast-forwards `main`. It builds and signs installers only from that
-promoted `main` commit, publishes and re-fetches the public update feed,
-removes old artifacts, and only then announces the release on Discord. Any
-`RBX-<number>` bug reference is called out as fixed. A failed validation creates
-no version tag or release notes. The pipeline creates no GitHub Release.
+Run `npm run deploy` from a clean, pushed `dev` branch. A normal push to `dev`
+does not release anything. The command verifies the branch and commit before
+dispatching the release workflow.
+
+The workflow validates the source before creating an immutable version tag and
+generated release notes on `dev`. It then fast-forwards `main` and builds the
+signed installers from that promoted commit. After publishing and verifying the
+update feed, it removes old artifacts and notifies Discord. Release notes call
+out referenced `RBX-<number>` bugs as fixed. A failed validation creates no tag
+or release notes. The pipeline does not create a GitHub Release.
 
 `pnpm build` obfuscates the app's own JavaScript and omits source maps.
 `pnpm dev` stays readable. Obfuscation makes the bundle harder to read but

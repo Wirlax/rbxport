@@ -18,7 +18,7 @@ const PROJECT_OUTPUT = [
 const PARTIAL_BACKUP = /^\.partial-[0-9a-f-]+(?:\.zip)?$/i;
 
 function usage() {
-  return `Usage: pnpm clean -- [options]
+  return `Usage: npm run clean -- [options]
 
 Removes generated RBXport files. With no options, only regenerable output in
 this checkout is removed.
