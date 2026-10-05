@@ -76,3 +76,30 @@ ownership, and actual destination of a later load command.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`;
 use fixture libraries if exercising catalog-backed load behavior.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented the bounded matching-payload/sender address correction.
+Peer records now retain and refresh the six-byte MAC. Existing Player records
+update address/type when the keepalive payload IP matches the UDP sender,
+preserving other identities. An old greeting is forgotten only after its last
+player/peer owner has moved. Existing greeting dispatch is unchanged.
+
+State tests cover repeated IP/MAC replacement, both stores and shared-address
+survivors. A real loopback UDP fixture constructs a Beacon with the changed
+member, invokes `load_track`, and verifies the complete `19` command reaches
+the new destination from the existing command socket.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Payload/sender disagreement, same-IP MAC replacement lifecycle and vendor
+greeting follow-up remain the Step 1 evidence tasks; loaded/playback fields
+were not reset on an assumed lifecycle policy.
+
+### Review remediation — F2 (2026-10-05)
+
+The V5 `messageReceived` guard (1354–1367) now precedes membership/address
+updates, not only rejection dispatch. After NetIF initialization, own-address
+and off-subnet keepalives cannot mutate the peer/player address, MAC, greeting
+ownership or command destination. Accepted same-subnet address corrections
+retain the matching-payload/sender boundary above. Regression results are
+recorded in [review.md](review.md); disagreeing addresses and vendor follow-up
+remain unresolved.

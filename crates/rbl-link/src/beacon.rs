@@ -186,6 +186,39 @@ impl Shared {
         }
     }
 
+    fn observe_player(&mut self, keep_alive: &KeepAlive, sender: Ipv4Addr) {
+        self.players.entry(keep_alive.device_number).or_insert_with(|| Player {
+            number: keep_alive.device_number,
+            name: keep_alive.name.clone(),
+            address: sender,
+            kind: keep_alive.device_type,
+            loaded: None,
+            playing: false,
+            master: false,
+            sync: false,
+            cued: false,
+            bpm_x100: 0,
+            last_seen: Instant::now(),
+        });
+        if let Some(player) = self.players.get_mut(&keep_alive.device_number) {
+            player.last_seen = Instant::now();
+            player.name.clone_from(&keep_alive.name);
+            // Only the established matching payload/sender case is changed.
+            // A disagreement still needs vendor evidence before a policy.
+            if keep_alive.ip == sender {
+                let old_address = player.address;
+                player.address = keep_alive.ip;
+                player.kind = keep_alive.device_type;
+                if old_address != keep_alive.ip
+                    && !self.players.values().any(|other| other.address == old_address)
+                    && !self.peers.peers().iter().any(|peer| peer.ip == old_address)
+                {
+                    self.forget_greeting(old_address);
+                }
+            }
+        }
+    }
+
     fn expire_silent_players(&mut self) {
         let mut expired_addresses = Vec::new();
         self.players.retain(|number, player| {
@@ -808,26 +841,7 @@ fn hear_announce(
         }
         // A device is listed from its keep-alive; its status
         // fills in the rest when it comes.
-        shared
-            .players
-            .entry(keep_alive.device_number)
-            .or_insert_with(|| Player {
-                number: keep_alive.device_number,
-                name: keep_alive.name.clone(),
-                address: *from.ip(),
-                kind: keep_alive.device_type,
-                loaded: None,
-                playing: false,
-                master: false,
-                sync: false,
-                cued: false,
-                bpm_x100: 0,
-                last_seen: Instant::now(),
-            });
-        if let Some(player) = shared.players.get_mut(&keep_alive.device_number) {
-            player.last_seen = Instant::now();
-            player.name.clone_from(&keep_alive.name);
-        }
+        shared.observe_player(&keep_alive, *from.ip());
         // A player is greeted when first heard: in the capture the
         // greeting is what the player's portmap query follows,
         // six milliseconds later.
@@ -1479,6 +1493,31 @@ mod all_in_one_tests {
     }
 
     #[test]
+    fn matching_sender_address_change_updates_command_destination_and_peer_mac() {
+        let now = Instant::now();
+        let old = Ipv4Addr::new(169, 254, 20, 2);
+        let new = Ipv4Addr::new(169, 254, 20, 3);
+        let shared = Mutex::new(members(&[1, 2], now));
+        let mut announcement = keep_alive(1, new);
+        announcement.mac = [6, 5, 4, 3, 2, 1];
+        let wire = announcement.encode();
+        for _ in 0..2 {
+            hear_announce(&wire, SocketAddr::from((new, 50000)), &config(), &shared, now);
+            let state = shared.lock();
+            assert_eq!(player_address(&state.players, 1), Some(new));
+            assert_eq!(player_address(&state.players, 2), Some(old));
+            let peer = state.peers.peers().iter().find(|p| p.device_number == 1).unwrap();
+            assert_eq!(peer.ip, new);
+            assert_eq!(peer.mac, announcement.mac);
+            assert!(state.greeted.contains(&old));
+        }
+        // The old greeting is forgotten only when its final member moves.
+        announcement.device_number = 2;
+        hear_announce(&announcement.encode(), SocketAddr::from((new, 50000)), &config(), &shared, now);
+        assert!(!shared.lock().greeted.contains(&old));
+    }
+
+    #[test]
     fn xdj_az_usb_two_slot_survives_status_parsing() {
         let mut packet = vec![0_u8; 0xcd];
         packet[..rbl_prolink::MAGIC.len()].copy_from_slice(&rbl_prolink::MAGIC);
@@ -1514,5 +1553,33 @@ mod all_in_one_tests {
         let shared = Mutex::new(state_fixture);
         hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
         assert_eq!(shared.lock().players.len(), 1);
+    }
+
+    #[test]
+    fn changed_address_is_used_by_the_actual_load_command_socket() {
+        let now = Instant::now();
+        let shared = Arc::new(Mutex::new(members(&[1], now)));
+        let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        receiver.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let commands = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let command_source = commands.local_addr().unwrap();
+        let beacon = Beacon {
+            stop: Arc::new(AtomicBool::new(false)),
+            threads: Vec::new(),
+            shared: Arc::clone(&shared),
+            announce_port: 0,
+            status_port: command_source.port(),
+            commands,
+            player_port: receiver.local_addr().unwrap().port(),
+            number: Arc::new(AtomicU8::new(17)),
+        };
+        let changed = keep_alive(1, Ipv4Addr::LOCALHOST).encode();
+        assert!(hear_announce(&changed, SocketAddr::from((Ipv4Addr::LOCALHOST, 50000)),
+            &config(), &shared, now).is_none());
+        beacon.load_track(1, 0x1234).unwrap();
+        let mut bytes = [0; 256];
+        let (length, source) = receiver.recv_from(&mut bytes).unwrap();
+        assert_eq!(source, command_source);
+        assert_eq!(bytes[..length], rbl_prolink::load_track_command(REKORDBOX_NAME, 17, 1, 0x1234));
     }
 }

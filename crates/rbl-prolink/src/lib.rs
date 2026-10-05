@@ -1070,6 +1070,8 @@ pub struct Peer {
     pub device_number: u8,
     pub device_type: DeviceType,
     pub ip: Ipv4Addr,
+    /// Hardware identity advertised by the keep-alive.
+    pub mac: [u8; 6],
     /// Milliseconds since this device was last heard from.
     pub last_seen_ms: u64,
 }
@@ -1107,6 +1109,7 @@ impl DeviceTable {
             existing.name.push_str(&keep_alive.name);
             existing.device_type = keep_alive.device_type;
             existing.ip = keep_alive.ip;
+            existing.mac = keep_alive.mac;
             existing.last_seen_ms = now_ms;
             return;
         }
@@ -1115,6 +1118,7 @@ impl DeviceTable {
             device_number: keep_alive.device_number,
             device_type: keep_alive.device_type,
             ip: keep_alive.ip,
+            mac: keep_alive.mac,
             last_seen_ms: now_ms,
         });
     }
