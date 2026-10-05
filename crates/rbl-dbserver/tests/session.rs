@@ -1933,6 +1933,72 @@ fn filter_set_failure_is_32_and_keeps_existing_conditions_and_menu() {
         vec![hex("11872349ae11000081311040000f021400000002060611000032071100000000")]);
 }
 
+#[test]
+fn scalar_and_silent_notices_preserve_menus_for_both_setup_modes() {
+    for extended in [false, true] {
+        let handler = CatalogHandler::new(Arc::new(Small(false)));
+        let mut s = handler.open();
+        let setup = if extended { vec![5,20] } else { vec![5] };
+        exchange_wire(&mut s, &numbers(kind::SETUP, 0xffff_fffe, &setup).encode());
+        browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
+        let render = numbers(kind::RENDER, 0x8100, &[CTX, 0, 9]);
+        let before = exchange_wire(&mut s, &render.encode());
+        for command in [0x3402, 0x3903] {
+            assert_eq!(exchange_wire(&mut s, &numbers(command, 0x8132, &[CTX]).encode()),
+                vec![hex(&format!("11872349ae11000081321040000f0214000000020606110000{command:04x}1100000000"))]);
+            assert_eq!(exchange_wire(&mut s, &render.encode()), before);
+        }
+        for command in [0x3203, 0x3503, kind::DELETE_HISTORY_TRACK] {
+            // Foreign history context is intentionally silent and must not
+            // turn into a generic error or affect a pending menu.
+            assert!(exchange_wire(&mut s, &numbers(command, 0x8132, &[0x0101_0302, TRACK]).encode()).is_empty());
+            assert_eq!(exchange_wire(&mut s, &render.encode()), before);
+        }
+    }
+}
+
+#[test]
+fn my_setting_flag_scalar_masks_the_low_byte_and_preserves_both_menus() {
+    const SECOND: u32 = 0x0102_0301;
+    for extended in [false, true] {
+        let handler = CatalogHandler::new(Arc::new(Small(false)));
+        let mut s = handler.open();
+        let setup = if extended { vec![5,20] } else { vec![5] };
+        exchange_wire(&mut s, &numbers(kind::SETUP, 0xffff_fffe, &setup).encode());
+        exchange_wire(&mut s, &numbers(kind::ROOT_MENU, 0x8100, &[CTX, 0, 0x5cf_ffff]).encode());
+        exchange_wire(&mut s, &numbers(kind::TRACK_MENU, 0x8101, &[SECOND, 0]).encode());
+        let renders = [numbers(kind::RENDER, 0x8102, &[CTX, 0, 9]),
+            numbers(kind::RENDER, 0x8103, &[SECOND, 0, 1])];
+        let before: Vec<_> = renders.iter().map(|request| exchange_wire(&mut s, &request.encode())).collect();
+        assert_eq!(before[0].len(), 11);
+        assert_eq!(before[1].len(), 3);
+        // V4's case has no context condition. A typed foreign context remains
+        // a scalar query, unlike the intentional foreign-history silence.
+        for context in [CTX, SECOND, 0x0208_0302] {
+            for (value, scalar) in [(0, 1), (1, 1), (2, 0), (255, 0),
+                (256, 1), (257, 1), (0x10000, 1)] {
+                let request = numbers(0x3c03, 0x8133, &[context, value]);
+                assert_eq!(exchange_wire(&mut s, &request.encode()),
+                    vec![hex(&format!("11872349ae11000081331040000f02140000000206061100003c03110000000{scalar}"))]);
+                for (render, expected) in renders.iter().zip(&before) {
+                    assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+                }
+            }
+        }
+        for arguments in [vec![], vec![Argument::Number(CTX)],
+            vec![Argument::String("context".into()), Argument::Number(0)],
+            vec![Argument::Number(CTX), Argument::String("value".into())],
+            vec![Argument::Number(CTX), Argument::Blob(vec![0])]] {
+            let request = Message::new(0x8133, 0x3c03, arguments);
+            assert_eq!(exchange_wire(&mut s, &request.encode()),
+                vec![hex("11872349ae11000081331040030f011400000001061100003c03")]);
+            for (render, expected) in renders.iter().zip(&before) {
+                assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct AnalysisBoundaryCatalog {
     edits: std::sync::atomic::AtomicUsize,

@@ -1110,7 +1110,22 @@ impl Session for LinkSession {
             // Neither request expects a reply. In particular, RX3's
             // `dbcl_SetOnAir` must not replace an unrelated pending menu with
             // a spurious generic `0x4000` response.
-            kind::TEARDOWN | kind::SET_ON_AIR => Vec::new(),
+            kind::TEARDOWN | kind::SET_ON_AIR | 0x3203 | 0x3503 => Vec::new(),
+            // V4 OnPrepareCmd / OnOtherCmd: scalar responses, no menu/cache
+            // replacement. Internal notices above do not imply wire replies.
+            0x3402 | 0x3903 => vec![menu_header(tx, u32::from(message.kind), 0)],
+            0x3c03 => {
+                // V4 OnOtherCmd case 0xc masks only bits 1..7 of argument 1;
+                // it is not a full-number <= 1 check or a settings write.
+                match (message.arguments.first(), message.arguments.get(1)) {
+                    (Some(Argument::Number(_)), Some(Argument::Number(value))) => {
+                        vec![menu_header(tx, u32::from(message.kind), u32::from(value & 0xfe == 0))]
+                    }
+                    // Malformed decoded shapes are deliberately refused; the
+                    // vendor malformed-request policy is not established.
+                    _ => vec![Message::new(tx, kind::ERROR, vec![Argument::Number(u32::from(message.kind))])],
+                }
+            }
             // RX3 `dbcl_GetBrowseType` falls back to this request when the
             // device-property response has no browse kind. `1` is the
             // database-backed/export-media kind the firmware uses for its
@@ -1281,11 +1296,9 @@ impl Session for LinkSession {
                         }
                         Vec::new()
                     }
-                    // A player waits for this one, so it is answered either
-                    // way, where rekordbox would leave a stranger unanswered.
                     _ => {
-                        let success = rekordbox_track
-                            && self.catalog.edit(&Edit::HistoryRemove { track: target });
+                        if !rekordbox_track { return Vec::new(); }
+                        let success = self.catalog.edit(&Edit::HistoryRemove { track: target });
                         vec![menu_header(
                             tx,
                             u32::from(message.kind),
