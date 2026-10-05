@@ -174,18 +174,16 @@ impl Shared {
         self.to_greet.retain(|pending| *pending != address);
     }
 
-    fn remove_players_at(&mut self, address: Ipv4Addr) {
-        let leaving: Vec<u8> = self
-            .players
-            .iter()
-            .filter(|(_, player)| player.address == address)
-            .map(|(number, _)| *number)
-            .collect();
-        for number in leaving {
-            tracing::info!(number, %address, "device said goodbye; gone from the link");
-            self.players.remove(&number);
+    fn remove_member(&mut self, number: u8) {
+        let peer = self.peers.remove_number(number);
+        let player = self.players.remove(&number);
+        for address in peer.map(|peer| peer.ip).into_iter().chain(player.map(|player| player.address)) {
+            if !self.players.values().any(|player| player.address == address)
+                && !self.peers.peers().iter().any(|peer| peer.ip == address)
+            {
+                self.forget_greeting(address);
+            }
         }
-        self.forget_greeting(address);
     }
 
     fn expire_silent_players(&mut self) {
@@ -749,9 +747,22 @@ fn hear_announce(
             return None;
         }
         // A disconnect names the device leaving.
-        Some(AnnounceKind::Other(0x07 | 0x08)) => {
+        Some(AnnounceKind::Other(0x07) | AnnounceKind::Conflict) => {
+            let number = *packet.get(0x24)?;
+            if !(1..=80).contains(&number) {
+                return None;
+            }
             let mut shared = shared.lock();
-            shared.remove_players_at(*from.ip());
+            if !matches!(shared.join.as_ref().map(Join::state), Some(
+                join::State::Discovery { .. } | join::State::Probing { .. }
+                | join::State::Assigning { .. } | join::State::Running { .. }
+            )) || !shared.peers.peers().iter().any(|peer| peer.device_number == number) {
+                return None;
+            }
+            shared.remove_member(number);
+            if number == 9 || number == 11 {
+                shared.remove_member(number + 1);
+            }
             return None;
         }
         Some(AnnounceKind::KeepAlive) => {}
@@ -1353,7 +1364,7 @@ mod all_in_one_tests {
     }
 
     #[test]
-    fn goodbye_forgets_every_identity_and_the_greeting_at_an_address() {
+    fn goodbye_preserves_the_other_logical_identity_and_shared_greeting() {
         let address = Ipv4Addr::new(169, 254, 20, 2);
         let mut shared = Shared {
             greeted: vec![address],
@@ -1365,11 +1376,106 @@ mod all_in_one_tests {
             ..Shared::default()
         };
 
-        shared.remove_players_at(address);
+        shared.remove_member(1);
+
+        assert_eq!(shared.players.len(), 1);
+        assert!(shared.players.contains_key(&2));
+        assert!(shared.greeted.contains(&address));
+        assert!(shared.to_greet.contains(&address));
+        shared.remove_member(2);
 
         assert!(shared.players.is_empty());
         assert!(!shared.greeted.contains(&address));
         assert!(!shared.to_greet.contains(&address));
+    }
+
+    fn config() -> BeaconConfig {
+        BeaconConfig {
+            interface: None,
+            address: Ipv4Addr::LOCALHOST,
+            netmask: Ipv4Addr::new(255, 0, 0, 0),
+            broadcast: Ipv4Addr::LOCALHOST,
+            mac: [0; 6],
+            mode: rbl_prolink::ConnectionMode::Wired,
+            announce_port: 50000,
+            status_port: 50002,
+            player_port: 50002,
+            beat_port: 50001,
+            computer_name: "fixture".into(),
+        }
+    }
+
+    fn keep_alive(number: u8, ip: Ipv4Addr) -> KeepAlive {
+        let mut packet = KeepAlive::rekordbox_as(number, [1, 2, 3, 4, 5, 6], ip, 0);
+        packet.name = "CDJ-3000".into();
+        packet.device_type = DeviceType::Cdj;
+        packet
+    }
+
+    fn members(numbers: &[u8], now: Instant) -> Shared {
+        let address = Ipv4Addr::new(169, 254, 20, 2);
+        let mut shared = Shared {
+            greeted: vec![address],
+            to_greet: vec![address],
+            join: Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now)),
+            ..Shared::default()
+        };
+        for &number in numbers {
+            let packet = keep_alive(number, address);
+            shared.peers.observe(&packet, 0);
+            shared.players.insert(number, player(number, address, DeviceType::Cdj));
+            shared.join.as_mut().unwrap().hear_keep_alive(&packet, now);
+        }
+        shared
+    }
+
+    #[test]
+    fn numbered_disconnect_covers_both_kinds_pairs_sender_and_state_guards() {
+        let now = Instant::now();
+        for kind in [7, 8] {
+            for (leaving, remaining) in [(1, vec![2, 9, 10, 11, 12]), (9, vec![1, 2, 11, 12]),
+                (10, vec![1, 2, 9, 11, 12]), (11, vec![1, 2, 9, 10]), (12, vec![1, 2, 9, 10, 11])] {
+                let shared = Mutex::new(members(&[1, 2, 9, 10, 11, 12], now));
+                // Complete synthetic 41-byte vendor-shaped disconnect. Its
+                // sender is intentionally unrelated to the numbered member.
+                let mut wire = keep_alive(leaving, Ipv4Addr::new(169, 254, 20, 2)).encode();
+                wire[10] = kind;
+                wire[34..36].copy_from_slice(&41_u16.to_be_bytes());
+                wire.truncate(41);
+                let sender = SocketAddr::from((Ipv4Addr::new(10, 1, 2, 3), 50000));
+                for cut in 0..37 {
+                    assert!(hear_announce(&wire[..cut], sender, &config(), &shared, now).is_none());
+                    assert_eq!(shared.lock().peers.len(), 6);
+                }
+                assert!(hear_announce(&wire, sender, &config(), &shared, now).is_none());
+                let state = shared.lock();
+                let mut actual: Vec<_> = state.players.keys().copied().collect();
+                actual.sort_unstable();
+                assert_eq!(actual, remaining);
+                assert_eq!(state.peers.peers().iter().map(|p| p.device_number).collect::<Vec<_>>(), remaining);
+                assert!(state.greeted.contains(&Ipv4Addr::new(169, 254, 20, 2)));
+            }
+        }
+        let shared = Mutex::new(members(&[9, 10], now));
+        let sender = SocketAddr::from((Ipv4Addr::new(10, 1, 2, 3), 50000));
+        let mut wire = keep_alive(9, Ipv4Addr::new(169, 254, 20, 2)).encode();
+        wire[10] = 7;
+        for number in [0, 81, 255, 1] {
+            wire[36] = number;
+            hear_announce(&wire, sender, &config(), &shared, now);
+            assert_eq!(shared.lock().peers.len(), 2);
+        }
+        wire[36] = 9;
+        shared.lock().join.as_mut().unwrap().reset(now);
+        hear_announce(&wire, sender, &config(), &shared, now);
+        assert_eq!(shared.lock().peers.len(), 2);
+        shared.lock().join.as_mut().unwrap().hear_keep_alive(&keep_alive(9, Ipv4Addr::new(169, 254, 20, 2)), now);
+        hear_announce(&wire, sender, &config(), &shared, now);
+        let state = shared.lock();
+        assert!(state.players.is_empty());
+        assert!(state.peers.is_empty());
+        assert_eq!(state.greeted, Vec::<Ipv4Addr>::new());
+        assert_eq!(state.to_greet, Vec::<Ipv4Addr>::new());
     }
 
     #[test]
@@ -1380,5 +1486,33 @@ mod all_in_one_tests {
 
         let status = status_from_packet(&packet).unwrap().unwrap();
         assert_eq!(status.track_slot, MediaSlot::Unknown07);
+    }
+
+    #[test]
+    fn numbered_disconnect_state_guards_cover_the_whole_join_machine() {
+        let now = Instant::now();
+        let ip = Ipv4Addr::new(169, 254, 20, 2);
+        let mut wire = keep_alive(1, ip).encode();
+        wire[10] = 7;
+        for (state, accepted) in [
+            (join::State::Waiting, false),
+            (join::State::Discovery { sent: 0 }, true),
+            (join::State::Probing { round: 1, index: 0 }, true),
+            (join::State::Assigning { sent: 1 }, true),
+            (join::State::Running { number: 17 }, true),
+            (join::State::Failed("fixture".into()), false),
+        ] {
+            let mut state_fixture = members(&[1, 2], now);
+            state_fixture.join = Some(Join::new([0; 6], Ipv4Addr::LOCALHOST, now).test_state(state));
+            let shared = Mutex::new(state_fixture);
+            assert!(hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+            assert_eq!(shared.lock().players.contains_key(&1), !accepted);
+            assert_eq!(shared.lock().players.len(), if accepted { 1 } else { 2 });
+        }
+        let mut state_fixture = members(&[1], now);
+        state_fixture.join = None;
+        let shared = Mutex::new(state_fixture);
+        hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+        assert_eq!(shared.lock().players.len(), 1);
     }
 }

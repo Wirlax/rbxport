@@ -78,3 +78,34 @@ truncation; surviving and last-member greeting cleanup.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`
 and `RB_LITE_TEST=1 cargo test -p rbl-prolink`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented payload-number removal in both the player and peer stores,
+including only the 9→10 and 11→12 pairs. The dispatcher now reaches both
+`07` and `08` (the latter is decoded as `AnnounceKind::Conflict`, rather
+than `Other(08)`). Invalid/inactive IDs and idle/failed/absent Join state are
+inert; accepted disconnects emit no wire reply and preserve acquisition state.
+Greeting ownership is retained until the address's final logical member leaves.
+
+Synthetic complete datagram/state tests cover both kinds, every prefix before
+the consumed number, foreign sender, same-IP survivors, both pairs and reverse
+(nonpaired) removals, inactive/invalid IDs, all discovery/probing/assigning/
+running guards, idle/failed/absent state and final greeting cleanup.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Vendor receiver-length policy and player-visible behavior remain unverified;
+no OPUS-wide deletion was added.
+
+### Review remediation — F2/F3 (2026-10-05)
+
+Numbered disconnect now passes the shared V5 `messageReceived` sender guard
+(1354–1367). With initialized NetIF, own/off-subnet `07` and `08` cannot
+remove members. An unrelated same-subnet sender may still remove the member
+named by the payload; no sender-owns-number requirement was invented.
+
+V2 `readDisconnect` (589–608) removes membership without stopping the slot's
+timer. `remove_number` now retains that pending deadline, including paired
+removal. Synthetic recreation before expiry inherits the old deadline; a
+direct keepalive refreshes it. An inactive slot's expired timer is consumed,
+not saved for a later recreation. Whole-session clearing remains distinct.
+See [review.md](review.md) for the focused timer and receive-context tests.

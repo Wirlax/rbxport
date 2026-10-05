@@ -1081,6 +1081,10 @@ pub struct Peer {
 #[derive(Debug, Default)]
 pub struct DeviceTable {
     peers: Vec<Peer>,
+    /// Pending per-slot ageing clocks, armed only by received keep-alives.
+    /// Explicit membership removal does not stop these timers (V1/V2);
+    /// synthesis neither arms nor refreshes them, even after recreation.
+    received_at: std::collections::HashMap<u8, u64>,
 }
 
 /// How long a peer may be silent before it is considered gone.
@@ -1093,6 +1097,7 @@ impl DeviceTable {
 
     /// Records a keep-alive at a given time.
     pub fn observe(&mut self, keep_alive: &KeepAlive, now_ms: u64) {
+        self.received_at.insert(keep_alive.device_number, now_ms);
         if let Some(existing) = self
             .peers
             .iter_mut()
@@ -1116,14 +1121,40 @@ impl DeviceTable {
 
     /// Drops peers that have gone quiet, returning how many were removed.
     pub fn expire(&mut self, now_ms: u64) -> usize {
-        let before = self.peers.len();
-        self.peers
-            .retain(|p| now_ms.saturating_sub(p.last_seen_ms) <= PEER_TIMEOUT_MS);
-        before - self.peers.len()
+        self.expire_received(now_ms).len()
+    }
+
+    /// Removes active members whose received per-slot keep-alive clock expired.
+    /// Returns their numbers so Link can apply its evidenced paired removal.
+    pub fn expire_received(&mut self, now_ms: u64) -> Vec<u8> {
+        // V3 timerFuncAging stops the indexed timer before checking whether
+        // its current slot is active. Consume inactive deadlines too, or a
+        // later virtual recreation would inherit an already-fired timer.
+        let mut expired_slots = Vec::new();
+        self.received_at.retain(|number, seen| {
+            if now_ms.saturating_sub(*seen) > PEER_TIMEOUT_MS {
+                expired_slots.push(*number);
+                false
+            } else { true }
+        });
+        let expired: Vec<_> = self.peers.iter()
+            .filter(|peer| expired_slots.contains(&peer.device_number))
+            .map(|peer| peer.device_number).collect();
+        for number in &expired {
+            self.remove_number(*number);
+        }
+        expired
     }
 
     pub fn peers(&self) -> &[Peer] {
         &self.peers
+    }
+
+    /// Removes exactly one logical member, independently of shared IPs.
+    /// Its pending slot timer remains armed until expiry or session clearing.
+    pub fn remove_number(&mut self, number: u8) -> Option<Peer> {
+        let index = self.peers.iter().position(|peer| peer.device_number == number)?;
+        Some(self.peers.remove(index))
     }
 
     pub fn len(&self) -> usize {
