@@ -77,3 +77,30 @@ member counts, pairs, and shared-IP greeting survivors.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then
 `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: peer ageing now runs on each periodic announcement
+loop iteration before computing the next keepalive's member count. It no
+longer requires incoming traffic. The existing six-second keepalive-only
+peer clock remains distinct from Player status/activity expiry.
+
+A controlled-clock test advances time without network input, checks the
+inclusive timeout boundary, one refreshed/one expired peer, unchanged Player
+activity, and the subsequent encoded keepalive member count.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Full issue completion remains blocked: the vendor 10/180-second thresholds,
+all refresh sources and synthesized-pair ageing still require the Step 1
+evidence/dependencies. This change preserves current timeout policy.
+
+### Review remediation — F3 (2026-10-05)
+
+Pending received-keepalive timers now survive explicit membership removal.
+As in V3 `timerFuncAging` (3610–3637), expiry consumes the indexed timer even
+when its slot is inactive; it only reports an active member as removed.
+Synthetic recreation before expiry inherits the armed deadline without
+refreshing it. Direct reception refreshes it; full session teardown clears
+the table and all deadlines. Tests distinguish these cases from recreation
+after a timer has already fired. See [review.md](review.md) for validation.
+The independent Player activity clock, six-second timeout and remaining
+vendor threshold/refresh-source gaps above are unchanged.

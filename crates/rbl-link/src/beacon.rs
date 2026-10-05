@@ -186,6 +186,13 @@ impl Shared {
         }
     }
 
+    fn expire_peers(&mut self, now_ms: u64) {
+        let expired = self.peers.expire_received(now_ms);
+        if !expired.is_empty() {
+            tracing::debug!(expired = expired.len(), "peers timed out of the keep-alive table");
+        }
+    }
+
     fn observe_player(&mut self, keep_alive: &KeepAlive, sender: Ipv4Addr) {
         self.players.entry(keep_alive.device_number).or_insert_with(|| Player {
             number: keep_alive.device_number,
@@ -623,6 +630,9 @@ fn announce_loop(
         // The join's packets when due, and the number the moment it settles.
         let outgoing = {
             let mut shared = shared.lock();
+            // Membership ageing must run even when no new packet arrives.
+            // Keep the current timeout separate from status/player activity.
+            shared.expire_peers(now_ms(started));
             let outgoing = shared.join.as_mut().and_then(|join| join.tick(now));
             let settled = shared.join.as_ref().and_then(Join::number).unwrap_or(0);
             if settled != number.load(Ordering::Relaxed) {
@@ -850,10 +860,6 @@ fn hear_announce(
             .iter()
             .any(|p| p.device_number == keep_alive.device_number);
         shared.peers.observe(&keep_alive, now);
-        let expired = shared.peers.expire(now);
-        if expired > 0 {
-            tracing::debug!(expired, "peers timed out of the keep-alive table");
-        }
         if !known {
             tracing::info!(
                 number = keep_alive.device_number,
@@ -1540,6 +1546,25 @@ mod all_in_one_tests {
         announcement.device_number = 2;
         hear_announce(&announcement.encode(), SocketAddr::from((new, 50000)), &config(), &shared, now);
         assert!(!shared.lock().greeted.contains(&old));
+    }
+
+    #[test]
+    fn periodic_peer_expiry_needs_no_input_and_keeps_player_activity_separate() {
+        let now = Instant::now();
+        let mut shared = members(&[1, 2], now);
+        let ip = Ipv4Addr::new(169, 254, 20, 2);
+        shared.peers.observe(&keep_alive(2, ip), 1000);
+        shared.expire_peers(rbl_prolink::PEER_TIMEOUT_MS);
+        assert_eq!(shared.peers.len(), 2);
+        shared.expire_peers(rbl_prolink::PEER_TIMEOUT_MS + 1);
+        assert_eq!(shared.peers.peers()[0].device_number, 2);
+        // Status/player timestamps do not extend the independent peer clock.
+        shared.players.get_mut(&2).unwrap().last_seen = Instant::now();
+        shared.expire_peers(rbl_prolink::PEER_TIMEOUT_MS + 1001);
+        assert!(shared.peers.is_empty());
+        assert_eq!(shared.players.len(), 2);
+        assert_eq!(KeepAlive::decode(&KeepAlive::rekordbox_as(17, [0; 6], Ipv4Addr::LOCALHOST,
+            u8::try_from(shared.peers.len()).unwrap()).encode()).unwrap().peers, 0);
     }
 
     #[test]
