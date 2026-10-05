@@ -119,7 +119,7 @@ RBXPORT_TEST=1 cargo test --workspace
 pnpm lint
 pnpm build        # typecheck and production bundle
 pnpm test         # Vitest unit tests
-pnpm budget       # bundle size against perf-budgets.json
+pnpm budget       # budget schema and production bundle size
 pnpm e2e          # Playwright; first run: pnpm exec playwright install chromium webkit
 ```
 
@@ -152,9 +152,12 @@ or rekordbox libraries.
 - **Frontend lint rules encode the architecture.** `eslint.config.js` forbids
   calling `invoke` outside `src/ipc`, polling, deep-cloning rows, and sorting
   or filtering row arrays in a view. Row ordering belongs to `rbl-index`.
-- **Performance budgets are enforced.** `perf-budgets.json` sets bundle size,
-  startup, scroll frame time, IPC response size and more. The bundle check and
-  the e2e suite fail when a budget is exceeded.
+- **Performance budgets name their enforcement.** `perf-budgets.json` records
+  the measured baseline, CI gates, local timing gates, and targets that still
+  require manual hardware measurement. `pnpm budget`, Rust tests, and the e2e
+  suite consume the same limits. Run `npm run perf:gate` for isolated frame
+  timing, and `npm run perf:measure` against a production preview when
+  rebaselining browser timings.
 - **Formats come from evidence.** Code that mirrors rekordbox or a CDJ says
   where each fact came from: `[OBS]` for something observed in a capture or a
   real library, `[ASSUME]` for an inference, `[UNKNOWN]` for what nobody has

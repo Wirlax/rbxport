@@ -476,13 +476,9 @@ jobs:
             exit 1
           ' _ target/debug/rbxport "$log"
 
-  # On the Mac, not the Linux host, because of one test. `e2e/frames.spec.ts`
-  # asserts that two playing decks cost under 3 ms more per frame than an idle
-  # window, and WebKit on the Linux VM is software-rendered: it measures 10-13 ms
-  # there, three times out of three, single-worker or not, while Chromium on the
-  # same box passes. Measured, not assumed — and the budget is not the thing to
-  # move, because macOS is where the shipped app runs on WKWebView, so this is
-  # also the WebKit the number is supposed to be about.
+  # Run WebKit on macOS, where it represents the WKWebView the app ships.
+  # Environment-sensitive frame-cost gates are deliberately excluded from this
+  # parallel suite and run through the single-worker `npm run perf:gate` command.
   frontend:
     name: UI tests
     needs: [prepare, release-source]

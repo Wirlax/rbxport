@@ -13,6 +13,8 @@
     "build:mock": "cross-env RBL_MOCK=1 vite build --outDir design/sketch/dist --emptyOutDir",
     "clean": "node scripts/cleanup.mjs",
     "deploy": "node scripts/deploy.mjs",
+    "perf:gate": "cross-env RBXPORT_PERF=1 playwright test e2e/frames.spec.ts --workers=1",
+    "perf:measure": "pnpm build && node scripts/measure-performance.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint src e2e --max-warnings 0",
@@ -21,7 +23,7 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "tokens": "tsx scripts/build-tokens.ts",
-    "budget": "tsx scripts/check-bundle-size.ts",
+    "budget": "node scripts/check-perf-budgets.mjs && tsx scripts/check-bundle-size.ts",
     "icons": "tsx scripts/build-ui-icons.ts",
     "locales": "node scripts/build-locales.mjs"
   },

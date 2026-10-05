@@ -6,8 +6,9 @@ import { fileURLToPath, URL } from "node:url";
 
 const root = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 const budgets = JSON.parse(readFileSync(root("perf-budgets.json"), "utf8")) as {
-  bundle: { initialChunkKbGz: number; totalKbGz: number };
+  gates: { bundle: { initialChunkKbGz: number; totalKbGz: number } };
 };
+const limits = budgets.gates.bundle;
 
 const dir = root("dist/assets");
 let total = 0, initial = 0;
@@ -19,9 +20,9 @@ for (const f of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
   rows.push(`  ${f}  ${gz.toFixed(1)} KB gz  (raw ${(statSync(join(dir, f)).size / 1024).toFixed(1)} KB)`);
 }
 console.log(rows.sort().join("\n"));
-console.log(`initial ${initial.toFixed(1)} / ${budgets.bundle.initialChunkKbGz} KB gz · total ${total.toFixed(1)} / ${budgets.bundle.totalKbGz} KB gz`);
+console.log(`initial ${initial.toFixed(1)} / ${limits.initialChunkKbGz} KB gz · total ${total.toFixed(1)} / ${limits.totalKbGz} KB gz`);
 
 const fail: string[] = [];
-if (initial > budgets.bundle.initialChunkKbGz) fail.push(`initial chunk ${initial.toFixed(1)} KB gz > ${budgets.bundle.initialChunkKbGz}`);
-if (total > budgets.bundle.totalKbGz) fail.push(`total ${total.toFixed(1)} KB gz > ${budgets.bundle.totalKbGz}`);
+if (initial > limits.initialChunkKbGz) fail.push(`initial chunk ${initial.toFixed(1)} KB gz > ${limits.initialChunkKbGz}`);
+if (total > limits.totalKbGz) fail.push(`total ${total.toFixed(1)} KB gz > ${limits.totalKbGz}`);
 if (fail.length) { console.error("BUNDLE BUDGET EXCEEDED:\n  " + fail.join("\n  ")); process.exit(1); }

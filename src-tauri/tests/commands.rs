@@ -46,8 +46,12 @@ struct Shell {
 /// A mock app over a fresh fixture, loaded the way `spawn_library_load`
 /// loads the real one.
 fn shell() -> Shell {
+    shell_with_shape(Shape::default())
+}
+
+fn shell_with_shape(shape: Shape) -> Shell {
     let dir = tempfile::tempdir().unwrap();
-    let location = fixture::build(dir.path(), Shape::default()).expect("build the fixture");
+    let location = fixture::build(dir.path(), shape).expect("build the fixture");
 
     let state = AppState::with_backups(dir.path().join("backups"));
     let db = Db::open(location.clone(), OpenMode::ReadOnly).expect("open the fixture");
@@ -325,6 +329,27 @@ fn a_page_past_the_cap_is_refused_before_it_is_built() {
     let (view, _) = s.open(collection_spec());
     let err = run(commands::fetch_rows(s.state(), view, 0, commands::MAX_ROWS + 1, None)).unwrap_err();
     assert_eq!(err.kind, ErrorKind::Malformed);
+}
+
+#[test]
+fn a_full_page_stays_inside_the_ipc_response_budget() {
+    let s = shell_with_shape(Shape { tracks: commands::MAX_ROWS as usize, ..Shape::default() });
+    let (view, len) = s.open(collection_spec());
+    assert_eq!(len, commands::MAX_ROWS);
+    let rows = s.rows(view);
+    let bytes = serde_json::to_vec(&rows).unwrap().len();
+    let budgets: serde_json::Value =
+        serde_json::from_str(include_str!("../../perf-budgets.json")).unwrap();
+    let limit_kb = budgets
+        .pointer("/gates/ipc/responseKb")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
+    assert!(
+        bytes <= limit_kb as usize * 1024,
+        "a {}-row response is {:.1} KB, above the {limit_kb} KB budget",
+        rows.len(),
+        bytes as f64 / 1024.0,
+    );
 }
 
 #[test]
