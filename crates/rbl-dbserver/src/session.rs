@@ -6,16 +6,16 @@
 //! sent a CDJ-3000 (`docs/pre-release/design-notes/link-export-capture.md`).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 use crate::catalog::{
-    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackColumn, TrackDetails,
-    TrackScope, UsbCue,
+    Analysis, ArtistRole, Catalog, Edit, HotCueBankCue, Query, Row, Sort, TrackColumn,
+    TrackDetails, TrackScope, UsbCue,
 };
 use crate::item::{item_type, root_menu, sort_menu, track_flags, Item};
 use crate::net::{Handler, Session};
-use crate::{Argument, Message, keys, kind, menu_footer, menu_header, setup_reply};
+use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message};
 
 /// Our device number on the link when nothing has settled one: rekordbox's
 /// first choice, so a player treats us as it treats rekordbox.
@@ -233,11 +233,9 @@ impl LinkSession {
     fn render(&self, message: &Message) -> Vec<Message> {
         let location = Self::menu_location(message);
         let total = self.menus.get(&location).map_or(0, Menu::len);
-        let Some((offset, limit)) = render_window(
-            total,
-            Self::number(message, 1),
-            Self::number(message, 2),
-        ) else {
+        let Some((offset, limit)) =
+            render_window(total, Self::number(message, 1), Self::number(message, 2))
+        else {
             return Vec::new();
         };
         let column = (Self::number(message, 6) != 0 && Self::number(message, 7) != 0)
@@ -249,13 +247,7 @@ impl LinkSession {
             vec![Argument::Number(1), Argument::Number(offset)],
         )];
         out.extend(
-            self.items(
-                location,
-                offset,
-                limit,
-                column,
-                use_sort_column,
-            )
+            self.items(location, offset, limit, column, use_sort_column)
                 .iter()
                 .map(|item| {
                     let mut row = item.clone();
@@ -348,8 +340,8 @@ impl LinkSession {
                 }
             }
             (Query::Tracks { scope, sort }, Row::Track { id, position }) => {
-                let column = column
-                    .or_else(|| use_sort_column.then(|| sort.track_column()).flatten());
+                let column =
+                    column.or_else(|| use_sort_column.then(|| sort.track_column()).flatten());
                 let mut track = if matches!(scope, TrackScope::FileName) {
                     self.catalog.file_name_row(*id, column)?
                 } else {
@@ -448,7 +440,11 @@ impl LinkSession {
         let mut records = Vec::with_capacity(3 * 36);
         let mut sidecars = Vec::with_capacity(3 * 8);
         let mut count = 0_u32;
-        for cue in cues.into_iter().filter(|cue| (1..=3).contains(&cue.slot)).take(3) {
+        for cue in cues
+            .into_iter()
+            .filter(|cue| (1..=3).contains(&cue.slot))
+            .take(3)
+        {
             // `CueFmt_FmtBnkCue4Player` always receives the paired timing
             // sidecar and marks that fact with bit 8.
             let flags = 0x100 | u32::from(cue.out_ms.is_some()) | (u32::from(cue.slot) + 3) << 16;
@@ -506,12 +502,26 @@ impl LinkSession {
             let in_frame = cue.in_ms.saturating_mul(3) / 20;
             let out_ms = cue.out_ms.unwrap_or(u32::MAX);
             let out_frame = out_ms.saturating_mul(3) / 20;
-            for word in [flags, 0, 0, in_frame, out_frame, 0, cue.color_table_index, 0, 0] {
+            for word in [
+                flags,
+                0,
+                0,
+                in_frame,
+                out_frame,
+                0,
+                cue.color_table_index,
+                0,
+                0,
+            ] {
                 records.extend_from_slice(&word.to_le_bytes());
             }
             sidecars.extend_from_slice(&cue.in_ms.to_le_bytes());
             sidecars.extend_from_slice(&out_ms.to_le_bytes());
-            if cue.slot == 0 { memory += 1; } else { hot += 1; }
+            if cue.slot == 0 {
+                memory += 1;
+            } else {
+                hot += 1;
+            }
         }
         vec![Message::new(
             message.transaction,
@@ -536,7 +546,11 @@ impl LinkSession {
     fn hot_cue_bank_edit(message: &Message) -> Option<(u32, HotCueBankCue)> {
         let bank = Self::number(message, 1);
         let bytes = match message.arguments.get(3) {
-            Some(Argument::Blob(bytes)) if Self::number(message, 2) == 0x24 && bytes.len() == 0x24 => bytes,
+            Some(Argument::Blob(bytes))
+                if Self::number(message, 2) == 0x24 && bytes.len() == 0x24 =>
+            {
+                bytes
+            }
             _ => return None,
         };
         let word = |at: usize| -> Option<u32> {
@@ -544,7 +558,9 @@ impl LinkSession {
         };
         let flags = word(0)?;
         let slot = u8::try_from((flags >> 16) & 0xff).ok()?.checked_sub(3)?;
-        if !(1..=3).contains(&slot) { return None; }
+        if !(1..=3).contains(&slot) {
+            return None;
+        }
         // The firmware zeroes its eight-byte timecode buffer then copies the
         // declared sidecar length, capped at eight.  Preserve that behavior
         // for truncated-but-valid client sidecars.
@@ -554,7 +570,9 @@ impl LinkSession {
             Some(timecode)
         } else {
             match message.arguments.get(5) {
-                Some(Argument::Blob(bytes)) if sidecar_length <= 8 && bytes.len() >= sidecar_length => {
+                Some(Argument::Blob(bytes))
+                    if sidecar_length <= 8 && bytes.len() >= sidecar_length =>
+                {
                     timecode[..sidecar_length].copy_from_slice(&bytes[..sidecar_length]);
                     Some(timecode)
                 }
@@ -562,24 +580,30 @@ impl LinkSession {
             }
         };
         let frame_to_ms = |frame: u32| frame.saturating_mul(20) / 3;
-        let in_ms = sidecar.map_or_else(|| frame_to_ms(word(12).unwrap_or(0)), |bytes| {
-            u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]))
+        let in_ms = sidecar.map_or_else(
+            || frame_to_ms(word(12).unwrap_or(0)),
+            |bytes| u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4])),
+        );
+        let out_ms = (flags & 1 != 0).then(|| {
+            sidecar.map_or_else(
+                || frame_to_ms(word(16).unwrap_or(0)),
+                |bytes| u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
+            )
         });
-        let out_ms = (flags & 1 != 0).then(|| sidecar.map_or_else(
-            || frame_to_ms(word(16).unwrap_or(0)),
-            |bytes| u32::from_le_bytes(bytes[4..8].try_into().unwrap_or([0; 4])),
-        ));
-        Some((bank, HotCueBankCue {
-            slot,
-            content: word(4)?,
-            in_ms,
-            out_ms,
-            color: word(20)?,
-            color_table_index: word(24)?,
-            active_loop: word(28)? != 0,
-            beat_loop_size: word(32)?,
-            cue_microsec: 0,
-        }))
+        Some((
+            bank,
+            HotCueBankCue {
+                slot,
+                content: word(4)?,
+                in_ms,
+                out_ms,
+                color: word(20)?,
+                color_table_index: word(24)?,
+                active_loop: word(28)? != 0,
+                beat_loop_size: word(32)?,
+                cue_microsec: 0,
+            },
+        ))
     }
 
     fn hot_cue_bank_menu(&mut self, message: &Message) -> Vec<Message> {
@@ -592,18 +616,26 @@ impl LinkSession {
         let bank = Self::number(message, 1);
         let mode = Self::number(message, 2);
         let items = if mode == 0 {
-            self.catalog.hot_cue_bank_tracks(bank).into_iter()
+            self.catalog
+                .hot_cue_bank_tracks(bank)
+                .into_iter()
                 .enumerate()
-                .map(|(position, track)| Item::track(&track, 0, u32::try_from(position).unwrap_or(u32::MAX)))
+                .map(|(position, track)| {
+                    Item::track(&track, 0, u32::try_from(position).unwrap_or(u32::MAX))
+                })
                 .collect()
         } else if mode == 1 {
-            self.catalog.hot_cue_banks((bank != 0).then_some(bank)).into_iter().map(|bank| {
-                if bank.folder {
-                    Item::named(bank.id, &bank.name, item_type::FOLDER)
-                } else {
-                    Item::named(bank.id, &bank.name, item_type::HOT_CUE_BANK)
-                }
-            }).collect()
+            self.catalog
+                .hot_cue_banks((bank != 0).then_some(bank))
+                .into_iter()
+                .map(|bank| {
+                    if bank.folder {
+                        Item::named(bank.id, &bank.name, item_type::FOLDER)
+                    } else {
+                        Item::named(bank.id, &bank.name, item_type::HOT_CUE_BANK)
+                    }
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -712,7 +744,10 @@ impl LinkSession {
     }
 
     /// The requests that open a menu: a count now, rows on render.
-    #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one protocol dispatch table; splitting it would obscure its message coverage"
+    )]
     fn handle_menu(&mut self, message: &Message) -> Vec<Message> {
         match message.kind {
             kind::ROOT_MENU => {
@@ -923,9 +958,13 @@ impl LinkSession {
             kind::METADATA => self.track_menu(message, Menu::Metadata),
             kind::TRACK_INFO => self.track_menu(message, Menu::TrackInfo),
             kind::DELIVERY_INFO => self.track_menu(message, Menu::DeliveryInfo),
-            // `3007` after setup, MATCHING, and anything not built: a menu
-            // with nothing in it, which a player takes in its stride.
-            _ => self.menu(message, Menu::Empty),
+            // Unknown commands are not menus: rekordbox returns 4003 and
+            // leaves the currently rendered menu at this location intact.
+            _ => vec![Message::new(
+                message.transaction,
+                kind::ERROR,
+                vec![Argument::Number(u32::from(message.kind))],
+            )],
         }
     }
 
@@ -1049,7 +1088,10 @@ fn prepend_all_if_multiple(rows: &mut Vec<Row>) {
 }
 
 impl Session for LinkSession {
-    #[allow(clippy::too_many_lines, reason = "one protocol dispatch table; splitting it would obscure its message coverage")]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one protocol dispatch table; splitting it would obscure its message coverage"
+    )]
     fn handle(&mut self, message: &Message) -> Vec<Message> {
         let tx = message.transaction;
         match message.kind {
@@ -1129,7 +1171,10 @@ impl Session for LinkSession {
                 if Self::number(message, 0) & 0xff != 1 {
                     return Self::hot_cue_bank_unavailable(message);
                 }
-                Self::hot_cue_bank_reply(message, self.catalog.hot_cue_bank_cues(Self::number(message, 1)))
+                Self::hot_cue_bank_reply(
+                    message,
+                    self.catalog.hot_cue_bank_cues(Self::number(message, 1)),
+                )
             }
             kind::CHANGE_HOT_CUE_BANK => {
                 if Self::number(message, 0) & 0xff != 1 {

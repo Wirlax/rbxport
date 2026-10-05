@@ -193,7 +193,11 @@ impl Catalog for Small {
     }
     fn hot_cue_banks(&self, parent: Option<u32>) -> Vec<HotCueBank> {
         if parent.is_none() {
-            vec![HotCueBank { id: 42, name: "WARMUP".into(), folder: false }]
+            vec![HotCueBank {
+                id: 42,
+                name: "WARMUP".into(),
+                folder: false,
+            }]
         } else {
             Vec::new()
         }
@@ -201,21 +205,42 @@ impl Catalog for Small {
     fn hot_cue_bank_cues(&self, bank: u32) -> Vec<HotCueBankCue> {
         if bank == 42 {
             vec![HotCueBankCue {
-                slot: 1, content: TRACK, in_ms: 1_000, out_ms: Some(2_000), color: 3,
-                color_table_index: 21, active_loop: true, beat_loop_size: 0, cue_microsec: 0,
+                slot: 1,
+                content: TRACK,
+                in_ms: 1_000,
+                out_ms: Some(2_000),
+                color: 3,
+                color_table_index: 21,
+                active_loop: true,
+                beat_loop_size: 0,
+                cue_microsec: 0,
             }]
         } else {
             Vec::new()
         }
     }
     fn hot_cue_bank_tracks(&self, bank: u32) -> Vec<TrackRow> {
-        if bank == 42 { vec![the_track()] } else { Vec::new() }
+        if bank == 42 {
+            vec![the_track()]
+        } else {
+            Vec::new()
+        }
     }
     fn usb_cues(&self, track: u32) -> Vec<UsbCue> {
         if track == TRACK {
             vec![
-                UsbCue { slot: 1, in_ms: 3_000, out_ms: Some(4_000), color_table_index: 21 },
-                UsbCue { slot: 0, in_ms: 5_000, out_ms: None, color_table_index: 0 },
+                UsbCue {
+                    slot: 1,
+                    in_ms: 3_000,
+                    out_ms: Some(4_000),
+                    color_table_index: 21,
+                },
+                UsbCue {
+                    slot: 0,
+                    in_ms: 5_000,
+                    out_ms: None,
+                    color_table_index: 0,
+                },
             ]
         } else {
             Vec::new()
@@ -397,7 +422,10 @@ fn the_root_menu_uses_rekordboxs_special_disable_rules() {
         category(5, 24, 0),
     ];
     let items = root_menu(&categories, (1 << 1) | (1 << 24) | (1 << 26));
-    assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(
+        items.iter().map(|item| item.id).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
 }
 
 #[test]
@@ -640,20 +668,11 @@ fn key_menus_use_catalog_display_names() {
     session.handle(&setup_request(1));
 
     let (_, keys) = browse(&mut session, kind::KEY_MENU, &[CTX, 0]);
-    assert_eq!(
-        keys[0].arguments[3],
-        Argument::String("1A".to_owned())
-    );
-    assert_eq!(
-        keys[23].arguments[3],
-        Argument::String("12B".to_owned())
-    );
+    assert_eq!(keys[0].arguments[3], Argument::String("1A".to_owned()));
+    assert_eq!(keys[23].arguments[3], Argument::String("12B".to_owned()));
 
     let (_, related) = browse(&mut session, kind::RELATED_KEYS, &[0x0102_0301, 0, 1]);
-    assert_eq!(
-        related[0].arguments[3],
-        Argument::String("1A".to_owned())
-    );
+    assert_eq!(related[0].arguments[3], Argument::String("1A".to_owned()));
     assert_eq!(
         related[1].arguments[3],
         Argument::String("1A, 1B".to_owned())
@@ -734,11 +753,7 @@ fn render_override_selects_the_requested_track_column() {
     let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 2]));
     assert_eq!(header[0].arguments[1], Argument::Number(1));
 
-    let rendered = s.handle(&numbers(
-        kind::RENDER,
-        2,
-        &[CTX, 0, 1, 0, 1, 12, 1, 2],
-    ));
+    let rendered = s.handle(&numbers(kind::RENDER, 2, &[CTX, 0, 1, 0, 1, 12, 1, 2]));
     let row = &rendered[1].arguments;
     assert_eq!(row[0], Argument::Number(AALIYAH));
     assert_eq!(row[5], Argument::String("Aaliyah".into()));
@@ -781,11 +796,7 @@ fn extended_render_without_an_override_uses_the_configured_column() {
     let header = s.handle(&numbers(kind::TRACK_MENU, 1, &[CTX, 2]));
     assert_eq!(header[0].arguments[1], Argument::Number(1));
 
-    let rendered = s.handle(&numbers(
-        kind::RENDER,
-        2,
-        &[CTX, 0, 1, 0, 1, 12, 1, 0],
-    ));
+    let rendered = s.handle(&numbers(kind::RENDER, 2, &[CTX, 0, 1, 0, 1, 12, 1, 0]));
     let row = &rendered[1].arguments;
     assert_eq!(row[5], Argument::String("Em - 156".into()));
     assert_eq!(row[6], Argument::Number(0x2304));
@@ -1013,18 +1024,29 @@ fn artwork_and_tags_come_back_as_blobs_or_as_the_no_art_reply() {
 fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
     let mut s = session();
     let banks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c0, &[CTX, 0, 1]));
-    assert_eq!(banks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    assert_eq!(
+        banks[0].arguments,
+        vec![Argument::Number(0x2001), Argument::Number(1)]
+    );
     let items = s.handle(&numbers(kind::RENDER, 0x1c1, &[CTX, 0, 8]));
     assert_eq!(items[1].arguments[1], Argument::Number(42));
     assert_eq!(items[1].arguments[6], Argument::Number(0x2b));
     let reply = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c2, &[CTX, 42]));
     assert_eq!(reply.len(), 1);
     assert_eq!(reply[0].kind, kind::HOT_CUE_BANK_REPLY);
-    assert_eq!(args(&reply[0]), "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]");
-    let Argument::Blob(record) = &reply[0].arguments[3] else { panic!("cue record") };
+    assert_eq!(
+        args(&reply[0]),
+        "0x2101, 0x0, 0x24, blob[36], 0x24, 0x1, 0x0, 0x8, blob[8], 0x0, blob[0]"
+    );
+    let Argument::Blob(record) = &reply[0].arguments[3] else {
+        panic!("cue record")
+    };
     assert_eq!(&record[..8], &[1, 1, 4, 0, 0x5f, 0x47, 0, 0]);
     let tracks = s.handle(&numbers(kind::HOT_CUE_BANK, 0x1c3, &[CTX, 42, 0]));
-    assert_eq!(tracks[0].arguments, vec![Argument::Number(0x2001), Argument::Number(1)]);
+    assert_eq!(
+        tracks[0].arguments,
+        vec![Argument::Number(0x2001), Argument::Number(1)]
+    );
     let track_items = s.handle(&numbers(kind::RENDER, 0x1c4, &[CTX, 0, 8]));
     assert_eq!(track_items[1].arguments[1], Argument::Number(TRACK));
 
@@ -1036,13 +1058,21 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
         0x1c5,
         kind::CHANGE_HOT_CUE_BANK,
         vec![
-            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
-            Argument::Blob(changed_record), Argument::Number(8),
+            Argument::Number(CTX),
+            Argument::Number(42),
+            Argument::Number(0x24),
+            Argument::Blob(changed_record),
+            Argument::Number(8),
             Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
         ],
     ));
-    assert_eq!(args(&changed[0]), "0x2201, 0x0, 0x48, blob[72], 0x24, 0x1, 0x1, 0x10, blob[16], 0x0, blob[0]");
-    let Argument::Blob(reloaded) = &changed[0].arguments[3] else { panic!("USB cue records") };
+    assert_eq!(
+        args(&changed[0]),
+        "0x2201, 0x0, 0x48, blob[72], 0x24, 0x1, 0x1, 0x10, blob[16], 0x0, blob[0]"
+    );
+    let Argument::Blob(reloaded) = &changed[0].arguments[3] else {
+        panic!("USB cue records")
+    };
     assert_eq!(&reloaded[..8], &[1, 1, 1, 0, 0, 0, 0, 0]);
     let (decoded, used) = Message::decode(&reply[0].encode()).unwrap();
     assert_eq!(used, reply[0].encode().len());
@@ -1058,22 +1088,37 @@ fn rx3_hot_cue_bank_uses_its_menu_and_cue_envelopes() {
         0x1c5,
         kind::CHANGE_HOT_CUE_BANK,
         vec![
-            Argument::Number(CTX), Argument::Number(42), Argument::Number(0x24),
-            Argument::Blob(uncued_record), Argument::Number(8),
+            Argument::Number(CTX),
+            Argument::Number(42),
+            Argument::Number(0x24),
+            Argument::Blob(uncued_record),
+            Argument::Number(8),
             Argument::Blob([1_000_u32.to_le_bytes(), 2_000_u32.to_le_bytes()].concat()),
         ],
     ));
-    assert_eq!(args(&uncued[0]), "0x2201, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    assert_eq!(
+        args(&uncued[0]),
+        "0x2201, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]"
+    );
 
     let missing = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX, 999]));
-    assert_eq!(args(&missing[0]), "0x2101, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    assert_eq!(
+        args(&missing[0]),
+        "0x2101, 0x0, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]"
+    );
     let (empty, used) = Message::decode(&missing[0].encode()).unwrap();
     assert_eq!(used, missing[0].encode().len());
     assert_eq!(empty, missing[0]);
     let wrong_context = s.handle(&numbers(kind::HOT_CUE_BANK_CUES, 0x1c6, &[CTX & !0xff, 42]));
-    assert_eq!(args(&wrong_context[0]), "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    assert_eq!(
+        args(&wrong_context[0]),
+        "0x2101, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]"
+    );
     let malformed = s.handle(&numbers(kind::CHANGE_HOT_CUE_BANK, 0x1c7, &[CTX, 42]));
-    assert_eq!(args(&malformed[0]), "0x2201, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]");
+    assert_eq!(
+        args(&malformed[0]),
+        "0x2201, 0x32, 0x0, blob[0], 0x24, 0x0, 0x0, 0x0, blob[0], 0x0, blob[0]"
+    );
 }
 
 #[test]
@@ -1127,22 +1172,14 @@ fn a_page_of_a_long_list_is_the_window_asked_for() {
     assert_eq!(past[1].arguments[0], Argument::Number(100));
 
     // An overrun is right-aligned to preserve the requested page size.
-    let overrun = s.handle(&numbers(
-        kind::RENDER,
-        4,
-        &[CTX, 95, 25, 0, 100, 0xc, 1, 0],
-    ));
+    let overrun = s.handle(&numbers(kind::RENDER, 4, &[CTX, 95, 25, 0, 100, 0xc, 1, 0]));
     assert_eq!(overrun.len(), 27);
     assert_eq!(overrun[0].arguments[1], Argument::Number(75));
     assert_eq!(overrun[1].arguments[0], Argument::Number(76));
     assert_eq!(overrun[25].arguments[0], Argument::Number(100));
 
     // A zero count renders one row, while the maximum offset gets no reply.
-    let zero = s.handle(&numbers(
-        kind::RENDER,
-        5,
-        &[CTX, 0, 0, 0, 100, 0xc, 1, 0],
-    ));
+    let zero = s.handle(&numbers(kind::RENDER, 5, &[CTX, 0, 0, 0, 100, 0xc, 1, 0]));
     assert_eq!(zero.len(), 3);
     assert_eq!(zero[1].arguments[0], Argument::Number(1));
 
@@ -1667,4 +1704,37 @@ fn grid_offset_writes_do_not_claim_success_without_persistence() {
     // An edit acknowledgement must not replace the browser's pending menu.
     let rendered = s.handle(&numbers(kind::RENDER, 10, &[CTX, 0, 1]));
     assert_eq!(rendered[1].arguments[1], Argument::Number(TRACK));
+}
+
+#[test]
+fn unsupported_command_keeps_the_active_menu_and_echoes_its_kind_in_4003() {
+    let mut s = session();
+    let (count, expected) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
+
+    let unsupported = s.handle(&numbers(0x2fff, 0x8123, &[CTX, 0]));
+    assert_eq!(
+        unsupported,
+        vec![Message::new(
+            0x8123,
+            kind::ERROR,
+            vec![Argument::Number(0x2fff)],
+        )]
+    );
+
+    let rendered = s.handle(&numbers(
+        kind::RENDER,
+        0x8124,
+        &[CTX, 0, count, 0, count, 0xc, 1, 0],
+    ));
+    assert_eq!(rendered[0].kind, kind::RENDER_HEADER);
+    let items = &rendered[1..rendered.len() - 1];
+    assert_eq!(items.len(), expected.len());
+    for (actual, expected) in items.iter().zip(expected) {
+        assert_eq!(actual.kind, expected.kind);
+        assert_eq!(actual.arguments, expected.arguments);
+    }
+    assert_eq!(
+        rendered.last().map(|message| message.kind),
+        Some(kind::MENU_FOOTER)
+    );
 }
