@@ -1126,11 +1126,16 @@ impl Session for LinkSession {
                     .track_row(Self::number(message, 1), None)
                     .map_or(0, |track| track.bpm_x100),
             )],
-            kind::TRACK_PLAY_STATE => vec![menu_header(
-                tx,
-                u32::from(message.kind),
-                u32::from(self.catalog.played(Self::number(message, 1))),
-            )],
+            kind::TRACK_PLAY_STATE => {
+                // V4 OnOtherCmd looks up played membership only in database
+                // context 4, and emits 2 for a match. Keep catalog state bool.
+                let played = match (message.arguments.first(), message.arguments.get(1)) {
+                    (Some(Argument::Number(context)), Some(Argument::Number(track)))
+                        if (context >> 8) & 0xff == 4 => self.catalog.played(*track),
+                    _ => false,
+                };
+                vec![menu_header(tx, u32::from(message.kind), if played { 2 } else { 0 })]
+            }
             // RX3 converts the `djmdKey` ID returned by its legacy key menu
             // before opening a related-key menu. The virtual legacy menu
             // already advertises the dense 1..=24 IDs, which are exactly the

@@ -73,3 +73,18 @@ envelopes, and unchanged active menu/history. An unknown ID must not become
 played merely because an invalid request defaults to an existing ID.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented context-gated played membership: typed `3b03 [context,id]`
+consults `Catalog::played` only when context bits 8–15 equal 4, returning
+scalar 2 for membership and 0 otherwise. Catalog/history storage remains
+boolean and unchanged. Missing/wrong-typed arguments safely return 0 without
+defaulting an invalid ID to a played track.
+
+The encoded regression covers played/unplayed/unknown IDs, context 0/1/2/3/
+4/5/255 independently of three menu locations, malformed decoded shapes,
+complete scalar envelopes and unchanged complete follow-up renders.
+`RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session played_state_wire`
+passed. The visible device marker and played-list persistence lifecycle remain
+unverified; this implements the desktop read contract only.

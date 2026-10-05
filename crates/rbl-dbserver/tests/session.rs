@@ -1667,7 +1667,7 @@ fn rx3_scalar_track_and_mobile_queries_use_their_native_reply_shapes() {
     let mut loaded = session_with(Small(true));
     assert_eq!(
         loaded.handle(&numbers(kind::TRACK_PLAY_STATE, 0x54, &[CTX, TRACK]))[0].arguments,
-        vec![Argument::Number(0x3b03), Argument::Number(1)]
+        vec![Argument::Number(0x3b03), Argument::Number(0)]
     );
     let mobile = loaded.handle(&numbers(kind::REKORDBOX_MOBILE, 0x55, &[CTX]));
     assert_eq!(mobile[0].kind, kind::REKORDBOX_MOBILE_REPLY);
@@ -1861,6 +1861,35 @@ fn unsupported_command_keeps_filter_selection_and_enable_state() {
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 1);
     exchange_wire(&mut s, &numbers(0x3007, 0x8103, &[CTX, 1]).encode());
     assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
+}
+
+#[test]
+fn played_state_wire_uses_context_four_and_preserves_pending_menu() {
+    for played in [false, true] {
+        let mut s = session_with(Small(played));
+        browse(&mut s, kind::TRACK_MENU, &[CTX, 0]);
+        let render = numbers(kind::RENDER, 0x8100, &[CTX, 0, 1]);
+        let before = exchange_wire(&mut s, &render.encode());
+        for location in [1, 2, 8] {
+            for context in [0_u32, 1, 2, 3, 4, 5, 255] {
+                let packed = (CTX & 0xff00_00ff) | (location << 16) | (context << 8);
+                for track in [TRACK, 0, u32::MAX] {
+                    let request = numbers(kind::TRACK_PLAY_STATE, 0x8130, &[packed, track]);
+                    let scalar = if played && track == TRACK && context == 4 { "00000002" } else { "00000000" };
+                    assert_eq!(exchange_wire(&mut s, &request.encode()),
+                        vec![hex(&format!("11872349ae11000081301040000f02140000000206061100003b0311{scalar}"))]);
+                    assert_eq!(exchange_wire(&mut s, &render.encode()), before);
+                }
+            }
+        }
+        for arguments in [vec![], vec![Argument::Number(0x0101_0401)],
+            vec![Argument::String("context".into()), Argument::Number(TRACK)],
+            vec![Argument::Number(0x0101_0401), Argument::String("track".into())]] {
+            assert_eq!(exchange_wire(&mut s, &Message::new(0x8130, kind::TRACK_PLAY_STATE, arguments).encode()),
+                vec![hex("11872349ae11000081301040000f02140000000206061100003b031100000000")]);
+        }
+        assert_eq!(exchange_wire(&mut s, &render.encode()), before);
+    }
 }
 
 #[derive(Default)]
