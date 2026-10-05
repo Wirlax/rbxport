@@ -166,9 +166,21 @@ struct Shared {
     /// Why the link went down, when it did: the interface lost its address,
     /// or the join failed.
     down: Option<String>,
+    /// Shared with the database gate; rejection clears it before returning
+    /// any outgoing announcement, not on the next announce-loop tick.
+    assigned: Arc<AtomicU8>,
 }
 
 impl Shared {
+    fn rejected(&self) -> bool { self.join.as_ref().is_some_and(Join::rejected) }
+
+    fn clear_members(&mut self) {
+        self.peers = DeviceTable::new();
+        self.players.clear();
+        self.greeted.clear();
+        self.to_greet.clear();
+    }
+
     fn forget_greeting(&mut self, address: Ipv4Addr) {
         self.greeted.retain(|greeted| *greeted != address);
         self.to_greet.retain(|pending| *pending != address);
@@ -353,8 +365,9 @@ impl Beacon {
         let player_port = config.player_port;
 
         let stop = Arc::new(AtomicBool::new(false));
-        let shared = Arc::new(Mutex::new(Shared::default()));
-        let number = Arc::new(AtomicU8::new(0));
+        let initial = Shared::default();
+        let number = Arc::clone(&initial.assigned);
+        let shared = Arc::new(Mutex::new(initial));
         let mut threads = Vec::with_capacity(3);
         {
             let (stop, shared, config, number) = (
@@ -639,6 +652,10 @@ fn announce_loop(
                 number.store(settled, Ordering::Relaxed);
                 next_keep_alive = (settled != 0).then_some(now);
             }
+            // Rejection already cleared the shared number synchronously.
+            // Do not leave the old keep-alive schedule armed just because
+            // the next tick observes two equal zero values.
+            if settled == 0 { next_keep_alive = None; }
             if let Some(join::State::Failed(why)) = shared.join.as_ref().map(Join::state) {
                 if shared.down.is_none() {
                     shared.down = Some(why.clone());
@@ -761,6 +778,7 @@ fn hear_announce(
         join.announcement_sender_allowed(*from.ip(), config.netmask)) {
         return None;
     }
+    if kind != Some(9) && shared.lock().rejected() { return None; }
     // V1 frameRead checks runtime mode, initially 0xff. Known wireless
     // becomes active only on the first LinkUp attempt; Unknown keeps RBX's
     // conservative existing exclusion without pretending it is vendor 0xff.
@@ -799,6 +817,23 @@ fn hear_announce(
                 }
             }
             return None;
+        }
+        Some(AnnounceKind::Other(0x09)) => {
+            // RBX safe common-header bounds policy; V1 dispatches 09 without
+            // a target/subtype or running-only condition. Declared length is
+            // not a source-established receive policy.
+            if packet.len() < 36 || config.mode == rbl_prolink::ConnectionMode::Unknown {
+                return None;
+            }
+            let mut shared = shared.lock();
+            let join = shared.join.get_or_insert_with(||
+                Join::new(config.mac, config.address, Instant::now()).with_mode(config.mode));
+            let outgoing = join.reject(Instant::now());
+            shared.assigned.store(0, Ordering::Relaxed);
+            shared.clear_members();
+            shared.master = MasterState { on: false, bpm_x100: 0, bar_beat: 0 };
+            shared.down = Some("announcement rejected; restart Link to recover".into());
+            return outgoing;
         }
         // rekordbox drops every member, stops its timers and starts over
         // on a compatibility response (`readCompatiRes`).
@@ -961,6 +996,9 @@ fn status_loop(
         };
         let packet = buffer.get(..len).unwrap_or(&[]);
         let SocketAddr::V4(from) = from else { continue };
+        // A receive begun before rejection must not revive membership or
+        // answer from the stale pre-rejection assigned-number snapshot.
+        if shared.lock().rejected() { continue; }
         // Our own status comes back off the broadcast; its kind is one
         // nothing below handles.
         let Ok(kind) = packet_kind(packet) else {
@@ -1093,6 +1131,7 @@ fn hear_player_status(
         "player status"
     );
     let mut shared = shared.lock();
+    if shared.rejected() { return; }
     if !shared.greeted.contains(from.ip()) {
         // The first status from a player is what rekordbox
         // answers with the greeting `[ASSUME]`; it sent one just
@@ -1237,7 +1276,11 @@ fn beat_clock(
             Ok(_) => tracing::trace!(bpm_x100, bar_beat, %to, "beat sent"),
             Err(error) => tracing::warn!(%error, "beat not sent"),
         }
-        shared.lock().master.bar_beat = if bar_beat >= 4 { 1 } else { bar_beat + 1 };
+        let mut state = shared.lock();
+        if !state.rejected() {
+            state.master.bar_beat = if bar_beat >= 4 { 1 } else { bar_beat + 1 };
+        }
+        drop(state);
         // 60000/bpm ms a beat; bpm is × 100, so 6_000_000 / bpm_x100 ms.
         let interval = Duration::from_millis(6_000_000 / u64::from(bpm_x100.max(1)));
         next_beat += interval;
@@ -1692,6 +1735,323 @@ mod all_in_one_tests {
             wire[38] ^= 0xff;
             hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
             assert!(shared.lock().players.contains_key(&number));
+        }
+    }
+
+    fn rejection_config(mode: rbl_prolink::ConnectionMode) -> BeaconConfig {
+        BeaconConfig { address: Ipv4Addr::new(192, 168, 50, 2),
+            netmask: Ipv4Addr::new(255, 255, 255, 0),
+            broadcast: Ipv4Addr::new(192, 168, 50, 255), mode, ..config() }
+    }
+
+    fn rejection_frame() -> Vec<u8> {
+        let mut wire = keep_alive(1, Ipv4Addr::new(192, 168, 50, 10)).encode();
+        wire[10] = 9;
+        wire[11] = 0x7f; // V1 has no rejection subtype condition.
+        wire[34..36].copy_from_slice(&[0xff, 0xff]); // no invented length policy
+        wire.truncate(36); // common-header RBX safety boundary, no target
+        wire
+    }
+
+    fn disconnect_bytes(number: u8, ip: Ipv4Addr) -> Vec<u8> {
+        let mut bytes = vec![0x51,0x73,0x70,0x74,0x31,0x57,0x6d,0x4a,0x4f,0x4c,8,0,
+            b'r',b'e',b'k',b'o',b'r',b'd',b'b',b'o',b'x',0,0,0,0,0,0,0,0,0,0,0,
+            1,3,0,41,number];
+        bytes.extend_from_slice(&ip.octets());
+        bytes
+    }
+
+    struct EmptyCatalog;
+    impl rbl_dbserver::catalog::Catalog for EmptyCatalog {
+        fn list(&self, _: &rbl_dbserver::catalog::Query) -> Vec<rbl_dbserver::catalog::Row> { Vec::new() }
+        fn track_row(&self, _: u32, _: Option<rbl_dbserver::catalog::TrackColumn>) -> Option<rbl_dbserver::item::TrackRow> { None }
+        fn track(&self, _: u32) -> Option<rbl_dbserver::catalog::TrackDetails> { None }
+        fn artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn item_artwork(&self, _: u32) -> Option<Vec<u8>> { None }
+        fn analysis(&self, _: u32, _: &rbl_dbserver::catalog::Analysis) -> Option<Vec<u8>> { None }
+    }
+
+    #[test]
+    fn rejection_clears_every_store_and_database_readiness_in_all_known_mode_states() {
+        use rbl_dbserver::net::Handler;
+        let now = Instant::now();
+        let sender = Ipv4Addr::new(192, 168, 50, 10);
+        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+            let cfg = rejection_config(mode);
+            let candidate = if mode == rbl_prolink::ConnectionMode::Wireless { 41 } else { 17 };
+            let running = if mode == rbl_prolink::ConnectionMode::Wireless { 44 } else { 18 };
+            for state in [join::State::Waiting, join::State::Discovery { sent: 2 },
+                join::State::Probing { round: 4, index: 2 }, join::State::Assigning { sent: 3 },
+                join::State::Running { number: running }, join::State::Failed("fixture".into())] {
+                let assigned = if matches!(state, join::State::Running { .. }) { running } else { 0 };
+                let mut fixture = members(&[1, 9, 10, 11, 12, 33], now);
+                let mut initialized = Join::new(cfg.mac, cfg.address, now).with_mode(mode);
+                initialized.hear_keep_alive(&keep_alive(1, sender), now);
+                fixture.join = Some(initialized.test_state(state.clone()));
+                fixture.master = MasterState { on: true, bpm_x100: 12_300, bar_beat: 3 };
+                fixture.assigned.store(assigned, Ordering::Relaxed);
+                let cell = Arc::clone(&fixture.assigned);
+                let handler = rbl_dbserver::session::CatalogHandler::new(Arc::new(EmptyCatalog)).with_device(cell.clone());
+                assert_eq!(handler.open_ready().is_some(), assigned != 0);
+                let shared = Mutex::new(fixture);
+                let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+                assert_eq!(out.packet, disconnect_bytes(if assigned == 0 { candidate } else { running }, cfg.address), "{mode:?} {state:?}");
+                assert_eq!(out.to, None);
+                // The gate is already zero before the caller sends this output.
+                assert_eq!(cell.load(Ordering::Relaxed), 0);
+                assert!(handler.open_ready().is_none());
+                let snapshot = shared.lock();
+                assert!(snapshot.rejected());
+                assert!(snapshot.down.as_ref().unwrap().contains("rejected"));
+                assert_eq!(snapshot.join.as_ref().unwrap().state(), &join::State::Waiting);
+                assert!(snapshot.peers.is_empty());
+                assert!(snapshot.players.is_empty());
+                assert_eq!(snapshot.greeted, Vec::<Ipv4Addr>::new());
+                assert_eq!(snapshot.to_greet, Vec::<Ipv4Addr>::new());
+                assert_eq!(snapshot.master, MasterState { on: false, bpm_x100: 0, bar_beat: 0 });
+                drop(snapshot);
+                let repeat = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+                assert_eq!(repeat.packet, disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED));
+
+                let mut frames = vec![keep_alive(1, sender).encode(), rbl_prolink::rekordbox_claim_stage1([1;6], 1),
+                    rbl_prolink::rekordbox_claim_stage2([1;6], sender, running, 5),
+                    rbl_prolink::number_in_use_reply(REKORDBOX_NAME, running)];
+                for kind in [4, 7, 8, 0x0b] {
+                    let mut frame = keep_alive(1, sender).encode(); frame[10] = kind; frames.push(frame);
+                }
+                for frame in frames {
+                    assert!(hear_announce(&frame, SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                }
+                let mut snapshot = shared.lock();
+                snapshot.join.as_mut().unwrap().reset(now);
+                assert!(snapshot.join.as_mut().unwrap().tick(now + Duration::from_secs(60)).is_none());
+                assert!(snapshot.rejected());
+                assert!(snapshot.peers.is_empty() && snapshot.players.is_empty());
+                assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
+                assert_eq!(cell.load(Ordering::Relaxed), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn fresh_rejection_is_terminal_without_an_outgoing_datagram_and_unknown_is_unchanged() {
+        let now = Instant::now();
+        let sender = Ipv4Addr::new(10, 9, 8, 7); // before NetIF setup, no subnet guard
+        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown] {
+            let cfg = rejection_config(mode);
+            let mut fixture = members(&[1], now);
+            fixture.join = Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode));
+            let shared = Mutex::new(fixture);
+            assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+            let mut snapshot = shared.lock();
+            let known = mode != rbl_prolink::ConnectionMode::Unknown;
+            assert_eq!(snapshot.rejected(), known);
+            assert_eq!(snapshot.peers.is_empty(), known);
+            assert_eq!(snapshot.players.is_empty(), known);
+            assert_eq!(snapshot.down.is_some(), known);
+            assert!(snapshot.join.as_mut().unwrap().tick(now + Duration::from_secs(60)).is_none());
+            drop(snapshot);
+            assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+            // A new object is RBX's bounded explicit recovery policy.
+            let replacement = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)), ..Shared::default() });
+            hear_announce(&keep_alive(1, sender).encode(), SocketAddr::from((sender, 50000)), &cfg, &replacement, now);
+            assert!(!replacement.lock().rejected());
+            assert!(matches!(replacement.lock().join.as_ref().unwrap().state(), join::State::Discovery { .. }));
+        }
+    }
+
+    #[test]
+    fn rejection_header_and_network_sender_guards_are_scoped_and_preserve_state() {
+        let now = Instant::now();
+        let cfg = rejection_config(rbl_prolink::ConnectionMode::Wired);
+        let on_subnet = Ipv4Addr::new(192, 168, 50, 10);
+        for initialized in [false, true] {
+            for sender in [Ipv4Addr::UNSPECIFIED, cfg.address, Ipv4Addr::new(192, 168, 51, 10), on_subnet] {
+                let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
+                if initialized { join.hear_keep_alive(&keep_alive(1, on_subnet), now); }
+                let shared = Mutex::new(Shared { join: Some(join), ..Shared::default() });
+                for cut in 0..36 {
+                    assert!(hear_announce(&rejection_frame()[..cut], SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                    assert!(!shared.lock().rejected());
+                }
+                let mut invalid = rejection_frame(); invalid[0] ^= 0xff;
+                assert!(hear_announce(&invalid, SocketAddr::from((sender, 50000)), &cfg, &shared, now).is_none());
+                assert!(!shared.lock().rejected());
+                let accepted = if initialized { sender == on_subnet } else { sender != Ipv4Addr::UNSPECIFIED };
+                let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now);
+                assert_eq!(shared.lock().rejected(), accepted);
+                assert_eq!(out.is_some(), initialized && accepted);
+            }
+        }
+    }
+
+    #[test]
+    fn wireless_original_failed_linkup_retains_pre_rejection_identity_without_membership() {
+        let now = Instant::now();
+        let cfg = rejection_config(rbl_prolink::ConnectionMode::Wireless);
+        let sender = Ipv4Addr::new(192, 168, 50, 10);
+        for name in ["CDJ-2000", "CDJ-900"] {
+            let shared = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode)), ..Shared::default() });
+            let mut original = keep_alive(1, sender);
+            original.name = name.into(); original.generation = 0;
+            hear_announce(&original.encode(), SocketAddr::from((sender, 50000)), &cfg, &shared, now);
+            let snapshot = shared.lock();
+            assert_eq!(snapshot.join.as_ref().unwrap().state(), &join::State::Waiting);
+            assert!(snapshot.join.as_ref().unwrap().network_initialized());
+            assert!(snapshot.peers.is_empty() && snapshot.players.is_empty());
+            assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
+            assert_eq!(snapshot.assigned.load(Ordering::Relaxed), 0);
+            drop(snapshot);
+            let out = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+            assert_eq!(out.packet, disconnect_bytes(41, cfg.address));
+            let repeat = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &shared, now).unwrap();
+            assert_eq!(repeat.packet, disconnect_bytes(41, Ipv4Addr::UNSPECIFIED));
+        }
+    }
+
+    #[test]
+    fn rejection_disconnect_output_uses_configured_broadcast_destination() {
+        let now = Instant::now();
+        let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let port = receiver.local_addr().unwrap().port();
+        let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut cfg = config(); cfg.announce_port = port;
+        let remote = Ipv4Addr::new(127, 0, 0, 2);
+        let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
+        join.hear_keep_alive(&keep_alive(1, remote), now);
+        let shared = Mutex::new(Shared { join: Some(join.test_state(join::State::Running { number: 18 })), ..Shared::default() });
+        let out = hear_announce(&rejection_frame(), SocketAddr::from((remote, port + 1)), &cfg, &shared, now).unwrap();
+        assert_eq!(out.to, None);
+        send_announce(&sender, &out, SocketAddr::from((cfg.broadcast, port)), port);
+        let mut buffer = [0; 100];
+        let (length, from) = receiver.recv_from(&mut buffer).unwrap();
+        assert_eq!(buffer[..length], disconnect_bytes(18, cfg.address));
+        assert_eq!(from, sender.local_addr().unwrap());
+    }
+
+    #[test]
+    fn fresh_known_mode_rejection_sends_no_udp_in_the_real_announce_loop() {
+        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+            let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+            let announce = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            announce.set_read_timeout(Some(POLL)).unwrap();
+            let destination = announce.local_addr().unwrap();
+            let mut cfg = rejection_config(mode);
+            cfg.broadcast = Ipv4Addr::LOCALHOST;
+            cfg.announce_port = receiver.local_addr().unwrap().port();
+            let stop = Arc::new(AtomicBool::new(false));
+            let shared = Arc::new(Mutex::new(Shared::default()));
+            let cell = Arc::clone(&shared.lock().assigned);
+            let (thread_stop, thread_shared, thread_cell) = (stop.clone(), shared.clone(), cell.clone());
+            let worker = std::thread::spawn(move || announce_loop(&announce, &cfg, &thread_stop, &thread_shared, &thread_cell));
+            receiver.send_to(&rejection_frame(), destination).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !shared.lock().rejected() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Subsequent ordinary input and repeated rejection still have no
+            // initialized network interface through which to broadcast.
+            receiver.send_to(&keep_alive(1, Ipv4Addr::LOCALHOST).encode(), destination).unwrap();
+            receiver.send_to(&rejection_frame(), destination).unwrap();
+            let mut bytes = [0; 100];
+            let observed = receiver.recv_from(&mut bytes);
+            stop.store(true, Ordering::Relaxed);
+            worker.join().unwrap();
+            assert!(shared.lock().rejected());
+            assert!(shared.lock().down.is_some());
+            assert_eq!(cell.load(Ordering::Relaxed), 0);
+            assert!(matches!(observed, Err(ref error) if is_timeout(error)));
+        }
+    }
+
+    #[test]
+    fn a_late_player_status_cannot_revive_terminal_membership_or_report_a_load() {
+        struct Loads(std::sync::atomic::AtomicUsize);
+        impl LibraryFacts for Loads {
+            fn track_count(&self) -> u16 { 1 }
+            fn playlist_count(&self) -> u16 { 0 }
+            fn track_loaded(&self, _: u32) { self.0.fetch_add(1, Ordering::Relaxed); }
+        }
+        let now = Instant::now();
+        let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        receiver.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut cfg = config(); cfg.player_port = receiver.local_addr().unwrap().port();
+        let sender = Ipv4Addr::new(127, 0, 0, 2);
+        let from = SocketAddrV4::new(sender, 50002);
+        let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(cfg.mode);
+        join.hear_keep_alive(&keep_alive(1, sender), now);
+        let mut fixture = Shared { join: Some(join.test_state(join::State::Running { number: 17 })), ..Shared::default() };
+        fixture.assigned.store(17, Ordering::Relaxed);
+        // Use localhost for the observed status sender so its greeting can
+        // be received without adding another OS loopback alias.
+        fixture.greeted.push(Ipv4Addr::LOCALHOST);
+        let shared = Mutex::new(fixture);
+        let counter = Arc::new(Loads(std::sync::atomic::AtomicUsize::new(0)));
+        let facts: Arc<dyn LibraryFacts> = counter.clone();
+        let mut packet = include_bytes!("../tests/fixtures/cdj-status-playing-ours.bin").to_vec();
+        packet[0x28] = 17;
+        assert!(status_from_packet(&packet).unwrap().is_some());
+        assert!(hear_announce(&rejection_frame(), SocketAddr::V4(from), &cfg, &shared, now).is_some());
+        // Stale `ours` is exactly the snapshot StatusLoop could have taken
+        // before the rejection cleared its shared assigned-number cell.
+        hear_player_status(&packet, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002), &socket, &cfg, &shared, &facts, 17);
+        let snapshot = shared.lock();
+        assert!(snapshot.players.is_empty() && snapshot.peers.is_empty());
+        assert!(snapshot.greeted.is_empty() && snapshot.to_greet.is_empty());
+        drop(snapshot);
+        let mut buffer = [0; 100];
+        assert!(matches!(receiver.recv_from(&mut buffer), Err(ref error) if is_timeout(error)));
+        // A recording facts instance observes the callback without touching
+        // any actual library; prove the same captured status can otherwise
+        // report a load using a fresh non-rejected object below.
+        assert_eq!(counter.0.load(Ordering::Relaxed), 0);
+        let replacement = Mutex::new(Shared::default());
+        hear_player_status(&packet, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50002), &socket, &cfg, &replacement, &facts, 17);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert_eq!(replacement.lock().players.len(), 1);
+    }
+
+    #[test]
+    fn rejection_runtime_model_gate_is_distinct_from_selected_mode_and_cached_candidate() {
+        let now = Instant::now();
+        let sender = Ipv4Addr::new(192, 168, 50, 10);
+        for name in ["CDJ-2000", "CDJ-900"] {
+            let mut original = rejection_frame();
+            original[12..32].fill(0);
+            original[12..12 + name.len()].copy_from_slice(name.as_bytes());
+            original[33] = 0;
+            for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless] {
+                let cfg = rejection_config(mode);
+                // Constructor runtime mode 0xff permits original-named 09
+                // even on selected wireless; no initialized IF means no UDP.
+                let fresh = Mutex::new(Shared { join: Some(Join::new(cfg.mac, cfg.address, now).with_mode(mode)), ..Shared::default() });
+                assert!(!fresh.lock().join.as_ref().unwrap().excludes_original_models());
+                assert!(hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &fresh, now).is_none());
+                assert!(fresh.lock().rejected());
+                assert!(fresh.lock().join.as_ref().unwrap().excludes_original_models());
+
+                let mut join = Join::new(cfg.mac, cfg.address, now).with_mode(mode);
+                join.hear_keep_alive(&keep_alive(1, sender), now);
+                let active = Mutex::new(Shared { join: Some(join), ..Shared::default() });
+                let out = hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &active, now);
+                assert_eq!(out.is_some(), mode == rbl_prolink::ConnectionMode::Wired);
+                if mode == rbl_prolink::ConnectionMode::Wireless {
+                    // Runtime wireless exclusion precedes 09 dispatch.
+                    assert!(!active.lock().rejected());
+                    assert!(hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &active, now).is_some());
+                }
+                assert!(active.lock().rejected());
+                // readReject clears the runtime byte to zero, so original
+                // repeats are excluded even after a wired first rejection.
+                assert!(hear_announce(&original, SocketAddr::from((sender, 50000)), &cfg, &active, now).is_none());
+                let modern = hear_announce(&rejection_frame(), SocketAddr::from((sender, 50000)), &cfg, &active, now).unwrap();
+                let candidate = if mode == rbl_prolink::ConnectionMode::Wireless { 41 } else { 17 };
+                assert_eq!(modern.packet, disconnect_bytes(candidate, Ipv4Addr::UNSPECIFIED));
+            }
         }
     }
 }

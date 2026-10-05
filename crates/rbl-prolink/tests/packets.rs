@@ -623,3 +623,11 @@ fn a_djm_v5_is_read_as_a_mixer() {
     // The documented value still decodes the same way.
     assert_eq!(DeviceType::from_u8(0x02), DeviceType::Mixer);
 }
+
+#[test]
+fn rejection_disconnect_is_the_complete_pre_clear_41_byte_frame() {
+    assert_eq!(rbl_prolink::rejection_disconnect(18, Ipv4Addr::new(192,168,50,2)),
+        hex("5173707431576d4a4f4c080072656b6f7264626f7800000000000000000000000103002912c0a83202"));
+    assert_eq!(rbl_prolink::rejection_disconnect(41, Ipv4Addr::UNSPECIFIED),
+        hex("5173707431576d4a4f4c080072656b6f7264626f780000000000000000000000010300292900000000"));
+}

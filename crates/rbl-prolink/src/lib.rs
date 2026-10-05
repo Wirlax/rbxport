@@ -488,6 +488,16 @@ pub enum ConnectionMode {
     Unknown,
 }
 
+/// V2 `readReject`'s broadcast disconnect, using the pre-clear runtime
+/// identity. There is no numbered-target field on the incoming rejection.
+pub fn rejection_disconnect(number: u8, ip: Ipv4Addr) -> Vec<u8> {
+    let mut out = Vec::with_capacity(41);
+    write_header(&mut out, 0x08, 0, REKORDBOX_NAME);
+    out.extend_from_slice(&[1, 3, 0, 41, number]);
+    out.extend_from_slice(&ip.octets());
+    out
+}
+
 /// Discovery request (`00/00`), before device-number assignment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovery {

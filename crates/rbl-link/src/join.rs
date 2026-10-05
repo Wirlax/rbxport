@@ -77,8 +77,12 @@ pub struct Join {
     /// Which of the six numbers a device answered for, by index.
     in_use: [bool; 6],
     next_at: Instant,
+    /// Runtime announcement identity is not database serving readiness.
+    configured_number: u8,
+    runtime_ip: std::net::Ipv4Addr,
     /// Network access keeps its selected address after runtime clearing.
     network_ip: Option<std::net::Ipv4Addr>,
+    rejected: bool,
     /// V1's runtime +0x1a1 gate, distinct from selected interface mode.
     exclude_original_models: bool,
 }
@@ -92,7 +96,10 @@ impl Join {
             state: State::Waiting,
             in_use: [false; 6],
             next_at: now,
+            configured_number: 17,
+            runtime_ip: std::net::Ipv4Addr::UNSPECIFIED,
             network_ip: None,
+            rejected: false,
             exclude_original_models: false,
         }
     }
@@ -121,6 +128,9 @@ impl Join {
         }
     }
 
+    pub(crate) const fn rejected(&self) -> bool { self.rejected }
+    #[cfg(test)]
+    pub(crate) const fn network_initialized(&self) -> bool { self.network_ip.is_some() }
     pub(crate) const fn excludes_original_models(&self) -> bool { self.exclude_original_models }
 
     /// V5 messageReceived's guard precedes every announcement dispatch.
@@ -132,9 +142,28 @@ impl Join {
             || u32::from(sender) & u32::from(mask) == u32::from(own) & u32::from(mask))
     }
 
+    pub(crate) fn reject(&mut self, now: Instant) -> Option<Outgoing> {
+        if self.mode == ConnectionMode::Unknown { return None; }
+        let number = self.number().unwrap_or(self.configured_number);
+        let packet = rbl_prolink::rejection_disconnect(number, self.runtime_ip);
+        let can_send = self.network_ip.is_some_and(|ip| ip.octets()[0] != 0);
+        self.rejected = true;
+        // V2 clears the runtime mode byte to zero, which V1 frameRead uses
+        // for its outer model exclusion even when selected mode is wired.
+        self.exclude_original_models = true;
+        self.state = State::Waiting;
+        self.runtime_ip = std::net::Ipv4Addr::UNSPECIFIED;
+        self.in_use = [false; 6];
+        self.next_at = now;
+        can_send.then_some(Outgoing { packet, to: None, what: "rejection disconnect" })
+    }
+
     /// Back to listening, as rekordbox goes on a compatibility response or
     /// a link-down: the number is given up.
     pub fn reset(&mut self, now: Instant) {
+        // A compatibility reset is not evidence that the rejection latch
+        // clears. Only a new RBX Join instance starts without that latch.
+        if self.rejected { return; }
         self.state = State::Waiting;
         self.in_use = [false; 6];
         self.next_at = now;
@@ -143,6 +172,7 @@ impl Join {
     /// A keep-alive from another device: the first from a player or mixer
     /// starts the join.
     pub fn hear_keep_alive(&mut self, keep_alive: &KeepAlive, now: Instant) {
+        if self.rejected { return; }
         if keep_alive.ip == self.ip && keep_alive.mac == self.mac {
             return;
         }
@@ -161,6 +191,8 @@ impl Join {
             // V1 linkUpFunc sets the interface, IP and configured candidate
             // before it excludes original minor-0 players on wireless.
             self.network_ip = Some(self.ip);
+            self.runtime_ip = self.ip;
+            self.configured_number = if self.mode == ConnectionMode::Wireless { 41 } else { 17 };
             self.exclude_original_models = self.mode == ConnectionMode::Wireless;
         }
         if self.state == State::Waiting && rbl_prolink::brings_link_up_on(keep_alive, self.mode) {
@@ -178,6 +210,7 @@ impl Join {
     /// A `03` reply: to a probe, marks the number in use; to an assign
     /// request, settles or retries it.
     pub fn hear_reply(&mut self, reply: &NumberReply) {
+        if self.rejected { return; }
         match (&self.state, reply.subtype) {
             (State::Probing { .. }, PROBE_SUBTYPE_PROBE) if reply.status == NUMBER_REPLY_IN_USE => {
                 if let Some(index) = REKORDBOX_CLAIM_NUMBERS
@@ -210,6 +243,7 @@ impl Join {
     /// A `02` from another device: a probe of our number, or a block that
     /// names it, is answered with `03` (in use).
     pub fn hear_probe(&mut self, probe: &NumberProbe) -> Option<Outgoing> {
+        if self.rejected { return None; }
         let State::Running { number } = self.state else {
             return None;
         };
@@ -230,6 +264,7 @@ impl Join {
 
     /// The distinct subtype-2 occupancy masks, valid only while running.
     pub fn hear_block(&mut self, block: &NumberBlock) -> Option<Outgoing> {
+        if self.rejected { return None; }
         let State::Running { number } = self.state else {
             return None;
         };
@@ -245,6 +280,7 @@ impl Join {
 
     /// What to send now, if the timer is due.
     pub fn tick(&mut self, now: Instant) -> Option<Outgoing> {
+        if self.rejected { return None; }
         if now < self.next_at {
             return None;
         }
@@ -653,6 +689,45 @@ mod tests {
             announcement.device_number = 33;
             join.hear_keep_alive(&announcement, now);
             assert_eq!(join.in_use, expected);
+        }
+    }
+
+    #[test]
+    fn terminal_rejection_retains_interface_and_candidate_but_not_runtime_or_occupancy() {
+        let now = Instant::now();
+        for mode in [ConnectionMode::Wired, ConnectionMode::Wireless] {
+            let candidate = if mode == ConnectionMode::Wireless { 41 } else { 17 };
+            let mut machine = Join::new(MAC, IP, now).with_mode(mode);
+            assert_eq!(machine.configured_number, 17);
+            assert_eq!(machine.runtime_ip, std::net::Ipv4Addr::UNSPECIFIED);
+            assert!(!machine.network_initialized());
+            machine.hear_keep_alive(&player(), now);
+            assert_eq!(machine.configured_number, candidate);
+            assert_eq!(machine.runtime_ip, IP);
+            machine.in_use = [true; 6];
+            machine.state = State::Running { number: 18 };
+            let outgoing = machine.reject(now).unwrap();
+            assert_eq!(outgoing.packet[36], 18);
+            assert_eq!(outgoing.packet[37..], IP.octets());
+            assert_eq!(machine.state, State::Waiting);
+            assert_eq!(machine.runtime_ip, std::net::Ipv4Addr::UNSPECIFIED);
+            assert_eq!(machine.in_use, [false; 6]);
+            assert_eq!(machine.network_ip, Some(IP));
+            assert_eq!(machine.configured_number, candidate);
+            machine.reset(now);
+            machine.hear_keep_alive(&player(), now);
+            assert!(machine.tick(now + Duration::from_secs(60)).is_none());
+            let response = NumberReply::decode(&number_in_use_reply(REKORDBOX_NAME, 17)).unwrap();
+            machine.hear_reply(&response);
+            let probe = NumberProbe::decode(&rekordbox_claim_stage2([1;6], IP, 18, 3)).unwrap();
+            assert!(machine.hear_probe(&probe).is_none());
+            assert_eq!(machine.in_use, [false; 6]);
+            assert_eq!(machine.state, State::Waiting);
+            let repeat = machine.reject(now).unwrap();
+            assert_eq!(repeat.packet[36], candidate);
+            assert_eq!(repeat.packet[37..], [0; 4]);
+            assert!(machine.rejected());
+            assert!(!Join::new(MAC, IP, now).with_mode(mode).rejected());
         }
     }
 }
