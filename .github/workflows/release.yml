@@ -185,7 +185,7 @@ jobs:
     env:
       # Tests must never be able to open the installed library read-write.
       # This is the same switch the writer checks.
-      RB_LITE_TEST: "1"
+      RBXPORT_TEST: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -255,7 +255,7 @@ jobs:
     if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
-      RB_LITE_TEST: "1"
+      RBXPORT_TEST: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -414,7 +414,7 @@ jobs:
     if: needs.prepare.outputs.skip_tests != 'true'
     runs-on: [self-hosted, linux, x64]
     env:
-      RB_LITE_TEST: "1"
+      RBXPORT_TEST: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -553,7 +553,7 @@ jobs:
         # runtime gate for the x86_64 build; an arm64 build alone cannot prove
         # that an Intel user can launch the binary we ship.
         env:
-          RB_LITE_TEST: "1"
+          RBXPORT_TEST: "1"
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
           XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
         run: |
@@ -579,7 +579,7 @@ jobs:
 
       - name: Require the Intel macOS shell to stay running
         env:
-          RB_LITE_TEST: "1"
+          RBXPORT_TEST: "1"
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config-intel
           XDG_DATA_HOME: ${{ runner.temp }}/xdg-data-intel
         run: |

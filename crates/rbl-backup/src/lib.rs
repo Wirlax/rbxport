@@ -106,7 +106,7 @@ pub fn default_destination(state_dir: &Path) -> PathBuf {
 pub fn writable(location: &rbl_db::LibraryLocation) -> Result<()> {
     match rbl_db::write_refusal_reason(
         location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(),
+        rbl_db::test_mode(),
         rbl_db::is_rekordbox_running(),
     ) {
         Some(reason) => Err(refused(reason)),

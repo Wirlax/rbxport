@@ -96,7 +96,7 @@ The code is built so it cannot damage a library by accident. Keep it that way.
 
 - `master.db` opens read-only unless a write is explicitly asked for, and a
   write is refused while rekordbox is running.
-- `RB_LITE_TEST=1` refuses any write to the installed library, even from
+- `RBXPORT_TEST=1` refuses any write to the installed library, even from
   code that asks for one. CI sets it; set it when you run tests locally.
 - Write tests use `rbl_db::fixture::build`, which makes a temporary library
   with the real schema. Never point a test at your own library.
@@ -114,7 +114,7 @@ These are what CI runs before it builds a release. Run them before pushing.
 
 ```sh
 cargo clippy --workspace --all-targets -- -D warnings
-RB_LITE_TEST=1 cargo test --workspace
+RBXPORT_TEST=1 cargo test --workspace
 
 pnpm lint
 pnpm build        # typecheck and production bundle
@@ -178,7 +178,7 @@ The app logs to stdout and to a daily file under
 | `LOG_LEVEL` | Level for the app's own crates: `error`, `warn`, `info`, `debug` (default) or `trace`. `trace` adds LINK's packet-by-packet lines. |
 | `RUST_LOG` | Replaces the whole filter, e.g. `RUST_LOG=rbl_link=trace,rbxport=info`. |
 | `RBXPORT_LOG_DIR` | Writes the log file somewhere else. |
-| `RB_LITE_TEST` | Refuses writes to the installed library. |
+| `RBXPORT_TEST` | Refuses writes to the installed library. |
 | `RBX_DISABLE_READ_ONLY` | Enables the session-only write override described above. |
 | `E2E_PORT` | Moves the Playwright dev server so two checkouts can run e2e at once. |
 

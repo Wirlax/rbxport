@@ -381,7 +381,7 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     // whether or not rekordbox is open.
     if let Some(reason) = rbl_db::write_refusal_reason(
         location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(),
+        rbl_db::test_mode(),
         rbl_db::is_rekordbox_running(),
     ) {
         return Err(AppError::new(ErrorKind::ReadOnly, reason));
@@ -479,7 +479,7 @@ fn set_tempo_inner(state: &AppState, track: &str, value: &str) -> AppResult<()> 
     let _files = state.analysis_write.lock();
     let location = state.location()?;
     if let Some(reason) = rbl_db::write_refusal_reason(location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(), rbl_db::is_rekordbox_running()) {
+        rbl_db::test_mode(), rbl_db::is_rekordbox_running()) {
         return Err(AppError::new(ErrorKind::ReadOnly, reason));
     }
     if database_locked(&location, track)? { return Err(AppError::new(ErrorKind::ReadOnly, "The beat grid is locked.")); }
@@ -655,7 +655,7 @@ pub async fn grid_lock<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     // Every test builds its own library and share tree in a tempdir, the way
-    // the cue tests do; `RB_LITE_TEST` cannot reach a fixture.
+    // the cue tests do; `RBXPORT_TEST` cannot reach a fixture.
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
     use super::*;

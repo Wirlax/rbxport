@@ -7,7 +7,7 @@
 //!
 //! - Opening is **read-only** unless [`OpenMode::ReadWrite`] is asked for
 //!   explicitly, and read-write is refused while rekordbox is running.
-//! - With `RB_LITE_TEST=1` set, read-write against the *detected* (i.e. real)
+//! - With `RBXPORT_TEST=1` set, read-write against the *detected* (i.e. real)
 //!   database path is refused outright, so a test can never write to the
 //!   user's library even by mistake.
 
@@ -31,6 +31,10 @@ use rusqlite::{Connection, OpenFlags};
 
 /// Opts a deliberately launched app into the manual, session-only write override.
 pub const UNSAFE_WRITES_ENV: &str = "RBX_DISABLE_READ_ONLY";
+/// Prevents tests from opening the detected rekordbox library read-write.
+pub const TEST_ENV: &str = "RBXPORT_TEST";
+/// Accepted so older test scripts retain their installed-library protection.
+const LEGACY_TEST_ENV: &str = "RB_LITE_TEST";
 
 static UNSAFE_WRITES_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -46,6 +50,11 @@ pub fn enable_unsafe_writes() -> bool {
 
 pub fn unsafe_writes_enabled() -> bool {
     UNSAFE_WRITES_ENABLED.load(Ordering::Acquire)
+}
+
+/// Whether this process must refuse writes to the detected rekordbox library.
+pub fn test_mode() -> bool {
+    std::env::var_os(TEST_ENV).is_some() || std::env::var_os(LEGACY_TEST_ENV).is_some()
 }
 use serde::{Deserialize, Serialize};
 
@@ -212,7 +221,7 @@ pub fn write_refusal_reason(
         return None;
     }
     if test_mode {
-        return Some("RB_LITE_TEST is set and this is the real library; tests must copy a fixture first");
+        return Some("RBXPORT_TEST is set and this is the real library; tests must copy a fixture first");
     }
     if rekordbox_running && !unsafe_writes_enabled() {
         return Some("rekordbox is running. Quit it before making changes.");
@@ -235,7 +244,7 @@ impl Library {
         if mode == OpenMode::ReadWrite {
             if let Some(reason) = write_refusal_reason(
                 location.is_real_install,
-                std::env::var_os("RB_LITE_TEST").is_some(),
+                test_mode(),
                 is_rekordbox_running(),
             ) {
                 return Err(DbError::WriteRefused(reason.into()));

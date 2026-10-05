@@ -271,7 +271,7 @@ fn conversion_plan(cues: &[Cue]) -> Vec<(char, u32, u32)> {
 #[cfg(test)]
 mod tests {
     // Every test builds its own library in a tempdir, the way the writer's
-    // own tests do. `RB_LITE_TEST` makes the writer refuse the real install
+    // own tests do. `RBXPORT_TEST` makes the writer refuse the real install
     // as well, and a fixture is never marked as one.
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 

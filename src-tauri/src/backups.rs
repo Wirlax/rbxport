@@ -114,7 +114,7 @@ fn remove(path: &Path) -> AppResult<()> {
 fn writable(location: &rbl_db::LibraryLocation) -> AppResult<()> {
     if let Some(reason) = rbl_db::write_refusal_reason(
         location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(),
+        rbl_db::test_mode(),
         rbl_db::is_rekordbox_running(),
     ) {
         return Err(error(reason));

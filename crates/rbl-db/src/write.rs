@@ -362,7 +362,7 @@ impl Writer {
     /// Opens the library for writing and prepares the backup directory.
     ///
     /// Fails if rekordbox is running, or if this is the real library under
-    /// `RB_LITE_TEST` — both enforced by [`Library::open`].
+    /// `RBXPORT_TEST` — both enforced by [`Library::open`].
     pub fn open(location: crate::LibraryLocation, backup_dir: impl Into<PathBuf>) -> Result<Self> {
         let library = Library::open(location, OpenMode::ReadWrite)?;
         if let crate::SchemaSupport::Degraded { missing } = &library.schema().support {
@@ -2960,7 +2960,7 @@ pub fn backups_in(dir: &Path) -> Vec<PathBuf> {
 /// one on the old inode would answer with the old rows for ever.
 pub fn restore_backup(location: &crate::LibraryLocation, backup: &Path) -> Result<()> {
     if let Some(reason) = crate::write_refusal_reason(location.is_real_install,
-        std::env::var_os("RB_LITE_TEST").is_some(), is_rekordbox_running()) {
+        crate::test_mode(), is_rekordbox_running()) {
         return Err(DbError::WriteRefused(reason.into()));
     }
     let is_ours = backup

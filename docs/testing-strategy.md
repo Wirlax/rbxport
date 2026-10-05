@@ -9,7 +9,7 @@ RBX is tested at two boundaries:
 
 This document covers the part of each product manual that depends on RBX acting as a rekordbox Link Export source. Deck-local playback, mixer controls, effects, recording, lighting, streaming services, and USB-device export are outside this test surface.
 
-Tests must set `RB_LITE_TEST=1` whenever code can open or write a library. Writable tests must use `rbl_db::fixture::build`; an installed rekordbox library is never a test target.
+Tests must set `RBXPORT_TEST=1` whenever code can open or write a library. Writable tests must use `rbl_db::fixture::build`; an installed rekordbox library is never a test target.
 
 ## Evidence rules
 
@@ -125,8 +125,8 @@ Use this result format:
 Focused unit and protocol checks:
 
 ```sh
-RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session
-RB_LITE_TEST=1 cargo test -p rbl-link --test link
+RBXPORT_TEST=1 cargo test -p rbl-dbserver --test session
+RBXPORT_TEST=1 cargo test -p rbl-link --test link
 ```
 
 Real CDJ-3000 firmware integration, from the private companion checkout:
@@ -142,7 +142,7 @@ Before handing off a substantial Link Export change:
 
 ```sh
 cargo clippy --workspace --all-targets -- -D warnings
-RB_LITE_TEST=1 cargo test --workspace
+RBXPORT_TEST=1 cargo test --workspace
 ```
 
 XDJ-AZ and XDJ-RX3 integration runs remain blocked until AtEmu has bootable firmware models for them. Their protocol dialects stay covered by unit and socket integration tests in the meantime, with results labelled as protocol coverage.

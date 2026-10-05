@@ -2,7 +2,7 @@
 //!
 //! Every test builds its own encrypted library in a tempdir. Nothing here can
 //! reach the installed library: `Library::open` refuses read-write on a real
-//! install whenever `RB_LITE_TEST` is set, and a fixture is never marked as one.
+//! install whenever `RBXPORT_TEST` is set, and a fixture is never marked as one.
 #![allow(clippy::pedantic, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use rbl_db::fixture::{self, playlist_id, track_id, Shape};

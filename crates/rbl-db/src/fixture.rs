@@ -6,7 +6,7 @@
 //! approximation would let a wrong column type or a missing `NOT NULL` pass.
 //!
 //! Fixtures are always `is_real_install: false`, so opening one read-write is
-//! allowed even under `RB_LITE_TEST`.
+//! allowed even under `RBXPORT_TEST`.
 
 use std::path::Path;
 
@@ -181,7 +181,7 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
         share_root,
         passphrase: FIXTURE_PASSPHRASE.to_owned(),
         // The whole point: a fixture is never mistaken for the real install,
-        // so opening it read-write is allowed even under RB_LITE_TEST.
+        // so opening it read-write is allowed even under RBXPORT_TEST.
         is_real_install: false,
     })
 }
