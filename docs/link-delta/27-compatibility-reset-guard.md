@@ -67,3 +67,17 @@ reset handler. Smallest check:
 `RB_LITE_TEST=1 cargo test -p rbl-link --lib join`.
 A source-backed idle guard can be isolated from unresolved downstream
 cleanup work.
+
+## Step 2 — implementation (2026-10-05)
+
+Narrow implementation: an idle/absent Join ignores compatibility responses
+before member/greeting reset. This matches the established idle guard and
+prevents the existing broad teardown from erasing idle state.
+
+A complete synthetic announcement regression verifies unchanged peer/player
+maps, pending/completed greetings and Waiting state.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Full compatibility processing remains blocked: outer compatibility flags,
+all non-idle stop/default-mode transitions and downstream service/session
+teardown retain the Step 1 evidence dependencies. No new reset sequence was
+invented.

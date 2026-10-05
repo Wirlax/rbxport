@@ -872,12 +872,13 @@ fn hear_announce(
         // rekordbox drops every member, stops its timers and starts over
         // on a compatibility response (`readCompatiRes`).
         Some(AnnounceKind::Other(0x0b)) => {
-            tracing::warn!(%from, "compatibility response; leaving the link and starting over");
             let mut shared = shared.lock();
-            shared.peers = DeviceTable::new();
-            shared.players.clear();
-            shared.greeted.clear();
-            shared.to_greet.clear();
+            // V2 readCompatiRes returns immediately in the idle state.
+            if shared.join.as_ref().is_none_or(|join| *join.state() == join::State::Waiting) {
+                return None;
+            }
+            tracing::warn!(%from, "compatibility response; leaving the link and starting over");
+            shared.clear_members();
             if let Some(join) = shared.join.as_mut() {
                 join.reset(Instant::now());
             }
@@ -1653,6 +1654,23 @@ mod all_in_one_tests {
         assert_eq!(shared.players.len(), 2);
         assert_eq!(KeepAlive::decode(&KeepAlive::rekordbox_as(17, [0; 6], Ipv4Addr::LOCALHOST,
             u8::try_from(shared.peers.len()).unwrap()).encode()).unwrap().peers, 0);
+    }
+
+    #[test]
+    fn idle_compatibility_response_does_not_destroy_members_or_greetings() {
+        let now = Instant::now();
+        let shared = Mutex::new(members(&[1], now));
+        shared.lock().join.as_mut().unwrap().reset(now);
+        let mut wire = keep_alive(1, Ipv4Addr::new(169, 254, 20, 2)).encode();
+        wire[10] = 0x0b;
+        assert!(hear_announce(&wire, SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1), 50000)),
+            &config(), &shared, now).is_none());
+        let state = shared.lock();
+        assert_eq!(state.peers.len(), 1);
+        assert_eq!(state.players.len(), 1);
+        assert_eq!(state.greeted.len(), 1);
+        assert_eq!(state.to_greet.len(), 1);
+        assert_eq!(state.join.as_ref().unwrap().state(), &join::State::Waiting);
     }
 
     #[test]
