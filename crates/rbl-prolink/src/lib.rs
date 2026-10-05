@@ -488,6 +488,30 @@ pub enum ConnectionMode {
     Unknown,
 }
 
+/// Discovery request (`00/00`), before device-number assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discovery {
+    pub counter: u8,
+    pub device_type: u8,
+    pub mac: [u8; 6],
+}
+
+impl Discovery {
+    pub fn decode(packet: &[u8]) -> Result<Self> {
+        if packet.len() < 44 {
+            return Err(PacketError::TooShort(packet.len()));
+        }
+        let kind = packet_kind(packet)?;
+        if kind != 0 { return Err(PacketError::WrongKind(kind)); }
+        if packet[11] != 0 { return Err(PacketError::WrongSubtype(packet[11])); }
+        Ok(Self {
+            counter: packet[36],
+            device_type: packet[37],
+            mac: [packet[38], packet[39], packet[40], packet[41], packet[42], packet[43]],
+        })
+    }
+}
+
 pub fn brings_link_up_on(keep_alive: &KeepAlive, mode: ConnectionMode) -> bool {
     let kind = keep_alive.device_type.to_u8();
     if ![1, 2, 3, 7].contains(&kind) {

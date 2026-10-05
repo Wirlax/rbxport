@@ -73,3 +73,32 @@ after cleanup. Preserve a greeting if another member at that IP survives.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then
 `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented a bounded `00/00` discovery decoder and type-scoped MAC
+membership cleanup. The shared removal helper updates both stores and greeting
+ownership; only types/ranges listed in Step 1 participate. Type 7 preserves
+the established primary→secondary removal rule. Rediscovery produces no wire
+reply and does not reset the local Join state.
+
+Complete synthetic discovery fixtures cover all listed type/range combinations,
+same MAC outside the range, unrelated MAC at the same IP, unknown type,
+nonzero subtype, every truncated prefix and fresh keepalive registration after
+removal. Shared-IP survivors retain their greeting.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Receiver length policy, synthesized OPUS ageing and client UI remain
+unverified; this does not extend type 1 to IDs 5/6.
+
+### Review remediation — F2/F3 (2026-10-05)
+
+The shared V5 `messageReceived` guard (1354–1367) now rejects initialized
+own-address/off-subnet discovery before MAC-scoped removal. Same-subnet
+rediscovery keeps the established type/range rules.
+
+V1 `readDiscoveryRequest` (6849–7049) removes membership without cancelling
+its timers. The peer table now retains pending slot deadlines through that
+removal and synthetic recreation, and consumes them even if a slot remains
+inactive when they fire. This does not extend the six-second RBX timeout
+policy or establish full OPUS lifecycle equivalence. See [review.md](review.md)
+for the receive-context and removal/recreation regression results.

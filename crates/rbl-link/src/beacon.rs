@@ -219,6 +219,26 @@ impl Shared {
         }
     }
 
+    fn rediscover(&mut self, discovery: &rbl_prolink::Discovery) {
+        let leaving: Vec<_> = self.peers.peers().iter().filter(|peer| {
+            let in_range = match discovery.device_type {
+                1 => (1..=4).contains(&peer.device_number),
+                2 | 3 => peer.device_number == 33,
+                4 => [17, 18, 41, 42, 43, 44].contains(&peer.device_number),
+                6 => (41..=44).contains(&peer.device_number),
+                7 => (9..=12).contains(&peer.device_number),
+                _ => false,
+            };
+            in_range && peer.mac == discovery.mac
+        }).map(|peer| peer.device_number).collect();
+        for number in leaving {
+            self.remove_member(number);
+            if discovery.device_type == 7 && (number == 9 || number == 11) {
+                self.remove_member(number + 1);
+            }
+        }
+    }
+
     fn expire_silent_players(&mut self) {
         let mut expired_addresses = Vec::new();
         self.players.retain(|number, player| {
@@ -745,6 +765,11 @@ fn hear_announce(
         return None;
     }
     match kind.map(AnnounceKind::from_u8) {
+        Some(AnnounceKind::ClaimStage1) => {
+            let discovery = rbl_prolink::Discovery::decode(packet).ok()?;
+            shared.lock().rediscover(&discovery);
+            return None;
+        }
         Some(AnnounceKind::ClaimStage2) => {
             if packet.get(11) == Some(&rbl_prolink::PROBE_SUBTYPE_BLOCK) {
                 let block = rbl_prolink::NumberBlock::decode(packet).ok()?;
@@ -1581,5 +1606,67 @@ mod all_in_one_tests {
         let (length, source) = receiver.recv_from(&mut bytes).unwrap();
         assert_eq!(source, command_source);
         assert_eq!(bytes[..length], rbl_prolink::load_track_command(REKORDBOX_NAME, 17, 1, 0x1234));
+    }
+
+    #[test]
+    fn wireless_original_model_gate_applies_before_announcement_dispatch() {
+        let now = Instant::now();
+        // Keep the sender on the selected loopback /8 so this exercises
+        // the model gate, not V5's earlier cached-NetIF subnet guard.
+        let ip = Ipv4Addr::new(127, 0, 0, 2);
+        for mode in [rbl_prolink::ConnectionMode::Wired, rbl_prolink::ConnectionMode::Wireless,
+            rbl_prolink::ConnectionMode::Unknown] {
+            for name in ["CDJ-2000", "CDJ-900"] {
+                let shared = Mutex::new(members(&[1], now));
+                let mut configuration = config();
+                configuration.mode = mode;
+                let mut initialized = Join::new(configuration.mac, configuration.address, now).with_mode(mode);
+                initialized.hear_keep_alive(&keep_alive(1, ip), now);
+                shared.lock().join = Some(initialized);
+                let mut wire = rbl_prolink::rekordbox_claim_stage1([1,2,3,4,5,6], 1);
+                wire[12..32].fill(0);
+                wire[12..12 + name.len()].copy_from_slice(name.as_bytes());
+                wire[33] = 0;
+                wire[37] = 1;
+                hear_announce(&wire, SocketAddr::from((ip, 50000)), &configuration, &shared, now);
+                assert_eq!(shared.lock().peers.is_empty(), mode == rbl_prolink::ConnectionMode::Wired);
+            }
+        }
+    }
+
+    #[test]
+    fn rediscovery_removes_only_the_matching_mac_in_its_evidenced_type_range() {
+        let now = Instant::now();
+        let ip = Ipv4Addr::new(169, 254, 20, 2);
+        let numbers = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 17, 18, 33, 41, 42, 43, 44];
+        for (kind, removed) in [(1, vec![1,2,3,4]), (2,vec![33]), (3,vec![33]),
+            (4,vec![17,18,41,42,43,44]), (6,vec![41,42,43,44]), (7,vec![9,10,11,12]), (5,vec![])] {
+            let shared = Mutex::new(members(&numbers, now));
+            let mut wire = rbl_prolink::rekordbox_claim_stage1([1,2,3,4,5,6], 1);
+            wire[37] = kind;
+            for cut in 0..44 {
+                hear_announce(&wire[..cut], SocketAddr::from((ip, 50000)), &config(), &shared, now);
+                assert_eq!(shared.lock().peers.len(), numbers.len());
+            }
+            let before = shared.lock().join.as_ref().unwrap().state().clone();
+            assert!(hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now).is_none());
+            let state = shared.lock();
+            let remaining: Vec<_> = numbers.into_iter().filter(|number| !removed.contains(number)).collect();
+            assert_eq!(state.peers.peers().iter().map(|p| p.device_number).collect::<Vec<_>>(), remaining);
+            assert_eq!(state.players.len(), remaining.len());
+            assert_eq!(state.join.as_ref().unwrap().state(), &before);
+            assert!(state.greeted.contains(&ip), "out-of-range shared-IP survivors retain greeting");
+            drop(state);
+            // Fresh registration succeeds; an unrelated MAC cannot remove it.
+            let number = removed.first().copied().unwrap_or(1);
+            hear_announce(&keep_alive(number, ip).encode(), SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            wire[38] ^= 0xff;
+            hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            assert!(shared.lock().players.contains_key(&number));
+            wire[11] = 1;
+            wire[38] ^= 0xff;
+            hear_announce(&wire, SocketAddr::from((ip, 50000)), &config(), &shared, now);
+            assert!(shared.lock().players.contains_key(&number));
+        }
     }
 }
