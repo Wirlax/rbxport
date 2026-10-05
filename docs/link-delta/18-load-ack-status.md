@@ -1,6 +1,6 @@
 # 18. Distinguish load-command response statuses
 
-Priority: P1. Status: planned. Source: [comparison report](../../link-delta.md).
+Priority: P1. Step 1: complete (2026-10-05). Implementation/acceptance: see disposition below. Source: [comparison report](link-delta.md).
 
 ## Why this task exists
 
@@ -31,3 +31,53 @@ Record complete request/reply and state assertions, not just handler presence. I
 
 Use the smallest affected crate checks first; apply the repository's validation gates to substantial implementation changes. Write tests must use `RB_LITE_TEST=1` with temporary fixture libraries, never an installed rekordbox library. Preserve device-specific behavior unless evidence proves a change is needed.
 
+## Step 1 — investigation (2026-10-05)
+
+Disposition: **field extraction established; status enum meaning blocked**.
+[Evidence key](investigation.md).
+
+### Contract and current coverage
+
+[OBS] V5 `PSvLinkMusicDDResInfo::setData` (1375–1405) consumes a
+40-byte `1a` packet: common header, big-endian payload length at
+`0x22`, and bytes `0x24..0x27`. V5 `NormalInterval::messageReceived`
+(515–526) forwards bytes `0x24/0x25` as an eight-byte local message
+`0x22`. Those are the fields to preserve, not a blanket success event.
+
+R2 `status_loop` (922–924) logs every magic-valid kind `1a` as
+"accepted" without decoding the remaining length/fields. Add bounded
+parsing; retain numeric unknown values. An ACK must not mark a track loaded
+or playing. Later player status is the separate source for those states.
+No network response to the ACK is established.
+
+[OBS, capture] `push-load-cdj3000-emu-20260913.pcap` frame 37,
+`192.168.1.152 → 192.168.1.14`, is exactly 40 bytes:
+
+```text
+5173707431576d4a4f4c1a43444a2d33303030000000000000000000000000010003000403010000
+```
+
+It contains `03 01 00 00` at `0x24..0x27`, following a kind-`19`
+request in frame 36. This single response is not an enum definition.
+
+### Unknowns and bounded evidence attempt
+
+Read the parser and local-message construction and extracted the full
+historical ACK above. V3 `InnerLinkAPI::linkProc` (325–330) routes local
+0x22 to `musicDragDropResponse`; a search across the supplied C exports
+found its calls but no body. [UNKNOWN] authoritative acceptance/rejection meanings,
+correlation with request/deck, and reserved-byte semantics. Evidence task:
+trace the local `0x22` consumer or device's `1a` constructor and retain
+one accepted and one rejected load case. Do not label status 1 "accepted"
+solely because this historical request was followed by it. Semantic enum
+implementation remains blocked; neutral numeric reporting is bounded.
+
+### Implementation handoff
+
+Affected: `rbl-prolink/src/lib.rs` typed ACK decoder and packet tests;
+`rbl-link/src/beacon.rs` logging/state tests. Dependencies: none for
+parsing; 23/24 for completed-load evidence. Fixtures: frame 37, every
+truncated prefix, wrong kind/length, unknown values, mismatched deck,
+repeated ACK, and subsequent status naming the actual content. Smallest
+validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then the beacon
+test. Do not introduce a success UI from unproven values.

@@ -1,6 +1,6 @@
 # 05. Disconnect the correct logical deck and its peer entry
 
-Priority: P0. Status: planned. Source: [comparison report](../../link-delta.md).
+Priority: P0. Step 1: complete (2026-10-05). Implementation/acceptance: see disposition below. Source: [comparison report](link-delta.md).
 
 ## Why this task exists
 
@@ -30,3 +30,51 @@ Record complete request/reply and state assertions, not just handler presence. I
 
 Use the smallest affected crate checks first; apply the repository's validation gates to substantial implementation changes. Write tests must use `RB_LITE_TEST=1` with temporary fixture libraries, never an installed rekordbox library. Preserve device-specific behavior unless evidence proves a change is needed.
 
+## Step 1 — investigation (2026-10-05)
+
+Disposition: **numbered removal contract established**.
+[Evidence key and capture check](investigation.md).
+
+### Contract and current coverage
+
+- [OBS] V1 `frameRead` dispatches both `07` and `08` to V2
+  `readDisconnect` (578–611, address `100f4c8bc`), passing frame
+  payload at `0x24`. The first payload byte is the member number.
+  Accept member IDs 1–80, vendor states 2–6 or 8, and an active named member.
+  The callback does not match the sender IP to choose which member leaves.
+- Mark that member removed and notify local membership change. For number
+  9 remove 10 as well; for 11 remove 12 as well. No outgoing wire response
+  or forced rejoin is present in this handler. A disconnect for 10 or 12
+  does not remove its preceding member; an inactive primary is a no-op.
+- [OBS] R2 `hear_announce` (723–727) instead calls
+  `Shared::remove_players_at`, deleting all players at the UDP sender
+  address and forgetting that address's greeting; `DeviceTable` survives.
+  RBX needs removal by number in both tables. Preserve a shared-address
+  greeting while a surviving logical member still uses it, consistent with
+  the existing `expire_silent_players` greeting invariant (187–209).
+  This last mapping is an RBX state-coherence requirement, not proof of a
+  vendor greeting packet.
+
+### Unknowns and bounded evidence attempt
+
+Read the complete removal handler and dispatch and checked the available
+announcement captures: no `07/08`. The static body consumes the number;
+the exact vendor datagram-length acceptance and UI consequence remain
+[UNKNOWN]. The vendor's outgoing disconnect constructor in V1 collision
+handling is 41 bytes; it is a valid fixture, not proof that the receiver
+requires exactly 41. Reject malformed/truncated input safely. Do not add
+OPUS-wide four-deck deletion: this handler proves only the stated pairs.
+A fresh trace is required to claim client-visible disconnect parity.
+
+### Implementation handoff
+
+Affected: `beacon.rs` shared removal/greeting helpers,
+`rbl-prolink::DeviceTable` removal API and disconnect decoding,
+`tests/beacon.rs`. Dependencies: no numbered prerequisite; coordinate
+paired membership with 26 and avoid blocking ordinary numbered removal on
+unproved extra synthesis. Fixtures: same-IP IDs 1/2; 9/10 and 11/12;
+inactive/invalid IDs; every applicable state; both kinds; foreign sender;
+truncation; surviving and last-member greeting cleanup.
+
+Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`
+and `RB_LITE_TEST=1 cargo test -p rbl-prolink`.

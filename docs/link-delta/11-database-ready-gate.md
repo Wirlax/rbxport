@@ -1,6 +1,6 @@
 # 11. Do not serve sessions using an unnegotiated fallback number
 
-Priority: P0. Status: planned. Source: [comparison report](../../link-delta.md).
+Priority: P0. Step 1: complete (2026-10-05). Implementation/acceptance: see disposition below. Source: [comparison report](link-delta.md).
 
 ## Why this task exists
 
@@ -32,3 +32,52 @@ Record complete request/reply and state assertions, not just handler presence. I
 
 Use the smallest affected crate checks first; apply the repository's validation gates to substantial implementation changes. Write tests must use `RB_LITE_TEST=1` with temporary fixture libraries, never an installed rekordbox library. Preserve device-specific behavior unless evidence proves a change is needed.
 
+## Step 1 — investigation (2026-10-05)
+
+Disposition: **direct-session gap confirmed; exact refusal/reacquisition blocked**.
+[Evidence key and capture check](investigation.md).
+
+### Established contract and current coverage
+
+- [OBS] V3 `UiProDJLink::notifyLinkConnect` (4236–4296) calls
+  `PSvDBServer::Initialize` only when not initialized, with the assigned
+  number from the callback. This establishes the identity used at initial
+  initialization, not a complete TCP refusal policy.
+- R1 `Link::start` binds services and shares the beacon's number cell.
+  R3 `Bound::start` (218–241) **already gates port queries** through
+  `Handler::serving`. A pre-ready query closes unanswered.
+  The DB accept loop directly calls `serve_session`, which calls
+  `handler.open` without that gate. `CatalogHandler::open` (50–55)
+  converts number zero to 17. This direct-session bypass remains a real gap.
+- Established RBX invariant: a network session must never receive an
+  invented identity while number acquisition is incomplete. Preserve the
+  assigned number after readiness. Gate/check the direct session path and
+  make opening plus identity selection coherent; a separate boolean check
+  followed by a racy fallback-to-17 load is insufficient.
+
+### Unknowns and bounded evidence attempt
+
+Read V3 initialization and V1 `notifyLinkDisconnect` (11181 onward),
+plus both RBX accept loops and session creation. The disconnect callback
+posts a UI message; it does not itself prove accepted-session teardown.
+The shared captures do not cover pre-ready connection attempts or
+reacquisition. [UNKNOWN] vendor SYN refusal vs accepted close, daemon
+lifetime after link-down, and handling of established sessions when the
+assigned number changes. Evidence task: trace DB initialization/finalization
+from the posted link events, then capture pre-ready, joined, and reset
+connections. Exact transport refusal and in-flight-session policy remain
+blocked; do not infer them from bind order.
+
+### Implementation handoff
+
+Affected: `rbl-dbserver/src/net.rs` handler/session-open boundary,
+`session.rs`, `rbl-link/src/lib.rs`, and socket tests. Dependencies:
+04/09/10/20 lifecycle transitions, without requiring their unknown behavior
+to be fabricated. Fixtures use controllable number/readiness epochs,
+direct DB-port and discovery-port connections, zero→17/18, reset races,
+already-open sessions, and subsequent valid setup replies. No real library
+writes are required.
+
+Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-dbserver`; then
+`RB_LITE_TEST=1 cargo test -p rbl-link --test beacon` plus the relevant
+existing Link socket test once the lifecycle policy is evidenced.

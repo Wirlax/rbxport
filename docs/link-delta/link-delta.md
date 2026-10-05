@@ -139,20 +139,20 @@ Installed `libFilSiNE_Mac_DyLib.dylib` SHA-256: `94b48f4258613571ff40797c25f798c
 
 | ID | Artifact and inspected entry points |
 |---|---|
-| V1 | [System manager decompilation](../rbxport-private/verification/link/rekordbox-re/rb_named.c): `frameRead` at `100f4a760`; `readDiscovery`; `readIdBlkRequset` at `100f4b584`; `readConfigNotify`; UDP socket startup. |
-| V2 | [Additional system manager decompilation](../rbxport-private/verification/link/rekordbox-re/rb_sysmgr2.c): constructor, `readTimeServerRequest`, `readDisconnect`, `readReject`, `readCompatibiltyMode`, `timerCallback`. |
-| V3 | [Lifecycle/UI decompilation](../rbxport-private/verification/link/rekordbox-re/rb_bystring.c): `InnerLinkAPI::start`, `UiProDJLink::notifyLinkConnect`. |
-| V4 | [New dispatcher export](../rbxport-private/verification/link/rekordbox-re/link-delta-20261004.c): database dispatchers at lines 1–1170; stop at 1171; network start at 1205; database analysis helpers at 3329 onward; filter helpers at 5643 onward; socket startup at 6794 onward. |
-| V5 | [New packet receiver export](../rbxport-private/verification/link/rekordbox-re/link-delta-network-20261004.c): NormalInterval at 1, ShortInterval at 1026, Monitor at 1072, SysMgrTCP at 1164, DeviceConnect2 at 1186, and their directly called parsing/matching helpers. |
-| V6 | [New analysis/helper export](../rbxport-private/verification/link/rekordbox-re/link-delta-analysis-20261004.c): `GetVbrInf` at 1 (`101550638`), `GetUsbCue` at 65 (`10154f624`), `LoadKeyInf` at 365 (`101551bf8`), `GetUsbCueExt` at 477, `GetQtzInf`, filter persistence, and ID-block request processing. |
-| V7 | [File-service decompilation](../rbxport-private/verification/link/rekordbox-re/filsine.c): NFS dispatcher at 164, READ at 401, attributes at 1970, file READ at 2266, READDIR at 2401, portmapper at 2836, SET at 2906, UNSET at 2937, duplicate cache at 3426, mount dispatcher at 3641. |
-| C1 | [Captured setup probes](../rbxport-private/verification/link/interaction-audit-20260920/client-versions.txt). Historical execution evidence, not a fresh test. |
-| L1 | [Vendor API log](../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/PSvLinkAPILog.txt), [system manager log](../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/SysMgrLog.txt), [NFS log](../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/NFSdLog.txt). |
-| R1 | [Link orchestration](crates/rbl-link/src/lib.rs), [app orchestration](src-tauri/src/link.rs). |
-| R2 | [Beacon and UDP handlers](crates/rbl-link/src/beacon.rs), [join state machine](crates/rbl-link/src/join.rs), [packet codec](crates/rbl-prolink/src/lib.rs). |
-| R3 | [Database session](crates/rbl-dbserver/src/session.rs), [wire/command constants](crates/rbl-dbserver/src/lib.rs), [database networking](crates/rbl-dbserver/src/net.rs), [filter](crates/rbl-dbserver/src/filter.rs). |
-| R4 | [Library adapter](crates/rbl-link/src/catalog.rs), [analysis blobs](crates/rbl-link/src/blobs.rs), [export roots](crates/rbl-link/src/files.rs). |
-| R5 | [RPC/NFS implementation](crates/rbl-nfs/src/lib.rs), [VFS](crates/rbl-nfs/src/vfs.rs), [UDP networking](crates/rbl-nfs/src/net.rs). |
+| V1 | [System manager decompilation](../../../rbxport-private/verification/link/rekordbox-re/rb_named.c): `frameRead` at `100f4a760`; `readDiscovery`; `readIdBlkRequset` at `100f4b584`; `readConfigNotify`; UDP socket startup. |
+| V2 | [Additional system manager decompilation](../../../rbxport-private/verification/link/rekordbox-re/rb_sysmgr2.c): constructor, `readTimeServerRequest`, `readDisconnect`, `readReject`, `readCompatibiltyMode`, `timerCallback`. |
+| V3 | [Lifecycle/UI decompilation](../../../rbxport-private/verification/link/rekordbox-re/rb_bystring.c): `InnerLinkAPI::start`, `UiProDJLink::notifyLinkConnect`. |
+| V4 | [New dispatcher export](../../../rbxport-private/verification/link/rekordbox-re/link-delta-20261004.c): database dispatchers at lines 1–1170; stop at 1171; network start at 1205; database analysis helpers at 3329 onward; filter helpers at 5643 onward; socket startup at 6794 onward. |
+| V5 | [New packet receiver export](../../../rbxport-private/verification/link/rekordbox-re/link-delta-network-20261004.c): NormalInterval at 1, ShortInterval at 1026, Monitor at 1072, SysMgrTCP at 1164, DeviceConnect2 at 1186, and their directly called parsing/matching helpers. |
+| V6 | [New analysis/helper export](../../../rbxport-private/verification/link/rekordbox-re/link-delta-analysis-20261004.c): `GetVbrInf` at 1 (`101550638`), `GetUsbCue` at 65 (`10154f624`), `LoadKeyInf` at 365 (`101551bf8`), `GetUsbCueExt` at 477, `GetQtzInf`, filter persistence, and ID-block request processing. |
+| V7 | [File-service decompilation](../../../rbxport-private/verification/link/rekordbox-re/filsine.c): NFS dispatcher at 164, READ at 401, attributes at 1970, file READ at 2266, READDIR at 2401, portmapper at 2836, SET at 2906, UNSET at 2937, duplicate cache at 3426, mount dispatcher at 3641. |
+| C1 | [Captured setup probes](../../../rbxport-private/verification/link/interaction-audit-20260920/client-versions.txt). Historical execution evidence, not a fresh test. |
+| L1 | [Vendor API log](../../../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/PSvLinkAPILog.txt), [system manager log](../../../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/PSvLinkSysMgrLog.txt), [NFS log](../../../rbxport-private/verification/link/rekordbox-re/pioneerlog-2026-09-18/PSvNFSdLog.txt). |
+| R1 | [Link orchestration](../../crates/rbl-link/src/lib.rs), [app orchestration](../../src-tauri/src/link.rs). |
+| R2 | [Beacon and UDP handlers](../../crates/rbl-link/src/beacon.rs), [join state machine](../../crates/rbl-link/src/join.rs), [packet codec](../../crates/rbl-prolink/src/lib.rs). |
+| R3 | [Database session](../../crates/rbl-dbserver/src/session.rs), [wire/command constants](../../crates/rbl-dbserver/src/lib.rs), [database networking](../../crates/rbl-dbserver/src/net.rs), [filter](../../crates/rbl-dbserver/src/filter.rs). |
+| R4 | [Library adapter](../../crates/rbl-link/src/catalog.rs), [analysis blobs](../../crates/rbl-link/src/blobs.rs), [export roots](../../crates/rbl-link/src/files.rs). |
+| R5 | [RPC/NFS implementation](../../crates/rbl-nfs/src/lib.rs), [VFS](../../crates/rbl-nfs/src/vfs.rs), [UDP networking](../../crates/rbl-nfs/src/net.rs). |
 
 V4–V6 were generated read-only from the existing Ghidra `rb_arm64` project using `DecompileTree.java` with depth 1. They retain entry-point addresses and complete exported functions. Reproduce with `analyzeHeadless ... -process rb_arm64 -readOnly -noanalysis -postScript DecompileTree.java <output> 1 <addresses>`. The executable hash was checked against the installed executable; an executable hash is not itself proof of all Ghidra project metadata.
 

@@ -1,6 +1,6 @@
 # 07. Clear obsolete membership when a device rediscovers
 
-Priority: P0. Status: planned. Source: [comparison report](../../link-delta.md).
+Priority: P0. Step 1: complete (2026-10-05). Implementation/acceptance: see disposition below. Source: [comparison report](link-delta.md).
 
 ## Why this task exists
 
@@ -31,3 +31,45 @@ Record complete request/reply and state assertions, not just handler presence. I
 
 Use the smallest affected crate checks first; apply the repository's validation gates to substantial implementation changes. Write tests must use `RB_LITE_TEST=1` with temporary fixture libraries, never an installed rekordbox library. Preserve device-specific behavior unless evidence proves a change is needed.
 
+## Step 1 — investigation (2026-10-05)
+
+Disposition: **type-scoped MAC removal contract established**.
+[Evidence key and capture check](investigation.md).
+
+### Contract and current coverage
+
+- [OBS] V1 `frameRead` (6670–6830) passes `00` payload to
+  `readDiscoveryRequest` (6832–7059). Discovery has counter at frame
+  `0x24`, type at `0x25`, MAC at `0x26..0x2c`; require enough
+  bytes before reading those fields. Outer enabled/compatibility/model
+  gates still apply. The callback itself has no running-only state guard.
+- Removal requires matching six-byte MAC and an active member **within the
+  type-specific range**: type 1 checks IDs 1–4; types 2/3 check 33; type 4
+  checks 17/18 and falls through to 41–44; type 6 checks 41–44; type 7
+  checks 9–12, with paired 9→10 and 11→12 removal. Other types have no
+  membership effect. Do not erase every member with the MAC regardless of type.
+- Removed entries decrement count and notify membership (and clear the
+  type-2 marker when relevant). No network reply or local rejoin is present.
+  R2 `hear_announce` currently drops kind `00`; `Peer` has no MAC,
+  so the required matching cannot be implemented from the current table alone.
+
+### Unknowns and bounded evidence attempt
+
+Read all type branches including type-4 fallthrough and type-7 paired
+cleanup; scanned all five captures for announcements. No discovery packet
+was available. [UNKNOWN] exact receiver length policy and resulting player
+UI; a rediscovery trace is the next evidence task. Do not widen type 1 to
+IDs 5/6 or turn this branch into a universal MAC identity rule merely because
+newer devices can use additional numbers.
+
+### Implementation handoff
+
+Affected: `rbl-prolink/src/lib.rs` discovery decoder and MAC-bearing peer
+state; `rbl-link/src/beacon.rs` and beacon tests. Dependencies: share
+coherent removals with 05/06 and paired semantics with 26. Fixtures cover
+every type/range, same MAC outside its range, different MAC at same IP,
+inactive member, malformed discovery, and fresh keepalive registration
+after cleanup. Preserve a greeting if another member at that IP survives.
+
+Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then
+`RB_LITE_TEST=1 cargo test -p rbl-link --test beacon`.

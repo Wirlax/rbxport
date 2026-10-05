@@ -2,9 +2,24 @@
 
 These are proposed tasks, not implemented fixes. Numbered filenames are recommended execution priority, based on connection/state correctness first, load-data correctness next, and end-to-end proof last. The ordering is an engineering judgment—not evidence that every difference has caused a player failure.
 
-Source: [link-delta.md](../../link-delta.md). The source report was found at the repository root; it has not been moved or duplicated.
+Source: [link-delta.md](link-delta.md). The historical source report is stored alongside this worklist; the dated investigations below recheck its findings against the current checkout.
 
 Basic parity here means a device can discover/select the desktop source, connect with a coherent identity, browse playlists/tracks, obtain load data, and disconnect/reconnect coherently. It does not mean reproducing every rekordbox feature.
+
+## Investigation status — 2026-10-05
+
+Step 1 of [todo.md](todo.md) is recorded for all 46 numbered issues.
+Each issue has a dated contract, current-code comparison, bounded evidence
+attempt, unresolved evidence tasks, dependencies, fixture requirements and
+smallest useful validation command. See the [investigation index](investigation.md)
+for the source/capture baseline and per-issue dispositions.
+
+“Step 1 complete” means the investigation is documented, including explicit
+blocks where evidence is missing. It does not mean an implementation or an
+acceptance gate has passed. The original problem statements are historical;
+the dated section takes precedence where current code or deeper source
+inspection contradicts them. No production code or installed library was
+changed in this pass.
 
 ## Tasks
 
