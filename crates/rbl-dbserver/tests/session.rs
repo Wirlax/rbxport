@@ -1738,3 +1738,127 @@ fn unsupported_command_keeps_the_active_menu_and_echoes_its_kind_in_4003() {
         Some(kind::MENU_FOOTER)
     );
 }
+
+/// Pass complete wire requests through the codec before the session dispatcher.
+/// The synthetic unsupported-command fixtures use V4's source-proven envelope;
+/// they are not a vendor capture of a player's reaction to that error.
+fn exchange_wire(s: &mut Box<dyn Session>, request: &[u8]) -> Vec<Vec<u8>> {
+    let (message, used) = Message::decode(request).unwrap();
+    assert_eq!(used, request.len());
+    assert_eq!(message.encode(), request);
+    s.handle(&message).iter().map(Message::encode).collect()
+}
+
+#[test]
+fn unsupported_command_wire_preserves_both_menu_locations_and_setup_modes() {
+    const SECOND: u32 = 0x0102_0301;
+    for (setup, reply, width) in [
+        (
+            "11872349ae11fffffffe1000000f011400000001061100000005",
+            "11872349ae11fffffffe1040000f021400000002060611000000001100000011",
+            12,
+        ),
+        (
+            "11872349ae11fffffffe1000000f021400000002060611000000051100000014",
+            "11872349ae11fffffffe1000000f021400000002060611000000111100000014",
+            16,
+        ),
+    ] {
+        let handler = CatalogHandler::new(Arc::new(Small(false)));
+        let mut s = handler.open();
+        assert_eq!(exchange_wire(&mut s, &hex(setup)), vec![hex(reply)]);
+        // Keep different menus pending at the same time: an error must neither
+        // replace its own location nor change the other location's rows.
+        let root = numbers(kind::ROOT_MENU, 0x8100, &[CTX, 0, 0x5cf_ffff]);
+        let tracks = numbers(kind::TRACK_MENU, 0x8101, &[SECOND, 0]);
+        assert_eq!(
+            exchange_wire(&mut s, &root.encode()),
+            vec![hex("11872349ae11000081001040000f021400000002060611000010001100000009")]
+        );
+        assert_eq!(
+            exchange_wire(&mut s, &tracks.encode()),
+            vec![hex("11872349ae11000081011040000f021400000002060611000010041100000001")]
+        );
+        let renders = [
+            numbers(kind::RENDER, 0x8124, &[CTX, 0, 9, 0, 9, 0xc, 1, 0]),
+            numbers(kind::RENDER, 0x8124, &[SECOND, 0, 1, 0, 1, 0xc, 1, 0]),
+        ];
+        let before: Vec<_> = renders
+            .iter()
+            .map(|request| exchange_wire(&mut s, &request.encode()))
+            .collect();
+        assert_eq!(before[0].len(), 11);
+        assert_eq!(before[1].len(), 3);
+        for rows in &before {
+            for row in &rows[1..rows.len() - 1] {
+                assert_eq!(Message::decode(row).unwrap().0.arguments.len(), width);
+            }
+        }
+        assert_eq!(
+            Message::decode(&before[1][1]).unwrap().0.arguments[1],
+            Argument::Number(TRACK)
+        );
+        // Same-location, other-location, foreign-location, and no-context
+        // decoded unknown requests all have the same one-argument error.
+        for request in [
+            "11872349ae1100008123102fff0f021400000002060611010103011100000000",
+            "11872349ae1100008123102fff0f021400000002060611010203011100000000",
+            "11872349ae1100008123102fff0f021400000002060611010303011100000000",
+            "11872349ae1100008123102fff0f001400000000",
+        ] {
+            assert_eq!(
+                exchange_wire(&mut s, &hex(request)),
+                vec![hex("11872349ae11000081231040030f011400000001061100002fff")]
+            );
+            for (render, expected) in renders.iter().zip(&before) {
+                assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+            }
+        }
+        // Supported mobile queries and intentional silence must stay outside
+        // the unknown-command route and leave both pending menus intact.
+        assert_eq!(
+            exchange_wire(
+                &mut s,
+                &hex("11872349ae1100008125103e030f011400000001061101010301"),
+            ),
+            vec![hex("11872349ae1100008125104b020f0314000000030606021100000000110000000226000000010000")]
+        );
+        for command in [kind::TEARDOWN, kind::SET_ON_AIR] {
+            assert!(exchange_wire(&mut s, &numbers(command, 0x8126, &[CTX, 1]).encode()).is_empty());
+        }
+        for (render, expected) in renders.iter().zip(&before) {
+            assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+        }
+    }
+}
+
+#[test]
+fn unsupported_command_keeps_filter_selection_and_enable_state() {
+    let mut s = session();
+    let mut property = vec![1, 6, 2, 0];
+    property.extend_from_slice(&12_000_u32.to_le_bytes());
+    property.extend_from_slice(&13_000_u32.to_le_bytes());
+    let update = Message::new(
+        0x8100,
+        kind::FILTER_SET,
+        vec![
+            Argument::Number(CTX),
+            Argument::Number(6),
+            Argument::Number(0),
+            Argument::Number(12),
+            Argument::Blob(property),
+        ],
+    );
+    exchange_wire(&mut s, &update.encode());
+    exchange_wire(&mut s, &numbers(0x3007, 0x8101, &[CTX, 1]).encode());
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
+    assert_eq!(
+        exchange_wire(&mut s, &hex("11872349ae1100008123102fff0f011400000001061101010301")),
+        vec![hex("11872349ae11000081231040030f011400000001061100002fff")]
+    );
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
+    exchange_wire(&mut s, &numbers(0x3007, 0x8102, &[CTX, 0]).encode());
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 1);
+    exchange_wire(&mut s, &numbers(0x3007, 0x8103, &[CTX, 1]).encode());
+    assert_eq!(browse(&mut s, kind::TRACK_MENU, &[CTX, 0]).0, 0);
+}

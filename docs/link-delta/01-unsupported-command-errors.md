@@ -78,3 +78,22 @@ Smallest validation:
 `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session unsupported_command`,
 then the new encoded-message regression. No physical-device parity is
 established by this investigation.
+
+## Step 2 — implementation (2026-10-05)
+
+The existing `4003` fallback already implements the source-proven contract;
+no production dispatch change was needed. Added synthetic, complete encoded
+request/error fixtures for both captured setup shapes, with simultaneous root
+and track menus at independent locations. Tests compare the entire rendered
+byte stream before/after same-location, other-location, foreign-location and
+no-context unsupported requests, and verify legacy 12-/extended 16-field rows.
+The same tests preserve the explicit mobile `4b02` reply and silent teardown/
+on-air routes. A separate state regression preserves filter selection and its
+enable flag. Codec regressions reject every truncated unsupported fixture,
+foreign magic and an invalid field tag before dispatch.
+
+Validation: `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session
+unsupported_command` **3 passed**; `RB_LITE_TEST=1 cargo test -p rbl-dbserver
+--test messages malformed_unsupported` **1 passed**. These are fixture/codec
+tests, not a new vendor trace. [UNKNOWN] player-screen interpretation remains
+the Step 1 evidence task. Astra review/commit are later workflow steps.

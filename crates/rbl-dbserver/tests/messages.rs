@@ -275,6 +275,25 @@ fn truncation_is_an_error_rather_than_a_panic() {
 }
 
 #[test]
+fn malformed_unsupported_requests_are_not_decoded_as_dispatchable_commands() {
+    // Synthetic request for issue 01's established error contract. Malformed
+    // framing is a codec failure, not an accepted unknown command or success.
+    let wire = hex("11872349ae1100008123102fff0f021400000002060611010103011100000000");
+    for cut in 0..wire.len() {
+        assert!(matches!(Message::decode(&wire[..cut]), Err(DbError::Truncated { .. })));
+        assert_eq!(Message::decode_all(&wire[..cut]), (Vec::new(), 0));
+    }
+    let mut foreign = wire.clone();
+    foreign[1] = 0x51;
+    assert!(matches!(Message::decode(&foreign), Err(DbError::BadMagic(_))));
+    assert_eq!(Message::decode_all(&foreign), (Vec::new(), 0));
+    let mut invalid_field = wire;
+    invalid_field[22] = 0x99;
+    assert_eq!(Message::decode(&invalid_field), Err(DbError::UnknownTag(0x99)));
+    assert_eq!(Message::decode_all(&invalid_field), (Vec::new(), 0));
+}
+
+#[test]
 fn a_blob_length_beyond_the_buffer_is_rejected() {
     // A number before the blob saying it is huge, then the blob claims so too.
     let mut bytes = header_declaring(kind::ANLZ_TAG, &[0x06, 0x03]);
