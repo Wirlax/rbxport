@@ -411,6 +411,42 @@ impl LinkSession {
         Self::blob(message, reply, self.catalog.analysis(track, what), tail)
     }
 
+    /// Source-proven early write refusals only. Passing these guards is not
+    /// write acceptance: storage/authorization callbacks remain unsupported.
+    /// Wrong decoded types retain RBX's safe unsupported-command response.
+    fn analysis_write_refusal(message: &Message) -> Option<Vec<Message>> {
+        let extension_is = |value: u32, expected: &[u8; 3]| {
+            let bytes = value.to_le_bytes();
+            bytes[3] == 0 && bytes[..3].eq_ignore_ascii_case(expected)
+        };
+        match (message.kind, message.arguments.as_slice()) {
+            (0x2705, [Argument::Number(_), Argument::Number(_), Argument::Number(_),
+                Argument::Number(length), Argument::Blob(_), ..]) if *length < 56 => {
+                // V4 SavUsbCueExt -> V6 RetNewCueToClient. Native pointer
+                // alignment is deliberately not a Rust wire-level guard.
+                Some(Self::blob(message, kind::EXTENDED_CUES_REPLY, None, Some(0)))
+            }
+            (0x2805, [Argument::Number(_), Argument::Number(_), Argument::Number(atom),
+                Argument::Number(extension), Argument::Number(reserved),
+                Argument::Number(length), Argument::Blob(_), ..]) => {
+                // V4 SaveSpecifiedAtomInfo rejects 1..11, not zero.
+                let invalid = !(extension_is(*extension, b"DAT") || extension_is(*extension, b"EXT"))
+                    || !matches!(*atom, 0x3242_5650 | 0x3254_5150 | 0x5a54_5150)
+                    || *reserved != 0 || (1..12).contains(length);
+                invalid.then(|| vec![menu_header(message.transaction, u32::from(message.kind), 0x32)])
+            }
+            (0x2905, [Argument::Number(_), Argument::Number(_), Argument::Number(atom),
+                Argument::Number(extension), Argument::Number(reserved),
+                Argument::Number(length), Argument::Number(_), Argument::Blob(_), ..]) => {
+                // V4 UpdateSpecifiedAtomInfo is narrower than the save route.
+                let invalid = !extension_is(*extension, b"EXT") || *atom != 0x3254_5150
+                    || *reserved != 0 || *length < 12;
+                invalid.then(|| vec![menu_header(message.transaction, u32::from(message.kind), 0x32)])
+            }
+            _ => None,
+        }
+    }
+
     /// RX3's `DBSMain_RetCueToClient` failure envelope for a Hot Cue Bank
     /// request. It is deliberately not the usual unavailable-blob reply:
     /// `dbcl_WaitCue` requires the eleven-field `4702` layout even when a
@@ -1111,6 +1147,8 @@ impl Session for LinkSession {
             // `dbcl_SetOnAir` must not replace an unrelated pending menu with
             // a spurious generic `0x4000` response.
             kind::TEARDOWN | kind::SET_ON_AIR | 0x3203 | 0x3503 => Vec::new(),
+            0x2705 | 0x2805 | 0x2905 => Self::analysis_write_refusal(message)
+                .unwrap_or_else(|| self.handle_menu(message)),
             // V4 OnPrepareCmd / OnOtherCmd: scalar responses, no menu/cache
             // replacement. Internal notices above do not imply wire replies.
             0x3402 | 0x3903 => vec![menu_header(tx, u32::from(message.kind), 0)],

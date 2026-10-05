@@ -2023,6 +2023,103 @@ impl Catalog for AnalysisBoundaryCatalog {
     }
 }
 
+fn atom_write(command: u16, atom: &[u8; 4], extension: &[u8; 4], reserved: u32, length: u32) -> Message {
+    let mut request = numbers(command, 0x8134, &[CTX, TRACK, u32::from_le_bytes(*atom),
+        u32::from_le_bytes(*extension), reserved, length]);
+    if command == 0x2905 { request.arguments.push(Argument::Number(u32::from(length != 0))); }
+    request.arguments.push(Argument::Blob(vec![0xaa; length as usize]));
+    request
+}
+
+#[test]
+fn analysis_write_early_refusals_preserve_menus_without_storage_calls() {
+    use std::sync::atomic::Ordering;
+    const SECOND: u32 = 0x0102_0301;
+    for extended in [false, true] {
+        let catalog = Arc::new(AnalysisBoundaryCatalog::default());
+        let handler = CatalogHandler::new(catalog.clone());
+        let mut s = handler.open();
+        let setup = if extended { vec![5,20] } else { vec![5] };
+        exchange_wire(&mut s, &numbers(kind::SETUP, 0xffff_fffe, &setup).encode());
+        exchange_wire(&mut s, &numbers(kind::ROOT_MENU, 0x8100, &[CTX, 0, 0x5cf_ffff]).encode());
+        exchange_wire(&mut s, &numbers(kind::TRACK_MENU, 0x8101, &[SECOND, 0]).encode());
+        let renders = [numbers(kind::RENDER, 0x8102, &[CTX, 0, 9]),
+            numbers(kind::RENDER, 0x8103, &[SECOND, 0, 1])];
+        let before: Vec<_> = renders.iter().map(|request| exchange_wire(&mut s, &request.encode())).collect();
+        assert_eq!(before[0].len(), 11);
+        assert_eq!(before[1].len(), 3);
+
+        let mut cases = Vec::new();
+        for command in [0x2805, 0x2905] {
+            for length in [0, 1, 11, 12] {
+                cases.push((atom_write(command, b"PQT2", b"EXT\0", 0, length),
+                    if command == 0x2805 { (1..12).contains(&length) } else { length < 12 }));
+            }
+            for (atom, extension, reserved) in [
+                (*b"PWV4", *b"EXT\0", 0), (*b"PQT2", *b"2EX\0", 0),
+                (*b"PQT2", *b"EXTX", 0), (*b"PQT2", [0; 4], 0),
+                (*b"PQT2", *b"EXT\0", 1),
+            ] {
+                cases.push((atom_write(command, &atom, &extension, reserved, 12), true));
+            }
+            for atom in [b"PVB2", b"PQT2", b"PQTZ"] {
+                for extension in [b"DAT\0", b"EXT\0", b"ext\0"] {
+                    cases.push((atom_write(command, atom, extension, 0, 12),
+                        command == 0x2905 && (atom != b"PQT2" || extension == b"DAT\0")));
+                }
+            }
+        }
+        for length in [0, 1, 55, 56] {
+            let mut request = numbers(0x2705, 0x8134, &[CTX, TRACK, 0, length]);
+            request.arguments.push(Argument::Blob(vec![0xaa; length as usize]));
+            cases.push((request, length < 56));
+        }
+        // OnWriteCmd and these early guards have no foreign-context gate.
+        for context in [CTX, SECOND, 0x0208_0302] {
+            for (request, refusal) in &cases {
+                let mut request = request.clone();
+                request.arguments[0] = Argument::Number(context);
+                let expected = if !refusal {
+                    hex(&format!("11872349ae11000081341040030f01140000000106110000{:04x}", request.kind))
+                } else if request.kind == 0x2705 {
+                    // Empty blob is declared but omitted after zero length.
+                    hex("11872349ae1100008134104e020f05140000000506060603061100002705110000003211000000001100000000")
+                } else {
+                    hex(&format!("11872349ae11000081341040000f0214000000020606110000{:04x}1100000032", request.kind))
+                };
+                assert_eq!(exchange_wire(&mut s, &request.encode()), vec![expected], "{request:?}");
+                for (render, expected) in renders.iter().zip(&before) {
+                    assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+                }
+            }
+        }
+        // RBX malformed-shape safety policy, not vendor refusal parity:
+        // wrong-typed fields and missing blobs remain unsupported (4003).
+        for command in [0x2705, 0x2805, 0x2905] {
+            let valid = if command == 0x2705 {
+                let mut request = numbers(command, 0x8134, &[CTX, TRACK, 0, 55]);
+                request.arguments.push(Argument::Blob(vec![0xaa; 55]));
+                request
+            } else { atom_write(command, b"PQT2", b"EXT\0", 0, 11) };
+            let mut malformed = vec![vec![], valid.arguments[..valid.arguments.len()-1].to_vec()];
+            for index in 0..valid.arguments.len() {
+                let mut arguments = valid.arguments.clone();
+                arguments[index] = Argument::String("wrong type".into());
+                malformed.push(arguments);
+            }
+            for arguments in malformed {
+                assert_eq!(exchange_wire(&mut s, &Message::new(0x8134, command, arguments).encode()),
+                    vec![hex(&format!("11872349ae11000081341040030f01140000000106110000{command:04x}"))]);
+                for (render, expected) in renders.iter().zip(&before) {
+                    assert_eq!(exchange_wire(&mut s, &render.encode()), *expected);
+                }
+            }
+        }
+        assert_eq!(catalog.edits.load(Ordering::Relaxed), 0);
+        assert_eq!(catalog.reads.load(Ordering::Relaxed), 0);
+    }
+}
+
 #[test]
 fn vbr_compatibility_placeholder_keeps_existing_complete_envelope_and_menu() {
     for extended in [false, true] {

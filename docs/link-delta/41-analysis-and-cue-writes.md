@@ -73,3 +73,44 @@ failure, interrupted second storage operation and reopen hashes.
 Smallest prerequisite: `RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session`.
 Only individually proven refusal behavior may be added before storage
 contracts close; no installed analysis file is a test target.
+
+## Step 2 — bounded early write refusals (2026-10-05)
+
+[OBS] Added only the directly established early refusals in R3
+`LinkSession::analysis_write_refusal`. Re-read V4 `OnWriteCmd` (291–425),
+`SaveSpecifiedAtomInfo` (4189–4327), `UpdateSpecifiedAtomInfo` (4059–4173),
+`SavUsbCueExt` (5008–5115), and V6 `RetNewCueToClient` (4346–4407).
+The dispatcher and these guards impose no foreign-context condition.
+
+| Typed request | Implemented response |
+| --- | --- |
+| 2805 `[context, track, atom, extension, reserved, length, blob]` | Invalid DAT/EXT extension, atom other than PVB2/PQT2/PQTZ, nonzero reserved argument 4, or length 1..11: 4000 `[2805, 0x32]`. Extension is a zero-terminated little-endian numeric code, compared case-insensitively; atoms remain exact. |
+| 2905 `[context, track, atom, extension, reserved, length, offset, blob]` | Extension other than EXT, atom other than PQT2, nonzero reserved argument 4, or length below 12: 4000 `[2905, 0x32]`. |
+| 2705 `[context, track, operation, length, blob, ...]` | Numeric argument 3 below 56: 4e02 `[2705, 0x32, 0, empty blob, 0]`. The zero-length blob is declared but absent on the wire. |
+
+Valid shapes that pass the inspected guards remain unsupported with the
+existing 4003 response, including save-atom length zero. This does not
+claim their storage callbacks, permission results, or reread follow-ups.
+Wrong/missing typed fields also retain 4003 as an explicit RBX malformed
+request safety policy, not a vendor malformed-wire parity claim. No native
+pointer-alignment check, 2105 refusal, generic write failure, or storage
+operation was invented. The firmware-coverage-review checklist kept this
+change limited to the proven failure envelopes.
+
+Validation: `analysis_write_early_refusals_preserve_menus_without_storage_calls`
+passes encoded requests/replies through the real codec, checks complete
+envelopes, 0/1/11/12 atom-length and 0/1/55/56 cue-length boundaries,
+invalid extensions/atoms/reserved fields, accepted guard combinations,
+wrong-typed/missing fields, foreign contexts, both setup forms, and both
+pending menu locations. A recording in-memory catalog proves zero edit or
+analysis calls; no installed library is used. The initial fixture exposed
+an empty-blob encoding mismatch in the update offset argument; fixing that
+fixture to use zero before the omitted empty blob made the focused test
+pass without changing production behavior.
+
+Focused test passed; `RB_LITE_TEST=1 cargo test -p rbl-dbserver` passed
+81 tests (5 library, 3 corpus, 24 codec, 49 session; 0 doc tests), and
+`cargo clippy -p rbl-dbserver --all-targets -- -D warnings` passed.
+These are source-backed local codec/state tests, not capture, booted
+firmware, physical-device, or write-persistence validation. All other
+operation/storage evidence gates above remain unresolved.
