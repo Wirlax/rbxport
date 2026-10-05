@@ -30,6 +30,8 @@ tracing = { workspace = true }
 # The interface index, which the pin takes; the same crate alphatheta-connect
 # lists interfaces with.
 if-addrs = "0.15"
+core-foundation = "0.10"
+system-configuration-sys = "0.6"
 
 [dev-dependencies]
 if-addrs = "0.15"

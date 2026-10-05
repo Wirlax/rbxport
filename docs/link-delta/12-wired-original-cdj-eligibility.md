@@ -78,3 +78,42 @@ all candidate timing in this issue.
 
 Smallest validation: `RB_LITE_TEST=1 cargo test -p rbl-prolink`, then
 `RB_LITE_TEST=1 cargo test -p rbl-link join::tests`.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented explicit Wired/Wireless/Unknown mode plumbing through Beacon
+configuration and Join. On macOS the read-only detector follows the inspected
+current SystemConfiguration set/services path and compares IEEE80211 hardware
+MACs with the selected MAC. A proved match is wireless; a completed nonmatching
+enumeration is wired; unavailable/invalid data before a match is unknown.
+Other platforms remain Unknown rather than inferring mode from names/numbers.
+
+Original minor-0 CDJ-2000/CDJ-900 announcements may start the wired path;
+known wireless excludes them after classification, while Unknown keeps RBX's
+conservative original-model restriction. Newer models/versions retain existing eligibility.
+Pure detector fixtures and complete encoded announcement/controlled Join
+tests cover mode branches, malformed detector data and the wired first claim.
+`RB_LITE_TEST=1 cargo test -p rbl-link --lib` passed.
+Full wireless candidate timing, other-platform vendor classification and
+physical original-player compatibility remain unverified.
+
+The bounded issue 09 implementation clarified the runtime outer gate. [OBS]
+V2's constructor (1–94) initializes runtime mode `+0x1a1` to `0xff`;
+V1 `frameRead` (6737–6745) excludes original minor-0 models only when that
+runtime byte is zero, independently of selected interface mode. A known-mode
+fresh object therefore permits their first LinkUp attempt. V1 `linkUpFunc`
+(6499–6593) sets NetIF/runtime IP and configured candidate 17 (wired) or 41
+(wireless) before its inner model gate. The first wireless original-player
+attempt remains Waiting with that identity, but does not join, add members,
+or greet. Subsequent original announcements are excluded before dispatch.
+
+V2 `readReject` clears the runtime mode byte to zero, so this outer exclusion
+also becomes active after a wired rejection. Selected mode and configured
+candidate are retained separately: an original-named wired rejection can
+be processed once but its identical repeat is excluded; newer-model repeats
+still use the cached candidate and zero runtime IP. A new object starts with
+the runtime exclusion inactive. Encoded tests cover both original names,
+fresh/classified/rejected gates, the failed wireless first-attempt identity,
+and complete rejection frames. This does not enable original-model wireless
+negotiation, change its timer/candidate ladder, or map Unknown to vendor's
+defensive `0xff` classification behavior.

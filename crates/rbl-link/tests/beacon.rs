@@ -92,6 +92,11 @@ fn wait_for_link(beacon: &Beacon, wanted: &rbl_link::LinkState) {
 /// The same, with the beacon's sockets pinned to `interface`.
 fn start_on(interface: Option<String>) -> (Beacon, UdpSocket, Arc<Facts>) {
     let facts = Arc::new(Facts::default());
+    // Portable loopback transport uses 127.0.0.1; the non-pinned fixture's
+    // simulated selected/cached NetIF is distinct (no host alias required).
+    // The pinned test needs the actually assigned address for its monitor;
+    // it sends only the first fresh keepalive, then uses the status port.
+    let selected = if interface.is_some() { Ipv4Addr::LOCALHOST } else { Ipv4Addr::new(127,0,0,2) };
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     player
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -99,9 +104,11 @@ fn start_on(interface: Option<String>) -> (Beacon, UdpSocket, Arc<Facts>) {
     let beacon = Beacon::start(
         BeaconConfig {
             interface,
-            address: Ipv4Addr::LOCALHOST,
+            address: selected,
+            netmask: Ipv4Addr::new(255, 0, 0, 0),
             broadcast: Ipv4Addr::LOCALHOST,
             mac: [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],
+            mode: rbl_prolink::ConnectionMode::Wired,
             announce_port: 0,
             status_port: 0,
             player_port: player.local_addr().unwrap().port(),
@@ -415,6 +422,7 @@ fn a_load_command_reaches_the_player_from_our_status_port() {
 /// A beacon with its beat clock pointed at a socket the test owns, so the
 /// beats it broadcasts as master can be read.
 fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
+    // As in start_on(None), separate simulated NetIF from real transport.
     let player = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     player
         .set_read_timeout(Some(Duration::from_secs(3)))
@@ -426,9 +434,11 @@ fn start_master() -> (Beacon, UdpSocket, UdpSocket) {
     let beacon = Beacon::start(
         BeaconConfig {
             interface: None,
-            address: Ipv4Addr::LOCALHOST,
+            address: Ipv4Addr::new(127,0,0,2),
+            netmask: Ipv4Addr::new(255, 0, 0, 0),
             broadcast: Ipv4Addr::LOCALHOST,
             mac: [0x00, 0xe0, 0x4c, 0xcf, 0x63, 0x2e],
+            mode: rbl_prolink::ConnectionMode::Wired,
             announce_port: 0,
             status_port: 0,
             player_port: player.local_addr().unwrap().port(),

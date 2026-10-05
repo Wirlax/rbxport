@@ -21,6 +21,7 @@
 //! against real players, not against this crate.
 
 pub mod beacon;
+mod interface_mode;
 pub mod blobs;
 pub mod catalog;
 pub mod files;
@@ -212,8 +213,10 @@ impl LinkExport {
             beacon::BeaconConfig {
                 interface: (!interface.address.is_loopback()).then(|| interface.name.clone()),
                 address: interface.address,
+                netmask: interface.netmask,
                 broadcast: interface.broadcast(),
                 mac: interface.mac,
+                mode: interface_mode::selected(interface.mac),
                 announce_port: ports.announce,
                 status_port: ports.status,
                 player_port: rbl_prolink::PORT_STATUS,

@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use rbl_prolink::{
     number_in_use_reply, rekordbox_assign_request, rekordbox_claim_stage1, rekordbox_claim_stage2,
-    KeepAlive, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
+    ConnectionMode, KeepAlive, NumberProbe, NumberReply, NUMBER_REPLY_IN_USE, PROBE_SUBTYPE_ASSIGN,
     PROBE_SUBTYPE_BLOCK, PROBE_SUBTYPE_PROBE, REKORDBOX_CLAIM_NUMBERS, REKORDBOX_NAME,
 };
 
@@ -70,27 +70,38 @@ pub struct Outgoing {
 /// The join, from the first keep-alive to a settled number.
 #[derive(Debug)]
 pub struct Join {
+    mode: ConnectionMode,
     mac: [u8; 6],
     ip: std::net::Ipv4Addr,
     state: State,
     /// Which of the six numbers a device answered for, by index.
     in_use: [bool; 6],
     next_at: Instant,
+    /// V1's runtime +0x1a1 gate, distinct from selected interface mode.
+    exclude_original_models: bool,
 }
 
 impl Join {
     pub fn new(mac: [u8; 6], ip: std::net::Ipv4Addr, now: Instant) -> Self {
         Self {
+            mode: ConnectionMode::Unknown,
             mac,
             ip,
             state: State::Waiting,
             in_use: [false; 6],
             next_at: now,
+            exclude_original_models: false,
         }
     }
 
     pub const fn state(&self) -> &State {
         &self.state
+    }
+
+    #[must_use]
+    pub fn with_mode(mut self, mode: ConnectionMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// Our number, once there is one.
@@ -100,6 +111,8 @@ impl Join {
             _ => None,
         }
     }
+
+    pub(crate) const fn excludes_original_models(&self) -> bool { self.exclude_original_models }
 
     /// Back to listening, as rekordbox goes on a compatibility response or
     /// a link-down: the number is given up.
@@ -112,7 +125,15 @@ impl Join {
     /// A keep-alive from another device: the first from a player or mixer
     /// starts the join.
     pub fn hear_keep_alive(&mut self, keep_alive: &KeepAlive, now: Instant) {
-        if self.state == State::Waiting && rbl_prolink::brings_link_up(keep_alive) {
+        if self.state == State::Waiting
+            && rbl_prolink::brings_link_up_on(keep_alive, ConnectionMode::Wired)
+            && self.mode != ConnectionMode::Unknown
+        {
+            // V1 linkUpFunc sets the interface, IP and configured candidate
+            // before it excludes original minor-0 players on wireless.
+            self.exclude_original_models = self.mode == ConnectionMode::Wireless;
+        }
+        if self.state == State::Waiting && rbl_prolink::brings_link_up_on(keep_alive, self.mode) {
             tracing::info!(
                 number = keep_alive.device_number,
                 name = %keep_alive.name,
@@ -453,5 +474,28 @@ mod tests {
 
         join.reset(now);
         assert_eq!(join.state(), &State::Waiting);
+    }
+
+    #[test]
+    fn original_players_join_only_on_a_known_wired_interface() {
+        let now = Instant::now();
+        for name in ["CDJ-2000", "CDJ-900"] {
+            for mode in [ConnectionMode::Wired, ConnectionMode::Wireless, ConnectionMode::Unknown] {
+                let mut join = Join::new(MAC, IP, now).with_mode(mode);
+                let mut packet = player();
+                packet.name = name.into();
+                packet.generation = 0;
+                join.hear_keep_alive(&KeepAlive::decode(&packet.encode()).unwrap(), now);
+                if mode == ConnectionMode::Wired {
+                    assert_eq!(join.state(), &State::Discovery { sent: 0 });
+                    assert_eq!(join.tick(now).unwrap().packet, rekordbox_claim_stage1(MAC, 1));
+                } else {
+                    assert_eq!(join.state(), &State::Waiting);
+                    packet.generation = 1;
+                    join.hear_keep_alive(&packet, now);
+                    assert_eq!(join.state(), &State::Discovery { sent: 0 });
+                }
+            }
+        }
     }
 }

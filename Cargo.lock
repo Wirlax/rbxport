@@ -4061,6 +4061,7 @@ name = "rbl-link"
 version = "1.0.0-rc.13"
 dependencies = [
  "alphatheta-connect",
+ "core-foundation 0.10.1",
  "if-addrs",
  "parking_lot",
  "rbl-analysis",
@@ -4074,6 +4075,7 @@ dependencies = [
  "rbl-prolink",
  "serde_json",
  "socket2",
+ "system-configuration-sys",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

@@ -61,8 +61,12 @@ pub struct BeaconConfig {
     /// where a test has nothing to pin to.
     pub interface: Option<String>,
     pub address: Ipv4Addr,
+    /// The selected interface's actual mask, not inferred from broadcast.
+    pub netmask: Ipv4Addr,
     pub broadcast: Ipv4Addr,
     pub mac: [u8; 6],
+    /// Selected-interface mode; never inferred from a peer or number.
+    pub mode: rbl_prolink::ConnectionMode,
     /// Our announce port; 0 for any free one.
     pub announce_port: u16,
     /// Our status port; 0 for any free one.
@@ -559,7 +563,7 @@ fn announce_loop(
     let started = Instant::now();
     let broadcast = SocketAddr::V4(SocketAddrV4::new(config.broadcast, config.announce_port));
     let mut buffer = [0_u8; DATAGRAM];
-    shared.lock().join = Some(Join::new(config.mac, config.address, started));
+    shared.lock().join = Some(Join::new(config.mac, config.address, started).with_mode(config.mode));
 
     let mut next_keep_alive: Option<Instant> = None;
     let mut next_monitor = Instant::now() + NETWORK_MONITOR_EVERY;
@@ -689,6 +693,19 @@ fn hear_announce(
     let SocketAddr::V4(from) = from else {
         return None;
     };
+    // V1 frameRead checks runtime mode, initially 0xff. Known wireless
+    // becomes active only on the first LinkUp attempt; Unknown keeps RBX's
+    // conservative existing exclusion without pretending it is vendor 0xff.
+    let original_model = packet.get(0x21) == Some(&0)
+        && rbl_prolink::device_name(packet).is_ok_and(|name| name == "CDJ-2000" || name == "CDJ-900");
+    let model_gate = match config.mode {
+        rbl_prolink::ConnectionMode::Wired | rbl_prolink::ConnectionMode::Wireless =>
+            shared.lock().join.as_ref().is_some_and(Join::excludes_original_models),
+        rbl_prolink::ConnectionMode::Unknown => true,
+    };
+    if model_gate && original_model {
+        return None;
+    }
     match kind.map(AnnounceKind::from_u8) {
         Some(AnnounceKind::ClaimStage2) => {
             let probe = NumberProbe::decode(packet).ok()?;
@@ -740,6 +757,12 @@ fn hear_announce(
         let now = now_ms(started);
         if let Some(join) = shared.join.as_mut() {
             join.hear_keep_alive(&keep_alive, Instant::now());
+        }
+        // The first wireless original-player attempt initializes runtime
+        // identity above but fails linkUpFunc's model gate. Do not admit it
+        // to membership or greet it while still Waiting.
+        if config.mode == rbl_prolink::ConnectionMode::Wireless && original_model {
+            return None;
         }
         let known = shared
             .peers

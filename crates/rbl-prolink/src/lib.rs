@@ -468,14 +468,28 @@ pub const REKORDBOX_CLAIM_NUMBERS: [u8; 6] = [0x11, 0x12, 0x29, 0x2a, 0x2b, 0x2c
 
 /// The device types whose keep-alive brings rekordbox's link up: a player
 /// (1), an older mixer (2), a DJM (3) or type 7; a keep-alive from anything
-/// else, or from a `CDJ-2000` or `CDJ-900` reporting minor version 0, does
-/// not (`readConfigNotify`, `linkUpFunc` in the decompilation).
+/// else does not. Original minor-0 CDJ-2000/CDJ-900 models require a known
+/// wired mode (`readConfigNotify`, `linkUpFunc` in the decompilation).
 pub fn brings_link_up(keep_alive: &KeepAlive) -> bool {
+    brings_link_up_on(keep_alive, ConnectionMode::Unknown)
+}
+
+/// Selected-interface classification, independent of candidate device number.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionMode {
+    Wired,
+    Wireless,
+    #[default]
+    Unknown,
+}
+
+pub fn brings_link_up_on(keep_alive: &KeepAlive, mode: ConnectionMode) -> bool {
     let kind = keep_alive.device_type.to_u8();
     if ![1, 2, 3, 7].contains(&kind) {
         return false;
     }
-    !(keep_alive.generation == 0 && (keep_alive.name == "CDJ-2000" || keep_alive.name == "CDJ-900"))
+    mode == ConnectionMode::Wired
+        || !(keep_alive.generation == 0 && (keep_alive.name == "CDJ-2000" || keep_alive.name == "CDJ-900"))
 }
 
 /// One first-stage claim (`00`, 44 bytes): the counter, `04`, then the MAC.
