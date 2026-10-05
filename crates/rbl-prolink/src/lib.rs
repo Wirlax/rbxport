@@ -1130,6 +1130,9 @@ pub struct Peer {
     pub ip: Ipv4Addr,
     /// Hardware identity advertised by the keep-alive.
     pub mac: [u8; 6],
+    /// Raw membership flag bytes from keep-alive offsets 0x25/0x35.
+    /// Their meanings are unknown; generic typed observations have no raw flags.
+    pub member_flags: Option<[u8; 2]>,
     /// Milliseconds since this device was last heard from.
     pub last_seen_ms: u64,
 }
@@ -1157,7 +1160,23 @@ impl DeviceTable {
 
     /// Records a keep-alive at a given time.
     pub fn observe(&mut self, keep_alive: &KeepAlive, now_ms: u64) {
+        self.record(keep_alive, now_ms, true, None);
         self.received_at.insert(keep_alive.device_number, now_ms);
+    }
+
+    /// Records a received keep-alive with its validated raw membership flags.
+    pub fn observe_with_flags(&mut self, keep_alive: &KeepAlive, now_ms: u64, flags: [u8; 2]) {
+        self.record(keep_alive, now_ms, true, Some(flags));
+        self.received_at.insert(keep_alive.device_number, now_ms);
+    }
+
+    /// Records a synthesized identity without arming or refreshing its timer.
+    /// Any pending slot timer survives, including after member recreation.
+    pub fn observe_synthetic(&mut self, keep_alive: &KeepAlive, now_ms: u64, flags: Option<[u8; 2]>) {
+        self.record(keep_alive, now_ms, false, flags);
+    }
+
+    fn record(&mut self, keep_alive: &KeepAlive, now_ms: u64, received: bool, flags: Option<[u8; 2]>) {
         if let Some(existing) = self
             .peers
             .iter_mut()
@@ -1168,7 +1187,10 @@ impl DeviceTable {
             existing.device_type = keep_alive.device_type;
             existing.ip = keep_alive.ip;
             existing.mac = keep_alive.mac;
-            existing.last_seen_ms = now_ms;
+            existing.member_flags = flags;
+            if received || !self.received_at.contains_key(&keep_alive.device_number) {
+                existing.last_seen_ms = now_ms;
+            }
             return;
         }
         self.peers.push(Peer {
@@ -1177,7 +1199,10 @@ impl DeviceTable {
             device_type: keep_alive.device_type,
             ip: keep_alive.ip,
             mac: keep_alive.mac,
-            last_seen_ms: now_ms,
+            member_flags: flags,
+            last_seen_ms: if received { now_ms } else {
+                self.received_at.get(&keep_alive.device_number).copied().unwrap_or(now_ms)
+            },
         });
     }
 
@@ -1206,6 +1231,13 @@ impl DeviceTable {
             self.remove_number(*number);
         }
         expired
+    }
+
+    /// A live logical identity with no pending received keep-alive timer.
+    /// A recreated virtual identity can still inherit an armed slot timer.
+    pub fn is_synthetic(&self, number: u8) -> bool {
+        self.peers.iter().any(|peer| peer.device_number == number)
+            && !self.received_at.contains_key(&number)
     }
 
     pub fn peers(&self) -> &[Peer] {

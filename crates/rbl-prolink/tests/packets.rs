@@ -646,6 +646,69 @@ fn a_djm_v5_is_read_as_a_mixer() {
 }
 
 #[test]
+fn synthetic_members_do_not_own_or_refresh_received_keepalive_timers() {
+    let mut table = DeviceTable::new();
+    let mut primary = sample();
+    primary.device_number = 9;
+    table.observe_with_flags(&primary, 1_000, [0xa5, 0x5a]);
+    let mut secondary = primary.clone();
+    secondary.device_number = 10;
+    table.observe_synthetic(&secondary, 1_000, Some([0xa5, 0x5a]));
+    assert!(table.is_synthetic(10));
+    assert_eq!(table.peers()[1].member_flags, Some([0xa5, 0x5a]));
+    assert!(table.expire_received(7_000).is_empty());
+    assert_eq!(table.expire_received(7_001), vec![9]);
+    assert_eq!(table.peers()[0].device_number, 10);
+
+    // A real keepalive promotes the identity to an independent timer owner.
+    table.observe_with_flags(&secondary, 8_000, [1, 2]);
+    assert!(!table.is_synthetic(10));
+    secondary.ip = Ipv4Addr::new(192, 168, 1, 99);
+    table.observe_synthetic(&secondary, 13_999, Some([3, 4]));
+    assert_eq!(table.peers()[0].ip, secondary.ip);
+    assert_eq!(table.peers()[0].member_flags, Some([3, 4]));
+    assert_eq!(table.peers()[0].last_seen_ms, 8_000);
+    assert!(table.expire_received(14_000).is_empty());
+    assert_eq!(table.expire_received(14_001), vec![10]);
+
+    // After the old timer has fired, virtual recreation does not rearm it.
+    table.observe_synthetic(&secondary, 15_000, Some([5, 6]));
+    assert!(table.is_synthetic(10));
+    assert!(table.expire_received(u64::MAX).is_empty());
+}
+
+#[test]
+fn pending_slot_timer_survives_removal_and_synthetic_recreation() {
+    let mut table = DeviceTable::new();
+    let mut secondary = sample(); secondary.device_number = 10;
+    table.observe(&secondary, 0);
+    table.remove_number(10);
+    table.observe_synthetic(&secondary, 1_000, None);
+    assert!(!table.is_synthetic(10));
+    assert_eq!(table.peers()[0].last_seen_ms, 0);
+    assert!(table.expire_received(6_000).is_empty());
+    assert_eq!(table.expire_received(6_001), vec![10]);
+    assert!(table.is_empty());
+
+    // A timer firing while its slot is inactive is consumed, not suspended.
+    table.observe(&secondary, 10_000);
+    table.remove_number(10);
+    assert!(table.expire_received(16_001).is_empty());
+    table.observe_synthetic(&secondary, 17_000, None);
+    assert!(table.is_synthetic(10));
+    assert_eq!(table.peers()[0].last_seen_ms, 17_000);
+    assert!(table.expire_received(u64::MAX).is_empty());
+
+    // A new direct reception replaces the pending deadline, including after removal.
+    table.observe(&secondary, 20_000);
+    table.remove_number(10);
+    table.observe(&secondary, 25_000);
+    assert!(table.expire_received(26_001).is_empty());
+    assert!(table.expire_received(31_000).is_empty());
+    assert_eq!(table.expire_received(31_001), vec![10]);
+}
+
+#[test]
 fn rejection_disconnect_is_the_complete_pre_clear_41_byte_frame() {
     assert_eq!(rbl_prolink::rejection_disconnect(18, Ipv4Addr::new(192,168,50,2)),
         hex("5173707431576d4a4f4c080072656b6f7264626f7800000000000000000000000103002912c0a83202"));

@@ -66,3 +66,67 @@ packet on addition. Smallest check:
 `RB_LITE_TEST=1 cargo test -p rbl-link --lib`.
 Only the established add rules are ready for bounded implementation;
 full lifecycle parity is not.
+
+## Step 2 — implementation (2026-10-05)
+
+Implemented the established running-state additions: received primary 9 adds
+10, primary 11 adds 12, and exact `OPUS-QUAD` at 9 additionally adds 11/12.
+The peer/player stores retain logical identities, including shared IP/MAC,
+type/name and raw membership flag bytes from frame offsets `0x25`/`0x35`.
+No extra outgoing announcement or Join transition is introduced.
+
+Timer ownership is explicit: directly received keepalives own the existing
+six-second clocks; synthetic refreshes neither arm a new timer nor extend an
+existing direct timer. A real keepalive to a synthetic slot promotes its own
+clock. Source evidence remains V1 `readConfigNotify` at 7533–7553 and V3
+`timerFuncAging` at 3598–3643. Expiry applies only the proved 9→10 / 11→12
+pairs, with coherent player and greeting cleanup. Synthetic-only players do
+not acquire an independent activity-expiry rule. Ordinary direct-member
+timeout policy remains unchanged.
+
+The bounded OPUS behavior is literal: expiry/disconnect of 9 removes 9/10;
+11/12 remain until their own directly received primary timer, numbered
+disconnect, type-7 rediscovery or whole-session teardown removes them.
+[UNKNOWN] Any additional vendor path removing all four OPUS slots remains
+unresolved. Retention here is not a full OPUS lifecycle-parity claim. General
+typed `KeepAlive` APIs still use their existing flag encoding; this validated
+membership path preserves the two raw flags without assigning meanings.
+
+Focused synthetic packet/state tests cover exact model matching, pre-running
+guards, malformed prefixes/subtype, repeated adds, nondefault flags, member
+counts, replacement/shared-IP survivors, independent timer promotion and
+refresh, timeout boundaries, paired expiry and the established removal paths.
+The ordered assertions cover member-store effects, not the vendor's individual
+`notifyMessage` callbacks. RBX exposes player/status snapshots rather than that
+IPC notification stream. Callback ordering, delivery and downstream consumer
+equivalence remain unimplemented or unverified; this bounded change introduces
+no speculative event API and does not satisfy that full-lifecycle requirement.
+`RB_LITE_TEST=1 cargo test -p rbl-prolink -p rbl-link --lib --test packets
+--test blobs` passed: 61 Link unit tests, 34 packet tests and 7 blob tests.
+After the Clippy-driven test assertion adjustments, the focused multideck
+rerun and `cargo clippy -p rbl-prolink -p rbl-link -p rbl-dbserver
+--all-targets -- -D warnings` passed. No device trace was performed.
+
+### Review remediation — F1/F2/F3 (2026-10-05)
+
+Join now records the first peer type only on a successful Waiting→Discovery
+transition. V1 `readConfigNotify` (7256–7271, 7317–7334) uses that history in
+Running: a non-type-7 session rejects numbers 9–12, and a type-7 session
+rejects 1–4, before primary membership or logical synthesis. This is not
+conditioned on interface mode; an actual successful Unknown-mode join also
+establishes the classification. Failed wireless original-player attempts
+do not establish it. Reset clears it for the next successful session.
+
+Announcement-derived membership now passes V5's shared cached-NetIF sender
+guard before dispatch (1354–1367). Synthesis still neither arms nor refreshes timers:
+V1 7436–7553, V2 589–608 and V3 3610–3637 establish that a removed slot's
+pending deadline can remove its synthetically recreated identity. The peer
+table retains that deadline and consumes inactive expirations, while full
+session clearing discards all deadlines. Direct keepalives still refresh
+their slot's clock.
+
+Regressions use real Join acquisition for ordinary/type-7 sessions, retain
+Unknown-mode boundaries, and cover explicit disconnect, rediscovery,
+paired removal, recreation and inactive expiry. See [review.md](review.md)
+for the remediation validation and re-review. The callback, device and full
+OPUS lifetime gaps above remain open; these fixes do not establish full parity.

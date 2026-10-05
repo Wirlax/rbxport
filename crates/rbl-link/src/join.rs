@@ -85,6 +85,9 @@ pub struct Join {
     rejected: bool,
     /// V1's runtime +0x1a1 gate, distinct from selected interface mode.
     exclude_original_models: bool,
+    /// V1 +0x1aa: the peer type of the first successful `LinkUp`, not the
+    /// selected interface mode or the type of a later announcement.
+    all_in_one_session: Option<bool>,
 }
 
 impl Join {
@@ -101,6 +104,7 @@ impl Join {
             network_ip: None,
             rejected: false,
             exclude_original_models: false,
+            all_in_one_session: None,
         }
     }
 
@@ -142,6 +146,16 @@ impl Join {
             || u32::from(sender) & u32::from(mask) == u32::from(own) & u32::from(mask))
     }
 
+    /// V1 Running (6/8) excludes the other session's numbered deck range.
+    pub(crate) fn allows_running_member(&self, number: u8) -> bool {
+        if !matches!(self.state, State::Running { .. }) { return true; }
+        match self.all_in_one_session {
+            Some(false) => !(9..=12).contains(&number),
+            Some(true) => !(1..=4).contains(&number),
+            None => true, // No actual successful LinkUp history (test-only Running fixtures).
+        }
+    }
+
     pub(crate) fn reject(&mut self, now: Instant) -> Option<Outgoing> {
         if self.mode == ConnectionMode::Unknown { return None; }
         let number = self.number().unwrap_or(self.configured_number);
@@ -166,6 +180,7 @@ impl Join {
         if self.rejected { return; }
         self.state = State::Waiting;
         self.in_use = [false; 6];
+        self.all_in_one_session = None;
         self.next_at = now;
     }
 
@@ -203,6 +218,7 @@ impl Join {
                 "first player or mixer heard; joining the link"
             );
             self.state = State::Discovery { sent: 0 };
+            self.all_in_one_session = Some(keep_alive.device_type.to_u8() == 7);
             self.next_at = now;
         }
     }
