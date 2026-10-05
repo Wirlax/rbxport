@@ -725,8 +725,9 @@ impl Server {
                 return Self::status_only(call.xid, nfs_status::IO);
             }
         };
-        // At or past the end libFilSiNE answers IO, not an empty success.
-        if data.is_empty() && wanted > 0 {
+        // [OBS] libFilSiNE `_tkfFSReadFile` (filsine.c:2266–2329) answers
+        // IO for every zero-byte fread, including a requested count of zero.
+        if data.is_empty() {
             tracing::trace!(xid = call.xid, offset, size = attributes.size, "read at the end of the file; IO, as rekordbox answers");
             return Self::status_only(call.xid, nfs_status::IO);
         }

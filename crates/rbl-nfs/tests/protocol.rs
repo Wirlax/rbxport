@@ -636,6 +636,111 @@ fn reading_at_or_past_the_end_is_io_as_rekordbox_answers_it() {
     }
 }
 
+/// Isolated READ fixtures with deterministic attributes and real file bytes.
+fn read_edge_fixture() -> (tempfile::TempDir, Server, Handle, Handle) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("nonempty.dat"), b"hello").unwrap();
+    fs::write(dir.path().join("empty.dat"), b"").unwrap();
+    let mut vfs = Vfs::new("/");
+    let file = vfs.add_file("nonempty.dat", dir.path().join("nonempty.dat"), 5, 1_700_000_000);
+    let empty = vfs.add_file("empty.dat", dir.path().join("empty.dat"), 0, 1_700_000_000);
+    let handles = (vfs.handle(file).unwrap(), vfs.handle(empty).unwrap());
+    let mut exports = Exports::new();
+    exports.insert(vfs);
+    (dir, Server::new(exports, NFS_PORT, MOUNT_PORT), handles.0, handles.1)
+}
+
+fn read_edge_arguments(handle: &Handle, offset: u32, count: u32) -> Vec<u8> {
+    let mut args = Writer::new();
+    args.opaque_fixed(handle.as_bytes()).u32(offset).u32(count).u32(0);
+    args.into_bytes()
+}
+
+/// Explicit accepted RPC words, independent of the server's reply builder.
+fn read_edge_envelope(xid: u32, accept_status: u32) -> Vec<u8> {
+    [xid, 1, 0, 0, 0, accept_status].into_iter().flat_map(u32::to_be_bytes).collect()
+}
+
+fn assert_read_edge_status(server: &Server, handle: &Handle, offset: u32, count: u32, status: u32) {
+    let request = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, read_edge_arguments(handle, offset, count));
+    let xid = Call::decode(&request).unwrap().xid;
+    let mut expected = read_edge_envelope(xid, 0);
+    expected.extend_from_slice(&status.to_be_bytes());
+    assert_eq!(server.handle(&request), Some(expected), "offset {offset}, count {count}");
+}
+
+#[test]
+fn read_edge_zero_count_is_io_for_nonempty_and_empty_files() {
+    let (dir, server, file, empty) = read_edge_fixture();
+    assert_read_edge_status(&server, &file, 0, 0, nfs_status::IO);
+    assert_read_edge_status(&server, &empty, 0, 0, nfs_status::IO);
+    assert_read_edge_status(&server, &empty, 0, 4096, nfs_status::IO);
+    // The first READ populates the nonempty file's read-ahead window; its
+    // cached zero-length slice must still produce status-only IO.
+    assert_read_edge_status(&server, &file, 2, 0, nfs_status::IO);
+    assert_eq!(fs::read(dir.path().join("nonempty.dat")).unwrap(), b"hello");
+    assert_eq!(fs::read(dir.path().join("empty.dat")).unwrap(), b"");
+}
+
+#[test]
+fn read_edge_exact_eof_and_past_eof_have_status_only_io_replies() {
+    let (_dir, server, file, _) = read_edge_fixture();
+    for offset in [5, 6, u32::MAX] {
+        for count in [0, 1, 4096] {
+            assert_read_edge_status(&server, &file, offset, count, nfs_status::IO);
+        }
+    }
+}
+
+#[test]
+fn read_edge_stale_handle_is_stale_even_when_count_is_zero() {
+    let (_dir, server, _, _) = read_edge_fixture();
+    let stale = Handle::from_slice(&[0xff; HANDLE_LEN]).unwrap();
+    for count in [0, 4096] {
+        assert_read_edge_status(&server, &stale, 0, count, nfs_status::STALE);
+    }
+}
+
+#[test]
+fn read_edge_positive_short_read_keeps_attributes_length_data_and_padding() {
+    let (dir, server, file, _) = read_edge_fixture();
+    // A previous zero-count read must not prevent a later successful read
+    // through the same open-file/read-ahead cache.
+    assert_read_edge_status(&server, &file, 0, 0, nfs_status::IO);
+    for count in [4096, u32::MAX] {
+        let request = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, read_edge_arguments(&file, 2, count));
+        let xid = Call::decode(&request).unwrap().xid;
+        let mut expected = read_edge_envelope(xid, 0);
+        // Status followed by all seventeen fattr words for the fixture's
+        // five-byte regular file (file id 2), then actual data length 3.
+        expected.extend([
+            0_u32, 1, 0o100_444, 1, 0, 0, 5, 4096, 0, 1, 2, 2,
+            1_700_000_000, 0, 1_700_000_000, 0, 1_700_000_000, 0, 3,
+        ].into_iter().flat_map(u32::to_be_bytes));
+        expected.extend_from_slice(b"llo\0");
+        assert_eq!(server.handle(&request), Some(expected), "count {count}");
+    }
+    assert_eq!(fs::read(dir.path().join("nonempty.dat")).unwrap(), b"hello");
+}
+
+#[test]
+fn read_edge_truncated_handle_offset_or_count_is_garbage_args() {
+    let (_dir, server, file, _) = read_edge_fixture();
+    let arguments = read_edge_arguments(&file, 0, 0);
+    // The existing parser requires a full 32-byte handle and both u32
+    // arguments. Obsolete total-count handling is outside this change.
+    for cut in 0..HANDLE_LEN + 8 {
+        let request = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, arguments[..cut].to_vec());
+        let xid = Call::decode(&request).unwrap().xid;
+        assert_eq!(
+            server.handle(&request),
+            Some(read_edge_envelope(xid, 4)),
+            "truncation at {cut}"
+        );
+    }
+    assert_read_edge_status(&server, &file, 0, 0, nfs_status::IO);
+}
+
 #[test]
 fn reading_a_directory_is_isdir() {
     let (_dir, server) = fixture();

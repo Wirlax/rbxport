@@ -78,3 +78,38 @@ attributes, cookies, status, cache invalidation and full reply sizes.
 Smallest check: `RB_LITE_TEST=1 cargo test -p rbl-nfs`.
 Any retained 8192/symlink restriction must be an explicit scoped difference,
 not silently described as byte-for-byte full parity.
+
+## Step 2 — bounded zero-byte READ implementation (2026-10-05)
+
+[OBS] Re-read V7 `filsine.c` `_tkfNFSProcedureRead` (401–445,
+`0x343c`) and `_tkfFSReadFile` (2266–2329, `0x5464`). The helper
+returns IO (5) for any zero-byte `fread`, including a requested count of
+zero, while positive short reads succeed. R5 now returns status-only IO
+whenever the selected file read produces no bytes; the previous
+positive-count exception has been removed. Invalid handles still return
+STALE (70), and malformed required handle/offset/count fields still return
+the existing accepted RPC GARBAGE_ARGS envelope.
+
+Five isolated temporary-file fixtures in `crates/rbl-nfs/tests/protocol.rs`
+compare complete RPC replies, including XID, accepted status and null
+verifier. Coverage includes zero count on nonempty/empty files, positive
+count on an empty file, exact/past EOF, stale handles with zero/positive
+count, every truncation of the required handle/offset/count fields, and a
+positive short read after a zero-count request through the same cache.
+The short-read fixture checks all seventeen attribute words, actual data
+length, bytes and XDR padding; file contents remain unchanged. The
+malformed cases preserve RBX's existing bounds checks and do not establish
+vendor malformed-input parity or obsolete total-count parsing.
+
+Validation: the focused `RB_LITE_TEST=1 cargo test -p rbl-nfs --test protocol
+read_edge` passed **5 tests** (zero-count regressions failed before the
+condition change); `RB_LITE_TEST=1 cargo test -p rbl-nfs` passed **62 tests**
+(61 protocol fixtures and 1 read-ahead unit test).
+`cargo clippy -p rbl-nfs --all-targets -- -D warnings` passed.
+
+This is static-source and local RPC-fixture evidence. No new capture,
+booted-firmware or physical-device validation was performed. The 8192-byte
+cap, read-ahead/open-file cache, export confinement and symlink refusal
+remain explicit scoped differences. Metadata/directory refresh, cookies,
+budgets, cache lifetime and broader issue 44 acceptance remain blocked;
+this change makes no full NFS parity claim.
