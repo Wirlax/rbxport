@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "budget": "node scripts/check-perf-budgets.mjs && tsx scripts/check-bundle-size.ts",
-    "locales": "node scripts/build-locales.mjs"
+    "locales": "node scripts/build-locales.mjs",
+    "tests:private": "node scripts/tests-private.mjs"
   },
   "dependencies": {
     "@sentry/react": "^11.0.0",
