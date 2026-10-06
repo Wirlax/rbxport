@@ -44,7 +44,6 @@ suite runs against it too.
 | `crates/` | The Rust libraries that do the work, all prefixed `rbl-`. They know nothing about Tauri. |
 | `e2e/` | Playwright tests, run in Chromium and WebKit against the mock backend. |
 | `docs/` | User documentation and notes on formats. |
-| `design/` | Design tokens and reference material. `src/styles/tokens.css` is generated from `design/tokens/theme.json`. |
 | `scripts/` | Development utilities for cleanup, deployment, versioning, generated files, bundle checks, and release notes. |
 | `public/locales/` | Generated translations. |
 
@@ -122,10 +121,6 @@ pnpm test         # Vitest unit tests
 pnpm budget       # budget schema and production bundle size
 pnpm e2e          # Playwright; first run: pnpm exec playwright install chromium webkit
 ```
-
-CI also runs `pnpm tokens` and `pnpm icons` and fails if
-`src/styles/tokens.css` or `src/components/icons.tsx` changes. Regenerate and
-commit them when you change their sources.
 
 ## Cleanup
 

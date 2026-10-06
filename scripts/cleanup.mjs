@@ -21,7 +21,7 @@ const PROJECT_OUTPUT = [
   "dist",
   "test-results",
   "playwright-report",
-  "design/sketch/dist",
+  "dist-mock",
 ];
 const PARTIAL_BACKUP = /^\.partial-[0-9a-f-]+(?:\.zip)?$/i;
 

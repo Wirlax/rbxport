@@ -9,7 +9,7 @@
  * a five-pixel strip is a lot of layout for something this small.
  */
 import { memo, useEffect, useRef, useState } from "react";
-import theme from "../../../design/tokens/theme.json";
+import theme from "@/styles/theme";
 
 import { getBackend } from "@/ipc/client";
 import { backingSize } from "@/lib/canvasSize";

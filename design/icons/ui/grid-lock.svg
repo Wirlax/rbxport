@@ -1,8 +1,0 @@
-<svg viewBox="0 0 48 46" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    Grid locked: the padlock with both legs of its shackle in the body.
-    Measured from docs/screenshots/grid-edit-row-2026-09-18@2x.png (rekordbox 7.2.11, 2x): the box is one grid-edit button, 48 x 46 at 2x, so the glyph sits where rekordbox puts it.
-  -->
-  <path fill-rule="evenodd" d="M12 23H36V39H12ZM22 37V31.46A4 4 0 1 1 26 31.46V37Z" fill="currentColor"/>
-  <path d="M14 17.2A10 10 0 0 1 34 17.2V23H30V17.2A6 6 0 0 0 18 17.2V23H14Z" fill="currentColor"/>
-</svg>

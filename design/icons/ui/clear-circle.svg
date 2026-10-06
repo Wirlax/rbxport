@@ -1,5 +1,0 @@
-<svg viewBox="0 0 11 11" xmlns="http://www.w3.org/2000/svg">
-  <!-- A cross in a disc: the Release Date's clear button. The cross is cut
-       out of the disc so the panel shows through it. -->
-  <path fill-rule="evenodd" fill="currentColor" d="M5.5 0a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11Zm2.83 3.38-.71-.71L5.5 4.79 3.38 2.67l-.71.71L4.79 5.5 2.67 7.62l.71.71L5.5 6.21l2.12 2.12.71-.71L6.21 5.5Z"/>
-</svg>

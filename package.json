@@ -10,7 +10,7 @@
     "dev:web": "vite",
     "dev:mock": "cross-env RBL_MOCK=1 vite",
     "build": "tsc --noEmit && vite build",
-    "build:mock": "cross-env RBL_MOCK=1 vite build --outDir design/sketch/dist --emptyOutDir",
+    "build:mock": "cross-env RBL_MOCK=1 vite build --outDir dist-mock --emptyOutDir",
     "clean": "node scripts/cleanup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "perf:gate": "cross-env RBXPORT_PERF=1 playwright test e2e/frames.spec.ts --workers=1",
@@ -22,9 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "tokens": "tsx scripts/build-tokens.ts",
     "budget": "node scripts/check-perf-budgets.mjs && tsx scripts/check-bundle-size.ts",
-    "icons": "tsx scripts/build-ui-icons.ts",
     "locales": "node scripts/build-locales.mjs"
   },
   "dependencies": {

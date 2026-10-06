@@ -1,9 +1,0 @@
-<svg viewBox="0 0 48 46" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    Metronome: three bars rising to the right, each centred on the middle of the button.
-    Measured from docs/screenshots/grid-edit-row-2026-09-18@2x.png (rekordbox 7.2.11, 2x): the box is one grid-edit button, 48 x 46 at 2x, so the glyph sits where rekordbox puts it.
-  -->
-  <rect x="15" y="18.2" width="3.1" height="7.9" fill="currentColor"/>
-  <rect x="21.6" y="15" width="3.2" height="14.3" fill="currentColor"/>
-  <rect x="28" y="11.9" width="3.4" height="22.2" fill="currentColor"/>
-</svg>

@@ -523,14 +523,6 @@ jobs:
         # perf-budgets.json is enforced, not aspirational.
         run: pnpm budget
 
-      - name: Generated files are up to date
-        # tokens.css and icons.tsx are generated and committed; a stale one
-        # means the source and the shipped file disagree.
-        run: |
-          pnpm tokens
-          pnpm icons
-          git diff --exit-code -- src/styles/tokens.css src/components/icons.tsx
-
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium webkit
 

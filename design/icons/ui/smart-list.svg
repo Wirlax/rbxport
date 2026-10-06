@@ -1,9 +1,0 @@
-<svg viewBox="0 0 14 12" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    Intelligent playlist: the list icon's box and column, with a spark in it.
-    Was added to the generated file by hand; this is its source.
-  -->
-  <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/>
-  <path d="M1 4h12M4.5 4v7" stroke="currentColor" stroke-width="1.4"/>
-  <path d="M9 5.6v3.8M7.4 6.5l3.2 2M7.4 8.5l3.2-2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
-</svg>

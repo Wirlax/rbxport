@@ -1,9 +1,0 @@
-<svg viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    Ascending. Pioneer draws this as a filled outline on a 12-unit box with a
-    1.2-wide shaft and a head spanning 8 units; this is the same geometry drawn
-    as a stroke, which is a different construction and our own.
-  -->
-  <path d="M6 11.4V1.5M2.2 5.3 6 1.5l3.8 3.8" fill="none" stroke="currentColor"
-        stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

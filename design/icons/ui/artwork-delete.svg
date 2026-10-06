@@ -1,8 +1,0 @@
-<svg viewBox="0 0 20 22" xmlns="http://www.w3.org/2000/svg">
-  <!-- An arrow dropping into a bin: the Artwork tab's delete button. The
-       bin's slats are gaps cut out of it, so the button shows through. -->
-  <path d="M10 10 6 5h2.6V0h2.8v5H14z" fill="currentColor"/>
-  <rect x="4" y="11" width="12" height="1.6" fill="currentColor"/>
-  <path fill-rule="evenodd" fill="currentColor"
-        d="M5.5 13.6h9l-.8 8.4H6.3zM7.6 15v5.5h.8V15zm2 0v5.5h.8V15zm2 0v5.5h.8V15z"/>
-</svg>

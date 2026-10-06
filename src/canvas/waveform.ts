@@ -7,7 +7,7 @@
  */
 
 /** A rendered preview, cached as a bitmap so scrolling is a `drawImage`. */
-import theme from "../../design/tokens/theme.json";
+import theme from "@/styles/theme";
 
 export interface RenderedWaveform {
   bitmap: ImageBitmap | HTMLCanvasElement;

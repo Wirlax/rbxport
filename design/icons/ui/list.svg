@@ -1,5 +1,0 @@
-<svg viewBox="0 0 14 12" xmlns="http://www.w3.org/2000/svg">
-  <!-- A framed table: an outer rule, two rows, one column division. -->
-  <rect x="1" y="1" width="12" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/>
-  <path d="M1 4h12M1 7.5h12M4.5 4v7" stroke="currentColor" stroke-width="1.4"/>
-</svg>

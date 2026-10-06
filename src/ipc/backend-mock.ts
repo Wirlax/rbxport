@@ -10,7 +10,7 @@
  * parity test once `rbl-index` lands.
  */
 import { TRACK_SEARCH_OPTIONS, type TrackSearchField } from "@/lib/search";
-import theme from "../../design/tokens/theme.json";
+import theme from "@/styles/theme";
 
 import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,

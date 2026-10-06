@@ -38,7 +38,7 @@ describe("cleanup script", () => {
       "dist",
       "test-results",
       "playwright-report",
-      "design/sketch/dist",
+      "dist-mock",
     ]);
     expect(plan.every(item => item.path.startsWith(`${setup.repository}${path.sep}`))).toBe(true);
   });

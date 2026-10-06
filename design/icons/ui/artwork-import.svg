@@ -1,5 +1,0 @@
-<svg viewBox="0 0 20 22" xmlns="http://www.w3.org/2000/svg">
-  <!-- An arrow rising out of a folder: the Artwork tab's import button. -->
-  <path d="M10 1 14 6h-2.6v5h-2.8V6H6z" fill="currentColor"/>
-  <path d="M1 12h6l1.6 1.6H19V21H1z" fill="currentColor"/>
-</svg>
