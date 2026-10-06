@@ -119,12 +119,13 @@ jobs:
             const { execFileSync } = require("child_process");
             const fs = require("fs");
             const text = fs.readFileSync("Cargo.toml", "utf8");
-            const current = /\[workspace\.package\][\s\S]*?^version\s*=\s*"(\d+\.\d+\.\d+)-rc\.(\d+)"/m.exec(text);
-            if (!current) throw new Error("workspace version must be an RC");
+            const current = /\[workspace\.package\][\s\S]*?^version\s*=\s*"(\d+\.\d+\.\d+)(?:-rc\.(\d+))?"/m.exec(text);
+            if (!current) throw new Error("workspace version must be stable or an RC");
             if ("${{ inputs.skip_version_bump || false }}" === "true") {
-              process.stdout.write(`${current[1]}-rc.${current[2]}`);
+              process.stdout.write(current[2] === undefined ? current[1] : `${current[1]}-rc.${current[2]}`);
               process.exit(0);
             }
+            if (current[2] === undefined) throw new Error("a stable version can only be reused");
             const prefix = current[1];
             const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
           const numbers = tags
@@ -1115,7 +1116,7 @@ jobs:
           Write-Host "Submitting $($packages[0].Name), version $($identity.Version)"
 
       - name: Install Microsoft Store Developer CLI
-        uses: microsoft/microsoft-store-apppublisher@v1.1
+        uses: microsoft/microsoft-store-apppublisher@v1.4
 
       - name: Configure Partner Center credentials
         shell: pwsh
