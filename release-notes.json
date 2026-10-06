@@ -1,5 +1,41 @@
 [
   {
+    "version": "1.0.0-rc.14",
+    "date": "2026-10-06",
+    "changes": [
+      "(Fixed) Align LINK file reads and prefer wired adapters.",
+      "(Fixed) Import files dropped on Linux playlists.",
+      "(Fixed) Return NFS IO for zero-byte reads.",
+      "(Fixed) Match bounded RPC portmap and mount replies.",
+      "(Fixed) Refuse unsupported LINK analysis writes precisely.",
+      "(Fixed) Preserve LINK menus for scalar and silent requests.",
+      "(Fixed) Return native LINK filter refusal codes.",
+      "(Fixed) Ignore idle LINK compatibility responses.",
+      "(New) Retain paired logical LINK identities.",
+      "(Fixed) Preserve mount hosts on malformed unmounts.",
+      "(Fixed) Scope RPC replay cache to receiving sockets.",
+      "(Fixed) Report raw LINK load-response fields.",
+      "(Fixed) Return the evidenced LINK played-state scalar.",
+      "(Fixed) Handle known-mode LINK announcement rejection.",
+      "(Fixed) Refuse database sessions before LINK readiness.",
+      "(Fixed) Expire LINK peers without incoming traffic.",
+      "(Fixed) Clear stale LINK members on rediscovery.",
+      "(Fixed) Update LINK peer addresses consistently.",
+      "(Fixed) Disconnect the numbered LINK member.",
+      "(Fixed) Honor keepalives during LINK number probing.",
+      "(Fixed) Answer LINK occupancy masks in interface context.",
+      "(Fixed) Classify LINK interfaces for original players.",
+      "(Fixed) Preserve menus for unsupported LINK commands.",
+      "(Fixed) Reduce LINK audio read fragmentation.",
+      "(Fixed) Match Smart Playlist attribute parsing.",
+      "(Fixed) Match Smart Playlist XML structure.",
+      "(Fixed) Reject empty Smart Playlist rules.",
+      "(Fixed) Match Smart Playlist relative dates.",
+      "(Fixed) Match Smart Playlist date conversion.",
+      "(Fixed) Separate LINK key notation and order."
+    ]
+  },
+  {
     "version": "1.0.0-rc.13",
     "date": "2026-10-04",
     "changes": [
