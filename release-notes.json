@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.0-rc.15",
+    "date": "2026-10-06",
+    "changes": [
+      "(Fixed) Preserve audio extensions on FAT exports."
+    ]
+  },
+  {
     "version": "1.0.0-rc.14",
     "date": "2026-10-06",
     "changes": [
