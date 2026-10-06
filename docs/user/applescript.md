@@ -1,4 +1,6 @@
-# AppleScript
+# AppleScript automation
+
+[Documentation](../README.md)
 
 On macOS, rbxport can be scripted: from Script Editor, `osascript`,
 Shortcuts' "Run AppleScript", or any app that sends Apple Events. Open the
@@ -8,7 +10,15 @@ every class, property and command.
 The first time a program scripts rbxport, macOS asks whether to allow it
 (System Settings → Privacy & Security → Automation).
 
-## What a script can reach
+## Library write protection
+
+Every change to the library is refused while rekordbox is running, and
+while Library Protection is on (it is by default). Turn it off from a
+script with `set value of setting "advanced.protectLibrary" to false`, or in
+Preferences. A refused change raises an error with the same message the
+window shows.
+
+## Objects and properties
 
 | Object | What it is |
 | --- | --- |
@@ -39,14 +49,6 @@ integer AppleScript holds, and track ids follow suit. `track id "12345"`.
   Deleting a track of a playlist takes it off that playlist; it stays in
   the collection.
 
-## Editing is guarded as it is in the window
-
-Every change to the library is refused while rekordbox is running, and
-while Library Protection is on (it is by default). Turn it off from a
-script with `set value of setting "advanced.protectLibrary" to false`, or in
-Preferences. A refused change raises an error with the same message the
-window shows.
-
 ## Examples
 
 ```applescript
@@ -72,3 +74,10 @@ tell application "rbxport"
     end timeout
 end tell
 ```
+
+## Developer entry points
+
+The macOS integration is in `src-tauri/src/scripting/`. Scripted library edits
+must preserve the same guards and refresh behavior as UI edits. Use disposable
+libraries for writable automation tests; see [Conventions](../development/conventions.md)
+and [Testing](../development/testing.md).

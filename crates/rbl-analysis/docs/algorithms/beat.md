@@ -1,8 +1,15 @@
 # Beat grid
 
-Finds the tempo and puts a beat on every kick. Code: `onset.rs` (the
-onset envelope), `tempo.rs` (tempo, fit, tempo changes, gaps) and
-`attack.rs` (the kick's attack). Steps 1–7 of [pipeline.md](pipeline.md).
+[Analysis documentation](../README.md) · [Code map](../development.md)
+
+`onset.rs`, `attack.rs`, and `tempo.rs` turn onset envelopes and optional
+attack evidence into a `TempoResult`: fitted segments and an explicit beat
+list. This stage does not choose the final musical downbeat; `lib.rs` applies
+bar-phase selection and numbering afterwards.
+
+Read [Pipeline](../pipeline.md) for stage order and [Assumptions](../assumptions.md)
+for the 4/4, tempo, and transition rules. The sections below explain each
+part of detection, fitting, and segmentation.
 
 ```mermaid
 flowchart TD
@@ -40,7 +47,7 @@ Two measurements of the envelope are combined, over the whole track:
   never at two thirds of it. This is what rules out the one-and-a-half
   error.
 
-Every autocorrelation peak between 70 and 200 BPM is a candidate, with its
+Every autocorrelation peak within the requested BPM range (70–180 by default) is a candidate, with its
 simple multiples and fractions. Each is scored
 `autocorrelation × √fourier × prior`, the prior a broad bell centred on
 132 BPM that only breaks ties between octaves. Drum & bass comes back at
@@ -80,7 +87,7 @@ line in step 4.
 
 The line is fitted twice, from the comb's phase and from half a beat
 later, and the one that collects more kick is kept. The phrase-structure
-stage ([downbeat.md](downbeat.md)) still has the last word on which half
+stage ([Downbeat](downbeat.md)) still has the last word on which half
 of the beat the kicks are on: it is right on 153 of the 155 reference
 grids where the kick alone is right on 150, the kick's misses being
 off-beat claps with a sharper transient than the kick.
@@ -146,7 +153,7 @@ The tuning is in `tempo.rs::TransitionTransients`:
 The shaper reads the transition plus one second of context on each side.
 `walk_report` uses the same fallback as the production transition walker.
 The separate same-tempo gap walker in §8 keeps its existing envelope and
-thresholds. [grid-fixtures.md](grid-fixtures.md#transitions-without-kicks)
+thresholds. The private fixture guide (`rbxport-private/crates/rbl-analysis/docs/grid-fixtures.md`, “Transitions without kicks”)
 lists the quiet-transition, release, silence and timing regressions.
 
 **A jump, or a change with no reliable transients to follow, is one cut.** In a DJ edit
@@ -182,7 +189,7 @@ A new segment starts with the beat it was cut on. An old-tempo beat within
 half a period before the cut is the same hit as the new tempo's first
 beat and is dropped.
 
-[multibpm.md](multibpm.md) records a baseline from before transient emphasis:
+[Multi-tempo evaluation](../validation/multitempo.md) records a baseline from before transient emphasis:
 seven of ten changes were within 3 ms, and the three misses were where the hand
 grid switched at the impact that ends a section, with the new tempo's
 kick arriving twenty seconds later.
@@ -248,8 +255,15 @@ and cuts at 147.029 s, where the hand grid re-phases.
   any beat's time. A walked transition is a run of one-beat segments;
   a walked ramp a run of one-beat segments.
 - `beats` — every beat's time in ms, its tempo ×100, and its number in the
-  bar. Numbering here is 1–4 from the first beat; [downbeat.md](downbeat.md)
+  bar. Numbering here is 1–4 from the first beat; [Downbeat](downbeat.md)
   fixes it on the first tempo's music, and the count carries on across
   every change as rekordbox numbers a hand grid.
 - `confidence` — how far the winning tempo stood above the best candidate
   that is not a simple ratio of it.
+
+## Changing this stage
+
+Follow the [change workflow](../development.md#make-a-change) and run the
+[relevant public checks](../validation/README.md#public-tests). Preserve the
+input/output contract above and update the reference when options or evidence
+change. Report new measurements separately from the recorded results.

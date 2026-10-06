@@ -1,28 +1,32 @@
-# Analysis rules
+# Analysis assumptions and policy
+
+[Analysis guide](../README.md) · [Documentation](../../../docs/README.md)
+
+These are algorithm assumptions and evaluation targets, not guarantees for arbitrary
+music. Recorded measurements are in [Reference evaluation](validation/reference-playlist.md).
 
 The rules for how this library's music is read, and what the code does
 with each. They are general: none is about a particular track. Evidence
-and measurements live in [golden-gate.md](golden-gate.md) and
-[key.md](key.md).
+and measurements live in [Reference evaluation](validation/reference-playlist.md) and
+[Key detection](algorithms/key.md).
 
-## The reference
+## Reference and target
 
-- **The playlist `RBX-BPM-GRID-TEST` is the truth.** Every track in it was
+- **The private playlist `RBX-BPM-GRID-TEST` is the recorded reference.** Every track in it was
   analysed by rekordbox and its grid checked or set by hand.
-- **Accuracy must reach 99 % on BPM, downbeat/grid and key** against that
+- **The evaluation target is 99 % on BPM, downbeat/grid and key** against that
   playlist.
 - **Where rekordbox versions disagree with each other, follow the current
   one.** The decoder in `rbl-audio` reproduces rekordbox 7's timeline.
 
 ## Time signature and tempo
 
-- **Every track is in 4/4.** A bar is four beats; beats are numbered 1–4
+- **The algorithm assumes 4/4.** A bar is four beats; beats are numbered 1–4
   and 1 is the downbeat. Nothing needs to detect a metre.
 - **Drum & bass is counted at the fast tempo** (174, not 87). When two
   octaves are both plausible, the faster one wins if it carries the most
   rhythm at its rate.
-- **A steady tempo is a whole number of BPM.** Dance music is produced at
-  whole tempos; a fitted line within a tenth of a whole number is snapped
+- **Near-integer steady tempos snap to whole BPM.** Under this policy, a fitted line within a tenth of a whole number is snapped
   to it and re-phased through the same kicks. The beats of a gradual change
   keep the tempo they were measured at.
 - **A tempo change is a new segment**, with the beat count carrying on 1–4
@@ -82,13 +86,18 @@ and measurements live in [golden-gate.md](golden-gate.md) and
   the second eighth: the kick, tail included, takes the first sixteenth to
   eighth of the beat, so the second eighth is the bass line alone. The
   code's `BassRoot` and `BassVote` rules read the bass in each of those
-  windows; which rules ship is decided by measurement ([key.md](key.md)).
+  windows; which rules ship is decided by measurement ([Key detection](algorithms/key.md)).
 - Key names are rekordbox's: `Dbm`, `F#m`, `Abm`, `Bbm` for the minors and
   `Db`, `F#`, `Ab`, `Bb`, `Eb` for the majors, matching `djmdKey.ScaleName`.
 
-## Adding a rule
+## Adding or changing a rule
 
 A rule is a variant of `key::Rule` with its knobs, a match arm in
 `key::apply`, and a line in this file, stated generally. `golden key` then
 reports how often it fires, what it fixes and what it breaks, against the
 shipped rules.
+
+Write rules as general conditions, keep tuning and profile changes in the
+owning options/rule code, and add public regressions. A new assumption needs
+an explanation and identified evidence. Follow the [change workflow](development.md#make-a-change)
+and report [evaluation results](validation/README.md#report-results).

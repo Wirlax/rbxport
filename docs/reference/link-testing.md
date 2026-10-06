@@ -1,15 +1,18 @@
-# RBX testing strategy
+# LINK behavior and hardware coverage
 
-## Purpose and scope
+[Documentation](../README.md) · [General test guide](../development/testing.md)
 
-RBX is tested at two boundaries:
+## Scope
 
-1. **Unit tests** exercise RBX code with mocks, fixtures, and in-memory protocol sessions. They prove query selection, ordering, record layout, reply envelopes, error handling, and state changes without opening network sockets or touching an installed rekordbox library.
-2. **Integration tests** boot vendor firmware in AtEmu and exercise user-visible RBX behavior through its emulated panel. The firmware connects to RBX over the real Link Export TCP, UDP, RemoteDB, portmap, mountd, and NFS paths. A protocol client such as `rbl-fakecdj` is useful below this boundary, but it is not a hardware-emulation integration test.
+This reference covers RBX as a rekordbox Link Export source: firmware browsing,
+loading, and interaction over the real protocol. The separate XDJ-AZ USB gate
+covers a generated export and deck-1 playback. Mixer controls, effects,
+recording, streaming services, and broader USB compatibility are outside this
+LINK behavior catalog.
 
-This document covers the part of each product manual that depends on RBX acting as a rekordbox Link Export source. Deck-local playback, mixer controls, effects, recording, lighting, streaming services, and USB-device export are outside this test surface.
-
-Tests must set `RBXPORT_TEST=1` whenever code can open or write a library. Writable tests must use `rbl_db::fixture::build`; an installed rekordbox library is never a test target.
+Use temporary fixtures for writes and set `RB_LITE_TEST=1` for public Rust
+checks. Booted firmware, protocol-client, and physical-device results must be
+reported as separate evidence layers.
 
 ## Evidence rules
 
@@ -23,7 +26,7 @@ AtEmu proves the response, transport, and firmware behavior that its device mode
 
 | Device | User manual | Firmware reference | AtEmu status | Important compatibility detail |
 | --- | --- | --- | --- | --- |
-| XDJ-AZ | `nowplaying3/dj-products/alphatheta/xdj-az/manual/xdj-az-manual.pdf` | `alphatheta-docs/devices/xdj-az`, firmware 1.30 | **Unavailable:** catalog-only stub; no firmware, guest, shim, panel, or media model. | One appliance exposes two ordinary Pro DJ Link deck identities; four-deck status can use USB slot `07`. |
+| XDJ-AZ | `nowplaying3/dj-products/alphatheta/xdj-az/manual/xdj-az-manual.pdf` | `alphatheta-docs/devices/xdj-az`, firmware 1.30 | **Passing emulated USB gate:** generated FAT32 export browses, loads on deck 1, and passes tone/cue audio tests at 44100 Hz with exclusive bridge capture. | One appliance exposes two ordinary Pro DJ Link deck identities; four-deck status can use USB slot `07`. No physical-device result exists. |
 | XDJ-RX3 | `nowplaying3/dj-products/alphatheta/xdj-rx3/manual/xdj-rx3-manual.pdf` | `alphatheta-docs/devices/xdj-rx3`, firmware 1.20; activation capture on 1.19 | **Unavailable:** catalog-only stub; no bootable firmware, guest, or shim. | Uses legacy request variants for several browse/load operations. Rear USB Link Export does not start until the audio gadget reports its connection event. |
 | CDJ-3000 | `nowplaying3/dj-products/alphatheta/cdj-3000/manual/cdj-3000-manual.pdf` | `alphatheta-docs/devices/cdj-3000`, firmware 3.20 | **Available:** vendor EP122 firmware boots with a live panel and REST control harness. | Uses live keyboard search `1500`; after a Link Export load it waits for user-info `3006` before requesting delivery info `2602`. |
 
@@ -102,7 +105,20 @@ The CDJ-3000 suite currently maps to the catalog as follows:
 | HW-INF-01 | `test_tag_track_button_and_loaded_track_rating_editor` | The firmware renders loaded-track INFO and persists a rating edit. |
 | Additional edit/navigation behavior | the remaining `test_interactions.py` cases | Selection restoration, filters, tag list, rating propagation, grid correction, and nested BACK behavior operate through the live panel. |
 
-HW-BRW-03 (HISTORY), HW-BRW-06 (KEY category navigation), and exact cue/artwork display still need dedicated panel assertions. Their RemoteDB requests remain covered by unit and protocol integration tests, which is weaker evidence. All XDJ-AZ and XDJ-RX3 firmware cases remain unavailable because those AtEmu models cannot boot.
+HW-BRW-03 (HISTORY), HW-BRW-06 (KEY category navigation), and exact cue/artwork display still need dedicated panel assertions. Their RemoteDB requests remain covered by unit and protocol integration tests, which is weaker evidence. XDJ-RX3 firmware cases remain unavailable because that AtEmu model cannot boot.
+
+Run `npm run tests:private` from RBXport to run the CDJ-3000 LINK and XDJ-AZ
+USB firmware suites sequentially. Use `npm run tests:private -- cdj-3000` or
+`npm run tests:private -- xdj-az` to select one suite. The sibling
+`rbxport-private` checkout is required; set `RBXPORT_PRIVATE_REPO` for another
+location. These suites require built AtEmu models and imported firmware.
+
+The XDJ-AZ harness lives at `../rbxport-private/scripts/e2e-xdj-az/run.sh`.
+It exports a generated tone to a disposable FAT32 image, browses its playlist,
+loads deck 1, and checks playback and cue audio. Investigation notes are in
+`../rbxport-private/docs/testing/xdj-az.md`; evidence is saved under that
+repository's `verification/xdj-az/`. This establishes emulator/deck-1 coverage;
+physical-device and multideck behavior remain unverified.
 
 ## Manual hardware run
 
@@ -125,27 +141,29 @@ Use this result format:
 Focused unit and protocol checks:
 
 ```sh
-RBXPORT_TEST=1 cargo test -p rbl-dbserver --test session
-RBXPORT_TEST=1 cargo test -p rbl-link --test link
+RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session
+RB_LITE_TEST=1 cargo test -p rbl-link --test link
 ```
 
-Real CDJ-3000 firmware integration, from the private companion checkout:
+CDJ-3000 firmware integration, from the public checkout:
 
 ```sh
-cd ../rbxport-private
-RBXPORT_REPO=../rbxport ./scripts/e2e-link/run.sh
+npm run tests:private -- cdj-3000
 ```
 
-The run is valid only if its output includes `bringing the booth up`, `deck cdj-3000-1 is booted`, and pytest results backed by `testbed.json` showing a connected, ticking firmware panel. `--no-build` may be used only after the intended RBX executable has been built.
+Confirm the intended app build, device/firmware, pytest results, and `testbed.json` showing a connected, ticking firmware panel. A log message alone is not proof that the required behavior passed. `--no-build` may be used only after the intended RBX executable has been built.
 
 Before handing off a substantial Link Export change:
 
 ```sh
 cargo clippy --workspace --all-targets -- -D warnings
-RBXPORT_TEST=1 cargo test --workspace
+RB_LITE_TEST=1 cargo test --workspace
 ```
 
-XDJ-AZ and XDJ-RX3 integration runs remain blocked until AtEmu has bootable firmware models for them. Their protocol dialects stay covered by unit and socket integration tests in the meantime, with results labelled as protocol coverage.
+XDJ-AZ's generated one-track USB fixture passes the emulated deck-1 audio gate;
+XDJ-RX3 integration remains blocked until AtEmu has a bootable firmware model.
+Their protocol dialects stay covered by unit and socket integration tests in
+the meantime, with results labelled as protocol coverage.
 
 ## Coverage gate
 

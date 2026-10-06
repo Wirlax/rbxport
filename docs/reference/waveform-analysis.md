@@ -1,4 +1,6 @@
-# Three-band overview calibration
+# Waveform overview calibration
+
+[Documentation](../README.md) · [Analysis crate](../../crates/rbl-analysis/README.md)
 
 RBX computes `PWV6` separately from the 150 Hz detail waveform. Peak-reducing
 that detail produced the regular cream spikes and shallow blue band seen in
@@ -19,7 +21,7 @@ These are empirical approximations, not recovered rekordbox DSP. Calibration
 used the nine tracks in `RBX-BPM-MULTIBPM-TEST`; those tracks are not a held-out
 accuracy test. The remaining mismatch is principally track-level gain.
 
-## Measured comparison
+## Recorded calibration results
 
 At 1,200 columns and 40px height, compare all three stacked band boundaries
 using the renderer's scales (128, 256, 128). Mean absolute error in pixels:
@@ -46,14 +48,20 @@ The 2.5px boundary gate is a regression limit for those fixtures, not a claim
 of pixel-perfect output. The captured tracks and comparison tooling are kept
 outside this public repository.
 
-For read-only audio diagnostics:
+## Read-only diagnostics
+
+For audio diagnostics that write separate output:
 
 ```sh
 cargo run --release -p rbl-analysis --example waveform_probe -- AUDIO OUTPUT_DIRECTORY
 ```
 
 This writes decoded mono samples, sample rate, and generated PWV6/PWV7 payloads.
-To refresh only the overview in a results playlist, with rekordbox closed:
+## Manual repair tool
+
+This operation writes analysis files in the selected library. It is not an
+onboarding or automated test command. Use only a disposable development
+library, with rekordbox closed. To refresh only the overview:
 
 ```sh
 cargo run --release -p rbl-analysis --example repair_waveforms -- RBX-BPM-MULTIBPM-RESULTS --overview-only

@@ -1,27 +1,41 @@
-# The multi-tempo test
+# Multi-tempo evaluation
 
-The golden gate scores the analysis against rekordbox's stamps in a cache.
-This test puts it in front of rekordbox: the playlist `RBX-BPM-MULTIBPM-TEST`
-holds nine DJ edits with tempo changes, each gridded by hand in rekordbox.
-The rig `examples/multibpm.rs` copies their files, imports the copies into
-`RBX-BPM-MULTIBPM-RESULTS`, analyses them, and registers the result in the
-library the way rekordbox registers its own, so a copy can be loaded on a
-deck beside its original. `report` scores the copies with the golden
-gate's metrics and prints both grids as tempo runs. The Claude skill
-`.claude/skills/multibpm-test` runs it for all songs or one.
+[Testing and evaluation](README.md) · [Analysis documentation](../README.md)
 
+This is a historical manual evaluation tool, not an automated fixture test.
+`examples/multibpm.rs` detects the installed library for its write path; it does
+not offer a verified disposable-library selector in the commands below.
+Do not run its write modes against an installed user library during development.
+Use the [public multi-tempo tests](README.md#public-tests) for writable regression
+coverage.
+
+## Purpose and prerequisites
+
+The private `RBX-BPM-MULTIBPM-TEST` playlist holds nine hand-gridded DJ edits.
+The tool's write modes copy those files, import them into
+`RBX-BPM-MULTIBPM-RESULTS`, analyse them, and register the results for side-by-side
+comparison in rekordbox. `report` scores the copied grids against the originals.
+The historical workflow required rekordbox and its agent to be closed and
+backed up `master.db` under `target/multibpm/backups` before writing.
+
+The modes are `run`, `stage`, `reset`, `import`, `analyse`, `report`, and `check`.
+These are described here to explain the recorded evidence; they are not part of
+onboarding or the public test gate. A future reusable write harness must supply
+an explicitly isolated library before these operations can be test commands.
+
+## Read-only comparison
+
+If the private reference playlist/audio is available, compare it without importing
+copies. The `golden` example reads the library and stores a separate cache:
+
+```sh
+RB_LITE_GOLDEN=target/multibpm-gold cargo run --release -p rbl-analysis --example golden -- cache RBX-BPM-MULTIBPM-TEST
+RB_LITE_GOLDEN=target/multibpm-gold cargo run --release -p rbl-analysis --example golden -- score
 ```
-cargo run --release -p rbl-analysis --example multibpm -- run [filter]
-cargo run --release -p rbl-analysis --example multibpm -- stage|reset|import|analyse|report|check [filter]
-```
 
-rekordbox and its agent must be quit: the writer refuses otherwise, and takes
-a backup of `master.db` (under `target/multibpm/backups`) before the first
-write of a run.
-
-The same playlist can be scored without touching the library: cache it
-with `golden cache RBX-BPM-MULTIBPM-TEST` into `RB_LITE_GOLDEN=target/multibpm-gold`
-and run `golden score` there ([golden-gate.md](golden-gate.md)).
+See [Reference playlist evaluation](reference-playlist.md) for metrics and cache
+provenance. The rest of this document preserves the manual tool's recorded file
+and database behavior, followed by historical results.
 
 ## What is written, and the evidence for it
 
@@ -86,7 +100,7 @@ The measurements below predate the 4× transient-rise gain and 20 ms
 release used when a transition lacks usable kicks or clicks. They have
 not been rerun for that change; keep them as the baseline for the next
 playlist comparison. Synthetic coverage is listed in
-[grid-fixtures.md](grid-fixtures.md#transitions-without-kicks).
+the private fixture guide (`rbxport-private/crates/rbl-analysis/docs/grid-fixtures.md`, “Transitions without kicks”).
 
 BPM 9 / 9, key 9 / 9, downbeat 8 / 9, grid 4 / 9. The bpm and key are
 right on every edit; what this playlist tests is where the tempo change is
@@ -103,7 +117,7 @@ changes are within 3 ms.
 | Cannonball [136-150-136] | 16 % | the return to 136 at 217.186 s against 217.187 s; but the hand grid cuts to 128 at 56.489 s and to 145 at 86.032 s at the impacts that end each section, with no kick at the new tempo for twenty seconds after either, and ours cuts at 67.3 s (where the onsets change sides) and at 109.95 s (where the 145 kick arrives), so the count is off from 56 s to 217 s |
 | Sao Paulo | 62 % | the 160 stretch is at 133.523 s against 133.524 s; the hand grid returns to 128 at 157.524 s at the impact that ends the 160 section, with the 128 kick arriving at 196 s, and ours cuts there |
 | Castles In The Sky (EDCLV23 Closer) [138-160] | 100 % | the change is at 233.260 s exactly |
-| BATTERY OPERATED | 91 % | the cut at 147.029 s is the hand grid's; the hand grid holds 130 through the slowdown before it and ours follows the bass beat by beat ([golden-gate.md](golden-gate.md)) |
+| BATTERY OPERATED | 91 % | the cut at 147.029 s is the hand grid's; the hand grid holds 130 through the slowdown before it and ours follows the bass beat by beat ([Reference evaluation](reference-playlist.md)) |
 
 The three cut misses (Cannonball twice, Sao Paulo) are one kind: the hand
 grid switches at the impact that ends the old section, and the new
@@ -114,4 +128,4 @@ remain the preferred evidence for a cut. The transition walker now also
 tries emphasised transients when kick and click timing are unavailable;
 if no kick run qualifies for a cut, it compares transient support on both
 grids. This is not a claim that the three recorded misses are fixed;
-that requires a new playlist score ([rules.md](rules.md)).
+that requires a new playlist score ([Assumptions](../assumptions.md)).

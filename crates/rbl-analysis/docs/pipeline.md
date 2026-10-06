@@ -1,21 +1,22 @@
 # The pipeline
 
-The analysis as a procedure: what happens first, what happens next, and
-where it branches. The track is assumed to be in 4/4. The step numbers are
-the ones the stage documents use.
+[Analysis guide](../README.md) · [Documentation](../../../docs/README.md)
 
-This is the full BPM/grid pipeline. The app's
-[Analysis Setting dialog](../../../docs/analysis-settings.md) selects what
-to update before queueing tracks: key-only requests run key detection
-without rewriting grid files. High precision selects attack placement;
-the chosen BPM range bounds the search. Automatic imports use full analysis.
+This is the dependency order for the full `analyse_with` call. Independent
+onset, attack, band-frame, waveform, level, and eligible key passes run in
+parallel; the diagram presents their conceptual grid/key sequence.
+
+Read the [API and code map](development.md) first. The app's
+[analysis settings](../../../docs/user/analysis-settings.md) select requested
+stages outside this full-analysis API. Key-only app requests preserve grids;
+manual tempo ranges and placement override the preset options.
 
 ```mermaid
 flowchart TD
     S([start: decoded track]) --> S2
 
     subgraph P1 [Phase 1 — BPM]
-        S2[1. Detect the BPM over the whole track<br/>candidates between 70 and 200; the faster octave wins<br/>when it carries the rhythm]
+        S2[1. Detect the BPM over the whole track<br/>candidates in the requested range; default 70–180; the faster octave wins<br/>when it carries the rhythm]
     end
 
     S2 --> S3
@@ -57,30 +58,30 @@ flowchart TD
         S14 --> S16[17. Name the key as rekordbox does]
     end
 
-    S16 --> E([done: BPM, grid, beat 1, phrases, key])
+    S16 --> E([done: BPM/grid, key, waveform, peak/RMS])
 ```
 
 ## Step by step
 
 | step | where | how |
 |---|---|---|
-| 1. detect the BPM | `onset.rs`, `tempo.rs` | onset envelope → autocorrelation × √fourier × prior, over the whole track ([beat.md](beat.md) §1) |
+| 1. detect the BPM | `onset.rs`, `tempo.rs` | onset envelope → autocorrelation × √fourier × prior, over the whole track ([Beat grid](algorithms/beat.md) §1) |
 | 2. first grid, phase from the hits | `tempo.rs` | a comb over the onset envelope (§2) |
 | 3. the kick's attack | `attack.rs` | the strong rise in the 900–9000 Hz RMS nearest the predicted beat, within 15 ms; the line is fitted from both halves of the beat and the half that collects more kick is kept (§3) |
 | 4. fit through the attacks, extend over the track | `tempo.rs` | a weighted straight line, refitted without the outliers (§4) |
 | 5. tempo change anywhere | `tempo.rs` | 16 s windows over the whole track (§5) |
 | 6. grid the change | `tempo.rs` | walk from the old tempo's last settled window, retaining every measured interval; prefer kicks and clicks, otherwise emphasise full-band transient rises by 4× with a 20 ms release. If the walk cannot settle, prefer a reliable new-kick run with the mix; otherwise cut using transient support (§6). Steady tempos are whole numbers (§7); the count carries on across every change |
 | 7. gaps | `tempo.rs`, `split_gaps` | a line that loses its hits for two bars: hold across the gap if the hits come back on the same grid, cut where they come back on another phase, walk a ramp through the gap where the hits drift towards a cut (§8) |
-| 8–11. beat 1, the half-beat move, numbering | `downbeat.rs` | novelty peaks over half-beat spectral profiles at 1, 2, 4 and 8 bars ([downbeat.md](downbeat.md)) |
-| 12. phrase starts | `downbeat.rs` | the four-bar novelty peaks that fall on downbeats ([phrase.md](phrase.md)) |
+| 8–11. beat 1, the half-beat move, numbering | `downbeat.rs` | novelty peaks over half-beat spectral profiles at 1, 2, 4 and 8 bars ([Downbeat](algorithms/downbeat.md)) |
+| 12. phrase starts | `downbeat.rs` | the four-bar novelty peaks that fall on downbeats ([Phrase boundaries](algorithms/phrase.md)) |
 | 12a. file-start adjustment | `lib.rs::anchor_file_start`, called by `analyse_with` | after half-beat correction and numbering, before key rules consume the grid; see below |
-| 13–14. Faraldo's edmkey | `key.rs` | as Essentia's `KeyExtractor` runs it, with the `edma` profiles ([key.md](key.md)) |
+| 13–14. Faraldo's edmkey | `key.rs` | as Essentia's `KeyExtractor` runs it, with the `edma` profiles ([Key detection](algorithms/key.md)) |
 | 15–16. minor on a toss-up | `key.rs` | the `PreferMinor` rule at a bias of 0.1 |
 | 17. name | `key.rs` | rekordbox's `ScaleName` spellings |
 
 Two more rules exist in `key.rs` and are not in the shipped pipeline:
 `BassRoot` and `BassVote`, which read the bass line's root when the profile
-match is not decisive. The gate measures them ([golden-gate.md](golden-gate.md),
+match is not decisive. The gate measures them ([Reference evaluation](validation/reference-playlist.md),
 `golden key`); on the reference playlist they fix nothing, so
 `DEFAULT_RULES` is `PreferMinor` alone.
 

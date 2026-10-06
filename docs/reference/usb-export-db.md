@@ -10,6 +10,24 @@ The main sections and data appendices describe that reference behavior.
 [RBXport implementation](#rbxport-implementation) details and differences
 are collected separately at the end.
 
+## Reading this reference
+
+[Documentation](../README.md) · [Export preferences](../user/usb-export.md)
+
+Read the file overview first, then the section for the format you are changing.
+
+| Topic | Sections |
+| --- | --- |
+| Device layout | [Volume](#1-the-volume), [directories](#2-directory-tree), [audio](#3-audio-files). |
+| Databases | [DeviceSQL](#4-exportpdb--the-devicesql-database), [My Tags](#5-exportextpdb--my-tags), [OneLibrary](#6-exportlibrarydb--the-onelibrary-database). |
+| Track companions | [Analysis](#7-the-analysis-bundle), [artwork](#8-artwork). |
+| Settings and sync | [Device/DJ settings](#9-device-and-dj-settings), [sync records](#10-sync-records). |
+| Validation | [Verification](#11-verifying-the-result), [gotchas](#12-gotchas), [unknowns](#13-still-unknown). |
+| Code | [RBXport implementation](#rbxport-implementation), followed by fixed-row/schema appendices. |
+
+Keep evidence labels and version boundaries when using these layouts. Structural
+verification does not establish compatibility with every firmware or device.
+
 ## The short version
 
 The tested CDJ-3000 DeviceSQL playback path uses audio, the library database
@@ -721,218 +739,6 @@ the pad recalls the saved cue.
   a separate real-stick observation counted twenty-six. Not reconciled — it may be a version or a
   counting difference.
 
-## Appendix A. Fixed DeviceSQL rows
-
-These rows are the captured defaults from rekordbox 7.2.11, identical for
-an empty library and the 61-track reference playlist. Write each hex string
-as one row, in the listed order; normal page allocation and alignment still
-apply. Their unknown bytes are included rather than guessed.
-
-### Type 16: browse columns
-
-| Row | Exact bytes (hex) |
-|---|---|
-| 1 | `0100800090120000FAFF470045004E0052004500FBFF0000` |
-| 2 | `0200810090140000FAFF410052005400490053005400FBFF` |
-| 3 | `0300820090120000FAFF41004C00420055004D00FBFF0000` |
-| 4 | `0400830090120000FAFF54005200410043004B00FBFF0000` |
-| 5 | `05008500900E0000FAFF420050004D00FBFF0000` |
-| 6 | `0600860090140000FAFF52004100540049004E004700FBFF` |
-| 7 | `0700870090100000FAFF5900450041005200FBFF` |
-| 8 | `0800880090160000FAFF520045004D004900580045005200FBFF0000` |
-| 9 | `0900890090120000FAFF4C004100420045004C00FBFF0000` |
-| 10 | `0A008A0090260000FAFF4F0052004900470049004E0041004C002000410052005400490053005400FBFF0000` |
-| 11 | `0B008B00900E0000FAFF4B0045005900FBFF0000` |
-| 12 | `0C008D00900E0000FAFF430055004500FBFF0000` |
-| 13 | `0D008E0090120000FAFF43004F004C004F005200FBFF0000` |
-| 14 | `0E00920090100000FAFF540049004D004500FBFF` |
-| 15 | `0F00930090160000FAFF4200490054005200410054004500FBFF0000` |
-| 16 | `10009400901A0000FAFF460049004C00450020004E0041004D004500FBFF0000` |
-| 17 | `1100840090180000FAFF50004C00410059004C00490053005400FBFF` |
-| 18 | `1200980090200000FAFF48004F00540020004300550045002000420041004E004B00FBFF` |
-| 19 | `1300950090160000FAFF48004900530054004F0052005900FBFF0000` |
-| 20 | `1400910090140000FAFF530045004100520043004800FBFF` |
-| 21 | `1500960090180000FAFF43004F004D004D0045004E0054005300FBFF` |
-| 22 | `16008C00901C0000FAFF4400410054004500200041004400440045004400FBFF` |
-| 23 | `1700970090220000FAFF44004A00200050004C0041005900200043004F0055004E005400FBFF0000` |
-| 24 | `1800900090140000FAFF46004F004C00440045005200FBFF` |
-| 25 | `1900A10090160000FAFF440045004600410055004C005400FBFF0000` |
-| 26 | `1A00A20090180000FAFF41004C00500048004100420045005400FBFF` |
-| 27 | `1B00AA0090180000FAFF4D00410054004300480049004E004700FBFF` |
-
-### Type 17: browse category settings
-
-| Row | Exact bytes (hex) |
-|---|---|
-| 1 | `0100010063010000` |
-| 2 | `0500060005010000` |
-| 3 | `0600070063010000` |
-| 4 | `0700080063010000` |
-| 5 | `0800090063010000` |
-| 6 | `09000A0063010000` |
-| 7 | `0A000B0063010000` |
-| 8 | `0D000F0063010000` |
-| 9 | `0E00130004010000` |
-| 10 | `0F00140006010000` |
-| 11 | `1000150063010000` |
-| 12 | `1200170063010000` |
-| 13 | `0200020002000100` |
-| 14 | `0300030003000200` |
-| 15 | `0400040001000300` |
-| 16 | `0B000C0063000400` |
-| 17 | `1100050063000500` |
-| 18 | `1300160063000600` |
-| 19 | `1400120063000700` |
-| 20 | `1B001A0063020800` |
-| 21 | `1800110063000900` |
-| 22 | `16001B0063000A00` |
-
-### Type 18: browse sort settings
-
-| Row | Exact bytes (hex) |
-|---|---|
-| 1 | `0100060001000000` |
-| 2 | `1500070003000000` |
-| 3 | `0E00080001000000` |
-| 4 | `0800090001000000` |
-| 5 | `09000A0001000000` |
-| 6 | `0A000B0001000000` |
-| 7 | `0F000D0001000000` |
-| 8 | `0D000F0001000000` |
-| 9 | `1700100001000000` |
-| 10 | `1600110001000000` |
-| 11 | `1900000000010000` |
-| 12 | `1A00010000020000` |
-| 13 | `0200020000030000` |
-| 14 | `0300030000040000` |
-| 15 | `0500040000050000` |
-| 16 | `0600050000060000` |
-| 17 | `0B000C0000070000` |
-
-### Type 19: history row
-
-Replace exactly ten ASCII bytes starting at byte offset 13 with the export
-date in `YYYY-MM-DD` format; preserve every other byte.
-
-```text
-80020000000000000000000017323032362D30392D3137191E0B3130303003000000000000000000
-```
-
-## Appendix B. OneLibrary schema and initial browse rows
-
-Create every table, even when empty. The spellings below, including
-`isComplation` and `OutFileOffsetInBlock`, are intentional.
-
-```sql
-CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer, image_id integer, isComplation integer, nameForSearch varchar);
-CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar);
-CREATE TABLE category(category_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer);
-CREATE TABLE color(color_id integer primary key, name varchar);
-CREATE TABLE content(content_id integer primary key, title varchar, titleForSearch varchar, subtitle varchar, bpmx100 integer, length integer, trackNo integer, discNo integer, artist_id_artist integer, artist_id_remixer integer, artist_id_originalArtist integer, artist_id_composer integer, artist_id_lyricist integer, album_id integer, genre_id integer, label_id integer, key_id integer, color_id integer, image_id integer, djComment varchar, rating integer, releaseYear integer, releaseDate varchar, dateCreated varchar, dateAdded varchar, path varchar, fileName varchar, fileSize integer, fileType integer, bitrate integer, bitDepth integer, samplingRate integer, isrc varchar, djPlayCount integer, isHotCueAutoLoadOn integer, isKuvoDeliverStatusOn integer, kuvoDeliveryComment varchar, masterDbId integer, masterContentId integer, analysisDataFilePath varchar, analysedBits integer, contentLink integer, hasModified integer, cueUpdateCount integer, analysisDataUpdateCount integer, informationUpdateCount integer);
-CREATE TABLE cue(cue_id integer primary key, content_id integer, kind integer, colorTableIndex integer, cueComment varchar, isActiveLoop integer, beatLoopNumerator integer, beatLoopDenominator integer, inUsec integer, outUsec integer, in150FramePerSec integer, out150FramePerSec integer, inMpegFrameNumber integer, outMpegFrameNumber integer, inMpegAbs integer, outMpegAbs integer, inDecodingStartFramePosition integer, outDecodingStartFramePosition integer, inFileOffsetInBlock integer, OutFileOffsetInBlock integer, inNumberOfSampleInBlock integer, outNumberOfSampleInBlock integer);
-CREATE TABLE genre(genre_id integer primary key, name varchar);
-CREATE TABLE history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer);
-CREATE TABLE history_content(history_id integer, content_id integer, sequenceNo integer);
-CREATE TABLE hotCueBankList(hotCueBankList_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, hotCueBankList_id_parent integer);
-CREATE TABLE hotCueBankList_cue(hotCueBankList_id integer, cue_id integer, sequenceNo integer);
-CREATE TABLE image(image_id integer primary key, path varchar);
-CREATE TABLE key(key_id integer primary key, name varchar);
-CREATE TABLE label(label_id integer primary key, name varchar);
-CREATE TABLE menuItem(menuItem_id integer primary key, kind integer, name varchar);
-CREATE TABLE myTag(myTag_id integer primary key, sequenceNo integer, name varchar, attribute integer, myTag_id_parent integer);
-CREATE TABLE myTag_content(myTag_id integer, content_id integer);
-CREATE TABLE playlist(playlist_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, playlist_id_parent integer);
-CREATE TABLE playlist_content(playlist_id integer, content_id integer, sequenceNo integer);
-CREATE TABLE property(deviceName varchar, dbVersion varchar, numberOfContents integer, createdDate varchar, backGroundColorType integer, myTagMasterDBID integer);
-CREATE TABLE recommendedLike(content_id_1 integer, content_id_2 integer, rating integer, createdDate integer);
-CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer, isSelectedAsSubColumn integer);
-```
-
-### MENU_ITEMS
-
-| menuItem_id | kind | name |
-|---|---|---|
-| 1 | 128 | GENRE |
-| 2 | 129 | ARTIST |
-| 3 | 130 | ALBUM |
-| 4 | 131 | TRACK |
-| 5 | 133 | BPM |
-| 6 | 134 | RATING |
-| 7 | 135 | YEAR |
-| 8 | 136 | REMIXER |
-| 9 | 137 | LABEL |
-| 10 | 138 | ORIGINAL ARTIST |
-| 11 | 139 | KEY |
-| 12 | 141 | CUE |
-| 13 | 142 | COLOR |
-| 14 | 146 | TIME |
-| 15 | 147 | BITRATE |
-| 16 | 148 | FILE NAME |
-| 17 | 132 | PLAYLIST |
-| 18 | 152 | HOT CUE BANK |
-| 19 | 149 | HISTORY |
-| 20 | 145 | SEARCH |
-| 21 | 150 | COMMENTS |
-| 22 | 140 | DATE ADDED |
-| 23 | 151 | DJ PLAY COUNT |
-| 24 | 144 | FOLDER |
-| 25 | 161 | DEFAULT |
-| 26 | 162 | ALPHABET |
-| 27 | 170 | MATCHING |
-
-### CATEGORIES
-
-| category_id | menuItem_id | sequenceNo | isVisible |
-|---|---|---|---|
-| 1 | 1 | 0 | 0 |
-| 2 | 2 | 1 | 1 |
-| 3 | 3 | 2 | 1 |
-| 4 | 4 | 3 | 1 |
-| 5 | 17 | 5 | 1 |
-| 6 | 5 | 0 | 0 |
-| 7 | 6 | 0 | 0 |
-| 8 | 7 | 0 | 0 |
-| 9 | 8 | 0 | 0 |
-| 10 | 9 | 0 | 0 |
-| 11 | 10 | 0 | 0 |
-| 12 | 11 | 4 | 1 |
-| 15 | 13 | 0 | 0 |
-| 17 | 24 | 9 | 1 |
-| 18 | 20 | 7 | 1 |
-| 19 | 14 | 0 | 0 |
-| 20 | 15 | 0 | 0 |
-| 21 | 16 | 0 | 0 |
-| 22 | 19 | 6 | 1 |
-| 23 | 18 | 0 | 0 |
-| 26 | 27 | 8 | 1 |
-| 27 | 22 | 10 | 1 |
-
-### SORTS
-
-| sort_id | menuItem_id | sequenceNo | isVisible | isSelectedAsSubColumn |
-|---|---|---|---|---|
-| 0 | 25 | 1 | 1 | 0 |
-| 1 | 26 | 2 | 1 | 0 |
-| 2 | 2 | 3 | 1 | 0 |
-| 3 | 3 | 4 | 1 | 0 |
-| 4 | 5 | 5 | 1 | 0 |
-| 5 | 6 | 6 | 1 | 0 |
-| 6 | 1 | 0 | 0 | 0 |
-| 7 | 21 | 0 | 0 | 1 |
-| 8 | 14 | 0 | 0 | 0 |
-| 9 | 8 | 0 | 0 | 0 |
-| 10 | 9 | 0 | 0 | 0 |
-| 11 | 10 | 0 | 0 | 0 |
-| 12 | 11 | 7 | 1 | 0 |
-| 13 | 15 | 0 | 0 | 0 |
-| 15 | 13 | 0 | 0 | 0 |
-| 16 | 23 | 0 | 0 | 0 |
-| 17 | 22 | 0 | 0 | 0 |
-
-Menu names above must be wrapped in U+FFFA and U+FFFB before insertion.
-Color IDs 1–8 use Pink, Red, Orange, Yellow, Green, Aqua, Blue and Purple.
-Existing device category, sort and color settings override these defaults.
-
 ## RBXport implementation
 
 Everything below describes RBXport, not additional requirements of the
@@ -1326,3 +1132,215 @@ verification does not invent analysis that the source does not contain.
 The RBXport USB parity test goes further: it erases two FAT32 sticks, has rekordbox 7.2.11
 export the same playlist to one through its Sync Manager, writes the other
 with RBXport, and compares every file.
+
+## Appendix A. Fixed DeviceSQL rows
+
+These rows are the captured defaults from rekordbox 7.2.11, identical for
+an empty library and the 61-track reference playlist. Write each hex string
+as one row, in the listed order; normal page allocation and alignment still
+apply. Their unknown bytes are included rather than guessed.
+
+### Type 16: browse columns
+
+| Row | Exact bytes (hex) |
+|---|---|
+| 1 | `0100800090120000FAFF470045004E0052004500FBFF0000` |
+| 2 | `0200810090140000FAFF410052005400490053005400FBFF` |
+| 3 | `0300820090120000FAFF41004C00420055004D00FBFF0000` |
+| 4 | `0400830090120000FAFF54005200410043004B00FBFF0000` |
+| 5 | `05008500900E0000FAFF420050004D00FBFF0000` |
+| 6 | `0600860090140000FAFF52004100540049004E004700FBFF` |
+| 7 | `0700870090100000FAFF5900450041005200FBFF` |
+| 8 | `0800880090160000FAFF520045004D004900580045005200FBFF0000` |
+| 9 | `0900890090120000FAFF4C004100420045004C00FBFF0000` |
+| 10 | `0A008A0090260000FAFF4F0052004900470049004E0041004C002000410052005400490053005400FBFF0000` |
+| 11 | `0B008B00900E0000FAFF4B0045005900FBFF0000` |
+| 12 | `0C008D00900E0000FAFF430055004500FBFF0000` |
+| 13 | `0D008E0090120000FAFF43004F004C004F005200FBFF0000` |
+| 14 | `0E00920090100000FAFF540049004D004500FBFF` |
+| 15 | `0F00930090160000FAFF4200490054005200410054004500FBFF0000` |
+| 16 | `10009400901A0000FAFF460049004C00450020004E0041004D004500FBFF0000` |
+| 17 | `1100840090180000FAFF50004C00410059004C00490053005400FBFF` |
+| 18 | `1200980090200000FAFF48004F00540020004300550045002000420041004E004B00FBFF` |
+| 19 | `1300950090160000FAFF48004900530054004F0052005900FBFF0000` |
+| 20 | `1400910090140000FAFF530045004100520043004800FBFF` |
+| 21 | `1500960090180000FAFF43004F004D004D0045004E0054005300FBFF` |
+| 22 | `16008C00901C0000FAFF4400410054004500200041004400440045004400FBFF` |
+| 23 | `1700970090220000FAFF44004A00200050004C0041005900200043004F0055004E005400FBFF0000` |
+| 24 | `1800900090140000FAFF46004F004C00440045005200FBFF` |
+| 25 | `1900A10090160000FAFF440045004600410055004C005400FBFF0000` |
+| 26 | `1A00A20090180000FAFF41004C00500048004100420045005400FBFF` |
+| 27 | `1B00AA0090180000FAFF4D00410054004300480049004E004700FBFF` |
+
+### Type 17: browse category settings
+
+| Row | Exact bytes (hex) |
+|---|---|
+| 1 | `0100010063010000` |
+| 2 | `0500060005010000` |
+| 3 | `0600070063010000` |
+| 4 | `0700080063010000` |
+| 5 | `0800090063010000` |
+| 6 | `09000A0063010000` |
+| 7 | `0A000B0063010000` |
+| 8 | `0D000F0063010000` |
+| 9 | `0E00130004010000` |
+| 10 | `0F00140006010000` |
+| 11 | `1000150063010000` |
+| 12 | `1200170063010000` |
+| 13 | `0200020002000100` |
+| 14 | `0300030003000200` |
+| 15 | `0400040001000300` |
+| 16 | `0B000C0063000400` |
+| 17 | `1100050063000500` |
+| 18 | `1300160063000600` |
+| 19 | `1400120063000700` |
+| 20 | `1B001A0063020800` |
+| 21 | `1800110063000900` |
+| 22 | `16001B0063000A00` |
+
+### Type 18: browse sort settings
+
+| Row | Exact bytes (hex) |
+|---|---|
+| 1 | `0100060001000000` |
+| 2 | `1500070003000000` |
+| 3 | `0E00080001000000` |
+| 4 | `0800090001000000` |
+| 5 | `09000A0001000000` |
+| 6 | `0A000B0001000000` |
+| 7 | `0F000D0001000000` |
+| 8 | `0D000F0001000000` |
+| 9 | `1700100001000000` |
+| 10 | `1600110001000000` |
+| 11 | `1900000000010000` |
+| 12 | `1A00010000020000` |
+| 13 | `0200020000030000` |
+| 14 | `0300030000040000` |
+| 15 | `0500040000050000` |
+| 16 | `0600050000060000` |
+| 17 | `0B000C0000070000` |
+
+### Type 19: history row
+
+Replace exactly ten ASCII bytes starting at byte offset 13 with the export
+date in `YYYY-MM-DD` format; preserve every other byte.
+
+```text
+80020000000000000000000017323032362D30392D3137191E0B3130303003000000000000000000
+```
+
+## Appendix B. OneLibrary schema and initial browse rows
+
+Create every table, even when empty. The spellings below, including
+`isComplation` and `OutFileOffsetInBlock`, are intentional.
+
+```sql
+CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer, image_id integer, isComplation integer, nameForSearch varchar);
+CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar);
+CREATE TABLE category(category_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer);
+CREATE TABLE color(color_id integer primary key, name varchar);
+CREATE TABLE content(content_id integer primary key, title varchar, titleForSearch varchar, subtitle varchar, bpmx100 integer, length integer, trackNo integer, discNo integer, artist_id_artist integer, artist_id_remixer integer, artist_id_originalArtist integer, artist_id_composer integer, artist_id_lyricist integer, album_id integer, genre_id integer, label_id integer, key_id integer, color_id integer, image_id integer, djComment varchar, rating integer, releaseYear integer, releaseDate varchar, dateCreated varchar, dateAdded varchar, path varchar, fileName varchar, fileSize integer, fileType integer, bitrate integer, bitDepth integer, samplingRate integer, isrc varchar, djPlayCount integer, isHotCueAutoLoadOn integer, isKuvoDeliverStatusOn integer, kuvoDeliveryComment varchar, masterDbId integer, masterContentId integer, analysisDataFilePath varchar, analysedBits integer, contentLink integer, hasModified integer, cueUpdateCount integer, analysisDataUpdateCount integer, informationUpdateCount integer);
+CREATE TABLE cue(cue_id integer primary key, content_id integer, kind integer, colorTableIndex integer, cueComment varchar, isActiveLoop integer, beatLoopNumerator integer, beatLoopDenominator integer, inUsec integer, outUsec integer, in150FramePerSec integer, out150FramePerSec integer, inMpegFrameNumber integer, outMpegFrameNumber integer, inMpegAbs integer, outMpegAbs integer, inDecodingStartFramePosition integer, outDecodingStartFramePosition integer, inFileOffsetInBlock integer, OutFileOffsetInBlock integer, inNumberOfSampleInBlock integer, outNumberOfSampleInBlock integer);
+CREATE TABLE genre(genre_id integer primary key, name varchar);
+CREATE TABLE history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer);
+CREATE TABLE history_content(history_id integer, content_id integer, sequenceNo integer);
+CREATE TABLE hotCueBankList(hotCueBankList_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, hotCueBankList_id_parent integer);
+CREATE TABLE hotCueBankList_cue(hotCueBankList_id integer, cue_id integer, sequenceNo integer);
+CREATE TABLE image(image_id integer primary key, path varchar);
+CREATE TABLE key(key_id integer primary key, name varchar);
+CREATE TABLE label(label_id integer primary key, name varchar);
+CREATE TABLE menuItem(menuItem_id integer primary key, kind integer, name varchar);
+CREATE TABLE myTag(myTag_id integer primary key, sequenceNo integer, name varchar, attribute integer, myTag_id_parent integer);
+CREATE TABLE myTag_content(myTag_id integer, content_id integer);
+CREATE TABLE playlist(playlist_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, playlist_id_parent integer);
+CREATE TABLE playlist_content(playlist_id integer, content_id integer, sequenceNo integer);
+CREATE TABLE property(deviceName varchar, dbVersion varchar, numberOfContents integer, createdDate varchar, backGroundColorType integer, myTagMasterDBID integer);
+CREATE TABLE recommendedLike(content_id_1 integer, content_id_2 integer, rating integer, createdDate integer);
+CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer, isSelectedAsSubColumn integer);
+```
+
+### MENU_ITEMS
+
+| menuItem_id | kind | name |
+|---|---|---|
+| 1 | 128 | GENRE |
+| 2 | 129 | ARTIST |
+| 3 | 130 | ALBUM |
+| 4 | 131 | TRACK |
+| 5 | 133 | BPM |
+| 6 | 134 | RATING |
+| 7 | 135 | YEAR |
+| 8 | 136 | REMIXER |
+| 9 | 137 | LABEL |
+| 10 | 138 | ORIGINAL ARTIST |
+| 11 | 139 | KEY |
+| 12 | 141 | CUE |
+| 13 | 142 | COLOR |
+| 14 | 146 | TIME |
+| 15 | 147 | BITRATE |
+| 16 | 148 | FILE NAME |
+| 17 | 132 | PLAYLIST |
+| 18 | 152 | HOT CUE BANK |
+| 19 | 149 | HISTORY |
+| 20 | 145 | SEARCH |
+| 21 | 150 | COMMENTS |
+| 22 | 140 | DATE ADDED |
+| 23 | 151 | DJ PLAY COUNT |
+| 24 | 144 | FOLDER |
+| 25 | 161 | DEFAULT |
+| 26 | 162 | ALPHABET |
+| 27 | 170 | MATCHING |
+
+### CATEGORIES
+
+| category_id | menuItem_id | sequenceNo | isVisible |
+|---|---|---|---|
+| 1 | 1 | 0 | 0 |
+| 2 | 2 | 1 | 1 |
+| 3 | 3 | 2 | 1 |
+| 4 | 4 | 3 | 1 |
+| 5 | 17 | 5 | 1 |
+| 6 | 5 | 0 | 0 |
+| 7 | 6 | 0 | 0 |
+| 8 | 7 | 0 | 0 |
+| 9 | 8 | 0 | 0 |
+| 10 | 9 | 0 | 0 |
+| 11 | 10 | 0 | 0 |
+| 12 | 11 | 4 | 1 |
+| 15 | 13 | 0 | 0 |
+| 17 | 24 | 9 | 1 |
+| 18 | 20 | 7 | 1 |
+| 19 | 14 | 0 | 0 |
+| 20 | 15 | 0 | 0 |
+| 21 | 16 | 0 | 0 |
+| 22 | 19 | 6 | 1 |
+| 23 | 18 | 0 | 0 |
+| 26 | 27 | 8 | 1 |
+| 27 | 22 | 10 | 1 |
+
+### SORTS
+
+| sort_id | menuItem_id | sequenceNo | isVisible | isSelectedAsSubColumn |
+|---|---|---|---|---|
+| 0 | 25 | 1 | 1 | 0 |
+| 1 | 26 | 2 | 1 | 0 |
+| 2 | 2 | 3 | 1 | 0 |
+| 3 | 3 | 4 | 1 | 0 |
+| 4 | 5 | 5 | 1 | 0 |
+| 5 | 6 | 6 | 1 | 0 |
+| 6 | 1 | 0 | 0 | 0 |
+| 7 | 21 | 0 | 0 | 1 |
+| 8 | 14 | 0 | 0 | 0 |
+| 9 | 8 | 0 | 0 | 0 |
+| 10 | 9 | 0 | 0 | 0 |
+| 11 | 10 | 0 | 0 | 0 |
+| 12 | 11 | 7 | 1 | 0 |
+| 13 | 15 | 0 | 0 | 0 |
+| 15 | 13 | 0 | 0 | 0 |
+| 16 | 23 | 0 | 0 | 0 |
+| 17 | 22 | 0 | 0 | 0 |
+
+Menu names above must be wrapped in U+FFFA and U+FFFB before insertion.
+Color IDs 1–8 use Pink, Red, Orange, Yellow, Green, Aqua, Blue and Purple.
+Existing device category, sort and color settings override these defaults.

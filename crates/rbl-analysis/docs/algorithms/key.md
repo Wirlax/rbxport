@@ -1,11 +1,15 @@
-# Key
+# Key detection
 
-Finds the musical key and names it the way rekordbox does (`Fm`, `Db`,
-`F#m`). Code: `key.rs`. Steps 13–17 of [pipeline.md](pipeline.md).
+[Analysis documentation](../README.md) · [Code map](../development.md)
 
-The front end is Ángel Faraldo's **edmkey** method, as Essentia's
-`KeyExtractor` runs it. Every number below is Essentia's default, taken
-from its source. After it, the rules in [rules.md](rules.md) are applied.
+`key.rs` converts audio into pitch-class evidence, scores major/minor
+profiles, applies ordered rules, and returns an optional named key.
+The shipped `PreferMinor` rule does not require a grid; optional bass rules do.
+
+Read [Assumptions](../assumptions.md) for the musical policy and
+[Pipeline](../pipeline.md) for grid-dependent ordering. The parameters and
+historical measurements below describe this implementation, not a current
+accuracy guarantee.
 
 ```mermaid
 flowchart TD
@@ -104,7 +108,7 @@ playlist they fix nothing.
 Rekordbox's names: `Dbm`, `F#m`, `Abm`, `Bbm` for the minors, `Db`, `F#`,
 `Ab`, `Bb`, `Eb` for the majors, matching `djmdKey.ScaleName`.
 
-## Accuracy
+## Recorded evaluation
 
 **141 of 155** (91 %) on the reference playlist. `golden key` measures
 every combination:
@@ -129,3 +133,10 @@ The 14 misses:
 - **A fifth away** (4): `Big Jet Plane` (Bbm → Fm), `Da Ga Dam`
   (Fm → Cm), `Goddess` (Ebm → Abm), `Ride The Train` (F#m → Dbm).
 - **Elsewhere** (2): `Tiamat` (Em → F), `XTC Nation` (D → Gm).
+
+## Changing this stage
+
+Follow the [change workflow](../development.md#make-a-change) and run the
+[relevant public checks](../validation/README.md#public-tests). Preserve the
+input/output contract above and update the reference when options or evidence
+change. Report new measurements separately from the recorded results.

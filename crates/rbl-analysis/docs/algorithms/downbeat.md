@@ -1,8 +1,14 @@
-# First downbeat
+# Downbeat and numbering
 
-Decides which beat is beat 1, and checks that the grid is on the kick and
-not on the off-beat. Code: `downbeat.rs`, applied in `lib.rs::analyse`.
-Steps 8–12 of [pipeline.md](pipeline.md).
+[Analysis documentation](../README.md) · [Code map](../development.md)
+
+`downbeat.rs` combines band frames with beat times to choose bar phase,
+identify half-beat misalignment, and return internal phrase boundaries.
+`lib.rs::analyse_with` uses that decision to shift segments and number beats.
+
+Read [Beat grid](beat.md) for the input grid and [Pipeline](../pipeline.md#file-start-adjustment)
+for the later boundary heuristic. A detected first beat and a musical downbeat
+are different decisions.
 
 ```mermaid
 flowchart TD
@@ -18,7 +24,7 @@ flowchart TD
     J --> K[Each long tempo segment<br/>asked again on its own beats]
 ```
 
-## Why structure, not the kick
+## Structural evidence for bar phase
 
 The loudest hits do not pick the beat on every track. On tech house the
 open hat between the kicks shows up in the onset envelope as strongly as
@@ -35,7 +41,7 @@ is a kick, never an off-beat. So the question "which position in the bar
 does the music change on?" answers both "which beat is 1?" and "is the
 grid on the beat at all?".
 
-## How
+## Algorithm
 
 1. **Half-beat grid.** Every beat and the midpoint after it: eight
    positions per bar.
@@ -63,19 +69,19 @@ grid on the beat at all?".
    not outvote the opening section. The chosen 1–4 count then carries
    through every later segment, including individual ramp intervals.
 
-## Accuracy
+## Recorded evaluation
 
 On rekordbox's own grids (`golden downbeat`) this picks rekordbox's
 downbeat on 153 of the 155 reference tracks. On our grids the downbeat
 metric passes on 143: the eleven rekordbox 6 grids miss by the 25 ms
-their beats sit off the kick ([golden-gate.md](golden-gate.md)), and on
+their beats sit off the kick ([Reference evaluation](../validation/reference-playlist.md)), and on
 `Go Back [136-174]` the novelty peaks land a beat before each phrase
 change, so beat 1 is one beat early throughout.
 
 ## Also produced here
 
 The novelty peaks at the four-bar scale that fall on downbeats are the
-**phrase starts** — see [phrase.md](phrase.md).
+**phrase starts** — see [Phrase boundaries](phrase.md).
 
 
 ## Final file-start adjustment
@@ -86,12 +92,12 @@ selection is anchored to beat 1.1
 at exactly `0:00.00`. This can override fallback numbering at the first emitted beat; a distinct
 later musical downbeat is preserved. The
 conditions, ordering and regression tests are documented in
-[pipeline.md — File-start adjustment](pipeline.md#file-start-adjustment).
+[pipeline.md — File-start adjustment](../pipeline.md#file-start-adjustment).
 
 When less than 20 ms of the opening beat was cut off, the adjustment adds
 only beat 1.1 at zero and preserves every later beat's timestamp and BPM.
 The shortened first interval is represented by a one-beat opening segment;
-[pipeline.md](pipeline.md#file-start-adjustment) documents the cutoff check.
+[Pipeline](../pipeline.md#file-start-adjustment) documents the cutoff check.
 
 
 For a repeating pattern without meaningful four-bar spectral novelty,
@@ -100,3 +106,10 @@ alignment noise into a downbeat decision. The gate is a maximum four-bar
 novelty below 0.5 in the Euclidean distance of mean log-band energies.
 A first tempo segment of at least 32 beats can choose its own phase,
 so the later tempo or ramp does not outvote a shorter opening section.
+
+## Changing this stage
+
+Follow the [change workflow](../development.md#make-a-change) and run the
+[relevant public checks](../validation/README.md#public-tests). Preserve the
+input/output contract above and update the reference when options or evidence
+change. Report new measurements separately from the recorded results.

@@ -1,13 +1,20 @@
-# Phrases
+# Phrase boundaries and unimplemented stages
 
-Two different things go by this name: phrase starts, which the crate
-finds, and phrase labels, which it does not.
+[Analysis documentation](../README.md) · [Code map](../development.md)
+
+Phrase boundaries are internal outputs of `downbeat.rs`. Phrase labels
+and vocal detection are separate interfaces in `phrase.rs` and `vocal.rs`
+and remain unimplemented. They do not appear as fields in the public
+`Analysis` result.
+
+Read [Downbeat](downbeat.md) for boundary detection. The sections below explain
+how boundaries can feed key rules and which outputs must remain absent.
 
 ## Phrase starts
 
 Where sections begin: the downbeats at which the music changes most over
 the four bars either side. They come out of the downbeat stage
-([downbeat.md](downbeat.md)) and are used by the key rules that read the
+([Downbeat](downbeat.md)) and are used by the key rules that read the
 bass at the start of a phrase.
 
 ```mermaid
@@ -34,3 +41,10 @@ than write invented structure. The same goes for vocal detection (`PVDI`,
 
 If labels are built, the phrase starts above are the section boundaries
 to label.
+
+## Changing this stage
+
+Follow the [change workflow](../development.md#make-a-change) and run the
+[relevant public checks](../validation/README.md#public-tests). Preserve the
+input/output contract above and update the reference when options or evidence
+change. Report new measurements separately from the recorded results.

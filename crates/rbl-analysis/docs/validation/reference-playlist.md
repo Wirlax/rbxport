@@ -1,6 +1,12 @@
-# The golden gate
+# Reference playlist evaluation
 
-Every change to this crate is judged against one thing: the playlist
+[Testing and evaluation](README.md) · [Analysis documentation](../README.md)
+
+This evaluation needs a private reference playlist and audio. Public synthetic checks
+run with `RB_LITE_TEST=1 cargo test -p rbl-analysis`. Recorded scores below are
+historical measurements.
+
+The recorded full-track evaluation uses the playlist
 `RBX-BPM-GRID-TEST` in the installed rekordbox library. 155 tracks, all 4/4,
 123–178 BPM, each analysed by rekordbox and its grid checked or set by
 hand. The rig is `examples/golden.rs`; it only reads the library.
@@ -21,7 +27,7 @@ cargo run --release -p rbl-analysis --example golden -- bassroot
   `target/golden/` (3.6 GB, about two minutes). Delete a track's `.gold`
   file and run `cache` again after re-analysing it in rekordbox.
   `RB_LITE_GOLDEN` points the cache elsewhere, which is how another
-  playlist is scored ([multibpm.md](multibpm.md)).
+  playlist is scored ([Multi-tempo evaluation](multitempo.md)).
 - `eval` (or `score`) scores every track in about five seconds. With a
   title substring it scores one track; add `RB_LITE_CANDIDATES=1` to also
   print the tempo candidates, the segments, the fit's passes, the
@@ -53,7 +59,7 @@ These playlist measurements and miss descriptions predate the transition
 fallback that boosts transient rises by 4× with a 20 ms release. They
 have not been remeasured for that change. The synthetic regression
 coverage is documented in
-[grid-fixtures.md](grid-fixtures.md#transitions-without-kicks).
+the private fixture guide (`rbxport-private/crates/rbl-analysis/docs/grid-fixtures.md`, “Transitions without kicks”).
 
 | metric | passes |
 |---|---|
@@ -102,7 +108,7 @@ level under the 138 breakdown from 76 s, stops for two bars, and drops at
 and another from 147.029 s, 208 ms (0.45 beat) later than the first would
 put it. Between them, from bar 65 (118.2 s), the kick stops and an
 eighth-note bass slows under a filter to an eighth of 1.4 s at 2:22, then
-silence, then 130 again at 2:27.0. The gap stage ([beat.md](beat.md), §8)
+silence, then 130 again at 2:27.0. The gap stage ([Beat grid](../algorithms/beat.md), §8)
 fits the halves on their own, cuts at 147.029 s, and walks the slowdown
 beat by beat (25 beats, 130 → 22 BPM). Downbeat passes at −2 ms and the
 second half matches the hand grid in time and number. The grid metric
@@ -110,7 +116,7 @@ fails at 91 % because the hand grid holds 130 through the slowdown (62
 beats) where ours follows the bass (25 beats). Re-gridding the original
 with the slowdown would settle it.
 
-**Key.** 14 misses, listed in [key.md](key.md).
+**Key.** 14 misses, listed in [Key detection](../algorithms/key.md).
 
 ## What rekordbox does
 

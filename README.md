@@ -1,235 +1,94 @@
+<p align="center">
+  <a href="https://rbxport.com">
+    <img src="docs/assets/brand/combined/rbxport-logo-color-white.png" alt="rbxport" width="360">
+  </a>
+</p>
+
 # rbxport
 
-rbxport is a desktop app for a rekordbox DJ library. It reads and edits the
-library in rekordbox's own `master.db`, analyses audio, plays tracks on two
-decks, writes USB exports a CDJ can read, and serves the library to players
-over Pro DJ Link ("LINK"). It runs on macOS, Windows and Linux, built with
-Tauri 2, Rust and React.
+rbxport is a music library management app inspired by rekordbox. It keeps its
+feature set deliberately small, aiming for a faster, simpler user experience.
 
-This README covers development. User documentation lives in [docs/](docs/),
-including [USB export](docs/usb-export.md), [backups](docs/backups.md),
-[AppleScript](docs/applescript.md), [analysis settings](docs/analysis-settings.md),
-and [waveform scrubbing](docs/waveform-scrubbing.md).
+Its scope is limited to library management, USB exporting, and PRO DJ LINK.
 
-## Quick start
+## Tech stack
 
-You need:
+| Layer | Technology |
+| --- | --- |
+| Desktop app | Tauri 2. |
+| Frontend | React and TypeScript, with TanStack Virtual for track browsing. |
+| Backend | Rust, with independent `rbl-*` crates for library, audio, export, and LINK logic. |
+| Database | SQLCipher for rekordbox libraries and OneLibrary USB exports. |
+| Build tooling | Vite, pnpm, and Cargo. |
+| Testing | Vitest, Playwright, and Rust tests with temporary library fixtures. |
 
-- Rust stable (the workspace's minimum is 1.89).
-- Node 24 and pnpm 10 (`corepack enable` picks up the pinned version).
-- The Tauri 2 prerequisites for your OS. On Linux that is
-  `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev`.
-- rekordbox 7 is optional. Without an installed library the app offers to
-  create one.
+See [Architecture](docs/development/architecture.md) for the repository layout
+and how the frontend, desktop shell, and Rust crates fit together.
+
+## Start here
+
+For a first look at the interface, use the browser with a mock library:
 
 ```sh
 pnpm install
-pnpm dev          # the desktop app, against your installed library
-pnpm dev:web      # the interface alone in a browser, against the mock backend
+pnpm dev:web
 ```
 
-`pnpm dev:web` needs no Rust build and no library. The mock backend in
-`src/ipc/backend-mock.ts` stands in for every command, and the Playwright
-suite runs against it too.
+This requires Node 24 and pnpm 10.17.1. It does not open an installed rekordbox
+library or require a Rust build. For desktop prerequisites and safe library
+setup, read [Getting started](docs/development/getting-started.md).
 
-**Before you run anything that writes, back up your library.** See
-[Working with a real library](#working-with-a-real-library).
+## Developer reading path
 
-## Repository layout
+Read these in order to understand the project and make your first change:
 
-| Path | What is there |
+1. [Getting started](docs/development/getting-started.md): prerequisites, run modes, and library safety.
+2. [Architecture](docs/development/architecture.md): repository map, crate responsibilities, IPC, and edit flow.
+3. [Development conventions](docs/development/conventions.md): code style, performance, translation, and evidence rules.
+4. [Testing](docs/development/testing.md): checks, test setup, and what each result proves.
+5. [Contributing](CONTRIBUTING.md): issues, branches, implementation, validation, and review.
+6. [Debugging](docs/development/debugging.md): logs, diagnostics, environment variables, and cleanup.
+7. [Releases](docs/development/releases.md): versions, CI, packaging, and publication.
+
+The [documentation index](docs/README.md) also links to user guides and detailed
+analysis, USB-format, and hardware references.
+
+## Common commands
+
+| Command | Purpose |
 | --- | --- |
-| `src/` | The React interface. `views/` holds the screens, `store/` the hooks that hold state, `ipc/` the only code allowed to call the backend, `i18n/` the strings. |
-| `src-tauri/` | The app shell: Tauri commands, app state, windows, menus, updater, logging. `src/lib.rs` registers every command; most live in `src/commands.rs`. |
-| `crates/` | The Rust libraries that do the work, all prefixed `rbl-`. They know nothing about Tauri. |
-| `e2e/` | Playwright tests, run in Chromium and WebKit against the mock backend. |
-| `docs/` | User documentation and notes on formats. |
-| `scripts/` | Development utilities for cleanup, deployment, versioning, generated files, bundle checks, and release notes. |
-| `public/locales/` | Generated translations. |
+| `pnpm dev:web` | Browser UI with the mock backend. |
+| `pnpm dev` | Desktop app; can open your installed library. Read the safety guide first. |
+| `pnpm lint` | Frontend lint rules. |
+| `pnpm build` | TypeScript check and production frontend bundle. |
+| `pnpm test` | Vitest tests. |
+| `pnpm e2e` | Playwright browser tests against the mock backend. |
+| `RB_LITE_TEST=1 cargo test --workspace` | Rust tests with installed-library writes refused. |
 
-### The crates
+## License and trademarks
 
-| Crate | Job |
-| --- | --- |
-| `rbl-core` | Ids, time formats and durable file publishing shared by everything. |
-| `rbl-db` | Opens rekordbox's SQLCipher `master.db`. `write.rs` holds every write the app makes; `fixture.rs` builds a throwaway library with the real schema for tests. |
-| `rbl-index` | Loads the whole library into memory as columns. Sorting, filtering and searching happen here, not in the interface. |
-| `rbl-anlz` | Reads and writes rekordbox's ANLZ analysis files (`.DAT`, `.EXT`, `.2EX`): grids, cues, waveforms. |
-| `rbl-audio` | Decodes audio for analysis. |
-| `rbl-analysis` | Tempo, beat grid, key and waveform analysis. |
-| `rbl-deck` | Playback: two decks, the audio device, beat and key sync, scrubbing. |
-| `rbl-export` | Writes a USB export: `export.pdb` through `rbl-pdb` and `exportLibrary.db` through `rbl-onelibrary`. |
-| `rbl-pdb` | The DeviceSQL `export.pdb` format. |
-| `rbl-onelibrary` | The SQLCipher `exportLibrary.db` (Device Library Plus / OneLibrary). |
-| `rbl-devices` | Finds removable drives and reads what is already exported to them. |
-| `rbl-backup` | Backup archives and restoring them. |
-| `rbl-link` | LINK: the beacon, database server and file server a CDJ talks to, serving the library the way rekordbox does. |
-| `rbl-prolink` | Pro DJ Link packets and the device table. |
-| `rbl-dbserver` | The remote-database protocol a CDJ browses with (TCP 12523). |
-| `rbl-nfs` | The read-only NFSv2 server a CDJ loads audio from. |
-| `rbl-fakecdj` | A stand-in CDJ for testing the link servers over loopback. |
-| `rbl-difftool` | Records what rekordbox itself changes in `master.db`, so writes copy rekordbox rather than guess. |
+rbxport is GPL-2.0-or-later. See [LICENSE](LICENSE) and
+[Licensing](LICENSING.md) for bundled components and distribution terms.
+Third-party product names belong to their respective owners. rbxport is an
+independent project and is not affiliated with, endorsed by, or sponsored by
+their owners.
 
-## How a request flows
+## Disclaimer
 
-1. A view calls a function on the backend object from `getBackend()` in
-   `src/ipc/client.ts`. Inside Tauri that is `invoke(...)`; in a browser it is
-   the mock.
-2. The Tauri command in `src-tauri/src/` does blocking work on a worker
-   thread and reads the library from `AppState` (`state.rs`).
-3. The interface never receives the whole library. It opens a view (a sort, a
-   filter, a search) that `rbl-index` evaluates, then fetches windows of rows
-   by index as the table scrolls.
+rbxport is provided "as is", without warranty to the extent permitted by
+applicable law. Use it at your own risk and keep backups of your music library
+and USB drives. Unless required by
+applicable law or agreed to in writing, the authors and contributors are not
+liable for damages arising from using or being unable to use rbxport,
+including lost or corrupted data, equipment damage, or financial losses.
+See [LICENSE](LICENSE) for the full warranty and liability terms.
 
-Edits go through one path. A command calls `edit(...)` in `commands.rs`,
-which runs a `rbl_db::write::Writer` method inside `AppState::write_then`, then
-`refresh_after_edit` re-reads only what changed (`Touched::Playlists`,
-`Touched::Metadata`, and so on). The backend then emits `library:changed`
-with a new generation, and the interface drops the pages it has cached.
-Tag List edits emit `tag-list:changed` and keep the generation. The same path
-serves edits made from a CDJ over LINK (`src-tauri/src/link.rs`).
+rbxport is an independent project and is not affiliated with, endorsed by,
+or sponsored by AlphaTheta or Pioneer DJ. References to rekordbox,
+PRO DJ LINK, and other products describe compatibility only. All trademarks
+and product names belong to their respective owners.
 
-## Working with a real library
+## Special thanks
 
-The code is built so it cannot damage a library by accident. Keep it that way.
-
-- `master.db` opens read-only unless a write is explicitly asked for, and a
-  write is refused while rekordbox is running.
-- `RBXPORT_TEST=1` refuses any write to the installed library, even from
-  code that asks for one. CI sets it; set it when you run tests locally.
-- Write tests use `rbl_db::fixture::build`, which makes a temporary library
-  with the real schema. Never point a test at your own library.
-- `RBX_DISABLE_READ_ONLY=1` exposes a session-only override: double-click the
-  Read-only badge to allow writes while rekordbox runs. Both apps can then
-  write the same file. It is for debugging only and is never saved.
-- Read-only tools for looking at your own library:
-  `cargo run -q -p rbl-db --example sql -- "SELECT ..."` runs one `SELECT`.
-  `cargo run -p rbl-difftool -- record <name>` snapshots the database, waits
-  while you do one thing in rekordbox, snapshots again and prints the diff.
-
-## Checks
-
-These are what CI runs before it builds a release. Run them before pushing.
-
-```sh
-cargo clippy --workspace --all-targets -- -D warnings
-RBXPORT_TEST=1 cargo test --workspace
-
-pnpm lint
-pnpm build        # typecheck and production bundle
-pnpm test         # Vitest unit tests
-pnpm budget       # budget schema and production bundle size
-pnpm e2e          # Playwright; first run: pnpm exec playwright install chromium webkit
-```
-
-## Cleanup
-
-Run `npm run clean` to remove generated build and test output from the current
-checkout. Preview the files first with `npm run clean -- --dry-run`.
-
-Optional flags extend the cleanup:
-
-- `--dependencies` removes `node_modules`.
-- `--app-data` removes app caches and abandoned partial backups. Close rbxport
-  before using it.
-- `--git` prunes missing worktrees and deletes local branches already merged
-  into `HEAD`. It preserves `main`, `dev`, the current branch, and branches
-  checked out in a worktree.
-
-Cleanup never removes completed backups, preferences, logs, recovery journals,
-or rekordbox libraries.
-
-## Conventions
-
-- **Rust lints are strict.** `unwrap`, `expect` and `panic!` are errors
-  outside test modules. Nothing may panic across the IPC boundary. Clippy's
-  `pedantic` group is on, and CI treats warnings as errors.
-- **Frontend lint rules encode the architecture.** `eslint.config.js` forbids
-  calling `invoke` outside `src/ipc`, polling, deep-cloning rows, and sorting
-  or filtering row arrays in a view. Row ordering belongs to `rbl-index`.
-- **Performance budgets name their enforcement.** `perf-budgets.json` records
-  the measured baseline, CI gates, local timing gates, and targets that still
-  require manual hardware measurement. `pnpm budget`, Rust tests, and the e2e
-  suite consume the same limits. Run `npm run perf:gate` for isolated frame
-  timing, and `npm run perf:measure` against a production preview when
-  rebaselining browser timings.
-- **Formats come from evidence.** Code that mirrors rekordbox or a CDJ says
-  where each fact came from: `[OBS]` for something observed in a capture or a
-  real library, `[ASSUME]` for an inference, `[UNKNOWN]` for what nobody has
-  worked out yet. Keep the tags accurate when you change the code, and
-  prefer measuring (`rbl-difftool`, a packet capture) to guessing.
-- **Strings are translated.** Use `useTranslation()` from `src/i18n` for
-  anything shown to the user. `pnpm locales` rebuilds `public/locales` from
-  rekordbox's installed `.lang` files. It fails on strings rekordbox has no
-  translation for until you run it with `--translate-missing`.
-- **Commits** use Conventional Commits (`feat:`, `fix:`, `chore:`, ...), with
-  a subject that says what changes for the user.
-
-## Logs and environment
-
-The app logs to stdout and to a daily file under
-`~/Library/Application Support/rbxport/logs` (macOS) or
-`%APPDATA%\rbxport\logs` (Windows). The newest five daily log files are kept.
-
-| Variable | Effect |
-| --- | --- |
-| `LOG_LEVEL` | Level for the app's own crates: `error`, `warn`, `info`, `debug` (default) or `trace`. `trace` adds LINK's packet-by-packet lines. |
-| `RUST_LOG` | Replaces the whole filter, e.g. `RUST_LOG=rbl_link=trace,rbxport=info`. |
-| `RBXPORT_LOG_DIR` | Writes the log file somewhere else. |
-| `RBXPORT_TEST` | Refuses writes to the installed library. |
-| `RBX_DISABLE_READ_ONLY` | Enables the session-only write override described above. |
-| `E2E_PORT` | Moves the Playwright dev server so two checkouts can run e2e at once. |
-
-## Releases
-
-The version lives in `Cargo.toml` (`[workspace.package]`), `package.json`, and
-`src-tauri/tauri.conf.json`. `node scripts/sync-version.mjs --version X.Y.Z`
-updates all three and the workspace crates in `Cargo.lock`. Release notes live
-in `release-notes.json`; each change starts with `(New)`, `(Improved)`, or
-`(Fixed)`. The app shows these notes before it updates.
-
-`pnpm dev` runs `sync-version.mjs` without arguments first, which sets the
-version from the newest `v*` tag merged into your checkout. After a bump
-that is not tagged yet, it rewrites those files back to the tagged version,
-so don't commit them from a `pnpm dev` session.
-
-`.github/workflows/ci.yml` runs the complete non-publishing release gate for
-same-repository pull requests to `dev` or `main`: pinned-current Rust/Clippy,
-a separate Rust 1.89 MSRV compile check, Windows compilation, and the frontend
-lint, build, unit, budget, generated-file, and Playwright checks. Fork pull
-requests intentionally do not run on the self-hosted runners.
-
-Before validating a same-repository pull request, CI applies Clippy's safe
-machine fixes and fills any missing locale catalog entries with their English
-source text. It commits those deterministic changes to the PR branch, then
-validates the updated SHA in the same run. Translation fallbacks keep the
-catalog complete but should be replaced with native wording when one is
-available.
-
-Run `npm run deploy` from a clean, pushed `dev` branch. A normal push to `dev`
-does not release anything. The command verifies the branch and commit, asks the
-local Codex CLI to curate reader-facing notes from the release diff, and passes
-those validated notes to the release workflow. Codex receives read-only access
-and does not edit the checkout.
-
-The workflow validates the source before creating an immutable version tag and
-generated release notes on `dev`. It then fast-forwards `main` and builds the
-signed installers from that promoted commit. After publishing and verifying the
-update feed, it removes old artifacts and notifies Discord. Release notes call
-out referenced `RBX-<number>` bugs as fixed. A failed validation creates no tag
-or release notes. The pipeline does not create a GitHub Release.
-
-`pnpm build` obfuscates the app's own JavaScript and omits source maps.
-`pnpm dev` stays readable. Obfuscation makes the bundle harder to read but
-protects no secrets, so none go in the frontend.
-
-## License
-
-rbxport is licensed under GPL-2.0-or-later. See [LICENSE](LICENSE) and
-[LICENSING.md](LICENSING.md).
-
-## Trademark notice
-
-All third-party product names are the property of their respective owners.
-rbxport is an independent project and is not affiliated with, endorsed by, or
-sponsored by any third-party product or trademark owner.
+evanpurkhiser, Maddix, Morgan Page, nichi, profbx, Sean Tyas, shiz, syl, trancejesus, xorbxbx, and
+AlphaTheta.

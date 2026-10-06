@@ -1,6 +1,12 @@
 # How rbxport finds a song's beat grid
 
-This is the single guide to rbxport's beat-analysis algorithm.
+[Analysis guide](../README.md) · [Documentation](../../../docs/README.md)
+
+Start here for the beat algorithm, then use the individual stage documents for implementation detail.
+
+This overview introduces the beat-analysis algorithm. Read it before the
+[API/code map](development.md), [pipeline](pipeline.md), and individual stage
+references in the [documentation index](README.md).
 
 Given a decoded song, the algorithm puts a reliable timestamp on every
 beat, identifies beat 1 of each bar, and keeps that grid useful through
@@ -12,7 +18,7 @@ The result includes the displayed BPM, a list of timed beats, a beat number
 (1–4) for each one, and tempo segments for any changes in the song. The same
 audio always produces the same result.
 
-The app opens [Analysis Setting](../../../docs/analysis-settings.md) before
+The app opens [Analysis Setting](../../../docs/user/analysis-settings.md) before
 manual analysis. BPM/grid and key can be selected independently, with
 high-precision placement and a BPM range for the grid. Unchecked results
 are preserved. The algorithm below describes BPM/grid analysis with
