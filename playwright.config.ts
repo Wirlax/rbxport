@@ -22,10 +22,9 @@ export default defineConfig({
   // runner failure from an application failure; a test that fails all three
   // times still reports a trace through `trace: "on-first-retry"` below.
   retries: process.env.CI ? 3 : 2,
-  // The ARC macOS host runs Chromium and WebKit from the same runner. Parallel
-  // workers can exhaust it and kill Vite's preview process mid-suite, making
-  // production-page tests lose their server. Run CI serially; local runs keep
-  // Playwright's normal worker selection.
+  // The ARC macOS host runs Chromium and WebKit from the same runner. Running
+  // the suite serially keeps the browser processes within that host's limits;
+  // local runs keep Playwright's normal worker selection.
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
@@ -63,8 +62,10 @@ export default defineConfig({
     {
       // The built assets, which is what the shell actually ships. The dev
       // server injects inline scripts of its own, so a policy tested against
-      // it would be testing Vite rather than the app.
-      command: `pnpm exec vite preview --port ${previewPort} --strictPort --outDir dist`,
+      // it would be testing Vite rather than the app. A plain static server is
+      // sufficient for these hash-route tests and stays alive on the shared
+      // macOS runner for the full browser suite.
+      command: `python3 -m http.server ${previewPort} --bind 127.0.0.1 --directory dist`,
       url: `http://localhost:${previewPort}`,
       reuseExistingServer: true,
       timeout: 60_000,
