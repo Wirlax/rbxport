@@ -7,6 +7,7 @@
  * SKIP_TESTS=true and SKIP_VERSION_BUMP=true control workflow inputs.
  */
 import { spawnSync } from "node:child_process";
+import { curateReleaseNotes } from "./curate-release-notes.mjs";
 
 function setting(name) {
   const value = process.env[name] ?? "false";
@@ -59,13 +60,24 @@ function deploy() {
   if (ancestry.error) throw ancestry.error;
   requireCondition(ancestry.status === 0, "main is not an ancestor of dev");
 
-  command("gh", [
+  let releaseNotesJson = "";
+  if (!skipVersionBump) {
+    const previous = command("git", ["tag", "--merged", "HEAD", "--list", "v*", "--sort=-version:refname"], true)
+      .split("\n").find(Boolean);
+    requireCondition(previous, "no previous release tag found");
+    console.log(`Asking Codex to curate release notes for ${previous}..${head.slice(0, 7)}.`);
+    releaseNotesJson = JSON.stringify(curateReleaseNotes({ previous, source: head }));
+  }
+
+  const workflowArguments = [
     "workflow", "run", "Release",
     "--repo", "chrisle/rbxport",
     "--ref", "dev",
     "-f", `skip_tests=${skipTests}`,
     "-f", `skip_version_bump=${skipVersionBump}`,
-  ]);
+  ];
+  if (releaseNotesJson) workflowArguments.push("-f", `release_notes_json=${releaseNotesJson}`);
+  command("gh", workflowArguments);
   console.log(`Release workflow dispatched from ${head.slice(0, 7)}.`);
 }
 

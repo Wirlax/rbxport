@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changesFromCommits } from "./generate-release-notes.mjs";
+import { changesFromCommits, generateReleaseNotes } from "./generate-release-notes.mjs";
 
 test("exclude maintenance and test-only commits, even when titled fix", () => {
   assert.deepEqual(changesFromCommits([
@@ -22,4 +22,11 @@ test("reviewed trailers group descriptions and control ticket attribution", () =
     { subject: "fix: sorting followup", body: `Release-Note: ${note}` },
     { subject: "fix: repair artwork", body: "Related discussion RBX-25", files: ["src/views/Info.tsx"] },
   ]), [note, "(Fixed) Repair artwork."]);
+});
+
+test("refuses malformed curated notes before writing release metadata", () => {
+  assert.throws(
+    () => generateReleaseNotes("9.9.9", "HEAD", "HEAD", JSON.stringify({ changes: ["Internal refactor"] })),
+    /Invalid curated release note/,
+  );
 });

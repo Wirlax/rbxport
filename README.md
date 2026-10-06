@@ -207,8 +207,10 @@ catalog complete but should be replaced with native wording when one is
 available.
 
 Run `npm run deploy` from a clean, pushed `dev` branch. A normal push to `dev`
-does not release anything. The command verifies the branch and commit before
-dispatching the release workflow.
+does not release anything. The command verifies the branch and commit, asks the
+local Codex CLI to curate reader-facing notes from the release diff, and passes
+those validated notes to the release workflow. Codex receives read-only access
+and does not edit the checkout.
 
 The workflow validates the source before creating an immutable version tag and
 generated release notes on `dev`. It then fast-forwards `main` and builds the
