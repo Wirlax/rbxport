@@ -30,6 +30,53 @@ verification does not establish compatibility with every firmware or device.
 
 ## The short version
 
+### How the export pieces fit together
+
+This diagram shows RBXport's format ownership, not a claim that every player
+reads every format. Export orchestration assigns consistent identities and
+paths to the databases and their companion files.
+
+```mermaid
+flowchart TD
+    Input[Selected tracks and playlists] --> Export[rbl-export orchestration]
+    Export --> Audio[Contents: copied or converted audio]
+    Export --> ANLZ[rbl-anlz: grids, cues, waveforms]
+    Export --> PDB[rbl-pdb: export.pdb]
+    Export --> Plus[rbl-onelibrary: exportLibrary.db]
+    Export --> Companions[Artwork, settings, and sync records]
+    PDB --> Paths[Shared track identities and companion paths]
+    Plus --> Paths
+    Paths --> Audio
+    Paths --> ANLZ
+```
+
+### Staging and publication
+
+The export implementation reads the destination before staging, verifies the
+staged result, and checks for concurrent changes before publishing. A conflict
+or cancellation at these gates must not be presented as a successful export.
+
+```mermaid
+flowchart TD
+    Before[Read destination snapshot and analysis stamp] --> Reconcile[Reconcile source and device state]
+    Reconcile --> Stage[Stage audio, analysis, databases, and companions]
+    Stage --> Verify{Staged export verifies?}
+    Verify -->|No| Stop[Return failure without publishing staged files]
+    Verify -->|Yes| Manifest[Save staged manifest]
+    Manifest --> Changed{Destination changed during staging?}
+    Changed -->|Yes| Stop
+    Changed -->|No| Cancel{Cancelled?}
+    Cancel -->|Yes| Stop
+    Cancel -->|No| Commit[Commit staged publication]
+    Commit --> Cleanup[Remove obsolete files not retained]
+    Cleanup --> Report[Return export report]
+```
+
+See `export_cancellable` in
+[`rbl-export`](../../crates/rbl-export/README.md). Publication is a separate
+operation that can itself fail; this flow does not promise an atomic whole-volume
+filesystem transaction or physical-player compatibility.
+
 The tested CDJ-3000 DeviceSQL playback path uses audio, the library database
 and analysis companions. Other files support artwork, browsing options,
 rekordbox synchronization and the DJ's settings.

@@ -30,6 +30,9 @@ flowchart LR
 
 ### The crates
 
+Use the [crate guide](../../crates/README.md) to find each crate's onboarding
+README, code map, safety contracts, and focused checks.
+
 | Crate | Job |
 | --- | --- |
 | `rbl-core` | Ids, time formats and durable file publishing shared by everything. |
@@ -69,6 +72,60 @@ which runs a `rbl_db::write::Writer` method inside `AppState::write_then`, then
 with a new generation, and the interface drops the pages it has cached.
 Tag List edits emit `tag-list:changed` and keep the generation. The same path
 serves edits made from a CDJ over LINK (`src-tauri/src/link.rs`).
+
+### Library edit sequence
+
+This is the ordinary UI edit path in `commands.rs` and `state.rs`. The worker
+serializes edits and checks restore/recovery state before opening a writer.
+The success event is emitted only after the edit and targeted refresh return
+success; this diagram does not imply that refresh and database writes are one
+atomic transaction.
+
+```mermaid
+sequenceDiagram
+    participant UI as React view / store
+    participant IPC as src/ipc
+    participant Cmd as Tauri command
+    participant State as AppState worker
+    participant DB as rbl-db Writer
+    participant Index as rbl-index snapshot
+    UI->>IPC: Request edit
+    IPC->>Cmd: Typed backend call
+    Cmd->>State: Run blocking edit
+    State->>State: Serialize; check restore and recovery
+    State->>DB: Open guarded writer and apply edit
+    DB-->>State: Result
+    alt Edit succeeds
+        State->>Index: Refresh affected data
+        Index-->>State: Generation
+        State-->>Cmd: Success
+        Cmd-->>UI: Change event and command result
+        UI->>UI: Invalidate affected cached state
+    else Edit fails
+        State-->>Cmd: Contextual error
+        Cmd-->>IPC: Error result
+        IPC-->>UI: Display translated error
+    end
+```
+
+### Audio execution boundaries
+
+Playback separates control, file decoding, and real-time rendering. See
+[`rbl-deck`](../../crates/rbl-deck/README.md) for the API and callback contracts.
+
+```mermaid
+flowchart LR
+    Control[Control side] -->|Commands| Decode[Decode worker per deck]
+    File[Audio file] --> Decode
+    Decode -->|Generation-tagged blocks| Ring[Deck ring buffers]
+    Ring --> Callback[Audio callback: mix and render]
+    Callback --> Output[Audio sink]
+    Callback -->|Publish positions| Clock[Atomic clocks]
+    Clock -->|Read snapshots| Control
+```
+
+The callback must not perform file I/O, allocate in steady state, or wait on
+locks. Missing queued audio produces silence rather than blocking rendering.
 
 The [analysis guide](../../crates/rbl-analysis/README.md) and
 [playback guide](../../crates/rbl-deck/README.md) provide crate-specific

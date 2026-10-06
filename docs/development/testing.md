@@ -6,6 +6,30 @@ Choose a test boundary that exercises the behavior you changed. A mock UI
 pass, a socket test, an emulator run, and a physical-device result establish
 different things. Report the command, source revision, and relevant boundary.
 
+## Choose the validation boundary
+
+Use the smallest check that can catch the defect, then add the relevant wider
+boundary checks. These are complementary evidence layers, not a ladder where
+one passing result automatically establishes the next.
+
+```mermaid
+flowchart TD
+    Change[Behavior being changed] --> Logic[Pure logic or format bytes]
+    Change --> UI[UI and IPC behavior]
+    Change --> Network[Network service behavior]
+    Change --> Device[Device-facing compatibility]
+    Logic --> Unit[Crate tests with disposable fixtures]
+    UI --> Frontend[Vitest and mock-backed Playwright]
+    Network --> Socket[Loopback protocol integration]
+    Device --> Firmware[Booted firmware assertions]
+    Device --> Physical[Named physical-device check]
+    Device --> Filesystem[Filesystem acceptance check when applicable]
+```
+
+A mock UI test cannot prove native database writes; a protocol client cannot
+prove firmware navigation; emulator playback cannot prove physical audio or
+FAT32 behavior on a real USB device. Record each result separately.
+
 ## Protect library data
 
 Set `RB_LITE_TEST=1` for Rust checks; `RBXPORT_TEST=1` is the current equivalent.
