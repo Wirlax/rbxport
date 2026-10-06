@@ -43,7 +43,7 @@ const TONES: [Tone; 3] = [
         key: "Am",
     },
     Tone {
-        title: "02 Link Tone 440Hz",
+        title: "02 Link Tone 440Hz Kesä",
         hz: 440.0,
         bpm: 128.0,
         key: "Abm",
