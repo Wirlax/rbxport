@@ -1,3 +1,10 @@
+/**
+ * Prepends a release entry to release-notes.json from Git commits between
+ * PREVIOUS and SOURCE_REF. Uses Release-Note trailers or eligible product-change
+ * subjects, excluding maintenance and duplicate notes; refuses an empty release.
+ * Run: VERSION=X.Y.Z PREVIOUS=TAG SOURCE_REF=REF node scripts/generate-release-notes.mjs.
+ * PREVIOUS may be omitted for full history. Used by the Release workflow.
+ */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";

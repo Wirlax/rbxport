@@ -1,3 +1,8 @@
+/**
+ * Tests updater Markdown, Discord payload formatting, and rejection of a
+ * missing release version with in-memory release-note fixtures.
+ * Run: node --test scripts/release-notes.test.mjs.
+ */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 

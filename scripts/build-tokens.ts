@@ -1,6 +1,7 @@
 /**
  * Generates src/styles/tokens.css from design/tokens/theme.json.
- * Committed output; CI re-runs this and fails on drift.
+ * Run: pnpm tokens. Rewrites the committed CSS; release CI regenerates it to
+ * check for drift. The configured design input must exist in this checkout.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";

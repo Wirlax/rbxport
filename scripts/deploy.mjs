@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+/**
+ * Fetches Git refs, verifies a clean, pushed dev tip descended from main,
+ * and dispatches the GitHub Release workflow through gh; it does not build locally.
+ * Run: pnpm deploy. Requires authenticated gh and remote access. Optional
+ * SKIP_TESTS=true and SKIP_VERSION_BUMP=true control workflow inputs.
+ */
 import { spawnSync } from "node:child_process";
 
 function setting(name) {

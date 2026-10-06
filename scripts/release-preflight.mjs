@@ -1,3 +1,9 @@
+/**
+ * Checks version agreement across Cargo.toml, package.json, and Tauri config,
+ * plus the matching first release-note entry and optional tag.
+ * Run: node scripts/release-preflight.mjs [--version VERSION]
+ * [--require-tag | --expect-untagged]. Read-only; Release CI fails on mismatch.
+ */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";

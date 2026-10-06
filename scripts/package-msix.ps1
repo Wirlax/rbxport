@@ -1,3 +1,10 @@
+<#
+Packages a Windows executable and committed app icons into an MSIX with
+the Store identity, manifest, and supported locales. Converts SemVer to a
+four-part MSIX version and uses the Windows SDK MakeAppx utility.
+Run from build-installer CI, or invoke with -Executable, -Version, and -Output.
+Recreates RUNNER_TEMP/rbxport-msix staging and writes the requested package.
+#>
 param(
   [Parameter(Mandatory = $true)]
   [string]$Executable,

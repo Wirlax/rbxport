@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+/**
+ * Measures library first-paint, deck-frame, and scroll costs in Chromium
+ * and WebKit with Playwright, printing a JSON report to stdout.
+ * Run: pnpm perf:measure (builds first). Uses PERF_URL (default localhost:1421),
+ * PERF_RUNS (default 5), and PERF_FRAMES (default 240); starts a Vite preview
+ * when the target is unreachable and closes browsers and its preview afterward.
+ */
 import { spawn } from "node:child_process";
 import { chromium, webkit } from "@playwright/test";
 

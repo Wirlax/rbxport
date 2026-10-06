@@ -1,4 +1,8 @@
-/** Fails if any built chunk exceeds the gzip budget in perf-budgets.json. */
+/**
+ * Checks the gzip sizes of dist/assets/*.js against the initial-chunk and
+ * total JavaScript limits in perf-budgets.json; exits unsuccessfully on overflow.
+ * Run: pnpm build, then pnpm budget (which invokes this script). Read-only.
+ */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";

@@ -1,3 +1,10 @@
+/**
+ * Validates structured release-notes.json and renders updater Markdown or
+ * a Discord webhook JSON payload. Exports helpers for preflight and tests.
+ * Run: node scripts/release-notes.mjs validate FILE [VERSION], markdown FILE OUTPUT,
+ * or discord FILE VERSION OUTPUT URL. Writes output files for rendering modes;
+ * the Discord mode creates a payload but does not send it.
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 

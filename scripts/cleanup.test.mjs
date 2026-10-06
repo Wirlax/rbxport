@@ -1,3 +1,8 @@
+/**
+ * Tests cleanup argument parsing, deletion planning, preservation of user
+ * data, and merged-branch eligibility using temporary fixtures.
+ * Run: pnpm exec vitest run scripts/cleanup.test.mjs (also included in pnpm test).
+ */
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";

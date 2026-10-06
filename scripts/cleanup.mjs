@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+/**
+ * Removes regenerable checkout output via pnpm clean.
+ * Use pnpm clean -- --dry-run to preview. --app-data additionally removes caches
+ * and abandoned partial backups; --dependencies removes node_modules; --git
+ * prunes stale worktree records and eligible merged local branches.
+ * Preserves completed backups, preferences, logs, recovery data, and libraries.
+ * --app-data requires the desktop app to be closed.
+ */
 import { lstat, opendir, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";

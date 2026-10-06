@@ -1,3 +1,8 @@
+/**
+ * Tests release-note filtering, reviewed trailers, deduplication, and
+ * explicit ticket attribution using in-memory commit fixtures.
+ * Run: node --test scripts/generate-release-notes.test.mjs.
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changesFromCommits } from "./generate-release-notes.mjs";

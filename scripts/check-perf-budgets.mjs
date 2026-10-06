@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+/**
+ * Validates perf-budgets.json: its schema, positive limits, enforcement
+ * settings, and recorded browser baselines against their gates.
+ * Run: pnpm budget (also checks built bundle sizes). Read-only; this script
+ * does not collect fresh performance measurements.
+ */
 import { readFile } from "node:fs/promises";
 
 const path = new URL("../perf-budgets.json", import.meta.url);

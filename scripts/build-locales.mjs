@@ -1,3 +1,10 @@
+/**
+ * Builds src/i18n/ui.json and public/locales/*.json from UI strings and
+ * rekordbox locale files, retaining existing translations and applying overrides.
+ * Run: pnpm locales [LOCALE_DIRECTORY] [--translate-missing]. The default source
+ * is the installed rekordbox 7 locale directory; --translate-missing uses Google
+ * Translate over the network for missing entries.
+ */
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -1,3 +1,10 @@
+/**
+ * Synchronizes versions in package.json, Tauri config, Cargo.toml, and
+ * workspace package entries in Cargo.lock, leaving third-party versions alone.
+ * Run: node scripts/sync-version.mjs [--version VERSION]. Without an explicit
+ * version, uses the newest valid release tag merged into HEAD. Writes changed
+ * files; desktop dev and release/installer workflows invoke it.
+ */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

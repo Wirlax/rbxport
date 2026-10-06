@@ -1,12 +1,8 @@
 /**
- * Generates `src/components/icons.tsx` from `design/icons/ui/*.svg`.
- *
- * The SVGs are the source. Inlining them into a module rather than importing
- * them as files keeps the icons out of the network path entirely — they are a
- * few hundred bytes each, and a request per icon is a request too many for
- * something that must paint in the first frame.
- *
- * `pnpm icons`
+ * Generates src/components/icons.tsx by converting design/icons/ui/*.svg
+ * into React components that render inline SVG using currentColor.
+ * Run: pnpm icons. Rewrites the committed component module; release CI
+ * regenerates it to check for drift. The configured SVG directory must exist.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

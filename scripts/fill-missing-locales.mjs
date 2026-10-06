@@ -1,3 +1,9 @@
+/**
+ * Adds missing src/i18n/ui.json keys to public/locales/*.json using the
+ * English string as fallback, retaining existing translations.
+ * Run: node scripts/fill-missing-locales.mjs. CI uses this to ensure coverage;
+ * rewrites only locale files with missing keys and makes no translation requests.
+ */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const root = new URL("../", import.meta.url);
