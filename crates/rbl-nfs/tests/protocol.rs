@@ -565,9 +565,8 @@ fn attributes_describe_a_read_only_tree() {
     assert_eq!(reader.u32().unwrap(), 0o040_755, "rekordbox's export root showed 041ed");
 }
 
-/// Reads a whole file the way a player does: it asks for 32 KB, accepts the
-/// server's shorter fragmentation-safe replies, and continues at their end
-/// until the read at EOF is answered `IO`.
+/// Reads a whole file using the CDJ's 32 KB request size, continuing until
+/// the read at EOF is answered `IO`.
 fn read_whole(server: &Server, handle: &Handle) -> Vec<u8> {
     const PLAYER_READ: u32 = 32 * 1024;
     let mut out = Vec::new();
@@ -607,6 +606,59 @@ fn a_file_reads_back_byte_for_byte() {
 }
 
 #[test]
+fn each_new_read_reopens_the_file_and_reports_its_current_attributes() {
+    let (dir, server) = fixture();
+    let root = mount_root(&server);
+    let handle = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
+    let read = || {
+        let mut args = Writer::new();
+        args.opaque_fixed(handle.as_bytes()).u32(0).u32(32_768).u32(0);
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+        let mut reader = ok_reader(&reply);
+        assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+        let mut size = 0;
+        for field in 0..17 {
+            let value = reader.u32().unwrap();
+            if field == 5 {
+                size = value;
+            }
+        }
+        (size, reader.opaque().unwrap().to_vec())
+    };
+    assert_eq!(read(), (40_000, vec![7_u8; 32_768]));
+    // Replacing the path must not leave a retained descriptor or prefetch
+    // window serving the old file, or cached attributes describing its size.
+    let replacement = vec![9_u8; 16_384];
+    fs::write(dir.path().join("replacement.mp3"), &replacement).unwrap();
+    fs::remove_file(dir.path().join("track.mp3")).unwrap();
+    fs::rename(dir.path().join("replacement.mp3"), dir.path().join("track.mp3")).unwrap();
+    assert_eq!(read(), (16_384, replacement));
+    fs::remove_file(dir.path().join("track.mp3")).unwrap();
+    assert_read_edge_status(&server, &handle, 0, 32_768, nfs_status::IO);
+}
+
+#[test]
+fn cdj_32_kib_reads_are_complete_before_the_end_of_the_file() {
+    let (_dir, server) = fixture();
+    let root = mount_root(&server);
+    let file = lookup_path(&server, &root, "Contents/ARTBAT/The Abyss.mp3").unwrap();
+    // [OBS] The physical CDJ requests 32 KiB. An 8 KiB success can leave
+    // unfetched ranges; do not model the client as always filling them in.
+    for offset in [0, 4096] {
+        let mut args = Writer::new();
+        args.opaque_fixed(file.as_bytes()).u32(offset).u32(32_768).u32(0);
+        let reply = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, args.into_bytes());
+        let mut reader = ok_reader(&reply);
+        assert_eq!(reader.u32().unwrap(), nfs_status::OK);
+        for _ in 0..17 {
+            reader.u32().unwrap();
+        }
+        assert_eq!(reader.opaque().unwrap(), vec![7_u8; 32_768]);
+        assert_eq!(reader.remaining(), 0);
+    }
+}
+
+#[test]
 fn a_read_is_capped_at_the_protocol_limit_however_much_is_asked_for() {
     let (_dir, server) = fixture();
     let root = mount_root(&server);
@@ -619,7 +671,7 @@ fn a_read_is_capped_at_the_protocol_limit_however_much_is_asked_for() {
     for _ in 0..17 {
         reader.u32().unwrap();
     }
-    assert_eq!(MAX_READ, 8 * 1024);
+    assert_eq!(MAX_READ, 0xfc00);
     assert_eq!(reader.opaque().unwrap().len(), 40_000.min(MAX_READ));
 }
 
@@ -704,21 +756,23 @@ fn read_edge_stale_handle_is_stale_even_when_count_is_zero() {
 #[test]
 fn read_edge_positive_short_read_keeps_attributes_length_data_and_padding() {
     let (dir, server, file, _) = read_edge_fixture();
-    // A previous zero-count read must not prevent a later successful read
-    // through the same open-file/read-ahead cache.
+    // A previous zero-count read must not prevent a later successful read.
     assert_read_edge_status(&server, &file, 0, 0, nfs_status::IO);
     for count in [4096, u32::MAX] {
         let request = call(PROGRAM_NFS, VERSION_NFS, nfs_proc::READ, read_edge_arguments(&file, 2, count));
         let xid = Call::decode(&request).unwrap().xid;
+        let actual = server.handle(&request);
         let mut expected = read_edge_envelope(xid, 0);
-        // Status followed by all seventeen fattr words for the fixture's
-        // five-byte regular file (file id 2), then actual data length 3.
-        expected.extend([
-            0_u32, 1, 0o100_444, 1, 0, 0, 5, 4096, 0, 1, 2, 2,
-            1_700_000_000, 0, 1_700_000_000, 0, 1_700_000_000, 0, 3,
-        ].into_iter().flat_map(u32::to_be_bytes));
+        // READ carries current host attributes, as GETATTR does; synthetic
+        // insertion-time mode/owner/timestamps are not returned for a file
+        // backed by the host. Keep checking the complete reply envelope.
+        let mut args = Writer::new();
+        args.opaque_fixed(file.as_bytes());
+        let attributes = ask(&server, PROGRAM_NFS, VERSION_NFS, nfs_proc::GETATTR, args.into_bytes());
+        expected.extend_from_slice(&attributes[24..96]);
+        expected.extend_from_slice(&3_u32.to_be_bytes());
         expected.extend_from_slice(b"llo\0");
-        assert_eq!(server.handle(&request), Some(expected), "count {count}");
+        assert_eq!(actual, Some(expected), "count {count}");
     }
     assert_eq!(fs::read(dir.path().join("nonempty.dat")).unwrap(), b"hello");
 }

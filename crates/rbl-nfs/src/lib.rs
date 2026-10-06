@@ -183,10 +183,9 @@ pub struct Server {
     /// rekordbox names its own subnet in the mount EXPORT reply. A CDJ checks
     /// itself against this list and will not mount an export that offers none.
     export_host: Option<String>,
-    /// The files being read, kept open: a player reads a track in 32 KB
-    /// pieces, and opening the file for each piece is a syscall and a
-    /// directory walk per piece. Most recently used last.
-    open: Mutex<Vec<OpenFile>>,
+    /// Serializes host reads, as libFilSiNE holds `_tkvFSSem` while opening,
+    /// seeking, reading, obtaining attributes, and closing a file.
+    file_reads: Mutex<()>,
     /// Non-zero once the link is up. rekordbox adds its export list only
     /// on link-up, so until then the EXPORT reply lists nothing and a mount
     /// is refused; a server made without a gate is up from the start.
@@ -228,31 +227,6 @@ const REPLY_CACHE: usize = 20;
 /// The bytes of a call that identify it in the cache.
 const REPLY_KEY_LEN: usize = 24;
 
-#[derive(Debug)]
-struct OpenFile {
-    path: PathBuf,
-    file: File,
-    used: std::time::Instant,
-    window_offset: u64,
-    window: Vec<u8>,
-}
-
-/// How many files stay open between reads: a player keeps two mounts and
-/// reads one track through both, and a few players may load at once.
-const OPEN_FILES: usize = 8;
-/// A handle unused for this long is closed, so a file replaced on disk is
-/// read afresh rather than from the old inode for as long as it is cached.
-const OPEN_FOR: std::time::Duration = std::time::Duration::from_secs(30);
-/// Bytes fetched together on a cache miss. Players request at most 63 KiB at
-/// a time, but preview playback commonly walks a track in adjacent 32 KiB
-/// reads. Coalescing those reads avoids making removable and network-backed
-/// storage service hundreds of tiny operations while keeping memory bounded
-/// to `OPEN_FILES * CACHE_WINDOW`.
-const READ_AHEAD: usize = 1024 * 1024;
-/// Extra room keeps the largest legal request whole when it starts just
-/// before the next read-ahead boundary.
-const CACHE_WINDOW: usize = READ_AHEAD + MAX_READ;
-
 impl Server {
     pub fn new(exports: Exports, nfs_port: u16, mount_port: u16) -> Self {
         Self {
@@ -260,7 +234,7 @@ impl Server {
             nfs_port,
             mount_port,
             export_host: None,
-            open: Mutex::new(Vec::with_capacity(OPEN_FILES)),
+            file_reads: Mutex::new(()),
             up: None,
             mounts: Mutex::new(HashMap::new()),
             replies: Mutex::new(std::collections::VecDeque::with_capacity(REPLY_CACHE)),
@@ -310,49 +284,6 @@ impl Server {
     pub fn with_export_host(mut self, host: impl Into<String>) -> Self {
         self.export_host = Some(host.into());
         self
-    }
-
-    /// Reads `len` bytes at `offset` of the file at `path`, through the
-    /// open-file cache.
-    fn read_at(&self, path: &Path, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-        let mut open = self.open.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let now = std::time::Instant::now();
-        open.retain(|entry| now.duration_since(entry.used) < OPEN_FOR);
-        let at = if let Some(at) = open.iter().position(|entry| entry.path == path) {
-            at
-        } else {
-            if open.len() >= OPEN_FILES {
-                open.remove(0);
-            }
-            open.push(OpenFile {
-                path: path.to_path_buf(),
-                file: File::open(path)?,
-                used: now,
-                window_offset: 0,
-                window: Vec::new(),
-            });
-            open.len() - 1
-        };
-        let mut entry = open.remove(at);
-        let started = std::time::Instant::now();
-        let outcome = entry.read_at(offset, len);
-        let elapsed = started.elapsed();
-        // A read that failed drops the handle: the file may have been
-        // replaced, and the next read opens whatever is there now.
-        if let Ok((_, hit, prefetched)) = &outcome {
-            tracing::trace!(
-                file = %path.display(),
-                offset,
-                len,
-                cache_hit = hit,
-                prefetched,
-                elapsed_us = elapsed.as_micros(),
-                "file read completed"
-            );
-            entry.used = now;
-            open.push(entry);
-        }
-        outcome.map(|(data, _, _)| data)
     }
 
     pub fn exports(&self) -> &Exports {
@@ -707,18 +638,27 @@ impl Server {
             tracing::warn!(xid = call.xid, "read of a directory");
             return Self::status_only(call.xid, nfs_status::ISDIR);
         }
-        let (Some(source), Some(attributes)) = (vfs.source(index), vfs.attributes(index)) else {
+        let Some(source) = vfs.source(index) else {
             tracing::warn!(xid = call.xid, "read of a node with no file behind it");
             return Self::status_only(call.xid, nfs_status::STALE);
         };
 
         let wanted = (count as usize).min(MAX_READ);
         if offset == 0 {
-            tracing::debug!(xid = call.xid, file = %source.display(), size = attributes.size, "player started reading a file");
+            tracing::debug!(xid = call.xid, file = %source.display(), "player started reading a file");
         }
         // A file that vanished between the export and the read is the normal
         // case here, not an I/O fault worth distinguishing.
-        let data = match self.read_at(&source, u64::from(offset), wanted) {
+        let guard = self.file_reads.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut file = match File::open(&source) {
+            Ok(file) => file,
+            Err(error) => {
+                tracing::warn!(xid = call.xid, file = %source.display(), %error, "open for read failed");
+                return Self::status_only(call.xid, nfs_status::IO);
+            }
+        };
+        let started = std::time::Instant::now();
+        let data = match read_at(&mut file, u64::from(offset), wanted) {
             Ok(data) => data,
             Err(error) => {
                 tracing::warn!(xid = call.xid, file = %source.display(), offset, wanted, %error, "read failed");
@@ -728,10 +668,17 @@ impl Server {
         // [OBS] libFilSiNE `_tkfFSReadFile` (filsine.c:2266–2329) answers
         // IO for every zero-byte fread, including a requested count of zero.
         if data.is_empty() {
-            tracing::trace!(xid = call.xid, offset, size = attributes.size, "read at the end of the file; IO, as rekordbox answers");
+            tracing::trace!(xid = call.xid, offset, "read at the end of the file; IO, as rekordbox answers");
             return Self::status_only(call.xid, nfs_status::IO);
         }
-        tracing::trace!(xid = call.xid, offset, wanted, got = data.len(), "read served");
+        let Some(attributes) = vfs.attributes(index) else {
+            return Self::status_only(call.xid, nfs_status::STALE);
+        };
+        // [STATIC] `_tkfFSReadFile` obtains attributes after fread, then
+        // closes the file before the RPC reply is constructed.
+        drop(file);
+        drop(guard);
+        tracing::trace!(xid = call.xid, offset, wanted, got = data.len(), elapsed_us = started.elapsed().as_micros(), "read served");
 
         let mut writer = rpc::accepted(call.xid, rpc::accept::SUCCESS);
         writer.u32(nfs_status::OK);
@@ -879,7 +826,7 @@ fn write_attributes(writer: &mut Writer, attributes: &Attributes) {
 
 /// Reads at most `len` bytes from `offset`. A short read at the end of the
 /// file is not an error; NFS signals the end by returning fewer bytes.
-fn read_at(mut file: &File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
+fn read_at(file: &mut File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
     file.seek(SeekFrom::Start(offset))?;
     let mut out = vec![0_u8; len];
     let mut filled = 0;
@@ -891,35 +838,6 @@ fn read_at(mut file: &File, offset: u64, len: usize) -> std::io::Result<Vec<u8>>
     }
     out.truncate(filled);
     Ok(out)
-}
-
-impl OpenFile {
-    /// Returns exactly the requested slice while fetching a larger aligned
-    /// window on misses. This is deliberately implemented with portable
-    /// `std::fs` I/O so removable media behaves consistently on macOS,
-    /// Windows and Linux.
-    fn read_at(&mut self, offset: u64, len: usize) -> std::io::Result<(Vec<u8>, bool, usize)> {
-        let end = offset.saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
-        let window_end = self
-            .window_offset
-            .saturating_add(u64::try_from(self.window.len()).unwrap_or(u64::MAX));
-        if !self.window.is_empty() && offset >= self.window_offset && end <= window_end {
-            let start = usize::try_from(offset - self.window_offset).unwrap_or(usize::MAX);
-            let finish = start.saturating_add(len).min(self.window.len());
-            return Ok((self.window.get(start..finish).unwrap_or(&[]).to_vec(), true, 0));
-        }
-
-        let read_ahead = u64::try_from(READ_AHEAD).unwrap_or(1);
-        let window_offset = offset / read_ahead * read_ahead;
-        let window = read_at(&self.file, window_offset, CACHE_WINDOW)?;
-        let prefetched = window.len();
-        self.window_offset = window_offset;
-        self.window = window;
-
-        let start = usize::try_from(offset - self.window_offset).unwrap_or(usize::MAX);
-        let finish = start.saturating_add(len).min(self.window.len());
-        Ok((self.window.get(start..finish).unwrap_or(&[]).to_vec(), false, prefetched))
-    }
 }
 
 /// Splits an absolute path into the export a player mounts and the path within
@@ -944,42 +862,4 @@ pub fn split_export(path: &str) -> Option<(String, String)> {
         format!("/{}/", drive.to_ascii_uppercase()),
         rest.replace('\\', "/"),
     ))
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
-mod read_cache_tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn read_ahead_returns_exact_slices_and_covers_a_boundary() {
-        let mut source = tempfile::NamedTempFile::new().unwrap();
-        let bytes: Vec<u8> = (0..(CACHE_WINDOW * 2)).map(|at| (at % 251) as u8).collect();
-        source.write_all(&bytes).unwrap();
-        source.flush().unwrap();
-
-        let mut open = OpenFile {
-            path: source.path().to_path_buf(),
-            file: File::open(source.path()).unwrap(),
-            used: std::time::Instant::now(),
-            window_offset: 0,
-            window: Vec::new(),
-        };
-
-        let (first, hit, prefetched) = open.read_at(100, 64).unwrap();
-        assert!(!hit);
-        assert_eq!(prefetched, CACHE_WINDOW);
-        assert_eq!(first, bytes[100..164]);
-
-        let (nearby, hit, prefetched) = open.read_at(200, 64).unwrap();
-        assert!(hit);
-        assert_eq!(prefetched, 0);
-        assert_eq!(nearby, bytes[200..264]);
-
-        let offset = READ_AHEAD - 32;
-        let (across_boundary, hit, _) = open.read_at(offset as u64, MAX_READ).unwrap();
-        assert!(hit);
-        assert_eq!(across_boundary, bytes[offset..offset + MAX_READ]);
-    }
 }

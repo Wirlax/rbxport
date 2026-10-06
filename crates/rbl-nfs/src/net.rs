@@ -6,7 +6,7 @@
 //! runtime would cost a dependency and a scheduler on the read path.
 
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,15 +16,14 @@ use crate::Server;
 /// The largest datagram we will read. A request is small — a `READ` asks for
 /// 32 KB but carries none — so this is headroom for a long `LOOKUP` name and
 /// a generous `READDIR` budget, not for data.
-const DATAGRAM: usize = 16 * 1024;
+const DATAGRAM: usize = 65_535;
 
-/// Room for a burst of complete `READ` replies. A CDJ uses several source
-/// ports while walking a file; this avoids making `send_to` wait for each
-/// fragmented datagram to drain. The OS may clamp this to its platform limit.
-const SEND_BUFFER: usize = 1024 * 1024;
+/// [STATIC] libFilSiNE `_tkfTransportOpen` requests 0x10000 bytes for both
+/// `SO_SNDBUF` and `SO_RCVBUF`. The OS may clamp or account for these differently.
+const SOCKET_BUFFER: usize = 0x10000;
 
 /// How long a socket blocks before checking whether it has been asked to stop.
-const POLL: Duration = Duration::from_millis(200);
+const POLL: Duration = Duration::from_millis(100);
 
 /// Serves RPC on one bound socket until `stop` is set.
 ///
@@ -33,10 +32,11 @@ const POLL: Duration = Duration::from_millis(200);
 pub fn serve(server: &Arc<Server>, socket: &UdpSocket, stop: &Arc<AtomicBool>) -> io::Result<()> {
     let socket_id = crate::Receiver::default();
     socket.set_read_timeout(Some(POLL))?;
-    // Even an 8 KB `READ` reply is larger than one Ethernet frame. Keep the
-    // buffer roomy enough for bursts from several player source ports rather
-    // than making `send_to` wait for each fragmented datagram to drain.
-    socket2::SockRef::from(socket).set_send_buffer_size(SEND_BUFFER)?;
+    // Match `_tkfTransportOpen`: broadcast, then receive and send buffers.
+    socket.set_broadcast(true)?;
+    let socket_ref = socket2::SockRef::from(socket);
+    socket_ref.set_recv_buffer_size(SOCKET_BUFFER)?;
+    socket_ref.set_send_buffer_size(SOCKET_BUFFER)?;
     let mut buffer = vec![0_u8; DATAGRAM];
     while !stop.load(Ordering::Relaxed) {
         let (len, from) = match socket.recv_from(&mut buffer) {
@@ -95,7 +95,11 @@ pub struct Bound {
 }
 
 impl Bound {
-    /// Binds portmap, mount and NFS on `address`, and starts serving.
+    /// Advertises portmap, mount and NFS on `address`, and starts serving.
+    /// [STATIC] libFilSiNE binds its sockets to `INADDR_ANY`.
+    /// [LOCAL] On macOS, pin those sockets to the advertised interface so
+    /// the default Wi-Fi route cannot override the user's adapter selection.
+    /// Other platforms bind the advertised address.
     ///
     /// A port of 0 asks the OS for a free one, which is what the tests use.
     pub fn start(
@@ -107,14 +111,14 @@ impl Bound {
         export_host: Option<String>,
         up: Option<Arc<std::sync::atomic::AtomicU8>>,
     ) -> io::Result<Self> {
-        let portmap_socket = UdpSocket::bind(SocketAddr::new(address, portmap_port))?;
-        let mount_socket = UdpSocket::bind(SocketAddr::new(address, mount_port))?;
-        let nfs_socket = UdpSocket::bind(SocketAddr::new(address, nfs_port))?;
+        let portmap_socket = bind_rpc(address, portmap_port)?;
+        let mount_socket = bind_rpc(address, mount_port)?;
+        let nfs_socket = bind_rpc(address, nfs_port)?;
 
         let (portmap, mount, nfs) = (
-            portmap_socket.local_addr()?,
-            mount_socket.local_addr()?,
-            nfs_socket.local_addr()?,
+            SocketAddr::new(address, portmap_socket.local_addr()?.port()),
+            SocketAddr::new(address, mount_socket.local_addr()?.port()),
+            SocketAddr::new(address, nfs_socket.local_addr()?.port()),
         );
         tracing::debug!(%portmap, %mount, %nfs, "file server bound");
 
@@ -186,4 +190,33 @@ impl Drop for Bound {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+/// Keep RPC replies on the adapter whose address LINK advertises.
+fn bind_rpc(address: IpAddr, port: u16) -> io::Result<UdpSocket> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let bind_address = match address {
+            IpAddr::V4(_) => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+        };
+        let socket = UdpSocket::bind(SocketAddr::new(bind_address, port))?;
+        if !address.is_unspecified() {
+            let index = if_addrs::get_if_addrs()?
+                .into_iter()
+                .find(|interface| interface.ip() == address)
+                .and_then(|interface| interface.index)
+                .and_then(std::num::NonZeroU32::new)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::AddrNotAvailable,
+                    format!("no network interface has address {address}")))?;
+            let socket_ref = socket2::SockRef::from(&socket);
+            match address {
+                IpAddr::V4(_) => socket_ref.bind_device_by_index_v4(Some(index))?,
+                IpAddr::V6(_) => socket_ref.bind_device_by_index_v6(Some(index))?,
+            }
+        }
+        Ok(socket)
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    UdpSocket::bind(SocketAddr::new(address, port))
 }

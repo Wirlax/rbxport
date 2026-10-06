@@ -531,3 +531,111 @@ Expected totals:
 requests=269 sent_messages=903 sent_bytes=1778418 artwork_replies=99 analysis_tag_replies=99
 full_window_requests=291 full_window_sent_messages=1077 full_window_sent_bytes=1802640
 ```
+
+## 2026-10-06: KILLA unsupported-format report and playback cutouts
+
+- [OBS, user] DONT BLINK — KILLA (Extended Mix), content ID `40082`,
+  initially showed unsupported file format on a physical CDJ-3000. After
+  reconnecting the laptop, playback stuttered/cut out; the user also observed
+  a cutout while sorting on the other CDJ.
+- [OBS, local] The source MP3 exists, is 13,148,688 bytes, and decodes fully
+  with FFmpeg without errors. This does not prove CDJ decoder compatibility.
+- [OBS, capture] Private evidence:
+  `rbxport-private/verification/link/killa-20261006/reconnected.pcapng` and
+  `before-summary.json`. Both wired and Wi-Fi interfaces were captured;
+  all 29,936 packets were on the wired interface, with zero capture drops.
+  Every captured RPC call had a successful reply; no READ xid repeated.
+  KILLA's 1,984 READ replies match the source bytes exactly. The union of
+  returned ranges leaves nine gaps totaling 155,648 bytes unfetched.
+- [OBS, local packet mapping] FFprobe maps those gaps to real MP3 audio
+  frames around 51–58 s, 108–109 s, and 196–197 s into KILLA, rather than
+  merely artwork or ID3 metadata. Player-position/audio recordings remain
+  necessary to correlate these ranges with the user's cutout times.
+- [OBS, capture] CDJ-3000 requested 32 KiB, but RBX returned at most 8 KiB.
+  The player sometimes fetched missing portions with smaller requests, but
+  did not fetch every remaining range. Tests that assume every short reply
+  is followed by a request at its exact end do not establish player behavior.
+- [OBS, capture] Eight KILLA replies took 122–339 ms. The last audio reply
+  was at `06:58:47.563103Z`; the subsequent cutout report was received around
+  `07:00:41Z`. Database browsing/sorting continued on the other player.
+  There was no pending audio read at that later report time in this capture.
+- [STATIC] Rekordbox's `_tkfNFSRead` in `verification/link/rekordbox-re/filsine.c`
+  caps counts at `0xfc00`, not 8 KiB (lines 419–420).
+- [LOCAL CHANGE] Restore that vendor cap so a normal CDJ 32 KiB request is
+  answered in full. Add a regression requiring complete 32 KiB replies at
+  offset zero and a nonzero offset before EOF.
+- [UNKNOWN] Whether unfetched bytes, read latency, or simultaneous sorting
+  caused the reported cutouts or the earlier format rejection. Physical
+  replay with full-size replies and sorting on the other CDJ is pending.
+  Larger UDP replies also restore fragmentation, so measure retransmits
+  during that replay before declaring playback fixed.
+- [OBS, follow-up] With the vendor cap restored, the captured reads for
+  Everything (Extended Mix) on `192.168.1.35` cover all 12,038,900 bytes;
+  Pure NRG (Extended Mix) on `192.168.1.170` covers all 11,410,350 bytes.
+  Neither transfer has an unfetched range. No duplicate RPC calls/replies
+  were reported by Tshark in the examined capture. The user reported LINK
+  was back and "so far no stutter"; sustained KILLA/sorting proof remains
+  incomplete. Evidence: `full-read-retest.pcapng`, `after-summary.json`.
+- [LOCAL VALIDATION] Focused LINK/NFS tests pass, including the new complete
+  32 KiB regression; workspace/all-target clippy passes with warnings denied.
+- [LOCAL VALIDATION] The first workspace test run used an old `rbl-audio`
+  binary whose embedded fixture path pointed to a deleted temporary worktree.
+  Rebuilding that package resolved those failures. All `rbl-analysis` tests
+  passed in the first run; `cargo test --workspace --exclude rbl-analysis`
+  then passed for the remaining workspace with `RB_LITE_TEST=1`.
+- [UNKNOWN, transport regression] Restoring the vendor read cap does not
+  establish that the earlier 32 KiB retransmission/load-stall problem is
+  fixed. The current full-reply capture has zero Tshark `rpc.dup` frames,
+  but the laptop was reconnected through a different adapter/interface.
+  Compare the original transport conditions before claiming both issues
+  resolved. Avoid another short-success workaround without player proof.
+- [STATIC, implementation follow-up] The inspected rekordbox 7.2.11
+  `_tkfTransportOpen` requests 65,536-byte receive/send socket buffers,
+  enables broadcast, and binds wildcard addresses. Its receive wait is
+  100 ms. `_tkfFSReadFile` opens, seeks, reads only the requested bytes,
+  refreshes attributes, and closes the file under a filesystem semaphore.
+  RBX now follows these buffer and disk-read behaviors: the persistent
+  file/read-ahead cache is removed, READ disk operations are serialized,
+  and file attributes are refreshed from the source. This is evidence for
+  the scoped buffer/disk changes, not whole-application equivalence.
+- [LOCAL VALIDATION, latest revision] Focused NFS/LINK tests and
+  `RB_LITE_TEST=1 cargo test --workspace` pass. The latest strict clippy
+  run fails on one documentation-format warning: `INADDR_ANY` needs
+  backticks in `net.rs`. That comment edit is deferred while the user is
+  DJing because the desktop dev watcher restarts the app on Rust edits.
+- [OBS, passive follow-up] The user chose normal DJing instead of a forced
+  KILLA/sorting replay. In the examined portion of
+  `rekordbox-io-passive.pcapng`, 931 READ replies succeeded, with a maximum
+  request-to-reply time of 47.309 ms and zero Tshark `rpc.dup` frames.
+  All of those replies used Wi-Fi `en0`, source `192.168.1.120`, rather
+  than the selected wired address `192.168.1.138`. No network change or
+  additional app restart was performed during this passive observation.
+  This limits claims about wired validation and does not establish the
+  absence of audible stutters during sustained playback.
+- [OBS, user follow-up] Another audible stutter was reported around
+  `2026-10-06 07:35Z`. The prior timed capture had already ended, so this
+  occurrence has no packet correlation. A rolling dual-interface capture
+  was started at `07:35:26Z` to retain the last ten minutes for subsequent
+  reports (`stutter-rolling_*.pcapng`). The interface-selection/socket-pin
+  change is in source but has not been loaded into the running app;
+  automatic desktop rebuilds remain paused to preserve the DJ session.
+- [LOCAL VALIDATION, interface follow-up] Auto now ranks OS-labeled wired
+  adapters ahead of unknown adapters and Wi-Fi, and searches those adapters
+  for a player subnet before fallback. Manual selection remains explicit.
+  macOS RPC sockets keep wildcard binding but use the selected address's
+  interface index to pin traffic, avoiding the default Wi-Fi route.
+  Selection and focused LINK/NFS tests pass; strict workspace/all-target
+  clippy passes, including the corrected documentation formatting.
+- [OBS, user] The `07:35Z` stutter was on deck 2. Track identity and
+  simultaneous browse/sort activity were not yet provided.
+- [OBS, user clarification] Deck 2 was playing the song while the user
+  was beat matching it when the stutter occurred. This occurrence does
+  not establish a connection to browsing or sorting on the other player.
+- [LOCAL VALIDATION, final] `RB_LITE_TEST=1 cargo test --workspace`
+  completed successfully on the interface/socket changes. The final
+  selection regression also passes after removing test-only `expect`
+  calls to satisfy strict workspace/all-target clippy. No frontend code
+  changed. The user subsequently reported no further stuttering and asked
+  to stop; no capture remained running when checked. The new interface
+  selection and socket pinning have not been tested in the running
+  physical-player session, and the audible-stutter cause remains unknown.

@@ -4086,6 +4086,7 @@ dependencies = [
 name = "rbl-nfs"
 version = "1.0.0-rc.13"
 dependencies = [
+ "if-addrs",
  "nix",
  "socket2",
  "tempfile",

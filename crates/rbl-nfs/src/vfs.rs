@@ -22,20 +22,19 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::RwLock;
 
 use unicode_normalization::UnicodeNormalization as _;
 
 /// A file handle is a fixed 32 opaque bytes in `NFSv2`.
 pub const HANDLE_LEN: usize = 32;
 
-/// The most a single `READ` may return. A CDJ-3000 asks for 32 KB, but an
-/// `NFSv2` client accepts a short successful read and continues at its end.
-/// Keeping replies at the protocol's 8 KB ceiling materially reduces IP
-/// fragmentation: physical-CDJ testing on 2026-10-04 saw 761 retransmits in
-/// 2,170 reads and recurring five-second load stalls with 32 KB datagrams.
-/// `[OBS]` The 1 MB read-ahead cache still amortizes the underlying file I/O.
-pub const MAX_READ: usize = 8 * 1024;
+/// The most a single `READ` may return: rekordbox's libFilSiNE caps reads
+/// at 0xfc00 (`verification/link/rekordbox-re/filsine.c:419`).
+/// [OBS] A physical CDJ-3000 requests 32 KB; capping successful replies at
+/// 8 KB left unfetched audio ranges in the 2026-10-06 KILLA capture. Reply
+/// with the requested count up to the vendor cap, even when UDP fragments.
+pub const MAX_READ: usize = 0xfc00;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
@@ -61,9 +60,9 @@ struct Node {
     /// Whether every child is in the tree: always for a registered
     /// directory; for one on the host, once a listing has read it.
     listed: bool,
-    /// What the host says about the file. Given at insertion, or read from
-    /// the file the first time a player asks.
-    stat: OnceLock<Stat>,
+    /// Attributes of synthetic nodes. Host-backed nodes are stat'ed on
+    /// every request, as libFilSiNE obtains the current host attributes.
+    stat: Option<Stat>,
 }
 
 impl Node {
@@ -76,7 +75,7 @@ impl Node {
             by_name: HashMap::new(),
             source,
             listed,
-            stat: stat.map_or_else(OnceLock::new, OnceLock::from),
+            stat,
         }
     }
 }
@@ -346,8 +345,8 @@ impl Vfs {
         self.add(path, Some((source.into(), Some(Stat::plain(size, modified)))), Stat::directory(modified))
     }
 
-    /// Adds a file whose size and modification time are read from `source`
-    /// the first time a player asks for its attributes, not now.
+    /// Adds a file whose attributes are read from `source` on each request,
+    /// rather than doing filesystem I/O while building the export.
     pub fn add_file_unsized(&mut self, path: &str, source: impl Into<PathBuf>) -> usize {
         self.add(path, Some((source.into(), None)), Stat::directory(0))
     }
@@ -585,9 +584,10 @@ impl Vfs {
     pub fn attributes(&self, index: usize) -> Option<Attributes> {
         let nodes = self.read();
         let node = nodes.get(index)?;
-        let stat = *node
-            .stat
-            .get_or_init(|| node.source.as_deref().map_or_else(|| Stat::directory(0), stat_file));
+        let stat = node.source.as_deref().map_or_else(
+            || node.stat.unwrap_or_else(|| Stat::directory(0)),
+            stat_file,
+        );
         Some(Attributes {
             kind: node.kind,
             size: stat.size,

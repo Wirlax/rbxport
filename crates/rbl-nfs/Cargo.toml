@@ -10,7 +10,7 @@ description = "SUN-RPC/XDR and a read-only NFSv2 server over a virtual filesyste
 workspace = true
 
 [dependencies]
-socket2 = "0.6"
+socket2 = { version = "0.6", features = ["all"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # Names on the wire in NFD, as rekordbox's `UTF8-MAC` conversion sends them.
@@ -21,6 +21,9 @@ unicode-normalization = "0.1"
 # from the host filesystem; a safe wrapper, as the workspace forbids
 # `unsafe`.
 nix = { version = "0.29", default-features = false, features = ["fs"] }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+if-addrs = "0.15"
 
 [dev-dependencies]
 tempfile = "3"

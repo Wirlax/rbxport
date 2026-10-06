@@ -363,9 +363,9 @@ pub struct Session {
 
 impl Session {
     /// Turns LINK on for `interface`, or when none is named the interface
-    /// the OS reaches a player already heard through. With a connected RX3
+    /// prefers non-Wi-Fi adapters that reach a player. With a connected RX3
     /// that has not announced yet, its sole link-local USB interface is used.
-    /// Otherwise the first interface is the fallback. Reports the players to
+    /// Otherwise a non-Wi-Fi adapter is preferred as the fallback. Reports the players to
     /// `report` as they change.
     ///
     /// Blocking: binds seven sockets and walks every track's path.
@@ -380,7 +380,10 @@ impl Session {
     where
         F: Fn(LinkStatusDto) + Send + 'static,
     {
-        let available = rbl_link::interfaces();
+        let mut available = rbl_link::interfaces();
+        available.sort_by_key(|candidate| interface_preference(
+            crate::network_labels::for_interface(&candidate.name).connection.as_deref(),
+        ));
         tracing::debug!(
             interfaces = ?available.iter().map(|i| format!("{} {}/{}", i.name, i.address, i.netmask)).collect::<Vec<_>>(),
             "interfaces LINK could run on"
@@ -396,11 +399,12 @@ impl Session {
             available.iter().find(|i| i.name == name).cloned()
         } else {
             let peers = state.link_peers();
-            let toward = peers
-                .iter()
-                .find_map(|peer| rbl_link::interface_toward(&available, peer.address).map(|i| (peer.address, i)));
+            let toward = preferred_interface_toward(
+                &available,
+                &peers.iter().map(|peer| peer.address).collect::<Vec<_>>(),
+            );
             if let Some((peer, i)) = toward {
-                tracing::debug!(interface = %i.name, %peer, "interface chosen: the one that reaches a device already heard");
+                tracing::debug!(interface = %i.name, %peer, "interface chosen: preferred adapter on a device's subnet");
                 Some(i)
             } else if rx3.is_some() {
                 let mut usb = available.iter().filter(|candidate| is_link_local(candidate.address));
@@ -414,7 +418,7 @@ impl Session {
                 tracing::debug!(interface = %first.as_ref().map_or("", |i| i.name.as_str()), "interface chosen: the XDJ-RX3 USB link-local interface");
                 first
             } else {
-                tracing::debug!(peers = peers.len(), "no device heard on any interface; taking the first");
+                tracing::debug!(peers = peers.len(), "no device heard on any interface; preferring non-Wi-Fi");
                 available.first().cloned()
             }
         }
@@ -569,6 +573,29 @@ impl Drop for Session {
     }
 }
 
+// OS-provided connection types, never inferred from names such as en0.
+fn interface_preference(connection: Option<&str>) -> u8 {
+    match connection {
+        Some("wired") => 0,
+        Some("wireless") => 2,
+        _ => 1,
+    }
+}
+
+// Candidates are ordered by connection preference. Do not ask the default
+// route here: it can prefer Wi-Fi when both adapters reach the same players.
+fn preferred_interface_toward(
+    candidates: &[Interface],
+    peers: &[std::net::Ipv4Addr],
+) -> Option<(std::net::Ipv4Addr, Interface)> {
+    candidates.iter().find_map(|candidate| {
+        let mask = u32::from(candidate.netmask);
+        peers.iter().find(|peer| {
+            u32::from(**peer) & mask == u32::from(candidate.address) & mask
+        }).map(|peer| (*peer, candidate.clone()))
+    })
+}
+
 fn is_link_local(address: std::net::Ipv4Addr) -> bool {
     let [first, second, _, _] = address.octets();
     first == 169 && second == 254
@@ -582,6 +609,34 @@ mod rx3_interface_tests {
     use rbl_prolink::DeviceType;
     use std::net::Ipv4Addr;
     use std::time::Instant;
+
+    #[test]
+    fn auto_prefers_ethernet_even_when_wifi_peer_is_seen_first() {
+        let adapter = |name: &str, address: Ipv4Addr| Interface {
+            name: name.to_owned(), address,
+            netmask: Ipv4Addr::new(255, 255, 255, 0), mac: [0; 6],
+        };
+        let mut candidates = vec![
+            adapter("wifi", Ipv4Addr::new(192, 168, 2, 120)),
+            adapter("usb", Ipv4Addr::new(192, 168, 1, 138)),
+        ];
+        candidates.sort_by_key(|candidate| super::interface_preference(
+            Some(if candidate.name == "wifi" { "wireless" } else { "wired" }),
+        ));
+        let peers = [Ipv4Addr::new(192, 168, 2, 35), Ipv4Addr::new(192, 168, 1, 170)];
+        assert_eq!(super::preferred_interface_toward(&candidates, &peers)
+            .map(|(_, chosen)| chosen.name), Some("usb".to_owned()));
+        // With both adapters on the same subnet, Ethernet still wins.
+        candidates[1].address = Ipv4Addr::new(192, 168, 1, 120);
+        assert_eq!(super::preferred_interface_toward(&candidates, &peers[1..])
+            .map(|(_, chosen)| chosen.name), Some("usb".to_owned()));
+        // Wi-Fi is the fallback when it is the only adapter reaching a peer.
+        candidates[1].address = Ipv4Addr::new(192, 168, 2, 120);
+        assert_eq!(super::preferred_interface_toward(&candidates, &peers[..1])
+            .map(|(_, chosen)| chosen.name), Some("wifi".to_owned()));
+        assert!(super::preferred_interface_toward(&candidates, &[]).is_none());
+        assert_eq!(candidates.first().map(|candidate| candidate.name.as_str()), Some("usb"));
+    }
 
     #[test]
     fn only_ipv4_link_local_addresses_are_rx3_usb_candidates() {
