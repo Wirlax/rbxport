@@ -26,11 +26,11 @@ AtEmu proves the response, transport, and firmware behavior that its device mode
 
 | Device | User manual | Firmware reference | AtEmu status | Important compatibility detail |
 | --- | --- | --- | --- | --- |
-| XDJ-AZ | `nowplaying3/dj-products/alphatheta/xdj-az/manual/xdj-az-manual.pdf` | `alphatheta-docs/devices/xdj-az`, firmware 1.30 | **Passing emulated USB gate:** generated FAT32 export browses, loads on deck 1, and passes tone/cue audio tests at 44100 Hz with exclusive bridge capture. | One appliance exposes two ordinary Pro DJ Link deck identities; four-deck status can use USB slot `07`. No physical-device result exists. |
-| XDJ-RX3 | `nowplaying3/dj-products/alphatheta/xdj-rx3/manual/xdj-rx3-manual.pdf` | `alphatheta-docs/devices/xdj-rx3`, firmware 1.20; activation capture on 1.19 | **Unavailable:** catalog-only stub; no bootable firmware, guest, or shim. | Uses legacy request variants for several browse/load operations. Rear USB Link Export does not start until the audio gadget reports its connection event. |
-| CDJ-3000 | `nowplaying3/dj-products/alphatheta/cdj-3000/manual/cdj-3000-manual.pdf` | `alphatheta-docs/devices/cdj-3000`, firmware 3.20 | **Available:** vendor EP122 firmware boots with a live panel and REST control harness. | Uses live keyboard search `1500`; after a Link Export load it waits for user-info `3006` before requesting delivery info `2602`. |
+| XDJ-AZ | XDJ-AZ instruction manual | Firmware 1.30 | **Passing emulated USB gate:** generated FAT32 export browses, loads on deck 1, and passes tone/cue audio tests. | One appliance exposes two ordinary Pro DJ Link deck identities; four-deck status can use USB slot `07`. Physical XDJ-AZ behavior is not established by this gate. |
+| XDJ-RX3 | XDJ-RX3 instruction manual | Firmware 1.20; activation capture on 1.19 | **Unavailable:** no bootable emulator model. | Uses legacy request variants for several browse/load operations. Rear USB Link Export does not start until the audio gadget reports its connection event. |
+| CDJ-3000 | CDJ-3000 instruction manual | Firmware 3.20 | **Available:** vendor firmware boots and supports automated panel interaction. | Uses live keyboard search `1500`; after a Link Export load it waits for user-info `3006` before requesting delivery info `2602`. |
 
-Manual page numbers below are the printed English manual page numbers. The XDJ-AZ and XDJ-RX3 actions are in **Track selection**; the CDJ-3000 equivalents are in **Track selection** and **Browsing tracks**. Packet expectations are cross-referenced against `alphatheta-docs/platform/link-export-server.md` and `alphatheta-docs/platform/prodjlink/link-export-interactions.md`.
+The XDJ-AZ and XDJ-RX3 manual actions are in **Track selection**; the CDJ-3000 equivalents are in **Track selection** and **Browsing tracks**. Packet expectations are based on firmware analysis and protocol captures, with evidence markers distinguishing observations from assumptions.
 
 ## Test layers
 
@@ -61,7 +61,7 @@ Use complete encoded-message comparisons for protocol layouts. Use semantic asse
 
 ### AtEmu firmware integration tests
 
-The private companion harness at `../rbxport-private/scripts/e2e-link/run.sh` builds this checkout, creates an isolated three-track library, starts a bridged CDJ-3000 booth with `atemu up --api`, waits for the stock firmware panel to tick, launches RBX, and runs `test_link_export.py` plus `test_interactions.py`. The tests drive the firmware through its panel vocabulary and save screenshots, app logs, emulator health, JUnit XML, and pytest output under `../rbxport-private/verification/e2e-link/<timestamp>/`.
+The CDJ-3000 firmware suite uses an isolated three-track library and drives the stock firmware through its panel controls. Results include screenshots, app logs, emulator health, and test reports. The firmware harness and its artifacts are maintained separately from this public repository.
 
 An AtEmu case must assert a user-visible result, not only that a packet was accepted. Load coverage continues through firmware browsing, path lookup, NFS read, analysis retrieval, playback motion, and RBX receiving the deck's status packets.
 
@@ -107,18 +107,10 @@ The CDJ-3000 suite currently maps to the catalog as follows:
 
 HW-BRW-03 (HISTORY), HW-BRW-06 (KEY category navigation), and exact cue/artwork display still need dedicated panel assertions. Their RemoteDB requests remain covered by unit and protocol integration tests, which is weaker evidence. XDJ-RX3 firmware cases remain unavailable because that AtEmu model cannot boot.
 
-Run `npm run tests:private` from RBXport to run the CDJ-3000 LINK and XDJ-AZ
-USB firmware suites sequentially. Use `npm run tests:private -- cdj-3000` or
-`npm run tests:private -- xdj-az` to select one suite. The sibling
-`rbxport-private` checkout is required; set `RBXPORT_PRIVATE_REPO` for another
-location. These suites require built AtEmu models and imported firmware.
-
-The XDJ-AZ harness lives at `../rbxport-private/scripts/e2e-xdj-az/run.sh`.
-It exports a generated tone to a disposable FAT32 image, browses its playlist,
-loads deck 1, and checks playback and cue audio. Investigation notes are in
-`../rbxport-private/docs/testing/xdj-az.md`; evidence is saved under that
-repository's `verification/xdj-az/`. This establishes emulator/deck-1 coverage;
-physical-device and multideck behavior remain unverified.
+The XDJ-AZ firmware suite exports a generated tone to a disposable FAT32
+image, browses its playlist, loads deck 1, and checks playback and cue audio.
+This establishes emulator/deck-1 coverage; it does not establish physical
+XDJ-AZ or multideck behavior.
 
 ## Manual hardware run
 
@@ -145,13 +137,9 @@ RB_LITE_TEST=1 cargo test -p rbl-dbserver --test session
 RB_LITE_TEST=1 cargo test -p rbl-link --test link
 ```
 
-CDJ-3000 firmware integration, from the public checkout:
-
-```sh
-npm run tests:private -- cdj-3000
-```
-
-Confirm the intended app build, device/firmware, pytest results, and `testbed.json` showing a connected, ticking firmware panel. A log message alone is not proof that the required behavior passed. `--no-build` may be used only after the intended RBX executable has been built.
+For firmware integration results, confirm the intended app build,
+device/firmware, test results, and a connected, ticking firmware panel.
+A log message alone is not proof that the required behavior passed.
 
 Before handing off a substantial Link Export change:
 
