@@ -22,10 +22,11 @@ export default defineConfig({
   // runner failure from an application failure; a test that fails all three
   // times still reports a trace through `trace: "on-first-retry"` below.
   retries: process.env.CI ? 3 : 2,
-  // A shared ARC macOS runner hosts both Chromium and WebKit. Keeping CI at
-  // four workers prevents WebKit from being killed while creating a context;
-  // local runs retain Playwright's normal worker selection.
-  workers: process.env.CI ? 4 : undefined,
+  // The ARC macOS host runs Chromium and WebKit from the same runner. Parallel
+  // workers can exhaust it and kill Vite's preview process mid-suite, making
+  // production-page tests lose their server. Run CI serially; local runs keep
+  // Playwright's normal worker selection.
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
     baseURL: `http://localhost:${port}`,
