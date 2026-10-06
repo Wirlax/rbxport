@@ -21,7 +21,11 @@ export default defineConfig({
   // locally and on shared runners. Two retries distinguish that transient
   // runner failure from an application failure; a test that fails all three
   // times still reports a trace through `trace: "on-first-retry"` below.
-  retries: 2,
+  retries: process.env.CI ? 3 : 2,
+  // A shared ARC macOS runner hosts both Chromium and WebKit. Keeping CI at
+  // four workers prevents WebKit from being killed while creating a context;
+  // local runs retain Playwright's normal worker selection.
+  workers: process.env.CI ? 4 : undefined,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {
     baseURL: `http://localhost:${port}`,
