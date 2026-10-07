@@ -274,7 +274,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   analysis: {
     mode: "rbxport",
     concurrentTracks: SLOTS,
-    auto: true,
+    auto: false,
   },
   djSystem: {
     waveformColor: "3band",

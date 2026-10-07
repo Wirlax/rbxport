@@ -41,6 +41,12 @@ describe("sanitisePreferences", () => {
     expect(sanitisePreferences({ djSystem: { autoJoinLink: "yes" } }).djSystem.autoJoinLink).toBe(false);
     expect(sanitisePreferences({ djSystem: { autoJoinLink: true } }).djSystem.autoJoinLink).toBe(true);
   });
+  it("leaves automatic analysis off unless it is explicitly enabled", () => {
+    expect(DEFAULT_PREFERENCES.analysis.auto).toBe(false);
+    expect(sanitisePreferences({ analysis: {} }).analysis.auto).toBe(false);
+    expect(sanitisePreferences({ analysis: { auto: "yes" } }).analysis.auto).toBe(false);
+    expect(sanitisePreferences({ analysis: { auto: true } }).analysis.auto).toBe(true);
+  });
   it("keeps the browser key-sort choice and preserves the old display-based ordering", () => {
     expect(sanitisePreferences({view: {keySort: "musical"}}).view.keySort).toBe("musical");
     expect(sanitisePreferences({view: {keySort: "invalid"}}).view.keySort).toBe("alphabetical");

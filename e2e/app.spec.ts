@@ -1376,9 +1376,9 @@ test("the Analysis pane says what Auto Analysis will do", async ({ page }) => {
 
   const section = dialog.getByRole("region", { name: "Track Analysis" });
   const automatic = section.getByRole("switch", { name: "Automatic analysis" });
-  await expect(automatic).toBeChecked();
-  await automatic.click();
   await expect(automatic).not.toBeChecked();
+  await automatic.click();
+  await expect(automatic).toBeChecked();
 });
 
 test("a rating appears at once rather than waiting for the reload", async ({ page }) => {
