@@ -111,16 +111,6 @@ fn remove(path: &Path) -> AppResult<()> {
         Err(e) => Err(error(e)),
     }
 }
-fn writable(location: &rbl_db::LibraryLocation) -> AppResult<()> {
-    if let Some(reason) = rbl_db::write_refusal_reason(
-        location.is_real_install,
-        rbl_db::test_mode(),
-        rbl_db::is_rekordbox_running(),
-    ) {
-        return Err(error(reason));
-    }
-    Ok(())
-}
 fn checked(root: &Path, path: &Path) -> AppResult<PathBuf> {
     let root = root.canonicalize().map_err(error)?;
     let meta = fs::symlink_metadata(path).map_err(error)?;
@@ -229,7 +219,6 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
     let _gate = state.edit_gate.lock();
     let _files = state.analysis_write.lock();
     let location = state.location()?;
-    writable(&location)?;
     if pending(state.backup_dir()) {
         state.with_closed_reader(|| recover(state.backup_dir(), &location))?;
     }
@@ -493,6 +482,20 @@ mod tests {
         delete(&state, &path).unwrap();
         state.write(|w| w.set_rating(&track, 2)).unwrap();
         assert_eq!(rating(&state), 2);
+    }
+
+    #[test]
+    fn backup_is_available_while_the_library_is_read_only() {
+        let (dir, _state, location) = fixture();
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let db_version = db.schema().db_version;
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.path().join("read-only-backups"));
+        state.set_library(library, true, db_version, 0, location);
+
+        let backup = PathBuf::from(create(&state).unwrap());
+        assert!(backup.is_file());
+        assert_eq!(list(&state).unwrap().len(), 1);
     }
 
     #[test]

@@ -34,6 +34,31 @@
   border-radius: 0;
 }
 
+.warningBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: var(--c-modal-scrim);
+}
+.warningDialog {
+  width: min(420px, 100%);
+  padding: 24px;
+  box-sizing: border-box;
+  border: 1px solid var(--c-error);
+  border-radius: 8px;
+  background: var(--c-error);
+  color: var(--c-on-error);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 55%);
+}
+.warningDialog:focus { outline: none; }
+.warningDialog h3 { margin: 0 0 12px; font-size: var(--f-size-pref-title); }
+.warningDialog p { margin: 0; color: var(--c-on-error); line-height: 1.45; }
+.warningActions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
 .titlebar {
   position: relative;
   flex: none;

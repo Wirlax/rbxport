@@ -298,7 +298,7 @@ export function Preferences({
                 ) : pane === "usbExport" ? (
                   <UsbExportPane />
                 ) : pane === "backups" ? (
-                  <BackupsPane readOnly={summary?.readOnly ?? false} />
+                  <BackupsPane />
                 ) : pane === "rekordbox" ? (
                   <RekordboxPane />
                 ) : pane === "about" ? (

@@ -42,10 +42,9 @@ it("offers no restore here and points to RBXport Restore instead", async () => {
   expect(button("Change folder…").disabled).toBe(false);
   expect(button("Delete").disabled).toBe(false);
 });
-it("tells the user to quit rekordbox before creating a backup when read-only", async () => {
-  await act(async () => { root.render(<BackupsPane readOnly />); await Promise.resolve(); });
-  expect(host.textContent).toContain("Quit rekordbox before creating a backup.");
-  expect(button("Create backup").disabled).toBe(true);
+it("allows creating a backup while the library is read-only", async () => {
+  await act(async () => { root.render(<BackupsPane />); await Promise.resolve(); });
+  expect(button("Create backup").disabled).toBe(false);
 });
 it("reconnects to a background job after reopening Preferences and can stop it", async () => {
   vi.useFakeTimers();

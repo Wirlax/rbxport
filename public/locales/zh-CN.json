@@ -1386,5 +1386,7 @@
   "This USB belongs to a different or older unverified master library. Import its contents in rekordbox before changing its ownership.": "此 USB 属于不同的或更旧的未经验证的主库。在更改其所有权之前，将其内容导入 rekordbox。",
   "OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.": "OneLibrary 包含此导出将替换的提示记录。首先导入 rekordbox 中的提示。",
   "A track being removed is still referenced by USB history. Import and clear that history in rekordbox first.": "USB 历史记录仍会引用被删除的曲目。首先导入并清除 rekordbox 中的历史记录。",
-  "Pioneer DJ recommends FAT32": "Pioneer DJ recommends FAT32"
+  "Pioneer DJ recommends FAT32": "Pioneer DJ recommends FAT32",
+  "Unlock anyway": "Unlock anyway",
+  "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.": "It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport."
 }

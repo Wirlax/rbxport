@@ -9,7 +9,7 @@ import styles from "./BackupsPane.module.css";
 import { BackupSizeChart } from "./BackupSizeChart";
 import layout from "./PaneLayout.module.css";
 
-export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
+export function BackupsPane() {
   const job = useBackupProgress();
   const [backups, setBackups] = useState<Backup[]>([]);
   const [directory, setDirectory] = useState("");
@@ -51,7 +51,6 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
   const percent = Math.min(100, Math.max(0, Math.floor(job.progress.copiedBytes / (job.progress.totalBytes || 1) * 100)));
   const stopping = job.progress.phase === "stopping";
   return <Section title="Backups">
-    {readOnly ? <p className={styles.blockedNotice}>Quit rekordbox before creating a backup.</p> : null}
     {error || job.error ? <p role="alert" className={styles.error}>{error || job.error}</p> : null}
 
     <BackupSizeChart />
@@ -83,7 +82,7 @@ export function BackupsPane({ readOnly = false }: { readOnly?: boolean }) {
         <p className={layout.help}>Save your library in a compressed ZIP. Music files are not backed up.</p>
         <p className={styles.status} role="status" aria-live="polite">{busy || message || (job.error ? "" : job.text)}</p>
       </div>
-      <Button className={styles.backupButton} disabled={busy !== "" || job.progress.running || readOnly} onClick={() => {
+      <Button className={styles.backupButton} disabled={busy !== "" || job.progress.running} onClick={() => {
         setError(""); setMessage(""); void job.start();
       }}>Create backup</Button>
       </>}

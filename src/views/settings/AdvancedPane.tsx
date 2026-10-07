@@ -13,10 +13,11 @@
  * export name (link export is not built), hot cue GATE, loop export,
  * Recordings, and every streaming service.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
 import type { Duplicates, LibrarySummary, MissingTracks, RelocateReport } from "@/ipc/types";
+import { useTranslation } from "@/i18n";
 import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -33,10 +34,40 @@ export const ADVANCED_TABS: readonly { id: AdvancedTab; label: string }[] = [
 /** How many missing tracks to list. The count above it is exact. */
 const MISSING_SHOWN = 20;
 
-export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: LibrarySummary | null }) {
+export function AdvancedPane({ tab, summary }: {
+  tab: AdvancedTab;
+  summary: LibrarySummary | null;
+}) {
+  const t = useTranslation();
   const { preferences, update } = usePreferencesContext();
   const advanced = preferences.advanced;
   const set = (patch: Partial<typeof advanced>) => update("advanced", patch);
+  const [checkingBackup, setCheckingBackup] = useState(false);
+  const [unlockWarning, setUnlockWarning] = useState(false);
+  const warningDialog = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (unlockWarning) warningDialog.current?.focus();
+  }, [unlockWarning]);
+
+  const setLibraryProtection = async (protectLibrary: boolean) => {
+    if (protectLibrary) {
+      set({ protectLibrary: true });
+      return;
+    }
+    setCheckingBackup(true);
+    try {
+      const backend = await getBackend();
+      const backups = await backend.listBackups().catch(() => null);
+      if (backups && backups.length > 0) {
+        set({ protectLibrary: false });
+        return;
+      }
+      setUnlockWarning(true);
+    } finally {
+      setCheckingBackup(false);
+    }
+  };
 
   if (tab === "browse") {
     return (
@@ -45,7 +76,8 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
           <Toggle
             label="Protect library edit."
             checked={advanced.protectLibrary}
-            onChange={(protectLibrary) => set({ protectLibrary })}
+            disabled={checkingBackup}
+            onChange={(protectLibrary) => { void setLibraryProtection(protectLibrary); }}
           />
         </Section>
         <Section title="Edit Library">
@@ -55,6 +87,32 @@ export function AdvancedPane({ tab, summary }: { tab: AdvancedTab; summary: Libr
             onChange={(doubleClickToEdit) => set({ doubleClickToEdit })}
           />
         </Section>
+        {unlockWarning ? <div className={styles.warningBackdrop} role="presentation">
+          <section
+            ref={warningDialog}
+            className={styles.warningDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("Library Protection")}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setUnlockWarning(false);
+              }
+            }}
+          >
+            <h3>{t("Library Protection")}</h3>
+            <p>{t("It looks like you haven’t made a backup yet. We strongly recommend creating one before using RBXport.")}</p>
+            <div className={styles.warningActions}>
+              <Button onClick={() => {
+                setUnlockWarning(false);
+                set({ protectLibrary: false });
+              }}>{t("Unlock anyway")}</Button>
+              <Button onClick={() => setUnlockWarning(false)}>{t("Cancel")}</Button>
+            </div>
+          </section>
+        </div> : null}
       </>
     );
   }
