@@ -807,6 +807,10 @@ test("Library Protection refuses edits the way a running rekordbox does", async 
   const protection = dialog.getByRole("switch", { name: "Protect library edit." });
   await expect(protection).toBeChecked();
   await protection.click();
+  await dialog.getByRole("dialog", { name: "Library Protection" })
+    .getByRole("button", { name: "Unlock anyway" })
+    .click();
+  await expect(protection).not.toBeChecked();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("contentinfo").getByRole("alert")).toHaveCount(0);
 });
