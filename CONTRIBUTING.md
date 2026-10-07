@@ -70,8 +70,10 @@ a maintainer must arrange appropriate validation before integration.
 
 Address review findings and rerun checks affected by the updates. Keep `main`
 and `dev` linear: rebase the topic branch onto its target, then integrate with
-a fast-forward. Do not create merge commits between them. Coordinate before
-force-pushing a published rebased branch; never move or replace a release tag.
+a fast-forward. Do not create merge commits between them. A rebased topic
+branch may be force-pushed with `--force-with-lease`, including one with an
+open PR. Never force-push `main` or `dev`, and never move or replace a
+release tag.
 
 Opening or merging a PR does not publish a release. Release operators follow
 [Releases](docs/development/releases.md) from a clean, pushed `dev` checkout.
