@@ -79,6 +79,11 @@ pub fn set_history_menu<R: Runtime>(
     Ok(())
 }
 
+/// Whether the File menu offers the Missing File Manager. Its pane in
+/// Preferences is hidden for now (see `MISSING_FILES_ENABLED` in
+/// `src/views/settings/AdvancedPane.tsx`), so the item that opens it is too.
+const MISSING_FILE_MANAGER: bool = false;
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     build_with_labels(app, &Labels::new())
 }
@@ -141,13 +146,16 @@ fn build_with_labels<R: Runtime>(app: &AppHandle<R>, labels: &Labels) -> tauri::
         )?)
         .build()?;
 
-    let file = SubmenuBuilder::new(app, label(labels, "File"))
+    let mut file = SubmenuBuilder::new(app, label(labels, "File"))
         .item(&import)
         .item(&import_folder)
         .item(&import_xml)
         .item(&import_itunes)
-        .item(&export_xml)
-        .item(&missing)
+        .item(&export_xml);
+    if MISSING_FILE_MANAGER {
+        file = file.item(&missing);
+    }
+    let file = file
         .separator()
         .item(&PredefinedMenuItem::close_window(
             app,

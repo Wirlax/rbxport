@@ -23,6 +23,14 @@ import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
 import { Button, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
 
+/**
+ * Whether Database shows the missing-file manager and Auto Relocate Search
+ * Folders. Hidden from users for now; the code stays so it can be turned
+ * back on. The File menu's Missing File Manager item is gated to match in
+ * `src-tauri/src/menu.rs`.
+ */
+export const MISSING_FILES_ENABLED = false;
+
 export type AdvancedTab = "database" | "browse" | "others";
 
 export const ADVANCED_TABS: readonly { id: AdvancedTab; label: string }[] = [
@@ -178,11 +186,13 @@ export function AdvancedPane({ tab, summary }: {
           </dd>
         </dl>
       </Section>
-      <RelocateSection
-        folders={advanced.relocateFolders}
-        onFolders={(relocateFolders) => set({ relocateFolders })}
-        readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary}
-      />
+      {MISSING_FILES_ENABLED ? (
+        <RelocateSection
+          folders={advanced.relocateFolders}
+          onFolders={(relocateFolders) => set({ relocateFolders })}
+          readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary}
+        />
+      ) : null}
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
     </>
   );

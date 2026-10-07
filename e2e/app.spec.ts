@@ -1412,7 +1412,8 @@ test("with the library held by rekordbox the cells are not editable at all", asy
   await expect(warning).toHaveText("Editing is locked while rekordbox is running. Quit rekordbox to enable editing.");
 });
 
-test("settings can check for missing files", async ({ page }) => {
+// The missing-file manager is hidden for now (MISSING_FILES_ENABLED).
+test.skip("settings can check for missing files", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
   await page.getByRole("dialog", { name: "Preferences" }).getByRole("tab", { name: "Advanced" }).click();
