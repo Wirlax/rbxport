@@ -114,26 +114,15 @@ jobs:
             echo "::error::dev changed before this release started; its newer push owns the release."
             exit 1
           fi
-          # shellcheck disable=SC2016 # Node owns the quoted JavaScript.
-          version="$(node -e '
-            const { execFileSync } = require("child_process");
-            const fs = require("fs");
-            const text = fs.readFileSync("Cargo.toml", "utf8");
-            const current = /\[workspace\.package\][\s\S]*?^version\s*=\s*"(\d+\.\d+\.\d+)(?:-rc\.(\d+))?"/m.exec(text);
-            if (!current) throw new Error("workspace version must be stable or an RC");
-            if ("${{ inputs.skip_version_bump || false }}" === "true") {
-              process.stdout.write(current[2] === undefined ? current[1] : `${current[1]}-rc.${current[2]}`);
-              process.exit(0);
-            }
-            if (current[2] === undefined) throw new Error("a stable version can only be reused");
-            const prefix = current[1];
-            const tags = execFileSync("git", ["tag", "--list", `v${prefix}-rc.*`], { encoding: "utf8" }).trim().split("\\n").filter(Boolean);
-          const numbers = tags
-            .map(tag => Number(tag.slice((`v${prefix}-rc.`).length)))
-            .filter(Number.isSafeInteger);
-          const highest = Math.max(Number(current[2]), ...numbers);
-          process.stdout.write(`${prefix}-rc.${highest + 1}`);
-          ')"
+          if [ "$skip_version_bump" = true ]; then
+            version="$(node -p 'require("./package.json").version')"
+          else
+            version="$(node scripts/next-release-version.mjs)"
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Releases must use stable semantic versions; got $version."
+            exit 1
+          fi
           if [ "$skip_version_bump" = true ]; then
             git rev-parse --verify "refs/tags/v$version^{commit}"
             git merge-base --is-ancestor "v$version" "$source"
@@ -651,11 +640,14 @@ jobs:
             exit 1
           fi
           version="${RELEASE_TAG#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
-            echo "::error::Release candidates must have a numeric rc suffix; got $version."
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Releases must use stable semantic versions; got $version."
             exit 1
           fi
-          previous="$(git tag --merged "$SOURCE_REF" --list 'v*' --sort=-version:refname | head -n1)"
+          current="$(node -p 'require("./package.json").version')"
+          previous="v$current"
+          git rev-parse --verify "refs/tags/$previous^{commit}"
+          git merge-base --is-ancestor "$previous" "$SOURCE_REF"
           node scripts/sync-version.mjs --version "$version"
           # The workflow derives release notes from the immutable source range.
           # workflow_dispatch inputs are defined from the default branch, so a
