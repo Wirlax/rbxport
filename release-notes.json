@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.0",
+    "date": "2026-10-07",
+    "changes": [
+      "(New) Warn before unlocking an unbacked library.",
+      "(New) Include complete context in bug reports.",
+      "(Fixed) Default automatic analysis to off.",
+      "(Fixed) Preserve active loop ends on export.",
+      "(Fixed) Tolerate malformed library text."
+    ]
+  },
+  {
     "version": "1.0.0",
     "date": "2026-10-06",
     "changes": [
