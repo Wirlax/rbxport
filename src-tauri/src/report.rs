@@ -1,6 +1,5 @@
 //! Local support report attachments. The attachment is captured once for
 //! preview before the user explicitly chooses whether to submit it.
-use std::io::{Read, Seek, SeekFrom};
 use std::fmt::Write as _;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::error::{AppError, AppResult};
@@ -42,13 +41,13 @@ pub async fn report_attachment(player: State<'_, std::sync::Arc<crate::player::P
             health.load * 100.0, health.xruns);
         let sample = crate::diagnostics::sample_shared();
         let _ = writeln!(text, "Process CPU: {:.1}% of one core\nResident memory: {:.1} MiB", sample.cpu, sample.memory_mb);
-        text.push_str("\nApplication log (latest file, last 1 MiB)\n");
-        text.push_str(&log_tail(&crate::logging::log_dir())?);
+        text.push_str("\nApplication log (latest file)\n");
+        text.push_str(&log_file(&crate::logging::log_dir())?);
         Ok(text)
     }).await
 }
 
-fn log_tail(dir: &std::path::Path) -> AppResult<String> {
+fn log_file(dir: &std::path::Path) -> AppResult<String> {
     let mut paths: Vec<_> = match std::fs::read_dir(dir) {
         Ok(entries) => entries.filter_map(Result::ok).map(|entry| entry.path())
             .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rbxport")) && p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("log"))).collect(),
@@ -57,21 +56,33 @@ fn log_tail(dir: &std::path::Path) -> AppResult<String> {
     };
     paths.sort();
     let Some(path) = paths.last() else { return Ok("No application log available.\n".into()) };
-    let mut file = std::fs::File::open(path).map_err(|e| AppError::internal(e.to_string()))?;
-    let size = file.metadata().map_err(|e| AppError::internal(e.to_string()))?.len();
-    file.seek(SeekFrom::Start(size.saturating_sub(1_048_576))).map_err(|e| AppError::internal(e.to_string()))?;
-    let mut bytes = Vec::new();
-    file.take(1_048_576).read_to_end(&mut bytes).map_err(|e| AppError::internal(e.to_string()))?;
+    let bytes = std::fs::read(path).map_err(|e| AppError::internal(e.to_string()))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_log_preserves_the_entire_file_verbatim() {
+        let directory = tempfile::tempdir().expect("temporary log directory");
+        let log = format!(
+            "email=dj@example.com path=/Users/dj/Music title=Unreleased Track custom-field=visible\n{}\nend of log\n",
+            "x".repeat(1_048_576),
+        );
+        std::fs::write(directory.path().join("rbxport.2026-10-06.log"), &log)
+            .expect("write report log");
+
+        assert_eq!(log_file(directory.path()).expect("read report log"), log);
+    }
 }
 
 /// Open a copy of the exact attachment captured by the report form.
 #[tauri::command]
 pub async fn open_report_attachment(app: tauri::AppHandle, attachment: String) -> AppResult<()> {
     use tauri_plugin_opener::OpenerExt;
-    if attachment.len() > 2_000_000 {
-        return Err(AppError::internal("The attachment is too large."));
-    }
     let directory = app.path().app_cache_dir().map_err(|e| AppError::internal(e.to_string()))?;
     crate::commands::blocking("open_report_attachment", move || {
         std::fs::create_dir_all(&directory).map_err(|e| AppError::internal(e.to_string()))?;

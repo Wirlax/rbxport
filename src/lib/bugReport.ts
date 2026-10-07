@@ -13,6 +13,15 @@ export interface BugReportReceipt {
   attachmentAdded: boolean;
 }
 
+/** Add the reporter-provided identity and current, sanitised app settings. */
+export function formatBugReportAttachment(base: string, email: string, preferences: object): string {
+  const details = JSON.stringify({
+    email: email.trim() || null,
+    preferences,
+  }, null, 2);
+  return `Report details\n${details}\n\n${base}`;
+}
+
 function isReceipt(value: unknown): value is BugReportReceipt {
   return Boolean(value) && typeof value === "object" &&
     typeof (value as { key?: unknown }).key === "string" &&

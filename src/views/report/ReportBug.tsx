@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBackend } from "@/ipc/client";
-import { submitBugReport } from "@/lib/bugReport";
+import { formatBugReportAttachment, submitBugReport } from "@/lib/bugReport";
+import { loadPreferences } from "@/lib/preferences";
 import { startWindowDrag } from "@/lib/windowDrag";
 import styles from "./ReportBug.module.css";
 import { useShowWindowWhenReady } from "@/lib/windowReady";
@@ -97,7 +98,10 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
         event.preventDefault();
         if (busy || (include && attachment === null)) return;
         setBusy(true); setError(""); setReceipt(null);
-        void submitBugReport({ email, description, attachment: include ? attachment ?? "" : "", turnstileToken })
+        const submittedAttachment = include && attachment !== null
+          ? formatBugReportAttachment(attachment, email, loadPreferences())
+          : "";
+        void submitBugReport({ email, description, attachment: submittedAttachment, turnstileToken })
           .then(setReceipt).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => { setBusy(false); setTurnstileToken(""); setResetCount(count => count + 1); });
       }}>
@@ -116,7 +120,8 @@ export function ReportBug({ onClose, windowed = false }: { onClose: () => void; 
                 if (attachment === null) return;
                 setOpening(true);
                 setError("");
-                void getBackend().then(backend => backend.openReportAttachment(attachment))
+                const preview = formatBugReportAttachment(attachment, email, loadPreferences());
+                void getBackend().then(backend => backend.openReportAttachment(preview))
                   .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
                   .finally(() => setOpening(false));
               }}>
