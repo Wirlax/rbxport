@@ -115,9 +115,28 @@ jobs:
           toolchain: 1.99.0
           components: clippy
 
+      # Fix only the packages the Rust lane will lint, and leave enforcement
+      # (-D warnings) to that lane so Clippy gates the PR exactly once.
       - name: Apply Clippy's machine-applicable fixes
         if: needs.changes.outputs.rust == 'true'
-        run: cargo clippy --fix --allow-dirty --allow-staged --workspace --all-targets -- -D warnings
+        env:
+          BASE_REF: ${{ needs.changes.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          metadata="$RUNNER_TEMP/cargo-metadata.json"
+          cargo metadata --format-version 1 --no-deps > "$metadata"
+          mapfile -t packages < <(
+            git diff --name-only -z "$BASE_REF...HEAD" \
+              | node scripts/ci/affected-rust-packages.mjs "$metadata"
+          )
+          if [ "${packages[0]}" = --workspace ]; then
+            args=(--workspace)
+          else
+            args=()
+            for package in "${packages[@]}"; do args+=(-p "$package"); done
+            printf 'Fixing affected Rust packages: %s\n' "${packages[*]}"
+          fi
+          cargo clippy --fix --allow-dirty --allow-staged "${args[@]}" --all-targets
 
       - uses: actions/setup-node@v4
         if: needs.changes.outputs.frontend == 'true'
