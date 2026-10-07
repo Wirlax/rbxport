@@ -1115,8 +1115,31 @@ jobs:
           "path=$($packages[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Submitting $($packages[0].Name), version $($identity.Version)"
 
+      # microsoft-store-apppublisher@v1.4 delegates extraction to the runner's
+      # Node tool-cache. On our self-hosted Windows runner, Node 24 downloads
+      # the archive to an extensionless temporary filename, which PowerShell's
+      # Expand-Archive rejects. Fetch the same official CLI release explicitly
+      # so the ZIP keeps its extension and verify its published checksum.
       - name: Install Microsoft Store Developer CLI
-        uses: microsoft/microsoft-store-apppublisher@v1.4
+        shell: pwsh
+        run: |
+          $version = 'v0.4.3'
+          $archive = Join-Path $env:RUNNER_TEMP 'MSStoreCLI-win-x64.zip'
+          $installDir = Join-Path $env:RUNNER_TEMP 'msstore-cli'
+          $expectedSha256 = 'c5fb008b616f96b1b55f1d52e4e0a5dd8f6c156129b5f52f9b97ec0eed11bd57'
+          $url = "https://github.com/microsoft/msstore-cli/releases/download/$version/MSStoreCLI-win-x64.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Microsoft Store CLI checksum mismatch: expected $expectedSha256, got $actualSha256."
+          }
+
+          Expand-Archive -LiteralPath $archive -DestinationPath $installDir -Force
+          $cli = Join-Path $installDir 'msstore.exe'
+          if (-not (Test-Path -LiteralPath $cli)) { throw "msstore.exe was not found after extraction." }
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $cli --version
 
       - name: Configure Partner Center credentials
         shell: pwsh
