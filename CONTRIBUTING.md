@@ -27,8 +27,8 @@ rbxport and extend it however you like, but the core project stays small.
 Every contribution that adds a feature is carefully considered against this
 vision, and a working, well-tested feature can still be declined. Before writing
 code, open an issue that explains the problem and why it belongs in the core
-project. Bug fixes, performance improvements, compatibility work, and removing
-or simplifying existing behavior are always in scope.
+project. Bug fixes, performance improvements, compatibility work, and simplifying
+internal code are always in scope.
 
 A change must also respect two commitments:
 
