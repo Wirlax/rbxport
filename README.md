@@ -15,9 +15,9 @@ Its scope is limited to library management, USB exporting, and PRO DJ LINK.
 
 The core vision of rbxport is **fewer features**.
 
-Because rbxport is open source, you are free to fork it and build a fully
-customizable rekordbox. The core project does not aim to be that. A project that
-keeps adding features eventually becomes what rekordbox already is: full-featured
+Because rbxport is open source, you are free to fork it and build a version of
+rekordbox customized by the community. The core project does not aim to be that.
+A project that keeps adding features eventually becomes what rekordbox already is: full-featured
 DJ software. rbxport stays small on purpose. Any contribution that adds a feature
 is weighed carefully against this vision, and a good feature can still be
 declined.

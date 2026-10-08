@@ -19,9 +19,9 @@ trigger, result, and validation without reading a chat history.
 
 ## Feature proposals
 
-The core vision of rbxport is **fewer features**. It is not "fully customizable
-rekordbox": a project that keeps accumulating features ends up as the
-full-featured DJ software that rekordbox already is. You are welcome to fork
+The core vision of rbxport is **fewer features**. It is not a version of
+rekordbox customized by the community: a project that keeps accumulating
+features ends up as the full-featured DJ software that rekordbox already is. You are welcome to fork
 rbxport and extend it however you like, but the core project stays small.
 
 Every contribution that adds a feature is carefully considered against this
