@@ -44,5 +44,6 @@ files were already in place, before opening the library.
 ## Developer entry points
 
 Backup integration lives in `src-tauri/src/backups.rs` and the adjacent
-backup helper modules, with shared archive logic in `crates/rbl-backup/`.
+backup helper modules, with shared archive logic in `crates/rbl-backup/`. [How library backups work](../reference/backups.md)
+describes the implementation and its design.
 Validate backup/restore changes against disposable data, following [Testing](../development/testing.md).
