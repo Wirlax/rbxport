@@ -1,5 +1,41 @@
 [
   {
+    "version": "1.2.0",
+    "date": "2026-10-08",
+    "changes": [
+      "(Fixed) Match rekordbox's Explorer track menu for imported and loose files.",
+      "(Fixed) Base the track menu in the Explorer on each file's import state.",
+      "(New) Remember the DUAL control across restarts.",
+      "(Fixed) Name the refused file handle in stale-handle log lines.",
+      "(Fixed) Match rekordbox's BPM + KEY related tracks, half and double tempo included.",
+      "(New) Add keyboard bindings for hot cues D-H and all hot cue clears.",
+      "(New) Preview a track by clicking its waveform in the browser.",
+      "(New) Add AIFF export conversion.",
+      "(Fixed) Analyse every selected track, not only those in the row cache.",
+      "(Fixed) Show the Backups preferences fully in the chosen language.",
+      "(Fixed) Let Windows backups flush the database copy.",
+      "(Fixed) Add files already in the library to the playlist they are dropped on.",
+      "(Fixed) Let beat-grid edits confirm tempo changes on macOS and start at zero.",
+      "(Fixed) Answer intelligent playlists on a My Tag.",
+      "(Fixed) Apply Browse font size and line space to the playlist tree.",
+      "(New) Add Keyboard pane rows for per-deck low/mid/high EQ kill.",
+      "(Fixed) Let mouse wheel notches always step the waveform zoom.",
+      "(Fixed) Slow trackpad waveform zoom and make the sidebar easier to resize.",
+      "(New) Hide the missing-file manager from users for now.",
+      "(Fixed) Install Windows updates silently at quit.",
+      "(New) Tell reporters their bug description is posted publicly.",
+      "(New) Show reporters a link to follow their bug report.",
+      "(New) Import every identified column from rekordbox's browser layout.",
+      "(New) Sort tracks by every column rekordbox can sort.",
+      "(Fixed) Sort tracks by DJ play count.",
+      "(Fixed) Use hidden Pioneer root on HFS exports.",
+      "(Fixed) Register analysis for rekordbox waveforms.",
+      "(Fixed) Localize the native menu at runtime.",
+      "(Fixed) Recognize Linux FAT32 sync devices.",
+      "(Fixed) Include intelligent playlists in Sync Manager."
+    ]
+  },
+  {
     "version": "1.1.0",
     "date": "2026-10-07",
     "changes": [
