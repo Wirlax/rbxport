@@ -2,13 +2,15 @@
  * Prepends a release entry to release-notes.json from Git commits between
  * PREVIOUS and SOURCE_REF. Uses Release-Note trailers or eligible product-change
  * subjects, excluding maintenance and duplicate notes; refuses an empty release.
+ * Also adds the release to CHANGELOG.md.
  * Run: VERSION=X.Y.Z PREVIOUS=TAG SOURCE_REF=REF node scripts/generate-release-notes.mjs.
  * PREVIOUS may be omitted for full history. Used by the Release workflow.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { validateCuratedChanges } from "./curate-release-notes.mjs";
+import { addToChangelog } from "./release-notes.mjs";
+import { groupChanges, validateCuratedChanges } from "./curate-release-notes.mjs";
 
 // Release-Note trailers are the authoritative reader-facing description.
 // Without one, include only product changes; never publish CI/test maintenance.
@@ -32,7 +34,7 @@ export function changesFromCommits(commits) {
     const label = ticket || type === "fix" ? "Fixed" : type === "feat" ? "New" : "Improved";
     changes.push(`(${label}) ${ticket ? `${ticket}: ` : ""}${text.charAt(0).toUpperCase()}${text.slice(1).replace(/\.$/, "")}.`);
   }
-  return [...new Set(changes)];
+  return groupChanges([...new Set(changes)]);
 }
 
 export function generateReleaseNotes(version, previous, source, curatedJson = process.env.RELEASE_NOTES_JSON) {
@@ -49,8 +51,11 @@ export function generateReleaseNotes(version, previous, source, curatedJson = pr
   if (!changes.length) throw new Error("No user-facing release notes. Add Release-Note trailers before cutting a release.");
   const notes = JSON.parse(readFileSync("release-notes.json", "utf8"));
   if (notes.some(note => note.version === version)) throw new Error(`release notes already contain ${version}`);
-  notes.unshift({ version, date: new Date().toISOString().slice(0, 10), changes });
+  const release = { version, date: new Date().toISOString().slice(0, 10), changes };
+  const changelog = addToChangelog(readFileSync("CHANGELOG.md", "utf8"), release);
+  notes.unshift(release);
   writeFileSync("release-notes.json", `${JSON.stringify(notes, null, 2)}\n`);
+  writeFileSync("CHANGELOG.md", changelog);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

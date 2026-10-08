@@ -10,6 +10,12 @@ import { join } from "node:path";
 
 const NOTE_PATTERN = /^\((New|Improved|Fixed)\)\s+\S.*\.$/;
 
+// Keeps each label together (New, Fixed, Improved) and the given order within it.
+export function groupChanges(changes) {
+  const rank = change => ["(New)", "(Fixed)", "(Improved)"].findIndex(label => change.startsWith(label));
+  return changes.map((change, index) => ({ change, index })).sort((a, b) => rank(a.change) - rank(b.change) || a.index - b.index).map(({ change }) => change);
+}
+
 export function validateCuratedChanges(value) {
   if (!value || !Array.isArray(value.changes) || value.changes.length === 0) {
     throw new Error("Codex returned no release-note changes");
@@ -22,7 +28,7 @@ export function validateCuratedChanges(value) {
       throw new Error(`Invalid curated release note: ${JSON.stringify(change)}`);
     }
   }
-  return { changes: [...new Set(value.changes)] };
+  return { changes: groupChanges([...new Set(value.changes)]) };
 }
 
 export function releaseNotesPrompt(previous, source) {
