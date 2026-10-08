@@ -38,10 +38,3 @@ describe("release notes", () => {
     assert.throws(() => releaseForVersion(notes, "1.0.0"), /no entry/);
   });
 });
-
-it("adds a release to the changelog below Unreleased", async () => {
-  const { addToChangelog } = await import("./release-notes.mjs");
-  const out = addToChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n- X.\n\n## [1.0.0] — 2026-01-01\n\nold\n",
-    { version: "1.1.0", date: "2026-02-02", changes: ["(Fixed) A.", "(New) B."] });
-  assert.match(out, /- X\.\n\n## \[1\.1\.0\] — 2026-02-02\n\n### Fixed\n- A\.\n\n### Added\n- B\.\n\n## \[1\.0\.0\]/);
-});

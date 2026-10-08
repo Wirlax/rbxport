@@ -70,15 +70,6 @@ function releaseBody(release) {
   return sections.join("\n\n");
 }
 
-// Inserts the release above the newest versioned heading.
-export function addToChangelog(changelog, release) {
-  const section = `## [${release.version}] — ${release.date}\n\n${releaseBody(release)}\n\n`;
-  if (changelog.includes(`## [${release.version}]`)) throw new Error(`CHANGELOG.md already contains ${release.version}`);
-  const next = /^## \[\d/m.exec(changelog);
-  if (!next) return `${changelog.replace(/\n*$/, "\n\n")}${section.trimEnd()}\n`;
-  return changelog.slice(0, next.index) + section + changelog.slice(next.index);
-}
-
 export function updaterMarkdown(notes) {
   return notes.map((release) =>
     `## [${release.version}] — ${release.date}\n\n${releaseBody(release)}`,
