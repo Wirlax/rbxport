@@ -683,7 +683,12 @@ function AppBody() {
     try {
       const status = on ? await backend.startLinkExport(
         linkInterface ?? undefined,
-        stickDefaults.keyDisplay,
+        {
+          waveformColor: stickDefaults.waveformColor,
+          waveformPosition: stickDefaults.waveformPosition,
+          overviewWaveform: stickDefaults.overviewWaveform,
+          keyDisplay: stickDefaults.keyDisplay,
+        },
         stickDefaults.linkKeySort,
       ) : await backend.stopLinkExport();
       setLink(status);
@@ -691,7 +696,8 @@ function AppBody() {
     } finally {
       setLinkBusy(false);
     }
-  }, [linkInterface, stickDefaults.keyDisplay, stickDefaults.linkKeySort]);
+  }, [linkInterface, stickDefaults.keyDisplay, stickDefaults.linkKeySort,
+    stickDefaults.overviewWaveform, stickDefaults.waveformColor, stickDefaults.waveformPosition]);
   const toggleLink = useCallback(() => {
     void setLinkOn(!link?.on);
   }, [link?.on, setLinkOn]);

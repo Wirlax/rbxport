@@ -820,7 +820,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
     interface: Option<String>,
-    alphanumeric_keys: Option<bool>,
+    device_settings: Option<rbl_prolink::DeviceSettings>,
     alphabetical_keys: Option<bool>,
 ) -> AppResult<LinkStatusDto> {
     if let Some(status) = state.link_status() {
@@ -835,12 +835,8 @@ pub async fn start_link_export<R: tauri::Runtime>(
     let owner = Arc::clone(&state);
     let emitter = app.clone();
     let library_emitter = app.clone();
+    let device_settings = device_settings.unwrap_or_default();
     let started = blocking("start_link_export", move || {
-        let key_notation = if alphanumeric_keys.unwrap_or(false) {
-            rbl_link::KeyNotation::Alphanumeric
-        } else {
-            rbl_link::KeyNotation::Classic
-        };
         let key_order = if alphabetical_keys.unwrap_or(false) {
             rbl_link::KeyOrder::Alphabetical
         } else {
@@ -849,7 +845,7 @@ pub async fn start_link_export<R: tauri::Runtime>(
         Ok(crate::link::Session::start(
             &owner,
             interface.as_deref(),
-            key_notation,
+            device_settings,
             key_order,
             move |status| {
                 let _ = tauri::Emitter::emit(&emitter, "link:status", status);

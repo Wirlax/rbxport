@@ -161,12 +161,18 @@ pub fn interfaces() -> Vec<InterfaceDto> {
 struct StateSource(
     Weak<AppState>,
     Arc<dyn Fn(&'static str, u32) + Send + Sync>,
-    rbl_link::KeyNotation,
+    rbl_prolink::DeviceSettings,
     rbl_link::KeyOrder,
 );
 
 impl Source for StateSource {
     fn key_notation(&self) -> rbl_link::KeyNotation {
+        match self.2.key_display {
+            rbl_prolink::KeyDisplay::Classic => rbl_link::KeyNotation::Classic,
+            rbl_prolink::KeyDisplay::Alphanumeric => rbl_link::KeyNotation::Alphanumeric,
+        }
+    }
+    fn device_settings(&self) -> rbl_prolink::DeviceSettings {
         self.2
     }
     fn key_order(&self) -> rbl_link::KeyOrder {
@@ -372,7 +378,7 @@ impl Session {
     pub fn start<F>(
         state: &Arc<AppState>,
         interface: Option<&str>,
-        key_notation: rbl_link::KeyNotation,
+        device_settings: rbl_prolink::DeviceSettings,
         key_order: rbl_link::KeyOrder,
         report: F,
         library_changed: Arc<dyn Fn(&'static str, u32) + Send + Sync>,
@@ -431,7 +437,7 @@ impl Session {
         let source: Arc<dyn Source> = Arc::new(StateSource(
             Arc::downgrade(state),
             library_changed,
-            key_notation,
+            device_settings,
             key_order,
         ));
         let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
@@ -765,7 +771,7 @@ mod grid_offset_tests {
             Arc::new(move |event, generation| {
                 received.lock().unwrap().push((event, generation));
             }),
-            rbl_link::KeyNotation::Classic,
+            rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
         );
         let spec = |source| rbl_index::ViewSpec { source, sort: rbl_index::SortColumn::Title, descending: false, query: String::new(), filter: rbl_index::TrackFilter::default() };
@@ -826,7 +832,7 @@ mod grid_offset_tests {
             Arc::new(move |event, generation| {
                 received.lock().unwrap().push((event, generation));
             }),
-            rbl_link::KeyNotation::Classic,
+            rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
         );
         let catalog = rbl_link::IndexCatalog::new(Arc::new(source), rbl_link::Played::default());
@@ -878,7 +884,7 @@ mod grid_offset_tests {
         let source = StateSource(
             Arc::downgrade(&state),
             Arc::new(|_, _| {}),
-            rbl_link::KeyNotation::Classic,
+            rbl_prolink::DeviceSettings::default(),
             rbl_link::KeyOrder::Musical,
         );
 

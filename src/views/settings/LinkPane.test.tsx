@@ -10,7 +10,7 @@ const held = vi.hoisted(() => ({
   backend: { linkStatus: vi.fn(), onLinkStatus: vi.fn(), startLinkExport: vi.fn(), stopLinkExport: vi.fn() },
 }));
 vi.mock("@/ipc/client", () => ({ getBackend: () => Promise.resolve(held.backend) }));
-vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null, keyDisplay: "alphanumeric", linkKeySort: "musical", autoJoinLink: false } }, update: held.update }) }));
+vi.mock("@/store/usePreferences", () => ({ usePreferencesContext: () => ({ preferences: { djSystem: { linkInterface: null, waveformColor: "rgb", waveformPosition: "left", overviewWaveform: "full", keyDisplay: "alphanumeric", linkKeySort: "musical", autoJoinLink: false } }, update: held.update }) }));
 const off: LinkStatus = { on: false, problem: null, interface: null, interfaces: [], players: [], master: false, masterBpm: 120, state: "off", number: null };
 const blocked = { ...off, problem: "rekordbox is running and holds the link ports. Quit it to turn LINK on." };
 let host: HTMLDivElement;
@@ -74,12 +74,17 @@ it("shows key sort examples and saves the alphabetical choice", async () => {
   expect(held.update).toHaveBeenCalledWith("djSystem", {linkKeySort: "alphabetical"});
 });
 
-it("starts LINK with independent key notation and order", async () => {
+it("starts LINK with device settings and independent key order", async () => {
   held.backend.linkStatus.mockResolvedValue(off);
   held.backend.startLinkExport.mockResolvedValue({ ...off, on: true, state: "up" });
   await act(async () => { root.render(<LinkPane />); await Promise.resolve(); });
   await act(async () => { connect()?.click(); await Promise.resolve(); });
-  expect(held.backend.startLinkExport).toHaveBeenCalledWith(undefined, "alphanumeric", "musical");
+  expect(held.backend.startLinkExport).toHaveBeenCalledWith(undefined, {
+    waveformColor: "rgb",
+    waveformPosition: "left",
+    overviewWaveform: "full",
+    keyDisplay: "alphanumeric",
+  }, "musical");
 });
 
 it("offers automatic LINK joining and saves it as an opt-in", async () => {

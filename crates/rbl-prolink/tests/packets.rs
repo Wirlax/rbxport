@@ -40,14 +40,14 @@ const CAPTURED_CDJ_KEEP_ALIVE: &str =
 const CAPTURED_REKORDBOX_STATUS: &str =
     "5173707431576d4a4f4c2972656b6f7264626f7800000000000000000000000101110038110000c00010000080001e80001000000009ff01";
 /// The player's question about rekordbox's library slot, and rekordbox's
-/// answer (38,681 tracks, 627 playlists), then the `46` packet and its
-/// `47` reply, all from the same capture (the CDJ-3000 emulator, EP122
+/// answer (38,681 tracks, 627 playlists), then the device-settings request
+/// and response, all from the same capture (the CDJ-3000 emulator, EP122
 /// firmware, which asks about slot `03`).
 const CAPTURED_MEDIA_QUERY: &str =
     "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801980000001100000003";
 const CAPTURED_MEDIA_RESPONSE: &str =
     "5173707431576d4a4f4c0672656b6f7264626f780000000000000000000000010111009c000000110000000300720065006b006f007200640062006f007800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009719000001010000027300000000000000000000000000000000";
-const CAPTURED_HANDSHAKE_REPLY: &str =
+const CAPTURED_DEVICE_SETTINGS_RESPONSE: &str =
     "5173707431576d4a4f4c4772656b6f7264626f7800000000000000000000000101110024110400001234567800000001010104010101000002000000000000000000000000000000";
 /// The RX3's SOURCE-eligibility request and rekordbox's reply, captured from
 /// a direct macOS-to-RX3 Link Export session on firmware 1.19.
@@ -422,11 +422,69 @@ fn a_current_cdj_3000_asks_about_slot_4_and_the_answer_names_it_back() {
 }
 
 #[test]
-fn the_link_handshake_reply_matches_the_capture() {
+fn the_device_settings_response_matches_the_capture() {
     assert_eq!(
-        rbl_prolink::link_handshake_reply(REKORDBOX_NAME, REKORDBOX_DEVICE_NUMBER),
-        hex(CAPTURED_HANDSHAKE_REPLY)
+        rbl_prolink::device_settings_response(
+            REKORDBOX_NAME,
+            REKORDBOX_DEVICE_NUMBER,
+            rbl_prolink::DeviceSettings::default(),
+        ),
+        hex(CAPTURED_DEVICE_SETTINGS_RESPONSE)
     );
+}
+
+#[test]
+fn device_settings_response_encodes_each_decoded_field() {
+    let response = rbl_prolink::device_settings_response(
+        REKORDBOX_NAME,
+        REKORDBOX_DEVICE_NUMBER,
+        rbl_prolink::DeviceSettings {
+            overview_waveform: rbl_prolink::OverviewWaveform::Full,
+            waveform_color: rbl_prolink::WaveformColor::Rgb,
+            key_display: rbl_prolink::KeyDisplay::Alphanumeric,
+            waveform_position: rbl_prolink::WaveformPosition::Left,
+        },
+    );
+
+    assert_eq!(&response[0x30..0x36], &[1, 2, 3, 1, 2, 2]);
+}
+
+#[test]
+fn device_settings_deserialize_from_the_dj_system_values() {
+    let settings: rbl_prolink::DeviceSettings = serde_json::from_value(serde_json::json!({
+        "waveformColor": "3band",
+        "waveformPosition": "left",
+        "overviewWaveform": "full",
+        "keyDisplay": "alphanumeric",
+    }))
+    .unwrap();
+
+    assert_eq!(
+        settings,
+        rbl_prolink::DeviceSettings {
+            overview_waveform: rbl_prolink::OverviewWaveform::Full,
+            waveform_color: rbl_prolink::WaveformColor::ThreeBand,
+            key_display: rbl_prolink::KeyDisplay::Alphanumeric,
+            waveform_position: rbl_prolink::WaveformPosition::Left,
+        }
+    );
+}
+
+#[test]
+fn alphanumeric_device_settings_change_only_the_key_display_byte() {
+    let mut expected = hex(CAPTURED_DEVICE_SETTINGS_RESPONSE);
+    expected[0x34] = 2;
+
+    let response = rbl_prolink::device_settings_response(
+        REKORDBOX_NAME,
+        REKORDBOX_DEVICE_NUMBER,
+        rbl_prolink::DeviceSettings {
+            key_display: rbl_prolink::KeyDisplay::Alphanumeric,
+            ..rbl_prolink::DeviceSettings::default()
+        },
+    );
+
+    assert_eq!(response, expected);
 }
 
 #[test]

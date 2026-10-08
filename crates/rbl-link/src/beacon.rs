@@ -5,7 +5,7 @@
 //! Two sockets, two threads. The announce socket (UDP 50000) broadcasts our
 //! keep-alive every 2.0 s and hears everyone else's. The status socket (UDP
 //! 50002) broadcasts the mixer-style status every 200 ms, answers a player's
-//! media query and its `46` handshake, greets a player the first time it
+//! media query and its device-settings request, greets a player the first time it
 //! reports in, and reads every player's status packet — which is how a
 //! track loaded from us is known: the player says so, naming our device
 //! number as the track's source. Everything sent is what rekordbox 7.2.11
@@ -23,10 +23,10 @@ use alphatheta_connect::status::utils::status_from_packet;
 use alphatheta_connect::types::MediaSlot;
 use parking_lot::Mutex;
 use rbl_prolink::{
-    announce_kind_name, connect_greeting, connect_identity, hex, link_handshake_reply, packet_kind,
-    status_kind_name, AnnounceKind, DevicePropertyQuery, DevicePropertyResponse, DeviceTable,
-    DeviceType, KeepAlive, MediaQuery, MediaResponse, NumberProbe, NumberReply, Status,
-    DEVICE_IDENTITY_QUERY_KIND, DEVICE_PROPERTY_QUERY_KIND, LINK_HANDSHAKE_KIND,
+    announce_kind_name, connect_greeting, connect_identity, device_settings_response, hex,
+    packet_kind, status_kind_name, AnnounceKind, DevicePropertyQuery, DevicePropertyResponse,
+    DeviceTable, DeviceType, KeepAlive, MediaQuery, MediaResponse, NumberProbe, NumberReply,
+    Status, DEVICE_IDENTITY_QUERY_KIND, DEVICE_PROPERTY_QUERY_KIND, DEVICE_SETTINGS_REQUEST_KIND,
     LOAD_TRACK_ACK_KIND, PLAYER_STATUS_KIND, REKORDBOX_NAME, SLOT_REKORDBOX, SLOT_REKORDBOX_LEGACY,
 };
 
@@ -117,6 +117,9 @@ const MASTER_BPM_MAX: u16 = 30_000;
 pub trait LibraryFacts: Send + Sync {
     fn track_count(&self) -> u16;
     fn playlist_count(&self) -> u16;
+    fn device_settings(&self) -> rbl_prolink::DeviceSettings {
+        rbl_prolink::DeviceSettings::default()
+    }
     /// A player has just loaded one of our tracks: once per load, not per
     /// status packet.
     fn track_loaded(&self, _track: u32) {}
@@ -1075,15 +1078,15 @@ fn status_loop(
             DEVICE_PROPERTY_QUERY_KIND => {
                 answer_device_property_query(socket, packet, from, config, ours);
             }
-            LINK_HANDSHAKE_KIND => {
-                tracing::debug!(player = %from.ip(), "link handshake; answering");
-                let reply = link_handshake_reply(REKORDBOX_NAME, ours);
+            DEVICE_SETTINGS_REQUEST_KIND => {
+                tracing::debug!(player = %from.ip(), "device settings requested; answering");
+                let reply = device_settings_response(REKORDBOX_NAME, ours, facts.device_settings());
                 send(
                     socket,
                     &reply,
                     *from.ip(),
                     config.player_port,
-                    "handshake reply",
+                    "device settings response",
                 );
             }
             // Preserve raw response fields without assigning unknown enum

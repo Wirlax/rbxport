@@ -1,5 +1,5 @@
 //! The beacon against captured packets: a player's keep-alive, its media
-//! query, its `46`, and its status with one of our tracks playing, all sent
+//! query, its device-settings request, and its status with one of our tracks playing, all sent
 //! from a socket standing in for the player, on loopback.
 #![allow(
     clippy::pedantic,
@@ -19,7 +19,7 @@ const CDJ_KEEP_ALIVE: &str =
     "5173707431576d4a4f4c060043444a2d333030300000000000000000000000000103003601012497ed0b4043c0a80198030000000164";
 const MEDIA_QUERY: &str =
     "5173707431576d4a4f4c0543444a2d33303030000000000000000000000000010001000cc0a801980000001100000003";
-const HANDSHAKE: &str =
+const DEVICE_SETTINGS_REQUEST: &str =
     "5173707431576d4a4f4c4643444a2d333030300000000000000000000000000100010004010400e4";
 const STATUS_PLAYING_OURS: &[u8] = include_bytes!("fixtures/cdj-status-playing-ours.bin");
 const STATUS_EMPTY: &[u8] = include_bytes!("fixtures/cdj-status-empty.bin");
@@ -186,7 +186,9 @@ fn a_player_is_listed_from_its_keep_alive_and_answered_on_its_status_port() {
         assert_eq!(u16::from_be_bytes([response[0xae], response[0xaf]]), 627);
     }
 
-    player.send_to(&hex(HANDSHAKE), status).unwrap();
+    player
+        .send_to(&hex(DEVICE_SETTINGS_REQUEST), status)
+        .unwrap();
     let reply = receive(&player, 0x47);
     assert_eq!(reply.len(), 0x48);
     assert_eq!(reply[0x21], LINK_DEVICE_NUMBER);

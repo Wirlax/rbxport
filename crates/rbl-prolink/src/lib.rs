@@ -18,6 +18,8 @@
 
 use std::net::Ipv4Addr;
 
+use serde::Deserialize;
+
 /// Every DJ Link packet starts with this.
 pub const MAGIC: [u8; 10] = [0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c];
 
@@ -251,7 +253,8 @@ pub fn status_kind_name(kind: u8) -> String {
         0x2a => "sync control".to_owned(),
         DEVICE_PROPERTY_QUERY_KIND => "device property query".to_owned(),
         DEVICE_PROPERTY_RESPONSE_KIND => "device property response".to_owned(),
-        LINK_HANDSHAKE_KIND => "link handshake".to_owned(),
+        DEVICE_SETTINGS_REQUEST_KIND => "device settings request".to_owned(),
+        DEVICE_SETTINGS_RESPONSE_KIND => "device settings response".to_owned(),
         _ => format!("kind {kind:#04x}"),
     }
 }
@@ -906,20 +909,108 @@ impl DevicePropertyResponse {
     }
 }
 
-/// The kind of the 48-byte packet a player unicasts to port 50002 right
-/// after the media response, whose meaning is unknown; rekordbox answers
-/// it with [`link_handshake_reply`].
-pub const LINK_HANDSHAKE_KIND: u8 = 0x46;
+/// A player's request for the media source's device display settings.
+pub const DEVICE_SETTINGS_REQUEST_KIND: u8 = 0x46;
+/// The response carrying the media source's device display settings.
+pub const DEVICE_SETTINGS_RESPONSE_KIND: u8 = 0x47;
+/// Byte length of a device-settings response.
+pub const DEVICE_SETTINGS_RESPONSE_LEN: usize = 0x48;
 
-/// Byte length of the handshake reply.
-pub const LINK_HANDSHAKE_REPLY_LEN: usize = 0x48;
+/// Type of the overview waveform shown on a player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverviewWaveform {
+    #[default]
+    Half,
+    Full,
+}
 
-/// rekordbox's reply to a `46` packet (`kind 47`, 72 bytes, unicast;
-/// measured once, 2026-09-12). Every byte after the device number is copied
-/// from the capture, meaning unknown.
-pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
-    let mut out = Vec::with_capacity(LINK_HANDSHAKE_REPLY_LEN);
-    write_status_header(&mut out, 0x47, name);
+/// Color palette used for player waveforms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaveformColor {
+    Blue,
+    Rgb,
+    #[default]
+    #[serde(rename = "3band")]
+    ThreeBand,
+}
+
+/// Notation used when a player displays musical keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyDisplay {
+    #[default]
+    Classic,
+    Alphanumeric,
+}
+
+/// Position of the play marker in the scrolling waveform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaveformPosition {
+    #[default]
+    Center,
+    Left,
+}
+
+/// The complete decoded settings in the 32-byte `DEVSETTING` body.
+///
+/// Body bytes 9, 10, 12 and 13 carry the four user-facing values. The
+/// remaining bytes are framing, reserved bytes or customization markers whose
+/// semantics are not established. The encoder preserves rekordbox's captured
+/// Link values for them rather than assigning speculative settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSettings {
+    pub overview_waveform: OverviewWaveform,
+    pub waveform_color: WaveformColor,
+    pub key_display: KeyDisplay,
+    pub waveform_position: WaveformPosition,
+}
+
+impl DeviceSettings {
+    fn body(self) -> [u8; 32] {
+        let mut body = [0; 32];
+        body[0..4].copy_from_slice(&0x1234_5678_u32.to_le_bytes());
+        body[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        body[8] = 1;
+        body[9] = match self.overview_waveform {
+            OverviewWaveform::Half => 1,
+            OverviewWaveform::Full => 2,
+        };
+        body[10] = match self.waveform_color {
+            WaveformColor::Blue => 1,
+            WaveformColor::Rgb => 3,
+            WaveformColor::ThreeBand => 4,
+        };
+        body[11] = 1;
+        body[12] = match self.key_display {
+            KeyDisplay::Classic => 1,
+            KeyDisplay::Alphanumeric => 2,
+        };
+        body[13] = match self.waveform_position {
+            WaveformPosition::Center => 1,
+            WaveformPosition::Left => 2,
+        };
+        // The captured rekordbox Link response carries `2` here. USB files
+        // vary at bytes 14-16 after category, sort and color-list edits, but
+        // no stable meaning has been demonstrated for those markers.
+        body[16] = 2;
+        body
+    }
+}
+
+/// rekordbox's response to a device-settings request (`kind 47`, 72 bytes,
+/// unicast). The 32-byte body is the same logical structure stored in
+/// `DEVSETTING.DAT`; integer fields use network byte order on Link.
+pub fn device_settings_response(
+    name: &str,
+    device_number: u8,
+    settings: DeviceSettings,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(DEVICE_SETTINGS_RESPONSE_LEN);
+    write_status_header(&mut out, DEVICE_SETTINGS_RESPONSE_KIND, name);
     out.extend_from_slice(&[
         0x01,
         0x01,
@@ -931,10 +1022,16 @@ pub fn link_handshake_reply(name: &str, device_number: u8) -> Vec<u8> {
         0x00,
         0x00,
     ]);
-    out.extend_from_slice(&[0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x01]);
-    out.extend_from_slice(&[0x01, 0x01, 0x04, 0x01, 0x01, 0x01, 0x00, 0x00, 0x02]);
-    out.resize(LINK_HANDSHAKE_REPLY_LEN, 0);
-    debug_assert_eq!(out.len(), LINK_HANDSHAKE_REPLY_LEN);
+    let body = settings.body();
+    out.extend_from_slice(&u32::from_le_bytes([body[0], body[1], body[2], body[3]]).to_be_bytes());
+    out.extend_from_slice(&u32::from_le_bytes([body[4], body[5], body[6], body[7]]).to_be_bytes());
+    out.extend_from_slice(&body[8..24]);
+    out.extend_from_slice(&u16::from_le_bytes([body[24], body[25]]).to_be_bytes());
+    out.extend_from_slice(&u16::from_le_bytes([body[26], body[27]]).to_be_bytes());
+    out.extend_from_slice(
+        &u32::from_le_bytes([body[28], body[29], body[30], body[31]]).to_be_bytes(),
+    );
+    debug_assert_eq!(out.len(), DEVICE_SETTINGS_RESPONSE_LEN);
     out
 }
 

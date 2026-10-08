@@ -97,7 +97,12 @@ export function LinkPane() {
         const backend = await getBackend();
         const next = link?.on ? await backend.stopLinkExport() : await backend.startLinkExport(
           linkInterface ?? undefined,
-          preferences.djSystem.keyDisplay,
+          {
+            waveformColor: preferences.djSystem.waveformColor,
+            waveformPosition: preferences.djSystem.waveformPosition,
+            overviewWaveform: preferences.djSystem.overviewWaveform,
+            keyDisplay: preferences.djSystem.keyDisplay,
+          },
           preferences.djSystem.linkKeySort,
         );
         revision.current += 1;

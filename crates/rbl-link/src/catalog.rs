@@ -52,6 +52,15 @@ pub trait Source: Send + Sync {
     fn key_notation(&self) -> KeyNotation {
         KeyNotation::Alphanumeric
     }
+    fn device_settings(&self) -> rbl_prolink::DeviceSettings {
+        rbl_prolink::DeviceSettings {
+            key_display: match self.key_notation() {
+                KeyNotation::Classic => rbl_prolink::KeyDisplay::Classic,
+                KeyNotation::Alphanumeric => rbl_prolink::KeyDisplay::Alphanumeric,
+            },
+            ..rbl_prolink::DeviceSettings::default()
+        }
+    }
     fn key_order(&self) -> KeyOrder {
         KeyOrder::Musical
     }

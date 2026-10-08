@@ -186,6 +186,9 @@ impl beacon::LibraryFacts for Facts {
             u16::try_from(l.playlists().len()).unwrap_or(u16::MAX)
         })
     }
+    fn device_settings(&self) -> rbl_prolink::DeviceSettings {
+        self.source.device_settings()
+    }
 }
 
 impl LinkExport {
@@ -425,6 +428,26 @@ fn computer_name() -> String {
 mod tests {
     use super::*;
 
+    struct NotationSource(KeyNotation);
+
+    impl Source for NotationSource {
+        fn library(&self) -> Option<Arc<Library>> {
+            None
+        }
+
+        fn key_notation(&self) -> KeyNotation {
+            self.0
+        }
+
+        fn share_root(&self) -> std::path::PathBuf {
+            std::path::PathBuf::new()
+        }
+
+        fn details(&self, _id: &str) -> Option<rbl_db::details::TrackDetails> {
+            None
+        }
+    }
+
     #[test]
     fn library_services_bind_to_the_selected_interface_address() {
         let interface = Interface {
@@ -438,5 +461,25 @@ mod tests {
             service_bind_address(&interface),
             IpAddr::V4(interface.address)
         );
+    }
+
+    #[test]
+    fn link_device_settings_follow_the_catalog_key_notation() {
+        for (notation, display) in [
+            (KeyNotation::Classic, rbl_prolink::KeyDisplay::Classic),
+            (
+                KeyNotation::Alphanumeric,
+                rbl_prolink::KeyDisplay::Alphanumeric,
+            ),
+        ] {
+            let facts = Facts {
+                source: Arc::new(NotationSource(notation)),
+            };
+
+            assert_eq!(
+                beacon::LibraryFacts::device_settings(&facts).key_display,
+                display
+            );
+        }
     }
 }

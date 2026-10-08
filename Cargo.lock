@@ -4120,6 +4120,8 @@ dependencies = [
 name = "rbl-prolink"
 version = "1.2.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
