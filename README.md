@@ -11,6 +11,29 @@ feature set deliberately small, aiming for a faster, simpler user experience.
 
 Its scope is limited to library management, USB exporting, and PRO DJ LINK.
 
+## Project vision
+
+The core vision of rbxport is **fewer features**.
+
+Because rbxport is open source, you are free to fork it and build a fully
+customizable rekordbox. The core project does not aim to be that. A project that
+keeps adding features eventually becomes what rekordbox already is: full-featured
+DJ software. rbxport stays small on purpose. Any contribution that adds a feature
+is weighed carefully against this vision, and a good feature can still be
+declined.
+
+Two commitments define what "small" must not cost:
+
+- **Compatibility.** rbxport aims to be fully compatible with the current
+  version of rekordbox and all the hardware that rekordbox supports.
+- **Performance.** rbxport maintains its speed through a performance budget,
+  defined in `perf-budgets.json` and enforced by `pnpm budget` and CI. See
+  [Development conventions](docs/development/conventions.md).
+
+If you want to propose a feature, read
+[Feature proposals](CONTRIBUTING.md#feature-proposals) in the contributing guide
+first.
+
 ## Tech stack
 
 | Layer | Technology |

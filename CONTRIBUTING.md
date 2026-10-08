@@ -17,6 +17,29 @@ For a substantial change, explain the problem and proposed behavior before
 implementation. Keep the change scoped so a reviewer can understand its
 trigger, result, and validation without reading a chat history.
 
+## Feature proposals
+
+The core vision of rbxport is **fewer features**. It is not "fully customizable
+rekordbox": a project that keeps accumulating features ends up as the
+full-featured DJ software that rekordbox already is. You are welcome to fork
+rbxport and extend it however you like, but the core project stays small.
+
+Every contribution that adds a feature is carefully considered against this
+vision, and a working, well-tested feature can still be declined. Before writing
+code, open an issue that explains the problem and why it belongs in the core
+project. Bug fixes, performance improvements, compatibility work, and removing
+or simplifying existing behavior are always in scope.
+
+A change must also respect two commitments:
+
+- **Compatibility.** rbxport aims to be fully compatible with the current
+  version of rekordbox and all the hardware that rekordbox supports. A change
+  must not break existing libraries, USB exports, or supported devices.
+- **Performance.** rbxport maintains its speed through the performance budget
+  in `perf-budgets.json`. A change must stay within it; run `pnpm budget` for
+  interface changes. Do not raise a budget gate to fit a new feature. See
+  [Development conventions](docs/development/conventions.md).
+
 ## Create a branch
 
 Branch from the target branch for the change, normally `dev`:
