@@ -222,9 +222,10 @@ const MAIN_WINDOW: &str = "main";
 
 /// What the window-state plugin saves and puts back: everything but whether
 /// the window is showing. Every window is created hidden and shows itself
-/// once its page has rendered (`startup::show_window`); a restore that
-/// included visibility called `show()` the moment the window was built, and
-/// the window came up as an empty frame until React drew into it.
+/// once its page has rendered (`startup::show_window`), or is shown without
+/// it when the page never gets that far (`startup::reveal_if_page_stalls`); a
+/// restore that included visibility called `show()` the moment the window was
+/// built, and the window came up as an empty frame until React drew into it.
 const WINDOW_STATE: tauri_plugin_window_state::StateFlags =
     tauri_plugin_window_state::StateFlags::all().difference(tauri_plugin_window_state::StateFlags::VISIBLE);
 
@@ -246,6 +247,9 @@ fn window_geometry() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
     tauri::plugin::Builder::<tauri::Wry>::new("windowfit")
         .on_window_ready(|window| {
+            // Every window, not only the main one: each is built hidden and waits
+            // for its page to show it.
+            startup::reveal_if_page_stalls(&window);
             if window.label() != MAIN_WINDOW {
                 return;
             }
