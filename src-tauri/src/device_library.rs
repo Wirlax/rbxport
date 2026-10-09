@@ -151,7 +151,7 @@ fn library_dto(library: &device::Library) -> DeviceLibraryDto {
 /// Applies one edit to one library on the stick at `path`.
 #[tauri::command]
 pub async fn device_playlist_edit(path: String, format: String, edit: DeviceEditDto) -> AppResult<DeviceEditResultDto> {
-    blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_running())).await
+    blocking("device_playlist_edit", move || apply_edit(&path, &format, edit, rbl_db::is_rekordbox_app_running())).await
 }
 
 /// Why an edit to a stick must be refused, if it must.

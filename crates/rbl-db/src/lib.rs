@@ -204,16 +204,35 @@ pub fn detect_from(options_json: &Path) -> Result<LibraryLocation> {
 
 /// True when rekordbox (or its agent) is running, in which case we must not write.
 pub fn is_rekordbox_running() -> bool {
+    process_running(|name| is_rekordbox_app(name) || is_rekordbox_agent(name))
+}
+
+/// True when the rekordbox application itself is running: the writer a USB
+/// stick needs protecting from. rekordbox rewrote a stick's `export.pdb` and
+/// `exportLibrary.db` within a minute of seeing it; its agent, which keeps
+/// running after rekordbox is closed, changed no file on a stick replugged
+/// beside it and left for two minutes [OBS 2026-10-09, rekordbox 7.2.14,
+/// Windows 11, #122]. The library itself still waits for the agent too
+/// ([`is_rekordbox_running`]): it syncs the library with the cloud.
+pub fn is_rekordbox_app_running() -> bool {
+    process_running(is_rekordbox_app)
+}
+
+fn process_running(matches: impl Fn(&str) -> bool) -> bool {
     use sysinfo::{ProcessRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::new()),
     );
-    sys.processes().values().any(|p| {
-        let name = p.name().to_string_lossy().to_ascii_lowercase();
-        // Match the app and its agent, not Electron helpers.
-        name == "rekordbox" || name == "rekordbox.exe"
-            || name == "rekordboxagent" || name == "rekordboxagent.exe"
-    })
+    sys.processes().values().any(|p| matches(&p.name().to_string_lossy().to_ascii_lowercase()))
+}
+
+/// The app's process name, not its Electron helpers'. Takes a lowercase name.
+fn is_rekordbox_app(name: &str) -> bool {
+    name == "rekordbox" || name == "rekordbox.exe"
+}
+
+fn is_rekordbox_agent(name: &str) -> bool {
+    name == "rekordboxagent" || name == "rekordboxagent.exe"
 }
 
 /// Why a read-write open must be refused, if it must.
@@ -641,5 +660,23 @@ mod tests {
         assert!(write_refusal_reason(false, true, false).is_none());
         assert!(write_refusal_reason(false, false, true).is_none());
         assert!(write_refusal_reason(false, true, true).is_none());
+    }
+}
+
+#[cfg(test)]
+mod process_name_tests {
+    use super::{is_rekordbox_agent, is_rekordbox_app};
+
+    #[test]
+    fn the_app_and_its_agent_are_told_apart() {
+        for name in ["rekordbox", "rekordbox.exe"] {
+            assert!(is_rekordbox_app(name) && !is_rekordbox_agent(name), "{name}");
+        }
+        for name in ["rekordboxagent", "rekordboxagent.exe"] {
+            assert!(is_rekordbox_agent(name) && !is_rekordbox_app(name), "{name}");
+        }
+        for name in ["rekordbox helper", "rekordbox helper (renderer)", "rbxport.exe"] {
+            assert!(!is_rekordbox_app(name) && !is_rekordbox_agent(name), "{name}");
+        }
     }
 }

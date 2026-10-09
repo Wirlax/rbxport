@@ -1684,8 +1684,8 @@ fn write_export_with_phase(
             "That device is no longer connected. It may have been unplugged or renamed.",
         ));
     }
-    if rbl_db::is_rekordbox_running() {
-        return Err(AppError::internal("Quit rekordbox before syncing this USB so only one application writes its libraries."));
+    if rbl_db::is_rekordbox_app_running() {
+        return Err(AppError::new(ErrorKind::ReadOnly, "Quit rekordbox before syncing this USB so only one application writes its libraries."));
     }
     let preferred_root = rbl_devices::list()
         .into_iter()
