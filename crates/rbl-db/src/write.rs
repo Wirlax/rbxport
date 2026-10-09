@@ -1287,6 +1287,77 @@ impl Writer {
         Ok(Changed { rows, usn })
     }
 
+    /// This fork's own: puts blocks of tracks in a playlist laid out in
+    /// mini-sets, where [`crate::mini_sets::plan`] says. One transaction, so
+    /// a refusal leaves the playlist as it was. Rows already there keep their
+    /// ids and are only touched when their number moves.
+    pub fn add_mini_sets(
+        &mut self,
+        playlist: &str,
+        blocks: &[Vec<String>],
+    ) -> Result<(Changed, Vec<crate::mini_sets::Placement>)> {
+        use crate::mini_sets::{self, Slot};
+
+        self.prepare()?;
+        let stamp = time::now();
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let attribute: Option<i64> = tx
+            .query_row(
+                "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                params![playlist],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match attribute {
+            None => return Err(DbError::WriteRefused(format!("no playlist {playlist}"))),
+            Some(ATTRIBUTE_FOLDER) => {
+                return Err(DbError::WriteRefused(format!("{playlist} is a folder, not a playlist")))
+            }
+            Some(_) => refuse_if_smart(&tx, playlist)?,
+        }
+        for content in blocks.iter().flatten() {
+            if !content_exists(&tx, content)? {
+                return Err(DbError::WriteRefused(format!("no track {content}")));
+            }
+        }
+        let entries = mini_sets::entries(&tx, playlist)?;
+        let plan = mini_sets::plan(&entries, &mini_sets::separators(&tx)?, blocks)?;
+
+        let mut rows = 0;
+        let mut usn = 0;
+        for (track_no, slot) in (1_i64..).zip(&plan.order) {
+            match slot {
+                Slot::Kept(index) => {
+                    let Some(entry) = entries.get(*index) else { continue };
+                    if entry.track_no == track_no {
+                        continue;
+                    }
+                    usn = next_usn(&tx)?;
+                    rows += tx.execute(
+                        "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
+                         WHERE ID = ?4",
+                        params![track_no, usn, stamp, entry.row],
+                    )?;
+                }
+                Slot::Added(content) => {
+                    usn = next_usn(&tx)?;
+                    rows += tx.execute(
+                        "INSERT INTO djmdSongPlaylist
+                            (ID, PlaylistID, ContentID, TrackNo, UUID,
+                             rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                             usn, rb_local_usn, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                        params![self.rng.uuid4(), playlist, content, track_no, self.rng.uuid4(), usn, stamp],
+                    )?;
+                }
+            }
+        }
+        set_counter(&tx, usn)?;
+        tx.commit()?;
+        Ok((Changed { rows, usn }, plan.placements))
+    }
+
     // ---------------------------------------------------------------- import
 
     /// The id of the live track already imported from `path`, if any.

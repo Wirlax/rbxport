@@ -25,6 +25,7 @@ pub mod xml;
 mod schema;
 pub mod track_path;
 pub mod track_files;
+pub mod mini_sets;
 
 use std::{
     path::{Path, PathBuf},
