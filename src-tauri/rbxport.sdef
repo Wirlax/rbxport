@@ -282,6 +282,9 @@
       <parameter name="creating playlist" code="NwPl" type="text" optional="yes" description="The name of a new playlist to make at the top of the tree for the blocks; refused if one there has the name already.">
         <cocoa key="newPlaylist"/>
       </parameter>
+      <parameter name="replacing" code="RplB" type="text" optional="yes" description="With `to`: the separator of one block to change instead, like &quot;SEPARATORBREMSEN 100&quot;. The single block given becomes its tracks; an empty one, {{}}, takes the block out with its separator.">
+        <cocoa key="replacing"/>
+      </parameter>
       <result>
         <type type="text" list="yes"/>
       </result>

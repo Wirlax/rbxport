@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rbl_db::mini_sets::Placement;
+use rbl_db::mini_sets::{Placement, Separator};
 use rbl_db::write::{Writer, ROOT};
 use rbl_db::DbError;
 use tauri::State;
@@ -20,11 +20,15 @@ pub(crate) enum Target {
     Playlist(String),
     /// A new playlist at the top of the tree, by name.
     New(String),
+    /// The block after a separator in a playlist, by id, given new tracks;
+    /// none takes it out.
+    Change { playlist: String, separator: Separator },
 }
 
 /// Places the blocks as any playlist edit is made — under the edit gate, the
 /// index refreshed and the window told — and answers the title of the
-/// separator each block went after.
+/// separator each block went after: for a change, the block's, or nothing
+/// when it was taken out.
 pub(crate) async fn place<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, Arc<AppState>>,
@@ -34,16 +38,27 @@ pub(crate) async fn place<R: tauri::Runtime>(
     let placed = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let out = Arc::clone(&placed);
     edit(app, state, "place_mini_sets", Touched::Playlists, move |writer| {
-        let placements = match &target {
-            Target::Playlist(id) => writer.add_mini_sets(id, &blocks)?.1,
-            Target::New(name) => into_new_playlist(writer, name, &blocks)?,
+        let titles = match &target {
+            Target::Playlist(id) => titles(&writer.add_mini_sets(id, &blocks)?.1),
+            Target::New(name) => titles(&into_new_playlist(writer, name, &blocks)?),
+            Target::Change { playlist, separator } => {
+                let [tracks] = blocks.as_slice() else {
+                    return Err(DbError::WriteRefused("a change is to one block".to_owned()));
+                };
+                writer.change_mini_set(playlist, *separator, tracks)?;
+                if tracks.is_empty() { Vec::new() } else { vec![separator.title()] }
+            }
         };
-        *out.lock() = placements;
+        *out.lock() = titles;
         Ok(())
     })
     .await?;
-    let titles = placed.lock().iter().map(|p| p.separator.title()).collect();
+    let titles = std::mem::take(&mut *placed.lock());
     Ok(titles)
+}
+
+fn titles(placements: &[Placement]) -> Vec<String> {
+    placements.iter().map(|p| p.separator.title()).collect()
 }
 
 /// A new playlist at the top of the tree holding just the blocks.
@@ -96,7 +111,6 @@ pub(crate) fn blocks_of(value: &ScriptValue) -> Option<Vec<Vec<String>>> {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use rbl_db::fixture::{self, track_id, Shape};
-    use rbl_db::mini_sets::Separator;
 
     use super::*;
 
