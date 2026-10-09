@@ -164,6 +164,19 @@ fn store_refusal() -> AppError {
     AppError::new(ErrorKind::Internal, "The Microsoft Store installs this copy of rbxport's updates.")
 }
 
+/// This fork's own: the fork never asks the official download server. What
+/// it offers is upstream's build, and on macOS the updater puts it in place
+/// over this one, taking the fork's features with it. The fork takes
+/// upstream's changes by merging them and rebuilding (`pnpm app:install`).
+const OFFICIAL_FEED: bool = false;
+
+fn fork_refusal() -> AppError {
+    AppError::new(
+        ErrorKind::Internal,
+        "This is a fork of rbxport: it is updated by rebuilding it, not from the download server.",
+    )
+}
+
 /// One release's entry in the published release notes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,6 +244,10 @@ pub async fn check_for_update(
     if store_install() {
         *updates.pending.lock() = None;
         return Ok(store_check(current_version));
+    }
+    if !OFFICIAL_FEED {
+        *updates.pending.lock() = None;
+        return Err(fork_refusal());
     }
     let found = app
         .updater()
