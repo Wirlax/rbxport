@@ -414,6 +414,15 @@ pub fn run() {
         .manage(Arc::new(crate::update::Updates::default()))
         .manage(crate::test_port::TestPort::default())
         .setup(|app| {
+            // The system webview runs the whole interface, and on macOS its
+            // version follows the Safari installed rather than the OS: Big Sur
+            // stopped shipping Safari with its updates after 11.6. A page that
+            // will not run in it leaves nothing on screen to report from, so
+            // the log is where the version has to be.
+            match tauri::webview_version() {
+                Ok(version) => tracing::info!(%version, "webview"),
+                Err(e) => tracing::warn!(error = %e, "could not read the webview's version"),
+            }
             screen_cache::initialize(app.handle());
             // Listens only in a debug build asked to (`RBXPORT_TEST_PORT`).
             crate::test_port::start(app.handle());
