@@ -1096,14 +1096,50 @@ pub fn export_cancellable(
         artwork.entries().map(|(id, _)| (id, artwork_path(id, "a", false).replacen("/PIONEER/", &format!("/{root_name}/"), 1))).collect();
     let artwork_rows: Vec<Vec<u8>> = artwork_paths.iter().map(|(id, path)| artwork_row(*id, path)).collect();
 
+    // A DeviceSQL row has to fit on one page. Without this check the page
+    // builder cuts the row off and the stick's export.pdb is corrupt, which
+    // verification reports only as the two databases disagreeing.
+    let limit = rbl_pdb::build::max_row_len(PAGE_SIZE);
+    if let Some((row, track)) = track_rows.iter().zip(&one_library_tracks).find(|(row, _)| row.len() > limit) {
+        return Err(ExportError::Conflict(format!(
+            "'{}' has more text in its title, comment and other tags than export.pdb can hold for one track ({} bytes; at most {limit}). Shorten them and sync again; the USB was left as it was.",
+            track.title,
+            row.len()
+        )));
+    }
+    let genre_rows: Vec<_> = genres.entries().map(|(id, n)| simple_named_row(id, n)).collect();
+    let artist_rows: Vec<_> = artists.entries().map(|(id, n)| artist_row(id, n)).collect();
+    let album_rows: Vec<_> = albums.entries().map(|(id, n)| album_row(id, 0, n)).collect();
+    let label_rows: Vec<_> = labels.entries().map(|(id, n)| simple_named_row(id, n)).collect();
+    let key_rows: Vec<_> = keys.entries().map(|(id, n)| key_row(id, n)).collect();
+    for (kind, names, rows) in [
+        ("genre", &genres, &genre_rows), ("artist", &artists, &artist_rows), ("album", &albums, &album_rows),
+        ("label", &labels, &label_rows), ("key", &keys, &key_rows),
+    ] {
+        if let Some(((_, name), row)) = names.entries().zip(rows).find(|(_, row)| row.len() > limit) {
+            let start: String = name.chars().take(40).collect();
+            return Err(ExportError::Conflict(format!(
+                "The {kind} '{start}…' is longer than export.pdb can hold ({} bytes; at most {limit}). Shorten it and sync again; the USB was left as it was.",
+                row.len()
+            )));
+        }
+    }
+    if let Some((row, playlist)) = playlist_rows.iter().zip(playlists).find(|(row, _)| row.len() > limit) {
+        let start: String = playlist.name.chars().take(40).collect();
+        return Err(ExportError::Conflict(format!(
+            "The playlist name '{start}…' is longer than export.pdb can hold ({} bytes; at most {limit}). Shorten it and sync again; the USB was left as it was.",
+            row.len()
+        )));
+    }
+
     progress(&ExportProgress { stage: "database", done: tracks.len(), total: tracks.len(), title: String::new() });
     let pdb = build_pdb(&PdbTables {
         tracks: &track_rows,
-        genres: &genres.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>(),
-        artists: &artists.entries().map(|(id, n)| artist_row(id, n)).collect::<Vec<_>>(),
-        albums: &albums.entries().map(|(id, n)| album_row(id, 0, n)).collect::<Vec<_>>(),
-        labels: &labels.entries().map(|(id, n)| simple_named_row(id, n)).collect::<Vec<_>>(),
-        keys: &keys.entries().map(|(id, n)| key_row(id, n)).collect::<Vec<_>>(),
+        genres: &genre_rows,
+        artists: &artist_rows,
+        albums: &album_rows,
+        labels: &label_rows,
+        keys: &key_rows,
         playlists: &playlist_rows,
         entries: &entry_rows,
         artwork: &artwork_rows,

@@ -11,6 +11,15 @@ pub const PAGE_HEADER_LEN: usize = 0x28;
 /// Bytes each row group occupies at the end of a page.
 pub const ROW_GROUP_LEN: usize = 0x24;
 
+/// The longest row a page of `page_size` bytes holds: an empty page less
+/// its header, one row group, and the slack [`FileBuilder`] keeps before it
+/// starts a new page. A row cannot continue onto another page, so anything
+/// longer cannot be written.
+#[must_use]
+pub const fn max_row_len(page_size: usize) -> usize {
+    page_size.saturating_sub(PAGE_HEADER_LEN + ROW_GROUP_LEN + 8)
+}
+
 /// Encodes a string in the short-ASCII `DeviceSQL` form.
 ///
 /// The length byte is "incremented, doubled, and incremented again", which is

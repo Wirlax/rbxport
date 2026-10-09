@@ -783,3 +783,21 @@ fn a_firmware_path_hash_collision_keeps_both_analysis_bundles() {
     assert_eq!(before.tracks[1].audio,after.tracks[1].audio);
     assert!(verify(dest.path()).unwrap().is_ok());
 }
+
+/// A row of `export.pdb` has to fit on one page. A track whose tags are
+/// longer used to be cut off on the page and the stick refused as "Device
+/// Library and OneLibrary disagree"; it is now refused before anything is
+/// written, naming the track.
+#[test]
+fn a_track_with_more_text_than_a_pdb_row_holds_is_refused_by_name() {
+    let src = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let mut long = track(src.path(), 1, "Very Long Notes", "TRIODE");
+    long.comment = "é".repeat(2500);
+    let tracks = vec![long, track(src.path(), 2, "Short", "ARTBAT")];
+    let playlists = vec![SourcePlaylist { name: "P".into(), track_indices: vec![0, 1], ..Default::default() }];
+    let error = export(dest.path(), &tracks, &playlists).unwrap_err().to_string();
+    assert!(error.contains("'Very Long Notes'") && error.contains("export.pdb"), "{error}");
+    assert!(!dest.path().join("PIONEER/rekordbox/export.pdb").exists());
+    assert!(!dest.path().join("Contents/TRIODE").exists());
+}
