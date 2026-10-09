@@ -1636,6 +1636,31 @@ fn export_track_puts_a_track_on_a_stick_by_itself_and_a_sync_keeps_it_there() {
 }
 
 #[test]
+fn a_stick_pulled_during_a_sync_is_reported_as_disconnected() {
+    let s = shell();
+    let audio = s._dir.path().join("Pulled.wav");
+    write_wav(&audio, 2);
+    let report = run(commands::import_files(s.handle(), s.state(), vec![audio.display().to_string()])).unwrap();
+    run(commands::add_tracks_to_playlist(s.handle(), s.state(), playlist_id(1), vec![report.tracks[0].id.clone()])).unwrap();
+    let stick = tempfile::tempdir().unwrap();
+    let mount = stick.path().join("USB");
+    std::fs::create_dir_all(&mount).unwrap();
+    // The stick goes away as soon as the copy starts.
+    let pulled = mount.clone();
+    s.app.listen("export:progress", move |event| {
+        if event.payload().contains("\"copying\"") || event.payload().contains("\"checking\"") {
+            let _ = std::fs::remove_dir_all(&pulled);
+        }
+    });
+    let reports = run(commands::sync_devices(
+        s.handle(), s.state(), vec![playlist_id(1)], vec![mount.display().to_string()], None, None, None, None, None,
+    ))
+    .unwrap();
+    let error = reports[0].error.as_deref().expect("the sync failed");
+    assert!(error.starts_with("The USB was disconnected during the sync."), "{error}");
+}
+
+#[test]
 fn a_sync_writes_the_same_playlists_to_every_stick_and_each_stick_remembers_them() {
     let s = shell();
     // One real file in playlist 1, so there is something to copy; the

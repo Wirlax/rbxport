@@ -1617,6 +1617,25 @@ pub async fn eject_device(path: String) -> AppResult<()> {
     }).await
 }
 
+/// An export that failed because the USB went away mid-way says so: the
+/// error the file system gave ("Device not configured", "Input/output
+/// error", "No such file or directory") names a file, not the cause. What
+/// was written stays recoverable, and the next sync finishes or rolls it
+/// back.
+fn disconnected_during_export(destination: &std::path::Path, error: AppError) -> AppError {
+    // Cancelled is not a failure, and a stick that was gone before the sync
+    // began is already reported as such.
+    if matches!(error.kind, ErrorKind::Cancelled | ErrorKind::NotFound) || destination.is_dir() {
+        return error;
+    }
+    let detail = error.detail.clone().unwrap_or_else(|| error.message.clone());
+    AppError::new(
+        ErrorKind::NotFound,
+        "The USB was disconnected during the sync. Plug it back in and sync again; the sync picks up from there.",
+    )
+    .with_detail(detail)
+}
+
 fn write_export_with_progress<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     destination: &std::path::Path,
@@ -1661,7 +1680,8 @@ fn write_export_with_progress<R: tauri::Runtime>(
         },
         &mut |phase| emit(phase, if phase == "verifying" { total } else { done.get() }, String::new()),
         &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
-    );
+    )
+    .map_err(|error| disconnected_during_export(destination, error));
     let cancelled = result.as_ref().err().is_some_and(|e| matches!(e.kind, ErrorKind::Cancelled));
     emit(if result.is_ok() { "done" } else if cancelled { "cancelled" } else { "failed" }, if result.is_ok() { total } else { done.get() },
         result.as_ref().err().map_or_else(String::new, |e| e.message.clone()));
