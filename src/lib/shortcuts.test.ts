@@ -182,6 +182,14 @@ describe("rekordbox's own Export key map", () => {
     expect(dispatch({ key: "x" }, mac, { tagName: "INPUT" })).toBeNull();
   });
 
+  it("gives this fork's every-16-bars memory cues V, on Player A only", () => {
+    expect(matchBinding({ key: "v" }, mac)).toMatchObject({ action: "memoryCuesEvery16Bars", deck: "a" });
+    expect(actionFor({ key: "v", shiftKey: true }, mac)).toBeNull();
+    // ⌘V is paste.
+    expect(actionFor({ key: "v", metaKey: true }, mac)).toBeNull();
+    expect(dispatch({ key: "v" }, mac, { tagName: "INPUT" })).toBeNull();
+  });
+
   it("gives the first three pads 1, 2 and 3, and their clears the same with command", () => {
     // `Set Hot Cue A`-`C` on `1`-`3`, `Clear Hot Cue A`-`C` on `command + 1`-`3`.
     // The preset binds nothing past C: 4 is the first beat loop.

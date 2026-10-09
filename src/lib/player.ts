@@ -656,6 +656,26 @@ export function quantizedLaunchMs(
 }
 
 /**
+ * `fromMs`, then every `beats` grid beats before it back to the start of the
+ * track, nearest first, in whole milliseconds. Walked on the grid rather than
+ * in seconds, so a grid that changes tempo keeps each place on the same point
+ * of its bar. Empty for a grid of fewer than two beats.
+ */
+export function beatsBackMs(grid: BeatGrid, fromMs: number, beats: number): number[] {
+  const from = stepIndexAt(grid.times, fromMs);
+  if (from === null || beats <= 0) return [];
+  const out: number[] = [];
+  for (let index = from; ; index -= beats) {
+    const ms = Math.round(msAtStepIndex(grid.times, index));
+    // A grid whose first two beats share a time extrapolates no spacing
+    // before them, and would otherwise never reach zero.
+    if (ms < 0 || ms >= (out.at(-1) ?? Number.POSITIVE_INFINITY)) break;
+    out.push(ms);
+  }
+  return out;
+}
+
+/**
  * Where a waiting hot cue call jumps from, in seconds, or `null` to drop it.
  * The call was timed to reach `at`; `head` is the head read when its timer
  * fires. A head within `drift` of `at` is a timer a little late, and the jump

@@ -1534,5 +1534,8 @@
   "No playlist was made.": "No playlist was made.",
   "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.": "Une ou plusieurs listes avec le même nom existent déjà.",
-  "{count} files skipped.": "{count} files skipped."
+  "{count} files skipped.": "{count} files skipped.",
+  "Memory Cues Every 16 Bars": "Memory cues toutes les 16 mesures",
+  "Memory Cues Every 16 Bars (V)": "Memory cues toutes les 16 mesures (V)",
+  "Set memory cues every 16 bars": "Poser des memory cues toutes les 16 mesures"
 }

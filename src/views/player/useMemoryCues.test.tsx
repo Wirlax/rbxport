@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __setBackend } from "@/ipc/client";
 import type { Backend, Cue, CueKind } from "@/ipc/types";
+import type { BeatGrid } from "@/lib/player";
 import { useMemoryCues, type MemoryCueActions, type MemoryCueDeck } from "./useMemoryCues";
 
 declare global {
@@ -338,6 +339,69 @@ describe("deleting", () => {
     act(() => memory.deleteAtHead());
     act(() => memory.remove(cue("m4", 90_000)));
     await settle();
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("storing a memory cue every 16 bars", () => {
+  /** 120 BPM from 0 ms for 500 s: 16 bars is 32 s. */
+  const GRID: BeatGrid = {
+    times: Uint32Array.from({ length: 1_000 }, (_, i) => i * 500),
+    numbers: Uint8Array.from({ length: 1_000 }, (_, i) => (i % 4) + 1),
+    tempos: new Uint16Array(1_000).fill(12_000),
+  };
+  /** Every write the action makes, however many it chains. */
+  const drain = () => act(() => new Promise<void>((resolve) => { setTimeout(resolve, 0); }));
+
+  it("replaces the plain memory cues from the playhead back, leaving loops and hot cues", async () => {
+    mount({ positionSeconds: () => 100, grid: GRID });
+    act(() => memory.storeEvery16Bars());
+    await drain();
+    expect(sent).toEqual([
+      "delete:m1", "delete:m2", "delete:m4",
+      "add:track-1:memory:100000", "add:track-1:memory:68000",
+      "add:track-1:memory:36000", "add:track-1:memory:4000",
+    ]);
+  });
+
+  it("keeps a cue already on a place, so a second press writes nothing", async () => {
+    mount({ cues: [cue("a", 36_000), cue("b", 4_010)], positionSeconds: () => 100, grid: GRID });
+    act(() => memory.storeEvery16Bars());
+    await drain();
+    expect(sent).toEqual(["add:track-1:memory:100000", "add:track-1:memory:68000"]);
+
+    sent = [];
+    const done = [100_000, 68_000, 36_000, 4_000].map((ms) => cue(`c${ms}`, ms));
+    mount({ cues: done, positionSeconds: () => 100, grid: GRID });
+    act(() => memory.storeEvery16Bars());
+    await drain();
+    expect(sent).toEqual([]);
+  });
+
+  it("stops at ten with the loops, keeping the places nearest the playhead", async () => {
+    mount({ cues: [loopCue("loop", 50_000, 54_000)], positionSeconds: () => 480, grid: GRID });
+    act(() => memory.storeEvery16Bars());
+    await drain();
+    expect(sent).toEqual(
+      Array.from({ length: 9 }, (_, i) => `add:track-1:memory:${480_000 - i * 32_000}`),
+    );
+  });
+
+  it("starts from the beat nearest the playhead with Q on", async () => {
+    mount({ cues: [], positionSeconds: () => 64.2, grid: GRID, quantiseTo: GRID });
+    act(() => memory.storeEvery16Bars());
+    await drain();
+    expect(sent).toEqual(["add:track-1:memory:64000", "add:track-1:memory:32000", "add:track-1:memory:0"]);
+  });
+
+  it("does nothing without a grid to count on, or read-only", async () => {
+    mount({ positionSeconds: () => 100 });
+    expect(memory.canStoreEvery16Bars).toBe(false);
+    act(() => memory.storeEvery16Bars());
+    mount({ positionSeconds: () => 100, grid: GRID, readOnly: true });
+    expect(memory.canStoreEvery16Bars).toBe(false);
+    act(() => memory.storeEvery16Bars());
+    await drain();
     expect(sent).toEqual([]);
   });
 });
