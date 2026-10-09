@@ -1,7 +1,7 @@
 //! Durable replacement through a unique sibling, with data flushed before
 //! rename and the containing directory flushed afterwards on Unix.
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub fn sync_dir(path: &Path) -> std::io::Result<()> {
@@ -20,7 +20,6 @@ pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     let _ = path;
     Ok(())
 }
-
 
 /// Whether the filesystem rejected an operation it does not implement
 /// (`ENOTSUP`/`EOPNOTSUPP`, or `ENOSYS`), as opposed to failing it.
@@ -67,6 +66,109 @@ fn persist_new_with(
         }
         Err(failed) => Err(failed.error),
     }
+}
+
+/// `path` with every component in Unicode NFC, the form an export writes
+/// its names in. Components that are not UTF-8 are kept as they are.
+#[must_use]
+pub fn nfc_path(path: &Path) -> PathBuf {
+    use unicode_normalization::UnicodeNormalization;
+    path.components()
+        .map(|component| {
+            let raw = component.as_os_str();
+            raw.to_str().map_or_else(|| raw.to_owned(), |text| text.nfc().collect::<String>().into())
+        })
+        .collect()
+}
+
+/// `path` with its last component in the other Unicode forms (NFC, NFD)
+/// that differ from the one given.
+///
+/// macOS's FAT32 and exFAT drivers (`FSKit`, macOS 26) list every name in
+/// NFD whatever form it was stored in, and look a name up in any form, yet
+/// rename (FAT32) or delete (exFAT) only under the stored form of the last
+/// component [OBS 2026-10-08, `hdiutil` FAT32 and exFAT images: a file
+/// created as NFC `Kesä.mp3` is listed as NFD, `stat` and `open` accept
+/// both, `rename` from the NFD name fails with ENOENT on FAT32 and `unlink`
+/// of the NFD name fails with ENOENT on exFAT]. Directory components in the
+/// middle of a path resolve in either form.
+fn name_forms(path: &Path) -> Vec<PathBuf> {
+    use unicode_normalization::UnicodeNormalization;
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Vec::new();
+    };
+    let mut forms: Vec<PathBuf> = Vec::new();
+    for form in [name.nfc().collect::<String>(), name.nfd().collect::<String>()] {
+        if form != name && !forms.iter().any(|f| f.file_name().and_then(|n| n.to_str()) == Some(form.as_str())) {
+            forms.push(path.with_file_name(form));
+        }
+    }
+    forms
+}
+
+/// Runs `operation` on `path`, and when the name is not found although
+/// something answers to it, on the other Unicode forms of its last
+/// component; see [`name_forms`].
+fn in_stored_form(path: &Path, operation: impl Fn(&Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut error = match operation(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => error,
+        other => return other,
+    };
+    if path.symlink_metadata().is_err() {
+        return Err(error);
+    }
+    for alternate in name_forms(path) {
+        match operation(&alternate) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => error = e,
+            other => return other,
+        }
+    }
+    Err(error)
+}
+
+/// [`std::fs::rename`], finding `from` under the form its name was stored
+/// in when it was given in another; see [`name_forms`]. `to` is created
+/// under the name given.
+pub fn rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    in_stored_form(from, |from| std::fs::rename(from, to))
+}
+
+/// Deletes a directory tree, as `std::fs::remove_dir_all` would, on a
+/// filesystem that lists names in a form it will not delete them under
+/// (exFAT on macOS; see [`name_forms`]). An entry that goes away on its
+/// own, as an `AppleDouble` `._` companion does with its file, is not an
+/// error. A missing `path` is not an error either.
+pub fn remove_tree(path: &Path) -> std::io::Result<()> {
+    fn contents(dir: &Path) -> std::io::Result<()> {
+        let entries = match std::fs::read_dir(dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            other => other?,
+        };
+        for entry in entries {
+            let child = entry?.path();
+            let Ok(meta) = child.symlink_metadata() else { continue };
+            if meta.is_dir() {
+                contents(&child)?;
+                gone(in_stored_form(&child, |p| std::fs::remove_dir(p)), &child)?;
+            } else {
+                gone(in_stored_form(&child, |p| std::fs::remove_file(p)), &child)?;
+            }
+        }
+        Ok(())
+    }
+    fn gone(result: std::io::Result<()>, path: &Path) -> std::io::Result<()> {
+        match result {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && path.symlink_metadata().is_err() => Ok(()),
+            other => other,
+        }
+    }
+    contents(path)?;
+    gone(in_stored_form(path, |p| std::fs::remove_dir(p)), path)
+}
+
+/// An I/O error that says what was being done to which file.
+fn at<'a>(action: &'static str, path: &'a Path) -> impl FnOnce(std::io::Error) -> std::io::Error + 'a {
+    move |error| std::io::Error::new(error.kind(), format!("Could not {action} {}: {error}", path.display()))
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -139,7 +241,20 @@ struct PublicationEntry {
     present: bool,
     #[serde(default)]
     had_target: Option<bool>,
+    /// Whether `path` is the name to publish under, exactly. Journals
+    /// written before this field took their paths from the staging
+    /// directory's listing, which macOS gives in NFD on FAT32 and exFAT
+    /// while the export names its files in NFC; those are published under
+    /// the form their image was stored in. See [`name_forms`].
+    #[serde(default)]
+    exact: bool,
 }
+
+/// What a staging directory's name starts with, so a stage left behind by
+/// an export that could not clean up after itself is recognizably ours.
+const STAGE_PREFIX: &str = ".rbxport-staging-";
+/// What a finished journal is renamed to before its images are deleted.
+const RETIRED_PREFIX: &str = ".rbxport-retired-";
 
 /// Durable commit intent for a set of files. Recovery rolls publication forward
 /// using retained images, so recovery itself can be interrupted repeatedly.
@@ -161,10 +276,17 @@ impl Publication {
         if journal.try_exists()? {
             Self::finish(root, &journal)?;
         }
+        // Under the exclusive lock nothing else is using a stage, so any
+        // left here belonged to an export that stopped or could not delete
+        // it, and would otherwise hold a copy of the audio on the device.
+        remove_leftovers(root);
         Ok(Self {
             root: root.to_owned(),
             journal,
-            stage: tempfile::tempdir_in(root)?,
+            stage: tempfile::Builder::new()
+                .prefix(STAGE_PREFIX)
+                .tempdir_in(root)
+                .map_err(at("create a staging folder in", root))?,
             _lock: lock,
             #[cfg(unix)]
             root_handle: std::fs::File::open(root)?,
@@ -190,7 +312,8 @@ impl Publication {
         self.stage.path()
     }
 
-    /// Missing staged files mean deletion. Paths are relative to root.
+    /// Missing staged files mean deletion. Paths are relative to root, and
+    /// are the names the files are published under.
     pub fn commit(&self, paths: &[std::path::PathBuf]) -> std::io::Result<()> {
         self.check_root()?;
         validate_paths(paths)?;
@@ -208,8 +331,9 @@ impl Publication {
             if present {
                 std::fs::OpenOptions::new()
                     .write(true)
-                    .open(&image)?
-                    .sync_all()?;
+                    .open(&image)
+                    .and_then(|file| file.sync_all())
+                    .map_err(at("flush", &image))?;
             }
             let target = self.root.join(path);
             let had_target = target.try_exists()? && std::fs::metadata(&target)?.is_file();
@@ -217,6 +341,7 @@ impl Publication {
                 path: path.clone(),
                 present,
                 had_target: Some(had_target),
+                exact: true,
             });
             let mut parent = image.parent();
             while let Some(dir) = parent.filter(|p| p.starts_with(self.stage.path())) {
@@ -234,7 +359,7 @@ impl Publication {
             &self.stage.path().join("publication.json"),
             &serde_json::to_vec(&entries)?,
         )?;
-        std::fs::rename(self.stage.path(), &self.journal)?;
+        std::fs::rename(self.stage.path(), &self.journal).map_err(at("start publishing to", &self.root))?;
         sync_dir(&self.root)?;
         Self::finish(&self.root, &self.journal)
     }
@@ -250,15 +375,22 @@ impl Publication {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines, reason = "one ordered roll-forward over the journal")]
     fn finish(root: &Path, journal: &Path) -> std::io::Result<()> {
-        let entries: Vec<PublicationEntry> =
-            serde_json::from_slice(&std::fs::read(journal.join("publication.json"))?)?;
+        let record = journal.join("publication.json");
+        let entries: Vec<PublicationEntry> = serde_json::from_slice(
+            &std::fs::read(&record).map_err(at("read the interrupted publication record", &record))?,
+        )?;
         validate_paths(
             &entries
                 .iter()
                 .map(|entry| entry.path.clone())
                 .collect::<Vec<_>>(),
         )?;
+        let entries: Vec<PublicationEntry> = entries
+            .into_iter()
+            .map(|entry| PublicationEntry { path: publish_as(journal, &entry), exact: true, ..entry })
+            .collect();
         let incomplete = journal.join(".incomplete");
         if incomplete.try_exists()? {
             return Err(std::io::Error::other(format!(
@@ -274,7 +406,7 @@ impl Publication {
         // audio file is published with atomic renames instead of being copied
         // over the USB a second time. Every intermediate state is recognizable
         // and recovery always rolls forward.
-        for entry in entries {
+        let publish = |entry: &PublicationEntry| -> std::io::Result<()> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::MetadataExt;
@@ -297,10 +429,10 @@ impl Publication {
                     if let Some(parent) = target.parent() {
                         create_dir_all(parent)?;
                     }
-                    std::fs::rename(&previous, &target)?;
+                    rename(&previous, &target).map_err(at("restore", &target))?;
                     sync_dir(target.parent().unwrap_or(root))?;
                 }
-                continue;
+                return Ok(());
             }
             if entry.present {
                 if image.try_exists()? {
@@ -335,13 +467,13 @@ impl Publication {
                         if let Some(parent) = previous.parent() {
                             create_dir_all(parent)?;
                         }
-                        std::fs::rename(&target, &previous)?;
+                        rename(&target, &previous).map_err(at("set aside the previous", &target))?;
                         sync_dir(target.parent().unwrap_or(root))?;
                     }
                     if let Some(parent) = target.parent() {
-                        create_dir_all(parent)?;
+                        create_dir_all(parent).map_err(at("create the folder", parent))?;
                     }
-                    std::fs::rename(&image, &target)?;
+                    rename(&image, &target).map_err(at("publish", &target))?;
                     sync_dir(target.parent().unwrap_or(root))?;
                 } else if !target.try_exists()?
                     || (entry.had_target == Some(true) && !previous.try_exists()?)
@@ -378,21 +510,73 @@ impl Publication {
                 if let Some(parent) = previous.parent() {
                     create_dir_all(parent)?;
                 }
-                std::fs::rename(&target, &previous)?;
+                rename(&target, &previous).map_err(at("remove", &target))?;
                 sync_dir(target.parent().unwrap_or(root))?;
             }
+            Ok(())
+        };
+        for entry in &entries {
+            publish(entry).map_err(|error| {
+                // Every failure names the file it was publishing.
+                if error.to_string().contains(&*entry.path.to_string_lossy()) {
+                    error
+                } else {
+                    std::io::Error::new(error.kind(), format!("Could not publish {}: {error}", entry.path.display()))
+                }
+            })?;
         }
         // Remove the commit intent atomically BEFORE deleting its images.
         // A crash during cleanup must never replay a missing image as deletion.
-        let discarded = tempfile::tempdir_in(root)?;
-        std::fs::rename(journal, discarded.path().join("completed"))?;
+        let discarded = tempfile::Builder::new().prefix(RETIRED_PREFIX).tempdir_in(root)?;
+        std::fs::rename(journal, discarded.path().join("completed"))
+            .map_err(at("finish publishing to", root))?;
         if let Err(error) = sync_dir(root) {
             // Until retirement is durable, a crash may resurrect the journal.
             // Keep its images instead of deleting them during TempDir::drop.
             let _retained = discarded.keep();
             return Err(error);
         }
+        // `TempDir`'s own cleanup cannot delete names exFAT lists in another
+        // form; whatever this leaves, the next publication clears.
+        let _ = remove_tree(discarded.path());
         Ok(())
+    }
+}
+
+impl Drop for Publication {
+    fn drop(&mut self) {
+        // A stage that was not committed; see `remove_tree` for why
+        // `TempDir`'s own cleanup is not enough on a stick.
+        let _ = remove_tree(self.stage.path());
+    }
+}
+
+/// The name a journal entry is published under. A journal written before
+/// entries were exact carries the staging directory's listing, which on a
+/// FAT32 or exFAT stick mounted by macOS is NFD although the image was
+/// written in NFC; publishing under the listed form would name the file
+/// differently from both databases, and renaming from it fails. Take the
+/// NFC form whenever the image or the set-aside file answers to it, which
+/// on those drivers it always does, and the listed form otherwise.
+fn publish_as(journal: &Path, entry: &PublicationEntry) -> PathBuf {
+    if entry.exact {
+        return entry.path.clone();
+    }
+    let nfc = nfc_path(&entry.path);
+    let answers = |path: &Path| journal.join(path).exists() || journal.join(".previous").join(path).exists();
+    if nfc != entry.path && answers(&nfc) { nfc } else { entry.path.clone() }
+}
+
+/// Stages and retired journals a previous run left at `root`. Best effort:
+/// a leftover that will not go is no reason to refuse this export.
+fn remove_leftovers(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let ours = name.to_str().is_some_and(|n| n.starts_with(STAGE_PREFIX) || n.starts_with(RETIRED_PREFIX));
+        if ours && entry.file_type().is_ok_and(|t| t.is_dir()) {
+            let _ = remove_tree(&entry.path());
+        }
     }
 }
 
@@ -418,7 +602,9 @@ fn check_external_changes(
             continue;
         }
         let target = root.join(&entry.path);
-        if !target.try_exists()? || std::fs::metadata(&target)?.modified()? <= published_at {
+        if !target.try_exists().map_err(at("check", &target))?
+            || std::fs::metadata(&target).and_then(|m| m.modified()).map_err(at("check", &target))? <= published_at
+        {
             continue;
         }
         let image = journal.join(&entry.path);
@@ -493,8 +679,9 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
         .write(true)
         .create(true)
         .truncate(false)
-        .open(root.join(".rbxport-write.lock"))?;
-    fs2::FileExt::lock_exclusive(&file)?;
+        .open(root.join(".rbxport-write.lock"))
+        .map_err(at("open the write lock on", root))?;
+    fs2::FileExt::lock_exclusive(&file).map_err(at("lock", root))?;
     Ok(file)
 }
 
@@ -636,21 +823,25 @@ mod tests {
                 path: "PIONEER/._rekordbox".into(),
                 present: true,
                 had_target: None,
+                exact: false,
             },
             PublicationEntry {
                 path: "Contents/._01".into(),
                 present: true,
                 had_target: None,
+                exact: false,
             },
             PublicationEntry {
                 path: "Contents/01/._missing.wav".into(),
                 present: true,
                 had_target: None,
+                exact: false,
             },
             PublicationEntry {
                 path: "PIONEER/rekordbox/exportLibrary.db".into(),
                 present: true,
                 had_target: None,
+                exact: false,
             },
         ];
         write_file(
@@ -687,6 +878,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: None,
+                exact: false,
             }])
             .unwrap(),
         );
@@ -714,6 +906,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: None,
+                exact: false,
             }])
             .unwrap(),
         );
@@ -738,6 +931,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: None,
+                exact: false,
             }])
             .unwrap(),
         );
@@ -770,11 +964,13 @@ mod tests {
                     path: "PIONEER/first.pdb".into(),
                     present: true,
                     had_target: None,
+                    exact: false,
                 },
                 PublicationEntry {
                     path: db.into(),
                     present: true,
                     had_target: None,
+                    exact: false,
                 },
             ])
             .unwrap(),
@@ -806,6 +1002,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: None,
+                exact: false,
             }])
             .unwrap(),
         );
@@ -829,6 +1026,7 @@ mod tests {
                 path: path.into(),
                 present: false,
                 had_target: None,
+                exact: false,
             }])
             .unwrap(),
         );
@@ -855,6 +1053,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: Some(true),
+                exact: false,
             }])
             .unwrap(),
         );
@@ -878,6 +1077,7 @@ mod tests {
                 path: path.into(),
                 present: true,
                 had_target: Some(false),
+                exact: false,
             }])
             .unwrap(),
         );
@@ -945,5 +1145,123 @@ mod tests {
         let error = persist_new_with(temp, &root.path().join("other.db"), denied).unwrap_err();
         assert_eq!(error.raw_os_error(), Some(13));
         assert!(!root.path().join("other.db").exists());
+    }
+
+    #[test]
+    fn paths_are_brought_to_nfc_component_by_component() {
+        assert_eq!(
+            nfc_path(Path::new("Contents/Bjo\u{308}rk/Kesa\u{308}.mp3")),
+            PathBuf::from("Contents/Bj\u{f6}rk/Kes\u{e4}.mp3")
+        );
+        assert_eq!(nfc_path(Path::new("PIONEER/rekordbox/export.pdb")), PathBuf::from("PIONEER/rekordbox/export.pdb"));
+    }
+
+    /// A journal an earlier version wrote on a FAT32 stick mounted by macOS:
+    /// its paths are the stage's listing, in NFD, while the images were
+    /// written in NFC. Renaming from the listed name failed with "No such
+    /// file or directory", and every later sync and import failed the same
+    /// way trying to recover it (#161). It must publish, under the NFC
+    /// name both databases use.
+    #[test]
+    fn a_journal_of_listed_nfd_names_publishes_under_the_nfc_names() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let nfc = "Contents/Bj\u{f6}rk/Album/Kes\u{e4}.mp3";
+        let nfd = "Contents/Bjo\u{308}rk/Album/Kesa\u{308}.mp3";
+        write_file(&journal.join(nfc), b"audio");
+        write_file(&journal.join("PIONEER/rekordbox/export.pdb"), b"pdb");
+        write_file(
+            &journal.join("publication.json"),
+            // As the earlier version wrote it: no `exact` field.
+            &serde_json::to_vec(&serde_json::json!([
+                {"path": nfd, "present": true, "had_target": false},
+                {"path": "PIONEER/rekordbox/export.pdb", "present": true, "had_target": false},
+            ]))
+            .unwrap(),
+        );
+        assert_ne!(nfc, nfd);
+
+        Publication::recover(root.path(), ".journal").unwrap();
+
+        assert!(!journal.exists());
+        let album = root.path().join("Contents/Bj\u{f6}rk/Album");
+        let listed: Vec<String> = std::fs::read_dir(&album)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| !n.starts_with("._"))
+            .collect();
+        // The temporary directory keeps the form a name was given in, so
+        // its listing shows the form the file was published under.
+        assert_eq!(listed, vec!["Kes\u{e4}.mp3".to_owned()]);
+        assert_eq!(std::fs::read(root.path().join(nfc)).unwrap(), b"audio");
+        assert_eq!(std::fs::read(root.path().join("PIONEER/rekordbox/export.pdb")).unwrap(), b"pdb");
+    }
+
+    #[test]
+    fn a_journal_entry_with_an_exact_path_is_published_as_written() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let nfd = "Contents/Kesa\u{308}.mp3";
+        write_file(&journal.join(nfd), b"audio");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry { path: nfd.into(), present: true, had_target: Some(false), exact: true }]).unwrap(),
+        );
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert_eq!(std::fs::read(root.path().join(nfd)).unwrap(), b"audio");
+    }
+
+    #[test]
+    fn an_abandoned_stage_is_deleted_and_a_stale_one_cleared() {
+        let root = tempfile::tempdir().unwrap();
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        write_file(&publication.stage().join("Contents/a.mp3"), b"audio");
+        let stage = publication.stage().to_owned();
+        assert!(stage.file_name().unwrap().to_str().unwrap().starts_with(STAGE_PREFIX));
+        drop(publication);
+        assert!(!stage.exists());
+
+        // What an export that could not delete its stage leaves behind
+        // (exFAT on macOS lists names it will not delete): the next
+        // publication on the device clears it, and nothing else.
+        let left_behind = root.path().join(format!("{STAGE_PREFIX}old"));
+        write_file(&left_behind.join("Contents/b.mp3"), b"audio");
+        let retired = root.path().join(format!("{RETIRED_PREFIX}old"));
+        write_file(&retired.join("completed/publication.json"), b"[]");
+        write_file(&root.path().join(".tmpOther/keep"), b"someone else's");
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        assert!(!left_behind.exists());
+        assert!(!retired.exists());
+        assert!(root.path().join(".tmpOther/keep").exists());
+        drop(publication);
+    }
+
+    #[test]
+    fn a_committed_publication_leaves_no_stage_or_journal() {
+        let root = tempfile::tempdir().unwrap();
+        let publication = Publication::new(root.path(), ".journal").unwrap();
+        write_file(&publication.stage().join("PIONEER/rekordbox/export.pdb"), b"pdb");
+        publication.commit(&["PIONEER/rekordbox/export.pdb".into()]).unwrap();
+        drop(publication);
+        let left: Vec<String> = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert!(left.iter().all(|n| n == "PIONEER" || n == ".rbxport-write.lock"), "{left:?}");
+    }
+
+    #[test]
+    fn a_failed_rename_names_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        write_file(&journal.join("Contents/a.mp3"), b"audio");
+        // A plain file where the folder must go.
+        write_file(&root.path().join("Contents"), b"not a folder");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[PublicationEntry { path: "Contents/a.mp3".into(), present: true, had_target: Some(false), exact: true }]).unwrap(),
+        );
+        let error = Publication::recover(root.path(), ".journal").unwrap_err();
+        assert!(error.to_string().contains("Contents"), "{error}");
     }
 }

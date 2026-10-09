@@ -1155,6 +1155,9 @@ pub fn export_cancellable(
         .map(|(_, track)| track.id)
         .collect();
     let retained: BTreeSet<String> = recorded.iter().flat_map(|track| [track.audio.to_lowercase(), track.anlz_dir.to_lowercase()]).collect();
+    // The audio paths as both databases name them, which is what the staged
+    // copies are published under.
+    let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
     before.check_changes(previous.as_ref(), &after)?;
@@ -1177,7 +1180,8 @@ pub fn export_cancellable(
         loose,
     }
     .save_at(publication.stage(), root_name)?;
-    let mut files = staged_files(publication.stage())?;
+    let named: Vec<&str> = named.iter().map(String::as_str).collect();
+    let mut files = staged_files(publication.stage(), &named)?;
     // A rebuilt database never inherits WAL pages from its previous image.
     files.splice(0..0, [format!("{root_name}/rekordbox/exportLibrary.db-wal").into(), format!("{root_name}/rekordbox/exportLibrary.db-shm").into()]);
     files.extend(deletions);
@@ -1347,7 +1351,7 @@ pub fn create_library_with_root(
     let master_db_id = my_tag_master_db_id(sync);
     rbl_core::durable::write(&db_dir.join("exportExt.pdb"), &ext_pdb::build(my_tags, master_db_id))?;
     write_one_library(&db_dir, &[], &[], &[], &[], &[], my_tags, defaults, master_db_id, &snapshot::Snapshot::default(), None)?;
-    let files = staged_files(publication.stage())?;
+    let files = staged_files(publication.stage(), &[])?;
     publication.commit(&files)?;
     Ok(true)
 }
@@ -1737,18 +1741,48 @@ pub fn recover(destination: &Path) -> std::io::Result<()> {
     rbl_core::durable::Publication::recover(destination, PUBLICATION)
 }
 
-fn staged_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+/// The files staged under `root`, relative to it, under the names they are
+/// to be published as.
+///
+/// The directory listing is not that name on a stick mounted by macOS:
+/// its FAT32 and exFAT drivers list every name in NFD while the export
+/// writes NFC (`fat_safe`), and a FAT32 stick then refuses to rename the
+/// file by its listed name [OBS 2026-10-08; see `rbl_core::durable`]. So a
+/// listed path is published as the one of `named` it matches in NFC, which
+/// is how the databases name it, and in NFC when it matches none.
+fn staged_files(root: &Path, named: &[&str]) -> std::io::Result<Vec<PathBuf>> {
     fn walk(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() { walk(root, &entry.path(), files)?; }
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                // An AppleDouble companion can go with its file meanwhile.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e),
+            };
+            if file_type.is_dir() { walk(root, &entry.path(), files)?; }
             else { files.push(entry.path().strip_prefix(root).map_err(std::io::Error::other)?.to_owned()); }
         }
         Ok(())
     }
+    let named: BTreeMap<PathBuf, PathBuf> = named
+        .iter()
+        .map(|path| {
+            let path = PathBuf::from(path.trim_start_matches('/'));
+            (rbl_core::durable::nfc_path(&path), path)
+        })
+        .collect();
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
+    let mut files: Vec<PathBuf> = files
+        .into_iter()
+        .map(|listed| {
+            let nfc = rbl_core::durable::nfc_path(&listed);
+            named.get(&nfc).cloned().unwrap_or(nfc)
+        })
+        .collect();
     files.sort();
+    files.dedup();
     Ok(files)
 }
 
@@ -1794,6 +1828,33 @@ mod tests {
             .is_some_and(|extension| extension.eq_ignore_ascii_case("aiff")));
         assert_eq!(fat_file_name("Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff"),
             "Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff");
+    }
+
+    /// macOS lists a FAT32 or exFAT stick's names in NFD whatever form they
+    /// were written in, and a FAT32 stick will not rename a file by that
+    /// name: publishing from the listing failed at 99% with "No such file or
+    /// directory" (#122, #161). The listing has to come back as the names
+    /// the databases use. A temporary directory keeps the form a name is
+    /// given in, so an NFD file here lists the way the stick does.
+    #[test]
+    fn staged_files_are_published_under_the_names_the_databases_use() {
+        let stage = tempfile::tempdir().unwrap();
+        let listed_nfd = stage.path().join("Contents/Bjo\u{308}rk/Album/Kesa\u{308}.mp3");
+        std::fs::create_dir_all(listed_nfd.parent().unwrap()).unwrap();
+        std::fs::write(&listed_nfd, b"audio").unwrap();
+        let other = stage.path().join("Contents/Bjo\u{308}rk/Album/Ebano\u{301}.mp3");
+        std::fs::write(&other, b"audio").unwrap();
+        std::fs::create_dir_all(stage.path().join("PIONEER/rekordbox")).unwrap();
+        std::fs::write(stage.path().join("PIONEER/rekordbox/export.pdb"), b"pdb").unwrap();
+
+        // One named by the databases (in NFC, as `fat_safe` writes names),
+        // one not named at all.
+        let files = staged_files(stage.path(), &["/Contents/Bj\u{f6}rk/Album/Kes\u{e4}.mp3"]).unwrap();
+        assert_eq!(files, vec![
+            PathBuf::from("Contents/Bj\u{f6}rk/Album/Eban\u{f3}.mp3"),
+            PathBuf::from("Contents/Bj\u{f6}rk/Album/Kes\u{e4}.mp3"),
+            PathBuf::from("PIONEER/rekordbox/export.pdb"),
+        ]);
     }
 
     #[test]
