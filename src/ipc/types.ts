@@ -815,6 +815,20 @@ export interface Backend {
    */
   autoRelocate(search: RelocateSearch, tracks: string[] | null): Promise<RelocateReport>;
 
+  /** What Organize Library would move into `root`, without moving anything. */
+  organizePreview(root: string): Promise<OrganizePreview>;
+  /**
+   * Moves every track's file into `root` as `<Artist>/<Album>/<file name>`
+   * and points the library at it: this fork's own, not rekordbox's.
+   */
+  organizeLibrary(root: string): Promise<OrganizeReport>;
+  /** Puts the last Organize Library's files back where they were. */
+  undoOrganize(): Promise<OrganizeUndo>;
+  /** The last Organize Library that can be undone, or null. */
+  lastOrganize(): Promise<OrganizeLast | null>;
+  /** Files moved so far, while Organize Library runs. Returns its own unsubscribe. */
+  onOrganizeProgress(listener: (progress: OrganizeProgress) => void): () => void;
+
   /** Opens a folder picker; null when it is cancelled. */
   pickFolder(title: string): Promise<string | null>;
   /** The platform's file dialog for one JPEG or PNG; null when cancelled. */
@@ -1544,6 +1558,45 @@ export interface RelocateSearch {
   music: boolean;
   video: boolean;
   desktop: boolean;
+}
+
+/** What Organize Library would do. */
+export interface OrganizePreview {
+  /** Files to move, and the tracks pointing at them. */
+  files: number;
+  tracks: number;
+  bytes: number;
+  /** Tracks whose file is already where it belongs. */
+  inPlace: number;
+  /** Tracks whose file is not there to move. */
+  missing: number;
+  /** Cloud-shared, streamed and rekordbox's own tracks. */
+  leftAlone: number;
+}
+
+/** What Organize Library did. */
+export interface OrganizeReport {
+  files: number;
+  tracks: number;
+  /** Files that could not be moved, with why; their tracks are unchanged. */
+  failed: string[];
+}
+
+export interface OrganizeUndo {
+  files: number;
+  /** Files no longer where Organize Library put them, left as they are. */
+  skipped: number;
+}
+
+export interface OrganizeLast {
+  /** Unix milliseconds. */
+  at: number;
+  files: number;
+}
+
+export interface OrganizeProgress {
+  done: number;
+  total: number;
 }
 
 /** What an automatic relocate did. */

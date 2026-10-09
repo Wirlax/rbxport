@@ -16,7 +16,7 @@ import type {
   AppErrorDto, Backend, Backup, BackupProgress, BackupSizes, Cue, DeckEvent, Device, DeviceSettings, Edits, ExplorerRoot, ExportReport,
   DatabaseDrive, EditHistoryState, FilterValues, GridState, LibraryProblem, LibrarySummary, Limiter, LinkPeerSeen, LinkStatus, RelatedCriterion, RowDto, SortKey,
   SelectionDetails, SmartRule, StickDefaults, SyncPlaylist, SyncProgress, Tick, TrackDetails, TrackField,
-  PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
+  OrganizeProgress, PreferencesRequest, RelocateSearch, UpdateCheck, UpdateProgress, UpdateReady, ExportProgress,
   DeckId, TrackFilter, TreeNode, ViewHandle, ViewSpec, WaveformKind,
 } from "./types";
 import { TREE_ROOT } from "./types";
@@ -1619,6 +1619,15 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   };
 
   const importListeners = new Set<(progress: ExportProgress) => void>();
+  const organizeListeners = new Set<(progress: OrganizeProgress) => void>();
+  let lastOrganize: { at: number; moves: { row: RowDto; from: string }[] } | null = null;
+  /** Organize Library's moves into `root`: every present track not yet under its artist and album. */
+  const organizeMoves = (root: string) => all.flatMap((row) => {
+    const from = String(row.extra?.location ?? "");
+    if (row.missing === true || from === "") return [];
+    const to = `${root}/${row.artist || "Unknown Artist"}/${row.album || "Unknown Album"}/${from.split("/").pop() ?? ""}`;
+    return to === from ? [] : [{ row, from, to }];
+  });
   const wait = <T>(value: T): Promise<T> =>
     latency > 0 ? new Promise((r) => setTimeout(() => r(value), latency)) : Promise.resolve(value);
 
@@ -2794,6 +2803,42 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (found.length > 0) await bump();
       return { relocated: found.length, unresolved: gone.length - found.length };
     },
+    // Organize Library over the rows' locations: every track that is not
+    // missing is filed under its artist and album, and the last run is kept
+    // to be undone.
+    organizePreview: (root) => {
+      const moves = organizeMoves(root);
+      return wait({
+        files: moves.length,
+        tracks: moves.length,
+        bytes: moves.reduce((sum, { row }) => sum + Number(row.extra?.size ?? 0), 0),
+        inPlace: all.filter((row) => row.missing !== true).length - moves.length,
+        missing: all.filter((row) => row.missing === true).length,
+        leftAlone: 0,
+      });
+    },
+    organizeLibrary: async (root) => {
+      const moves = organizeMoves(root);
+      moves.forEach(({ row, to }, done) => {
+        organizeListeners.forEach((listener) => listener({ done, total: moves.length }));
+        if (row.extra) row.extra.location = to;
+      });
+      organizeListeners.forEach((listener) => listener({ done: moves.length, total: moves.length }));
+      if (moves.length > 0) {
+        lastOrganize = { at: Date.now(), moves: moves.map(({ row, from }) => ({ row, from })) };
+        await bump();
+      }
+      return { files: moves.length, tracks: moves.length, failed: [] };
+    },
+    undoOrganize: async () => {
+      const run = lastOrganize;
+      lastOrganize = null;
+      for (const { row, from } of run?.moves ?? []) if (row.extra) row.extra.location = from;
+      if (run) await bump();
+      return { files: run?.moves.length ?? 0, skipped: 0 };
+    },
+    lastOrganize: () => wait(lastOrganize ? { at: lastOrganize.at, files: lastOrganize.moves.length } : null),
+    onOrganizeProgress: (listener) => { organizeListeners.add(listener); return () => { organizeListeners.delete(listener); }; },
     // No dialogs in a browser: the folder is a fixed one, so the search
     // folders list can be driven end to end.
     pickFolder: () => wait("/Users/mock/Music/Moved"),

@@ -160,3 +160,99 @@ describe("Database management", () => {
     expect(select!.value).toBe(local.masterDb);
   });
 });
+
+describe("Organize Library", () => {
+  const folder = "/Users/x/Music Folder";
+  const preview = { files: 3, tracks: 4, bytes: 3 * 1024 ** 2, inPlace: 1, missing: 2, leftAlone: 5 };
+
+  async function mountOrganize(backend: Partial<Backend>, protectLibrary = false) {
+    __setBackend({
+      listBackups,
+      findDuplicates: vi.fn(),
+      databaseDrives: vi.fn().mockResolvedValue([]),
+      lastOrganize: vi.fn().mockResolvedValue(null),
+      onOrganizeProgress: vi.fn(() => () => {}),
+      ...backend,
+    } as unknown as Backend);
+    const preferences = {
+      ...DEFAULT_PREFERENCES,
+      advanced: { ...DEFAULT_PREFERENCES.advanced, protectLibrary, musicFolder: folder },
+    };
+    act(() => root.render(
+      <PreferencesProvider value={{ preferences, update, reset: vi.fn() }}>
+        <AdvancedPane tab="database" summary={{ trackCount: 1, playlistCount: 1, dbVersion: "6000", readOnly: false } as never} />
+      </PreferencesProvider>,
+    ));
+    await settle();
+  }
+
+  async function settle() {
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+  }
+
+  function button(label: string): HTMLButtonElement {
+    const found = [...host.querySelectorAll("button")].find((b) => b.textContent === label);
+    if (!found) throw new Error(`${label} missing`);
+    return found;
+  }
+
+  async function press(label: string) {
+    act(() => { button(label).click(); });
+    await settle();
+  }
+
+  it("says what it would move, asks, backs up, then organizes", async () => {
+    const calls: string[] = [];
+    const confirm = vi.fn().mockResolvedValue(true);
+    const backUpLibrary = vi.fn(() => { calls.push("backup"); return Promise.resolve("/backups/x"); });
+    const organizeLibrary = vi.fn(() => { calls.push("organize"); return Promise.resolve({ files: 3, tracks: 4, failed: [] }); });
+    await mountOrganize({ organizePreview: vi.fn().mockResolvedValue(preview), confirm, backUpLibrary, organizeLibrary });
+
+    expect(host.textContent).toContain(folder);
+    await press("Organize Library…");
+
+    expect(confirm).toHaveBeenCalledWith([
+      `Organize the library into ${folder}?`,
+      "",
+      "Files to move: 3 (3.0 MB)",
+      "Already in place: 1",
+      "Missing, not moved: 2",
+      "Left alone (rekordbox’s own files, cloud and streaming): 5",
+      "",
+      "The library is backed up first, and this can be undone.",
+    ].join("\n"), { yes: "Organize", no: "Cancel" });
+    expect(calls).toEqual(["backup", "organize"]);
+    expect(organizeLibrary).toHaveBeenCalledWith(folder);
+    expect(host.textContent).toContain("Files moved: 3");
+  });
+
+  it("moves nothing when the answer is no", async () => {
+    const organizeLibrary = vi.fn();
+    const backUpLibrary = vi.fn();
+    await mountOrganize({
+      organizePreview: vi.fn().mockResolvedValue(preview), confirm: vi.fn().mockResolvedValue(false), backUpLibrary, organizeLibrary,
+    });
+    await press("Organize Library…");
+    expect(backUpLibrary).not.toHaveBeenCalled();
+    expect(organizeLibrary).not.toHaveBeenCalled();
+  });
+
+  it("is locked by Library Protection, and says so", async () => {
+    await mountOrganize({}, true);
+    expect(button("Organize Library…").disabled).toBe(true);
+    expect(host.textContent).toContain("Editing is locked by Library Protection. Turn it off in Preferences to edit.");
+  });
+
+  it("puts the last run back after asking", async () => {
+    const undoOrganize = vi.fn().mockResolvedValue({ files: 2, skipped: 0 });
+    const confirm = vi.fn().mockResolvedValue(true);
+    await mountOrganize({
+      lastOrganize: vi.fn().mockResolvedValueOnce({ at: 0, files: 2 }).mockResolvedValue(null), confirm, undoOrganize,
+    });
+    await press("Undo Last Organize");
+    expect(confirm.mock.calls[0]?.[0]).toContain("Put the 2 files moved on");
+    expect(undoOrganize).toHaveBeenCalled();
+    expect(host.textContent).toContain("Files put back: 2");
+    expect(button("Undo Last Organize").disabled).toBe(true);
+  });
+});

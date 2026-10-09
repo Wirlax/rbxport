@@ -12,7 +12,8 @@ import type {
   UpdateProgress, UpdateReady, XmlImportReport,
   ExportProgress, ExportReport, ExplorerChildren, ExplorerRoot, FilterValues, FolderPlaylistReport, Phrase, ImportReport,
   DatabaseDrive, EditHistoryState, ItunesLibrary, LibraryProblem, LibrarySummary, LinkPeerSeen, Meters,
-  LinkStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto, ScriptRequest, Tick,
+  LinkStatus, MissingExportFile, MissingTrack, MissingTracks, PreviewState, UnanalysedTracks, ReferenceStickSettings, RelocateReport, RowDto,
+  OrganizeLast, OrganizePreview, OrganizeProgress, OrganizeReport, OrganizeUndo, ScriptRequest, Tick,
   TreeNode, ViewHandle,
   SelectionDetails, TrackDetails, TrackLookups,
 } from "./types";
@@ -461,6 +462,11 @@ async function realBackend(): Promise<Backend> {
     relocationTargets: (tracks) => invoke<MissingTrack[]>("relocation_targets", { tracks }),
     relocateByLocation: (tracks, from, to) => invoke<number>("relocate_by_location", { tracks, from, to }),
     autoRelocate: (search, tracks) => invoke<RelocateReport>("auto_relocate", { search, tracks }),
+    organizePreview: (root) => invoke<OrganizePreview>("organize_preview", { root }),
+    organizeLibrary: (root) => invoke<OrganizeReport>("organize_library", { root }),
+    undoOrganize: () => invoke<OrganizeUndo>("undo_organize"),
+    lastOrganize: () => invoke<OrganizeLast | null>("last_organize"),
+    onOrganizeProgress: (listener) => subscribe<OrganizeProgress>("organize:progress", listener),
     pickImage: async (title) => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({
