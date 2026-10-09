@@ -1423,7 +1423,9 @@ define_class!(
 );
 
 /// This fork's own: `place mini sets {{…}, {…}} to playlist …`, or
-/// `… creating playlist "…"` for a new one at the top of the tree.
+/// `… creating playlist "…"` for a new one at the top of the tree, or
+/// `place mini sets {{…}} to playlist … replacing "SEPARATORBREMSEN 100"`
+/// to change that block (`{{}}` takes it out).
 ///
 /// Unlike every other edit here, Library Protection does not hold it back:
 /// its caller, the fork's MCP server, sends only blocks Ronan has confirmed in
@@ -1446,7 +1448,28 @@ fn place_mini_sets(command: &NSScriptCommand) {
             if kind != Some(model::KIND_PLAYLIST) {
                 return fail(&ScriptError::failed("Mini-sets go in a regular playlist."));
             }
-            crate::mini_sets::Target::Playlist(playlist.to_string())
+            if given(command, "replacing") {
+                let separator = match argument(command, "replacing").map(|title| from_objc(Some(&title))) {
+                    Some(ScriptValue::Text(title)) => rbl_db::mini_sets::Separator::parse(&title),
+                    _ => None,
+                };
+                let Some(separator) = separator else {
+                    return fail(&ScriptError::wrong_type(
+                        "Say which block by its separator: `replacing \"SEPARATORBREMSEN 100\"`.",
+                    ));
+                };
+                if blocks.len() != 1 {
+                    return fail(&ScriptError::wrong_type(
+                        "A change is to one block: `{{\"12\", \"34\"}}`, or `{{}}` to take it out.",
+                    ));
+                }
+                crate::mini_sets::Target::Change { playlist: playlist.to_string(), separator }
+            } else {
+                crate::mini_sets::Target::Playlist(playlist.to_string())
+            }
+        }
+        (false, true) if given(command, "replacing") => {
+            return fail(&ScriptError::wrong_type("Only a block in a playlist already there can be replaced."))
         }
         (false, true) => match argument(command, "newPlaylist").map(|name| from_objc(Some(&name))) {
             Some(ScriptValue::Text(name)) => crate::mini_sets::Target::New(name),
