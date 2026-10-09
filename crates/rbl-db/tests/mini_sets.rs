@@ -153,3 +153,64 @@ fn an_unknown_track_or_a_folder_is_refused() {
     let reason = refusal(f.writer.add_mini_sets(&folder, &blocks(&[&[0]])));
     assert!(reason.contains("is a folder"), "{reason}");
 }
+
+impl Fixture {
+    /// Membership rows of `playlist` soft-deleted so far.
+    fn deleted(&self, playlist: &str) -> Vec<String> {
+        let conn = self.writer.library().connection();
+        let mut stmt = conn
+            .prepare("SELECT ContentID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 1 ORDER BY ContentID")
+            .unwrap();
+        stmt.query_map(params![playlist], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+    }
+}
+
+#[test]
+fn a_block_changes_in_place_keeping_the_rows_it_keeps() {
+    let mut f = fixture();
+    let playlist = playlist_id(0);
+    f.writer.add_mini_sets(&playlist, &blocks(&[&[0, 1], &[2]])).unwrap();
+    let before = f.members(&playlist);
+
+    let changed = f.writer.change_mini_set(&playlist, Separator::Head, &ids(&[1, 3])).unwrap();
+
+    assert_eq!(f.contents(&playlist), ids(&[20, 1, 3, 21, 2]));
+    let after = f.members(&playlist);
+    assert_eq!(after[1].row, before[2].row, "track 1 kept its row, moved up one");
+    assert_eq!(f.deleted(&playlist), ids(&[0]));
+    let numbers: Vec<i64> = after.iter().map(|m| m.track_no).collect();
+    assert_eq!(numbers, [1, 2, 3, 4, 5]);
+    assert_eq!(changed.usn, f.counter());
+}
+
+#[test]
+fn an_emptied_block_leaves_with_its_separator() {
+    let mut f = fixture();
+    let playlist = playlist_id(0);
+    f.writer.add_mini_sets(&playlist, &blocks(&[&[0, 1], &[2]])).unwrap();
+
+    f.writer.change_mini_set(&playlist, Separator::Numbered(100), &[]).unwrap();
+
+    assert_eq!(f.contents(&playlist), ids(&[20, 0, 1]));
+    let mut gone = ids(&[2, 21]);
+    gone.sort();
+    assert_eq!(f.deleted(&playlist), gone);
+    // `100` is free again, so the next block takes it.
+    let (_, placed) = f.writer.add_mini_sets(&playlist, &blocks(&[&[4]])).unwrap();
+    assert_eq!(placed[0].separator, Separator::Numbered(100));
+}
+
+#[test]
+fn a_refused_change_leaves_the_playlist_and_the_counter_alone() {
+    let mut f = fixture();
+    let playlist = playlist_id(0);
+    f.writer.add_mini_sets(&playlist, &blocks(&[&[0, 1], &[2]])).unwrap();
+    let before = f.members(&playlist);
+    let counter = f.counter();
+
+    let reason = refusal(f.writer.change_mini_set(&playlist, Separator::Numbered(100), &ids(&[0])));
+
+    assert!(reason.contains("elsewhere in the playlist"), "{reason}");
+    assert_eq!(f.members(&playlist), before);
+    assert_eq!(f.counter(), counter);
+}

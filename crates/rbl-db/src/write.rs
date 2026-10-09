@@ -1296,66 +1296,42 @@ impl Writer {
         playlist: &str,
         blocks: &[Vec<String>],
     ) -> Result<(Changed, Vec<crate::mini_sets::Placement>)> {
-        use crate::mini_sets::{self, Slot};
+        use crate::mini_sets;
 
         self.prepare()?;
-        let stamp = time::now();
         let tx = self.library.connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let attribute: Option<i64> = tx
-            .query_row(
-                "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
-                params![playlist],
-                |r| r.get(0),
-            )
-            .optional()?;
-        match attribute {
-            None => return Err(DbError::WriteRefused(format!("no playlist {playlist}"))),
-            Some(ATTRIBUTE_FOLDER) => {
-                return Err(DbError::WriteRefused(format!("{playlist} is a folder, not a playlist")))
-            }
-            Some(_) => refuse_if_smart(&tx, playlist)?,
-        }
-        for content in blocks.iter().flatten() {
-            if !content_exists(&tx, content)? {
-                return Err(DbError::WriteRefused(format!("no track {content}")));
-            }
-        }
+        refuse_unless_playlist(&tx, playlist)?;
+        refuse_unknown_tracks(&tx, blocks.iter().flatten())?;
         let entries = mini_sets::entries(&tx, playlist)?;
         let plan = mini_sets::plan(&entries, &mini_sets::separators(&tx)?, blocks)?;
-
-        let mut rows = 0;
-        let mut usn = 0;
-        for (track_no, slot) in (1_i64..).zip(&plan.order) {
-            match slot {
-                Slot::Kept(index) => {
-                    let Some(entry) = entries.get(*index) else { continue };
-                    if entry.track_no == track_no {
-                        continue;
-                    }
-                    usn = next_usn(&tx)?;
-                    rows += tx.execute(
-                        "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
-                         WHERE ID = ?4",
-                        params![track_no, usn, stamp, entry.row],
-                    )?;
-                }
-                Slot::Added(content) => {
-                    usn = next_usn(&tx)?;
-                    rows += tx.execute(
-                        "INSERT INTO djmdSongPlaylist
-                            (ID, PlaylistID, ContentID, TrackNo, UUID,
-                             rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
-                             usn, rb_local_usn, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
-                        params![self.rng.uuid4(), playlist, content, track_no, self.rng.uuid4(), usn, stamp],
-                    )?;
-                }
-            }
-        }
-        set_counter(&tx, usn)?;
+        let changed = lay_out(&tx, &mut self.rng, playlist, &entries, &plan.order, &[])?;
         tx.commit()?;
-        Ok((Changed { rows, usn }, plan.placements))
+        Ok((changed, plan.placements))
+    }
+
+    /// This fork's own: the block after `separator` holds `tracks` instead,
+    /// or, with no tracks, leaves the playlist with its separator, as
+    /// [`crate::mini_sets::change`] says. One transaction, like
+    /// [`Writer::add_mini_sets`]; the rows that go are soft-deleted.
+    pub fn change_mini_set(
+        &mut self,
+        playlist: &str,
+        separator: crate::mini_sets::Separator,
+        tracks: &[String],
+    ) -> Result<Changed> {
+        use crate::mini_sets;
+
+        self.prepare()?;
+        let tx = self.library.connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        refuse_unless_playlist(&tx, playlist)?;
+        refuse_unknown_tracks(&tx, tracks.iter())?;
+        let entries = mini_sets::entries(&tx, playlist)?;
+        let change = mini_sets::change(&entries, &mini_sets::separators(&tx)?, separator, tracks)?;
+        let changed = lay_out(&tx, &mut self.rng, playlist, &entries, &change.order, &change.removed)?;
+        tx.commit()?;
+        Ok(changed)
     }
 
     // ---------------------------------------------------------------- import
@@ -2901,6 +2877,90 @@ fn intern(
     )?;
     set_counter(conn, usn)?;
     Ok(Some(id))
+}
+
+// ------------------------------------------------- mini-sets (fork's own)
+
+/// A regular playlist that is there, or the reason it will not do.
+fn refuse_unless_playlist(conn: &Connection, playlist: &str) -> Result<()> {
+    let attribute: Option<i64> = conn
+        .query_row(
+            "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            params![playlist],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match attribute {
+        None => Err(DbError::WriteRefused(format!("no playlist {playlist}"))),
+        Some(ATTRIBUTE_FOLDER) => Err(DbError::WriteRefused(format!("{playlist} is a folder, not a playlist"))),
+        Some(_) => refuse_if_smart(conn, playlist),
+    }
+}
+
+fn refuse_unknown_tracks<'a>(conn: &Connection, contents: impl Iterator<Item = &'a String>) -> Result<()> {
+    for content in contents {
+        if !content_exists(conn, content)? {
+            return Err(DbError::WriteRefused(format!("no track {content}")));
+        }
+    }
+    Ok(())
+}
+
+/// Writes a mini-set plan: `removed` rows soft-deleted, then every place in
+/// `order` numbered from 1 — a row already there touched only when its
+/// number moves, a track added as a new row — and the counter moved.
+fn lay_out(
+    conn: &Connection,
+    rng: &mut Rng,
+    playlist: &str,
+    entries: &[crate::mini_sets::Entry],
+    order: &[crate::mini_sets::Slot],
+    removed: &[usize],
+) -> Result<Changed> {
+    use crate::mini_sets::Slot;
+
+    let stamp = time::now();
+    let mut rows = 0;
+    let mut usn = 0;
+    for entry in removed.iter().filter_map(|&i| entries.get(i)) {
+        usn = next_usn(conn)?;
+        rows += conn.execute(
+            "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, rb_local_usn = ?1, updated_at = ?2
+             WHERE ID = ?3 AND rb_local_deleted = 0",
+            params![usn, stamp, entry.row],
+        )?;
+    }
+    for (track_no, slot) in (1_i64..).zip(order) {
+        match slot {
+            Slot::Kept(index) => {
+                let Some(entry) = entries.get(*index) else { continue };
+                if entry.track_no == track_no {
+                    continue;
+                }
+                usn = next_usn(conn)?;
+                rows += conn.execute(
+                    "UPDATE djmdSongPlaylist SET TrackNo = ?1, rb_local_usn = ?2, updated_at = ?3
+                     WHERE ID = ?4",
+                    params![track_no, usn, stamp, entry.row],
+                )?;
+            }
+            Slot::Added(content) => {
+                usn = next_usn(conn)?;
+                rows += conn.execute(
+                    "INSERT INTO djmdSongPlaylist
+                        (ID, PlaylistID, ContentID, TrackNo, UUID,
+                         rb_data_status, rb_local_data_status, rb_local_deleted, rb_local_synced,
+                         usn, rb_local_usn, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, ?7, ?7)",
+                    params![rng.uuid4(), playlist, content, track_no, rng.uuid4(), usn, stamp],
+                )?;
+            }
+        }
+    }
+    if rows > 0 {
+        set_counter(conn, usn)?;
+    }
+    Ok(Changed { rows, usn })
 }
 
 /// Whether a playlist or folder exists and is not deleted.
