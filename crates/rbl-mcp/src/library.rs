@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use rbl_core::musickey::{self, Key, Mode};
 use rbl_db::catalog::{self, CatalogNode, CatalogTrack};
 use rbl_db::mini_sets::{self, Placement, Separator};
-use rbl_db::write::{ATTRIBUTE_FOLDER, ATTRIBUTE_SMART, ROOT};
+use rbl_db::write::{ATTRIBUTE_FOLDER, ATTRIBUTE_PLAYLIST, ATTRIBUTE_SMART, ROOT};
 use rbl_db::{DbError, Library, LibraryLocation, OpenMode};
 use serde::Serialize;
 use unicode_normalization::UnicodeNormalization;
@@ -318,26 +318,54 @@ impl Snapshot {
 
     fn planned(&self, placement: Placement, block: &[String]) -> PlannedBlock {
         let transitions = self.transitions(block);
-        let warnings = transitions
-            .iter()
-            .filter_map(|t| {
-                let mut said = Vec::new();
-                if t.key == Some(Relation::Clash) {
-                    said.push(format!("key clash {} → {}", t.from_key, t.to_key));
-                }
-                if t.bpm_change.is_some_and(|d| d.abs() > BPM_JUMP) {
-                    said.push(format!("tempo jump of {:+} BPM", t.bpm_change.unwrap_or(0.0)));
-                }
-                (!said.is_empty()).then(|| format!("{} → {}: {}", t.from, t.to, said.join(", ")))
-            })
-            .collect();
         PlannedBlock {
             after: placement.separator.title(),
             into_reserved_slot: placement.reserved,
             tracks: block.iter().filter_map(|id| self.view_of(id)).collect(),
+            warnings: warnings(&transitions),
             transitions,
-            warnings,
         }
+    }
+
+    /// What changing the block after `separator` to `tracks` would do,
+    /// without writing; no tracks takes the block out. Refused exactly as
+    /// the write would be. Also answers the playlist's id for the write.
+    pub fn preview_change(&self, wanted: &str, separator: &str, tracks: &[String]) -> Result<(String, ChangePreview), String> {
+        let node = self.playlist(wanted)?;
+        if node.attribute != ATTRIBUTE_PLAYLIST {
+            return Err(format!("{} is not a regular playlist.", node.name));
+        }
+        for id in tracks {
+            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) || self.track(id).is_none() {
+                return Err(format!("No track has id {id:?}. Find tracks with search_tracks."));
+            }
+        }
+        let separator = separator_named(separator)?;
+        let entries = mini_sets::entries(self.db.connection(), &node.id).map_err(|e| e.to_string())?;
+        mini_sets::change(&entries, &self.separators, separator, tracks).map_err(|e| match e {
+            DbError::WriteRefused(reason) => reason,
+            other => other.to_string(),
+        })?;
+        let before = self
+            .layout_of(&node.id)
+            .blocks
+            .into_iter()
+            .find(|b| b.separator == separator)
+            .map(|b| b.tracks)
+            .unwrap_or_default();
+        let transitions = self.transitions(tracks);
+        Ok((
+            node.id.clone(),
+            ChangePreview {
+                playlist: node.name.clone(),
+                separator: separator.title(),
+                takes_the_block_out: tracks.is_empty(),
+                before: before.iter().filter_map(|id| self.view_of(id)).collect(),
+                after: tracks.iter().filter_map(|id| self.view_of(id)).collect(),
+                warnings: warnings(&transitions),
+                transitions,
+            },
+        ))
     }
 
     fn transitions(&self, block: &[String]) -> Vec<Transition> {
@@ -357,6 +385,39 @@ impl Snapshot {
             })
             .collect()
     }
+}
+
+/// Key clashes and tempo jumps, one line per transition that has either.
+fn warnings(transitions: &[Transition]) -> Vec<String> {
+    transitions
+        .iter()
+        .filter_map(|t| {
+            let mut said = Vec::new();
+            if t.key == Some(Relation::Clash) {
+                said.push(format!("key clash {} → {}", t.from_key, t.to_key));
+            }
+            if let Some(change) = t.bpm_change.filter(|d| d.abs() > BPM_JUMP) {
+                said.push(format!("tempo jump of {change:+} BPM"));
+            }
+            (!said.is_empty()).then(|| format!("{} → {}: {}", t.from, t.to, said.join(", ")))
+        })
+        .collect()
+}
+
+/// A block's separator as one may name it: its title, `100`, `099`, or
+/// `head` for the plain `SEPARATORBREMSEN`.
+pub fn separator_named(text: &str) -> Result<Separator, String> {
+    let text = text.trim();
+    if let Some(separator) = Separator::parse(text) {
+        return Ok(separator);
+    }
+    if text.eq_ignore_ascii_case("head") {
+        return Ok(Separator::Head);
+    }
+    text.parse::<u16>()
+        .ok()
+        .map(Separator::Numbered)
+        .ok_or_else(|| format!("{text:?} is not a separator: use its title as get_mini_sets shows it, like SEPARATORBREMSEN 100."))
 }
 
 /// Folders before their contents, siblings in order: the tree as the app
@@ -617,6 +678,19 @@ pub struct PlannedBlock {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ChangePreview {
+    pub playlist: String,
+    pub separator: String,
+    /// No tracks: the block leaves with its separator.
+    pub takes_the_block_out: bool,
+    pub before: Vec<TrackView>,
+    pub after: Vec<TrackView>,
+    pub transitions: Vec<Transition>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -748,5 +822,22 @@ mod tests {
         assert!(snap.preview(&Target::New("playlist 1".to_owned()), &blocks).unwrap_err().contains("already at the top"));
         assert!(snap.preview(&Target::Playlist("Playlist 1".to_owned()), &[vec![track_id(10)]]).unwrap_err().contains("already in the playlist"));
         assert!(snap.preview(&Target::Playlist("Playlist 1".to_owned()), &[vec!["nope".to_owned()]]).unwrap_err().contains("No track"));
+    }
+
+    #[test]
+    fn a_change_is_previewed_before_and_after() {
+        let f = fixture();
+        let snap = snapshot(&f);
+        let (id, preview) = snap.preview_change("Playlist 1", "head", &[track_id(11), track_id(12)]).unwrap();
+        assert_eq!(id, playlist_id(1));
+        assert_eq!(preview.separator, "SEPARATORBREMSEN");
+        assert_eq!(preview.before.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["Boulder", "Booyah Jale’s Edit"]);
+        assert_eq!(preview.after.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["Booyah Jale’s Edit", "Gave Birth"]);
+        assert!(preview.warnings[0].contains("key clash"), "{:?}", preview.warnings);
+
+        let (_, out) = snap.preview_change("Playlist 1", "SEPARATORBREMSEN", &[]).unwrap();
+        assert!(out.takes_the_block_out);
+        assert!(snap.preview_change("Playlist 1", "50", &[track_id(1)]).unwrap_err().contains("has no SEPARATORBREMSEN 050"));
+        assert!(snap.preview_change("Playlist 1", "nope", &[]).unwrap_err().contains("is not a separator"));
     }
 }
