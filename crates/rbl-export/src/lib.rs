@@ -844,7 +844,7 @@ pub fn export_cancellable(
             progress(&ExportProgress { stage: "copying", done: index, total: tracks.len(), title: track.title.clone() });
             let audio_dest = under(publication.stage(), &place.audio);
             if let Some(parent) = audio_dest.parent() {
-                std::fs::create_dir_all(parent)?;
+                std::fs::create_dir_all(parent).map_err(context(format!("Could not create the folder for '{}'", track.title)))?;
             }
             let written = match conversion {
                 Some(target) => rbl_audio::compatibility::convert(&track.source_path, &audio_dest, target)
@@ -857,7 +857,7 @@ pub fn export_cancellable(
                     return Err(ExportError::Conflict(format!("Source disappeared while copying '{}': {e}", track.title)));
                 }
                 Err(e) if is_device_gone(&e) => return Err(ExportError::DeviceGone),
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(context(format!("Could not copy '{}' to the USB", track.title))(e).into()),
             }
         }
 
@@ -923,9 +923,10 @@ pub fn export_cancellable(
         }
         if !track.analysis.is_empty() && !analysis_current {
             let anlz_dir = under(publication.stage(), &place.anlz_dir);
-            std::fs::create_dir_all(&anlz_dir)?;
+            let failed = context(format!("Could not write the analysis of '{}'", track.title));
+            std::fs::create_dir_all(&anlz_dir).map_err(&failed)?;
             for (extension, bytes) in analysis {
-                std::fs::write(anlz_dir.join(format!("ANLZ0000.{extension}")), bytes)?;
+                std::fs::write(anlz_dir.join(format!("ANLZ0000.{extension}")), bytes).map_err(&failed)?;
                 report.analysis_files += 1;
             }
         }
@@ -1150,11 +1151,11 @@ pub fn export_cancellable(
     });
     report.pdb_bytes = pdb.len();
     let staged_db = publication.stage().join(root_name).join("rekordbox");
-    std::fs::create_dir_all(&staged_db)?;
-    std::fs::write(staged_db.join("export.pdb"), &pdb)?;
+    std::fs::create_dir_all(&staged_db).map_err(context("Could not write export.pdb".to_owned()))?;
+    std::fs::write(staged_db.join("export.pdb"), &pdb).map_err(context("Could not write export.pdb".to_owned()))?;
     // The tags, for the player's My Tag browsing.
     let master_db_id = my_tag_master_db_id(sync);
-    std::fs::write(staged_db.join("exportExt.pdb"), ext_pdb::build(my_tags, master_db_id))?;
+    std::fs::write(staged_db.join("exportExt.pdb"), ext_pdb::build(my_tags, master_db_id)).map_err(context("Could not write exportExt.pdb".to_owned()))?;
 
     write_one_library(&staged_db, &one_library_tracks, playlists, &playlist_ids, &export_ids, &artwork_paths, my_tags, settings.as_ref().or(defaults), master_db_id, &before, Some(&existing_database))?;
     report.one_library = true;
@@ -1176,7 +1177,7 @@ pub fn export_cancellable(
         let kept = sync_record::read(destination).map(|r| r.timestamps).unwrap_or_default();
         let device_ids = playlists.iter().zip(&playlist_ids).map(|(p, id)| (p.id, *id)).collect();
         let bytes = sync_record::render_with_ids(sync, &ticked, rbl_core::time::unix_millis(), &kept, &device_ids);
-        for file in sync_record::FILES { std::fs::write(publication.stage().join(file.replacen("PIONEER/", &format!("{root_name}/"), 1)), &bytes)?; }
+        for file in sync_record::FILES { std::fs::write(publication.stage().join(file.replacen("PIONEER/", &format!("{root_name}/"), 1)), &bytes).map_err(context(format!("Could not write {file}")))?; }
     }
 
     // Last, so a run that fails part way leaves the older record standing and
@@ -1200,7 +1201,7 @@ pub fn export_cancellable(
     progress(&ExportProgress { stage: "verifying", done: tracks.len(), total: tracks.len(), title: String::new() });
     let verified = verification::verify_staged(publication.stage(), destination, &after)?;
     if !verified.is_ok() {
-        return Err(ExportError::Conflict(format!("Staged export did not verify: {:?}; {}", verified.missing_audio, verified.errors.join("; "))));
+        return Err(ExportError::Conflict(format!("The export did not verify, so the USB was left as it was: {}", verification_failure(&verified))));
     }
     Manifest {
         db_id,
@@ -1215,7 +1216,8 @@ pub fn export_cancellable(
             .collect(),
         loose,
     }
-    .save_at(publication.stage(), root_name)?;
+    .save_at(publication.stage(), root_name)
+    .map_err(context("Could not write the rbxport manifest".to_owned()))?;
     let named: Vec<&str> = named.iter().map(String::as_str).collect();
     let mut files = staged_files(publication.stage(), &named)?;
     // A rebuilt database never inherits WAL pages from its previous image.
@@ -1589,7 +1591,7 @@ fn write_one_library(
     }
     let created = rbl_core::time::local_date();
     builder.finish(&settings.device_name, &created, master_db_id).map_err(|e| one_library_error(&e))?;
-    rbl_core::durable::replace(&staged, &path)?;
+    rbl_core::durable::replace(&staged, &path).map_err(|e| ExportError::OneLibrary(e.to_string()))?;
     Ok(())
 }
 
@@ -1747,6 +1749,13 @@ pub fn copy_my_settings(destination: &Path, source: &Path) -> Result<usize> {
     Ok(written)
 }
 
+/// An I/O error that says what was being done when it happened, keeping its
+/// kind; the bare OS text ("No such file or directory") names nothing a
+/// user can act on.
+fn context(what: String) -> impl Fn(std::io::Error) -> std::io::Error {
+    move |error| std::io::Error::new(error.kind(), format!("{what}: {error}"))
+}
+
 /// Errors that mean the media was unplugged mid-write.
 fn is_device_gone(e: &std::io::Error) -> bool {
     matches!(
@@ -1768,6 +1777,23 @@ pub fn verify(destination: &Path) -> Result<VerifyReport> {
 
 pub fn verify_databases(destination: &Path) -> Result<VerifyReport> {
     verification::verify_databases(destination)
+}
+
+/// What a failed verification found, as one clause: the problems, then
+/// the audio it could not find, without an empty list when there is none.
+#[must_use]
+pub fn verification_failure(report: &VerifyReport) -> String {
+    let mut problems = report.errors.clone();
+    if !report.parsed && problems.is_empty() {
+        problems.push("the databases could not be read back".to_owned());
+    }
+    if !report.missing_audio.is_empty() {
+        const SHOWN: usize = 3;
+        let missing = report.missing_audio.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+        let more = report.missing_audio.len().saturating_sub(SHOWN);
+        problems.push(if more > 0 { format!("audio missing: {missing} and {more} more") } else { format!("audio missing: {missing}") });
+    }
+    problems.join("; ")
 }
 
 const PUBLICATION: &str = ".rbxport-publication";

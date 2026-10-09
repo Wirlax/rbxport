@@ -1,4 +1,4 @@
-use crate::{snapshot::Snapshot, Result};
+use crate::{snapshot::{Library, Snapshot}, Result};
 use std::{collections::BTreeSet, path::Path};
 #[derive(Debug, Clone, Default)]
 pub struct VerifyReport {
@@ -51,7 +51,7 @@ pub fn verify_databases(root: &Path) -> Result<VerifyReport> {
     };
     report.parsed = true;
     verify_track_records(root, &mut report.errors)?;
-    if legacy != one { report.errors.push("Device Library and OneLibrary disagree".into()); }
+    if legacy != one { report.errors.push(disagreement(legacy, one)); }
     report.tracks = legacy.tracks.len();
     report.playlists = legacy.playlists.len();
     report.playlist_entries = legacy.playlists.iter().map(|playlist| playlist.tracks.len()).sum();
@@ -80,9 +80,7 @@ pub(crate) fn verify_staged(
     report.parsed = true;
     verify_track_records(root, &mut report.errors)?;
     if legacy != one {
-        report
-            .errors
-            .push("Device Library and OneLibrary disagree".into());
+        report.errors.push(disagreement(legacy, one));
     }
     report.tracks = legacy.tracks.len();
     report.playlists = legacy.playlists.len();
@@ -133,6 +131,52 @@ pub(crate) fn verify_staged(
     }
     snapshot.check_retained_history(snapshot)?;
     Ok(report)
+}
+
+/// What differs between the two databases, first difference only: which
+/// track or playlist, and which of its fields, so a failed sync names
+/// something a user can look at rather than only that they disagree.
+fn disagreement(legacy: &Library, one: &Library) -> String {
+    const PREFIX: &str = "Device Library and OneLibrary disagree";
+    for track in &legacy.tracks {
+        let Some(other) = one.tracks.iter().find(|t| t.id == track.id) else {
+            return format!("{PREFIX}: track '{}' is only in export.pdb", track.title);
+        };
+        let fields = [
+            ("title", track.title != other.title),
+            ("artist", track.artist != other.artist),
+            ("album", track.album != other.album),
+            ("genre", track.genre != other.genre),
+            ("label", track.label != other.label),
+            ("key", track.key != other.key),
+            ("comment", track.comment != other.comment),
+            ("file path", track.path != other.path),
+            ("analysis path", track.analysis != other.analysis),
+            ("BPM", track.bpm != other.bpm),
+            ("rating", track.rating != other.rating),
+            ("colour", track.color != other.color),
+        ];
+        let differ: Vec<&str> = fields.iter().filter(|(_, differs)| *differs).map(|(name, _)| *name).collect();
+        if !differ.is_empty() {
+            return format!("{PREFIX} on the {} of track '{}'", differ.join(", "), track.title);
+        }
+    }
+    if let Some(track) = one.tracks.iter().find(|t| !legacy.tracks.iter().any(|l| l.id == t.id)) {
+        return format!("{PREFIX}: track '{}' is only in exportLibrary.db", track.title);
+    }
+    for playlist in &legacy.playlists {
+        match one.playlists.iter().find(|p| p.id == playlist.id) {
+            None => return format!("{PREFIX}: playlist '{}' is only in export.pdb", playlist.name),
+            Some(other) if other != playlist => {
+                return format!("{PREFIX} on playlist '{}'", playlist.name);
+            }
+            Some(_) => {}
+        }
+    }
+    if let Some(playlist) = one.playlists.iter().find(|p| !legacy.playlists.iter().any(|l| l.id == p.id)) {
+        return format!("{PREFIX}: playlist '{}' is only in exportLibrary.db", playlist.name);
+    }
+    PREFIX.to_owned()
 }
 
 fn verify_track_records(root: &Path, errors: &mut Vec<String>) -> Result<()> {
@@ -244,4 +288,27 @@ fn verify_assets(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::snapshot::{Playlist, Track};
+
+    /// A failed sync said only that the two databases disagree
+    /// (#161); it has to say where.
+    #[test]
+    fn a_disagreement_names_the_track_and_the_field() {
+        let track = Track { id: 1, title: "Kesä".into(), comment: "é".into(), ..Track::default() };
+        let legacy = Library { tracks: vec![track.clone()], playlists: vec![] };
+        let one = Library { tracks: vec![Track { comment: "é\0x".into(), ..track }], playlists: vec![] };
+        assert_eq!(disagreement(&legacy, &one), "Device Library and OneLibrary disagree on the comment of track 'Kesä'");
+
+        let playlist = Playlist { id: 4, name: "Warm up".into(), ..Playlist::default() };
+        let legacy = Library { tracks: vec![], playlists: vec![playlist.clone()] };
+        let one = Library { tracks: vec![], playlists: vec![Playlist { tracks: vec![1], ..playlist }] };
+        assert_eq!(disagreement(&legacy, &one), "Device Library and OneLibrary disagree on playlist 'Warm up'");
+        assert_eq!(disagreement(&legacy, &Library::default()), "Device Library and OneLibrary disagree: playlist 'Warm up' is only in export.pdb");
+    }
 }

@@ -1096,9 +1096,12 @@ fn sync_one_device<R: tauri::Runtime>(
         },
         Err(e) => {
             progress("failed");
-            tracing::warn!(destination, error = %e, "sync to one device failed");
-            set_export_failure(app, stick, e.message.clone());
-            SyncDeviceReportDto { path: destination, report: None, error: Some(e.message), ejected: false, eject_error: None }
+            tracing::warn!(destination, error = %e, detail = e.detail.as_deref().unwrap_or(""), "sync to one device failed");
+            // The Sync Manager shows this line on its own, so an internal
+            // error's detail — what actually failed — goes with its summary.
+            let message = e.full_message();
+            set_export_failure(app, stick, message.clone());
+            SyncDeviceReportDto { path: destination, report: None, error: Some(message), ejected: false, eject_error: None }
         }
     }
 }
@@ -1713,8 +1716,11 @@ fn write_export_with_phase(
     phase("verifying");
     let check = rbl_export::verify_databases(destination)
         .map_err(|e| AppError::new(ErrorKind::Internal, e.to_string()))?;
-    if !check.is_ok() || check.tracks != report.tracks {
-        return Err(AppError::internal(format!("USB verification failed: missing audio {:?}; {}", check.missing_audio, check.errors.join("; "))));
+    if !check.is_ok() {
+        return Err(AppError::internal(format!("The USB did not verify after the sync: {}", rbl_export::verification_failure(&check))));
+    }
+    if check.tracks != report.tracks {
+        return Err(AppError::internal(format!("The USB did not verify after the sync: it lists {} tracks where {} were written.", check.tracks, report.tracks)));
     }
 
     Ok(ExportReportDto {

@@ -42,6 +42,17 @@ impl AppError {
         self
     }
 
+    /// The message followed by the detail, as the webview's `errorMessage`
+    /// joins them, for a place that shows one line: an internal error's
+    /// message alone says only that something went wrong.
+    #[must_use]
+    pub fn full_message(&self) -> String {
+        match self.detail.as_deref().map(str::trim) {
+            Some(detail) if !detail.is_empty() && detail != self.message => format!("{} {detail}", self.message),
+            _ => self.message.clone(),
+        }
+    }
+
     pub fn internal(detail: impl Into<String>) -> Self {
         let detail = detail.into();
         tracing::error!(error.detail = %detail, "internal error");
@@ -102,5 +113,18 @@ mod tests {
         let err = AppError::internal("the database was unavailable");
         assert_eq!(err.message, "Something went wrong inside rbxport.");
         assert_eq!(err.detail.as_deref(), Some("the database was unavailable"));
+    }
+
+    #[test]
+    fn a_one_line_message_says_what_failed() {
+        // What the Sync Manager shows for a failed device (#122): the
+        // summary alone would only say that something went wrong.
+        let err = AppError::internal("Could not publish /Volumes/USB/Contents/a.mp3: No such file or directory (os error 2)");
+        assert_eq!(
+            err.full_message(),
+            "Something went wrong inside rbxport. Could not publish /Volumes/USB/Contents/a.mp3: No such file or directory (os error 2)"
+        );
+        let plain = AppError::new(ErrorKind::Internal, "could not write exportLibrary.db: Operation not supported (os error 45)");
+        assert_eq!(plain.full_message(), plain.message);
     }
 }
