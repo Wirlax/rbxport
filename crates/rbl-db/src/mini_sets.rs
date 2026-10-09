@@ -131,9 +131,10 @@ fn is_slot(entries: &[Entry], index: usize) -> bool {
 
 /// Where `blocks` go in a playlist holding `entries`: each into the next
 /// separator with nothing after it, then on the end after a separator of its
-/// own — `SEPARATORBREMSEN` in a playlist with none yet, then the numbers
-/// counting down from below the lowest the playlist holds. A number missing
-/// from the library is skipped.
+/// own — `SEPARATORBREMSEN` in a playlist with none yet, then the highest
+/// number the playlist does not hold. The numbers only make each separator a
+/// file of its own (Ronan: they mean nothing to him), so one freed by
+/// [`change`] is taken again rather than the count running down to nothing.
 ///
 /// Refused, with nothing to write, for an empty block, a separator or a track
 /// already in the playlist inside a block, a track in two blocks, or a
@@ -165,23 +166,22 @@ pub fn plan(entries: &[Entry], separators: &BTreeMap<Separator, String>, blocks:
     }
 
     let used: HashSet<Separator> = entries.iter().filter_map(|e| e.separator).collect();
-    let lowest = used
-        .iter()
-        .filter_map(|s| match s {
-            Separator::Numbered(n) => Some(*n),
-            Separator::Head => None,
-        })
-        .min();
     let mut fresh: Vec<(Separator, &String)> = Vec::new();
-    if used.is_empty() {
-        if let Some(content) = separators.get(&Separator::Head) {
-            fresh.push((Separator::Head, content));
-        }
+    let head = separators.get(&Separator::Head).filter(|_| !used.contains(&Separator::Head));
+    if let Some(content) = head.filter(|_| used.is_empty()) {
+        fresh.push((Separator::Head, content));
     }
-    fresh.extend(separators.iter().rev().filter_map(|(separator, content)| match separator {
-        Separator::Numbered(n) if lowest.is_none_or(|low| *n < low) => Some((*separator, content)),
-        _ => None,
-    }));
+    fresh.extend(
+        separators
+            .iter()
+            .rev()
+            .filter(|(separator, _)| matches!(separator, Separator::Numbered(_)) && !used.contains(separator))
+            .map(|(separator, content)| (*separator, content)),
+    );
+    // Last of all, the head separator a playlist that has others lost.
+    if let Some(content) = head.filter(|_| !used.is_empty()) {
+        fresh.push((Separator::Head, content));
+    }
     let slots = (0..entries.len()).filter(|&i| is_slot(entries, i)).count();
     let needed = blocks.len().saturating_sub(slots);
     if fresh.len() < needed {
@@ -209,6 +209,65 @@ pub fn plan(entries: &[Entry], separators: &BTreeMap<Separator, String>, blocks:
         placements.push(Placement { separator, reserved: false });
     }
     Ok(Plan { order, placements })
+}
+
+/// One block changed in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub order: Vec<Slot>,
+    /// The rows that leave the playlist, by index in the entries.
+    pub removed: Vec<usize>,
+}
+
+/// The playlist with the block after `separator` holding `tracks` instead,
+/// in that order: tracks already in the block keep their rows, the others
+/// come and go. No tracks at all takes the block out, separator and all.
+///
+/// Refused, with nothing to write, for a separator the playlist does not
+/// hold, and for a separator, a track given twice, or a track from elsewhere
+/// in the playlist among `tracks`.
+pub fn change(
+    entries: &[Entry],
+    separators: &BTreeMap<Separator, String>,
+    separator: Separator,
+    tracks: &[String],
+) -> Result<Change> {
+    let at = entries
+        .iter()
+        .position(|e| e.separator == Some(separator))
+        .ok_or_else(|| DbError::WriteRefused(format!("the playlist has no {}", separator.title())))?;
+    let end = (at + 1..entries.len()).find(|&i| entries.get(i).is_some_and(|e| e.separator.is_some())).unwrap_or(entries.len());
+    let is_separator: HashSet<&str> = separators.values().map(String::as_str).collect();
+    let mut seen = HashSet::new();
+    let mut slots = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        if is_separator.contains(track.as_str()) {
+            return Err(DbError::WriteRefused(format!("track {track} is a separator")));
+        }
+        if !seen.insert(track.as_str()) {
+            return Err(DbError::WriteRefused(format!("track {track} is in the block twice")));
+        }
+        match entries.iter().position(|e| e.content == *track) {
+            Some(i) if (at + 1..end).contains(&i) => slots.push(Slot::Kept(i)),
+            Some(_) => {
+                return Err(DbError::WriteRefused(format!(
+                    "track {track} is already elsewhere in the playlist, which holds a track once"
+                )))
+            }
+            None => slots.push(Slot::Added(track.clone())),
+        }
+    }
+    let kept: HashSet<usize> = slots.iter().filter_map(|s| if let Slot::Kept(i) = s { Some(*i) } else { None }).collect();
+    let mut removed: Vec<usize> = (at + 1..end).filter(|i| !kept.contains(i)).collect();
+    let mut order: Vec<Slot> = (0..at).map(Slot::Kept).collect();
+    if tracks.is_empty() {
+        removed.insert(0, at);
+    } else {
+        order.push(Slot::Kept(at));
+        order.extend(slots);
+    }
+    order.extend((end..entries.len()).map(Slot::Kept));
+    Ok(Change { order, removed })
 }
 
 #[cfg(test)]
@@ -248,7 +307,7 @@ mod tests {
             .collect()
     }
 
-    fn refusal(result: Result<Plan>) -> String {
+    fn refusal<T: std::fmt::Debug>(result: Result<T>) -> String {
         match result {
             Err(DbError::WriteRefused(reason)) => reason,
             other => panic!("expected a refusal, got {other:?}"),
@@ -322,19 +381,27 @@ mod tests {
     }
 
     #[test]
-    fn a_number_missing_from_the_library_is_skipped() {
+    fn a_freed_number_is_taken_again_and_a_missing_one_skipped() {
+        let entries = vec![separator(Separator::Head), track("x"), separator(Separator::Numbered(99)), track("y")];
+        let plan = plan(&entries, &pool(), &blocks(&[&["a"]])).unwrap();
+        assert_eq!(plan.placements[0].separator, Separator::Numbered(100));
         let mut pool = pool();
-        pool.remove(&Separator::Numbered(93));
-        let entries = vec![separator(Separator::Numbered(94)), track("x")];
-        let plan = plan(&entries, &pool, &blocks(&[&["a"]])).unwrap();
-        assert_eq!(plan.placements[0].separator, Separator::Numbered(92));
+        pool.remove(&Separator::Numbered(100));
+        let plan = super::plan(&entries, &pool, &blocks(&[&["a"]])).unwrap();
+        assert_eq!(plan.placements[0].separator, Separator::Numbered(98));
     }
 
     #[test]
     fn a_library_out_of_separators_refuses_the_whole_plan() {
+        let pool: BTreeMap<Separator, String> = [Separator::Head, Separator::Numbered(1), Separator::Numbered(2)]
+            .into_iter()
+            .map(|s| (s, format!("sep-{}", s.title())))
+            .collect();
         let entries = vec![separator(Separator::Numbered(2)), track("x")];
-        let reason = refusal(plan(&entries, &pool(), &blocks(&[&["a"], &["b"]])));
-        assert!(reason.starts_with("no separator left for block 2"), "{reason}");
+        // 001, then the head separator this playlist never had.
+        assert_eq!(plan(&entries, &pool, &blocks(&[&["a"], &["b"]])).unwrap().placements.len(), 2);
+        let reason = refusal(plan(&entries, &pool, &blocks(&[&["a"], &["b"], &["c"]])));
+        assert!(reason.starts_with("no separator left for block 3"), "{reason}");
     }
 
     #[test]
@@ -345,5 +412,58 @@ mod tests {
         assert!(refusal(plan(&entries, &pool(), &blocks(&[&["sep-SEPARATORBREMSEN 050"]]))).contains("is a separator"));
         assert!(refusal(plan(&entries, &pool(), &blocks(&[&["boulder"]]))).contains("already in the playlist"));
         assert!(refusal(plan(&entries, &pool(), &blocks(&[&["a"], &["b", "a"]]))).contains("earlier block"));
+    }
+
+    /// The playlist a change makes, by content id.
+    fn changed(entries: &[Entry], change: &Change) -> Vec<String> {
+        change
+            .order
+            .iter()
+            .map(|slot| match slot {
+                Slot::Kept(i) => entries[*i].content.clone(),
+                Slot::Added(content) => content.clone(),
+            })
+            .collect()
+    }
+
+    fn contents_of(entries: &[Entry]) -> Vec<String> {
+        entries.iter().map(|e| e.content.clone()).collect()
+    }
+
+    #[test]
+    fn a_block_changes_in_place_and_the_tracks_it_keeps_keep_their_rows() {
+        let entries = twelve();
+        let tracks = vec!["boulder".to_owned(), "new".to_owned()];
+        let change = change(&entries, &pool(), Separator::Numbered(100), &tracks).unwrap();
+        let mut expected = contents_of(&entries);
+        expected.splice(5..7, tracks.iter().cloned());
+        assert_eq!(changed(&entries, &change), expected);
+        assert!(change.order.contains(&Slot::Kept(6)), "Boulder keeps its row");
+        assert_eq!(change.removed, [5], "Booyah leaves");
+
+        let swapped = super::change(&entries, &pool(), Separator::Numbered(100), &["boulder".to_owned(), "booyah".to_owned()]).unwrap();
+        assert_eq!(swapped.removed, [] as [usize; 0]);
+        assert_eq!(swapped.order[5..7], [Slot::Kept(6), Slot::Kept(5)]);
+    }
+
+    #[test]
+    fn no_tracks_takes_the_block_out_separator_and_all() {
+        let entries = twelve();
+        let change = change(&entries, &pool(), Separator::Numbered(99), &[]).unwrap();
+        assert_eq!(change.removed, [7, 8, 9]);
+        let mut expected = contents_of(&entries);
+        expected.drain(7..10);
+        assert_eq!(changed(&entries, &change), expected);
+    }
+
+    #[test]
+    fn a_change_is_refused_when_it_would_break_the_playlist() {
+        let entries = twelve();
+        let one = |t: &str| vec![t.to_owned()];
+        assert!(refusal(change(&entries, &pool(), Separator::Numbered(50), &one("a"))).contains("has no SEPARATORBREMSEN 050"));
+        assert!(refusal(change(&entries, &pool(), Separator::Numbered(100), &one("2much"))).contains("elsewhere in the playlist"));
+        assert!(refusal(change(&entries, &pool(), Separator::Numbered(100), &one("sep-SEPARATORBREMSEN 050"))).contains("is a separator"));
+        let twice = vec!["a".to_owned(), "a".to_owned()];
+        assert!(refusal(change(&entries, &pool(), Separator::Numbered(100), &twice)).contains("twice"));
     }
 }
