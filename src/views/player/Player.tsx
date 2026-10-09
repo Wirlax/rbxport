@@ -1222,6 +1222,9 @@ export const Player = memo(function Player({
   const memory = useMemoryCues({
     trackId: playback.idle ? null : track?.id ?? null,
     cues, positionSeconds, seek, setLoop: playback.setLoop, cuePoint, setCuePoint, readOnly, onError,
+    // Right after a track change the grid is still the last track's.
+    grid: gridTrackId === track?.id ? grid : undefined,
+    quantiseTo: quantize ? quantizeGrid : null,
   });
   // A called hot cue plays from its point, as rekordbox does from pause. It
   // goes through PLAY, so a synced deck starts on the master's beat too.
@@ -1885,6 +1888,9 @@ export const Player = memo(function Player({
           break;
         case "deleteMemoryCue":
           if (!event.repeat) memory.deleteAtHead();
+          break;
+        case "memoryCuesEvery16Bars":
+          if (!event.repeat) memory.storeEvery16Bars();
           break;
         case "loopIn":
           if (!event.repeat) markLoopIn();
@@ -2574,7 +2580,8 @@ export const Player = memo(function Player({
                 Cue`, `Call Previous/Next Memory Cue`, `Delete Memory Cue` in
                 german.lang, on M, B, N and X in the Export key map. Calling
                 needs no write and works read-only; the rest is disabled with
-                the reason the menus give. */}
+                the reason the menus give. 16, on V, is this fork's own: see
+                `storeEvery16Bars`. */}
             <div className={styles.memory} aria-label="Memory cues">
               <button
                 type="button"
@@ -2615,6 +2622,16 @@ export const Player = memo(function Player({
                 onClick={memory.deleteAtHead}
               >
                 ✕
+              </button>
+              <button
+                type="button"
+                className={styles.step}
+                aria-label="Set memory cues every 16 bars"
+                title={tip(memoryCueEditReason ?? "Memory Cues Every 16 Bars (V)")}
+                disabled={!memory.canStoreEvery16Bars}
+                onClick={memory.storeEvery16Bars}
+              >
+                16
               </button>
             </div>
 

@@ -42,6 +42,7 @@ import {
   cuesFor,
   nearestBeatMs,
   quantizedLaunchMs,
+  beatsBackMs,
   foldIntoLoop,
   callLeavesFrom,
   needsRedraw,
@@ -1017,6 +1018,45 @@ describe("createWheelZoomGate", () => {
     expect(gate(-60, 1010)).toBe(0);
     // The old direction's travel was discarded, not netted against.
     expect(gate(-60, 1020)).toBe(-1);
+  });
+});
+
+describe("beatsBackMs", () => {
+  /** `count` beats `spacing` ms apart from `firstMs`, in 4/4 at 120 BPM. */
+  const steady = (count: number, spacing = 500, firstMs = 0): BeatGrid => ({
+    times: Uint32Array.from({ length: count }, (_, i) => firstMs + i * spacing),
+    numbers: Uint8Array.from({ length: count }, (_, i) => (i % 4) + 1),
+    tempos: new Uint16Array(count).fill(12_000),
+  });
+
+  it("steps back 16 bars at a time and stops before the start", () => {
+    // 64 beats at 500 ms is 32 s; a fifth step would be at -28 s.
+    expect(beatsBackMs(steady(400), 100_000, 64)).toEqual([100_000, 68_000, 36_000, 4_000]);
+  });
+
+  it("keeps a place that lands on the very start", () => {
+    expect(beatsBackMs(steady(400), 64_000, 64)).toEqual([64_000, 32_000, 0]);
+  });
+
+  it("counts beats rather than seconds through a tempo change", () => {
+    // 64 beats at 500 ms, then 400 ms beats: 16 bars back from beat 128 is
+    // beat 64 at 32 s, not 57.6 s less 32 s.
+    const times = Uint32Array.from({ length: 200 }, (_, i) => (i < 64 ? i * 500 : 32_000 + (i - 64) * 400));
+    expect(beatsBackMs({ ...steady(200), times }, 57_600, 64)).toEqual([57_600, 32_000, 0]);
+  });
+
+  it("keeps a place off the beat at the same point of its beat", () => {
+    expect(beatsBackMs(steady(400), 32_250, 64)).toEqual([32_250, 250]);
+  });
+
+  it("carries the first beat's spacing into an intro the grid does not reach", () => {
+    expect(beatsBackMs(steady(400, 500, 1_000), 32_500, 64)).toEqual([32_500, 500]);
+  });
+
+  it("is empty without a grid, and ends on one that cannot step back", () => {
+    expect(beatsBackMs(NO_BEATS, 10_000, 64)).toEqual([]);
+    const stuck = { ...steady(2), times: new Uint32Array([100, 100]) };
+    expect(beatsBackMs(stuck, 5_000, 64).length).toBeLessThanOrEqual(1);
   });
 });
 

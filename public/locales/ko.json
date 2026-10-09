@@ -1532,5 +1532,8 @@
   "No playlist was made.": "No playlist was made.",
   "No playlist was made: the folders hold no audio files.": "No playlist was made: the folders hold no audio files.",
   "One or several lists with the same name already exist.": "동일한 이름의 리스트 또는 폴더가 이미 있습니다.",
-  "{count} files skipped.": "{count} files skipped."
+  "{count} files skipped.": "{count} files skipped.",
+  "Memory Cues Every 16 Bars": "Memory Cues Every 16 Bars",
+  "Memory Cues Every 16 Bars (V)": "Memory Cues Every 16 Bars (V)",
+  "Set memory cues every 16 bars": "Set memory cues every 16 bars"
 }

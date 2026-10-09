@@ -45,6 +45,9 @@ export type Action =
   | "previousMemoryCue"
   | "nextMemoryCue"
   | "deleteMemoryCue"
+  // This fork's own, on V: a memory cue at the playhead and every 16 bars
+  // before it. Player A only, as the button is the 1 PLAYER deck's.
+  | "memoryCuesEvery16Bars"
   | "callMemoryCue1"
   | "callMemoryCue2"
   | "callMemoryCue3"
@@ -484,6 +487,7 @@ export const BINDINGS: readonly Binding[] = [
   { id: "loadPlayer1", group: "Browse", label: "Load on Player 1", chord: { key: "Enter" }, action: "loadPlayer1", pane: "Browse" },
   { id: "loadPlayer1.shift", group: "Browse", label: "Load on Player 1", chord: { key: "Enter", shiftKey: true }, action: "loadPlayer1", alias: true },
   ...PLAYER_A.map((row): Binding => ({ ...row, id: row.action ?? row.label, group: "Player A", deck: "a" })),
+  { id: "memoryCuesEvery16Bars", group: "Player A", label: "Memory Cues Every 16 Bars", chord: { key: "v" }, action: "memoryCuesEvery16Bars", deck: "a", pane: "Player A" },
   // The preset gives Player B no clears for its pads, no `Adjust
   // BPM/BeatGrid`, and the metronome's sound is the engine's: none of those
   // rows exists there.
