@@ -8,9 +8,12 @@
  * `tauri.fork.conf.json` is merged over the release config: only the .app,
  * no updater artifacts (they need upstream's signing key), and an ad-hoc
  * signature so the hardened runtime and its entitlements still apply.
+ *
+ * The MCP server (crates/rbl-mcp) is built too and goes to
+ * ~/.local/bin/rbxport-mcp, where Claude Desktop and Claude Code start it.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,3 +62,15 @@ const version = execFileSync(
   { encoding: "utf8" },
 ).trim();
 console.log(`rbxport ${version} (this fork) is installed in ${installed}.`);
+
+const mcp = spawnSync("cargo", ["build", "--release", "-p", "rbl-mcp"], { cwd: root, stdio: "inherit" });
+if (mcp.status !== 0) process.exit(mcp.status ?? 1);
+const bin = join(homedir(), ".local/bin");
+const server = join(bin, "rbxport-mcp");
+mkdirSync(bin, { recursive: true });
+// Copied beside it and renamed over it: a server a client is running keeps
+// its old file rather than having it rewritten under it.
+copyFileSync(join(root, "target/release/rbxport-mcp"), `${server}.new`);
+chmodSync(`${server}.new`, 0o755);
+renameSync(`${server}.new`, server);
+console.log(`The MCP server is installed in ${server}.`);
