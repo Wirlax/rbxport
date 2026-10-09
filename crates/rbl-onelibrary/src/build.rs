@@ -491,7 +491,7 @@ impl Builder {
         self.conn.execute_batch("COMMIT")?;
         drop(self.conn);
         std::fs::OpenOptions::new().write(true).open(&self.staged)?.sync_all()?;
-        self.staged.persist_noclobber(&self.target).map_err(|e| e.error)?;
+        rbl_core::durable::persist_new(self.staged, &self.target)?;
         rbl_core::durable::sync_dir(self.target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))?;
         Ok(())
     }

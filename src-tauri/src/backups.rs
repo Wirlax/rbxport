@@ -406,8 +406,9 @@ fn create_with_progress(state: &AppState, progress: &mut dyn FnMut(&str, u64, u6
         if let Some(error) = refused { return Err(error); }
         packed.map_err(error)?;
         remove(&partial)?;
-        tempfile::TempPath::try_from_path(&archive).map_err(error)?
-            .persist_noclobber(&target).map_err(error)?;
+        // A backup folder on an external exFAT or FAT32 drive has no
+        // exclusive rename on macOS; `persist_new` still never replaces one.
+        rbl_core::durable::persist_new(tempfile::TempPath::try_from_path(&archive).map_err(error)?, &target).map_err(error)?;
         crate::durable::sync_dir(root).map_err(error)?;
         Ok(target.to_string_lossy().into_owned())
     })();

@@ -12,7 +12,7 @@ pub fn sync_dir(path: &Path) -> std::io::Result<()> {
         // with ENOTSUP (os error 45). The directory flush is an extra
         // durability guarantee, not a reason to report a completed USB
         // database write as failed. Keep every other error fatal.
-        if !directory_sync_unsupported(&error) {
+        if !unsupported(&error) {
             return Err(error);
         }
     }
@@ -21,10 +21,52 @@ pub fn sync_dir(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn directory_sync_unsupported(error: &std::io::Error) -> bool {
+
+/// Whether the filesystem rejected an operation it does not implement
+/// (`ENOTSUP`/`EOPNOTSUPP`, or `ENOSYS`), as opposed to failing it.
+#[must_use]
+pub fn unsupported(error: &std::io::Error) -> bool {
+    // macOS: ENOTSUP 45, EOPNOTSUPP 102. Linux: EOPNOTSUPP/ENOTSUP 95.
+    const CODES: &[i32] = if cfg!(target_vendor = "apple") { &[45, 102] } else if cfg!(target_os = "linux") { &[95] } else { &[] };
     error.kind() == std::io::ErrorKind::Unsupported
-        || cfg!(target_os = "macos") && error.raw_os_error() == Some(45)
+        || error.raw_os_error().is_some_and(|code| CODES.contains(&code))
+}
+
+/// Moves a temporary file to `to`, refusing to replace an existing `to`.
+///
+/// The exclusive rename (`renameatx_np(RENAME_EXCL)` on macOS) is not
+/// available everywhere a DJ stick is mounted: the macOS kernel `msdosfs`
+/// driver has no `vnop_renamex`, so a FAT32 stick on a Mac that still uses
+/// it answers `ENOTSUP` (os error 45), and exFAT does on macOS 26 as well
+/// [OBS 2026-10-08, `hdiutil` exFAT image]. The usual emulation, a hard
+/// link, is missing on both. Where the filesystem cannot do it, check that
+/// `to` is absent and rename. The caller must own the directory (a private
+/// staging directory under the export's write lock), so nothing can create
+/// `to` in between.
+pub fn persist_new(temp: tempfile::TempPath, to: &Path) -> std::io::Result<()> {
+    persist_new_with(temp, to, |temp, to| temp.persist_noclobber(to))
+}
+
+/// [`persist_new`] with the exclusive rename supplied, so a test can stand
+/// in for a filesystem that lacks it.
+fn persist_new_with(
+    temp: tempfile::TempPath,
+    to: &Path,
+    exclusive: impl FnOnce(tempfile::TempPath, &Path) -> Result<(), tempfile::PathPersistError>,
+) -> std::io::Result<()> {
+    match exclusive(temp, to) {
+        Ok(()) => Ok(()),
+        Err(failed) if unsupported(&failed.error) => {
+            if to.symlink_metadata().is_ok() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} already exists", to.display()),
+                ));
+            }
+            failed.path.persist(to).map_err(|e| e.error)
+        }
+        Err(failed) => Err(failed.error),
+    }
 }
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -464,11 +506,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn only_an_unsupported_directory_flush_is_optional() {
-        assert!(directory_sync_unsupported(&std::io::Error::new(
+        assert!(unsupported(&std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "directory fsync is unsupported",
         )));
-        assert!(!directory_sync_unsupported(&std::io::Error::new(
+        assert!(!unsupported(&std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "permission denied",
         )));
@@ -477,7 +519,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_enotsup_from_directory_flush_is_optional() {
-        assert!(directory_sync_unsupported(
+        assert!(unsupported(
             &std::io::Error::from_raw_os_error(45)
         ));
     }
@@ -846,5 +888,62 @@ mod tests {
             b"external db"
         );
         assert_eq!(std::fs::read(journal.join(path)).unwrap(), b"staged db");
+    }
+
+    #[test]
+    fn filesystems_without_an_operation_are_told_apart_from_failures() {
+        // ENOTSUP from renameatx_np(RENAME_EXCL) on a macOS FAT32/exFAT
+        // stick, which made exportLibrary.db unwritable (#122).
+        let code = if cfg!(target_vendor = "apple") { 45 } else { 95 };
+        assert!(unsupported(&std::io::Error::from_raw_os_error(code)));
+        assert!(!unsupported(&std::io::Error::from_raw_os_error(2)));
+        assert!(!unsupported(&std::io::Error::from_raw_os_error(13)));
+    }
+
+    #[test]
+    fn persisting_a_new_file_never_replaces_one() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("exportLibrary.db");
+        let temp = tempfile::NamedTempFile::new_in(root.path()).unwrap().into_temp_path();
+        std::fs::write(&temp, b"new").unwrap();
+        persist_new(temp, &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        let again = tempfile::NamedTempFile::new_in(root.path()).unwrap().into_temp_path();
+        assert!(persist_new(again, &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    /// A filesystem without the exclusive rename (exFAT on macOS 26, FAT32
+    /// under the kernel `msdosfs` driver): the file is still published, and
+    /// still never over an existing one.
+    #[test]
+    fn persisting_falls_back_where_the_exclusive_rename_is_unsupported() {
+        let code = if cfg!(target_vendor = "apple") { 45 } else { 95 };
+        let unsupported_here = |temp: tempfile::TempPath, _: &Path| {
+            Err(tempfile::PathPersistError { error: std::io::Error::from_raw_os_error(code), path: temp })
+        };
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("exportLibrary.db");
+        let temp = tempfile::NamedTempFile::new_in(root.path()).unwrap().into_temp_path();
+        std::fs::write(&temp, b"new").unwrap();
+        persist_new_with(temp, &target, unsupported_here).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+
+        let temp = tempfile::NamedTempFile::new_in(root.path()).unwrap().into_temp_path();
+        std::fs::write(&temp, b"other").unwrap();
+        let staged = temp.to_path_buf();
+        let error = persist_new_with(temp, &target, unsupported_here).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert!(!staged.exists(), "the refused temporary file is cleaned up");
+
+        // Any other failure is reported as it is.
+        let temp = tempfile::NamedTempFile::new_in(root.path()).unwrap().into_temp_path();
+        let denied = |temp: tempfile::TempPath, _: &Path| {
+            Err(tempfile::PathPersistError { error: std::io::Error::from_raw_os_error(13), path: temp })
+        };
+        let error = persist_new_with(temp, &root.path().join("other.db"), denied).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(13));
+        assert!(!root.path().join("other.db").exists());
     }
 }

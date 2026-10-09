@@ -157,13 +157,14 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
     let staging = tempfile::Builder::new().prefix(".master.db-").tempdir_in(dir)?;
     let built = staging.path().join("master.db");
     build(&built, &plan.passphrase, &share_root)?;
-    tempfile::TempPath::try_from_path(&built)?
-        .persist_noclobber(&plan.master_db)
+    // `persist_new`: a library folder on an external exFAT or FAT32 drive
+    // has no exclusive rename on macOS, and the file is still never replaced.
+    rbl_core::durable::persist_new(tempfile::TempPath::try_from_path(&built)?, &plan.master_db)
         .map_err(|e| {
-            if e.error.kind() == std::io::ErrorKind::AlreadyExists {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
                 DbError::Open(format!("{} appeared while the new library was being made", plan.master_db.display()))
             } else {
-                DbError::Io(e.error)
+                DbError::Io(e)
             }
         })?;
     drop(staging);
