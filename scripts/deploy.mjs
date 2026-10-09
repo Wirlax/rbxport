@@ -79,7 +79,7 @@ function deploy() {
   if (ancestry.error) throw ancestry.error;
   requireCondition(ancestry.status === 0, "main is not an ancestor of dev");
 
-  if (!skipVersionBump) {
+  if (skipVersionBump !== "true") {
     const previous = command("git", ["tag", "--merged", "HEAD", "--list", "v*", "--sort=-version:refname"], true)
       .split("\n").find(Boolean);
     requireCondition(previous, "no previous release tag found");
