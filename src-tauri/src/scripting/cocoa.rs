@@ -1422,7 +1422,8 @@ define_class!(
     }
 );
 
-/// This fork's own: `place mini sets {{…}, {…}} to playlist …`.
+/// This fork's own: `place mini sets {{…}, {…}} to playlist …`, or
+/// `… creating playlist "…"` for a new one at the top of the tree.
 ///
 /// Unlike every other edit here, Library Protection does not hold it back:
 /// its caller, the fork's MCP server, sends only blocks Ronan has confirmed in
@@ -1434,17 +1435,32 @@ fn place_mini_sets(command: &NSScriptCommand) {
             "Say which blocks: a list of lists of track ids, like {{\"12\", \"34\"}, {\"56\"}}.",
         ));
     };
-    let Some(playlist) = argument(command, "to").and_then(|p| p.downcast_ref::<RbxPlaylist>().map(|p| p.ivars().id.get()))
-    else {
-        return fail(&ScriptError::no_such_object("There is no such playlist: `to playlist id \"…\"`."));
+    let target = match (given(command, "to"), given(command, "newPlaylist")) {
+        (true, false) => {
+            let Some(playlist) =
+                argument(command, "to").and_then(|p| p.downcast_ref::<RbxPlaylist>().map(|p| p.ivars().id.get()))
+            else {
+                return fail(&ScriptError::no_such_object("There is no such playlist: `to playlist id \"…\"`."));
+            };
+            let kind = library().ok().and_then(|library| model::playlist(&library, playlist)).map(|info| info.kind);
+            if kind != Some(model::KIND_PLAYLIST) {
+                return fail(&ScriptError::failed("Mini-sets go in a regular playlist."));
+            }
+            crate::mini_sets::Target::Playlist(playlist.to_string())
+        }
+        (false, true) => match argument(command, "newPlaylist").map(|name| from_objc(Some(&name))) {
+            Some(ScriptValue::Text(name)) => crate::mini_sets::Target::New(name),
+            _ => return fail(&ScriptError::wrong_type("A new playlist is named with text: `creating playlist \"…\"`.")),
+        },
+        _ => {
+            return fail(&ScriptError::missing_parameter(
+                "Say where, one way: `to playlist id \"…\"` or `creating playlist \"…\"`.",
+            ))
+        }
     };
-    let kind = library().ok().and_then(|library| model::playlist(&library, playlist)).map(|info| info.kind);
-    if kind != Some(model::KIND_PLAYLIST) {
-        return fail(&ScriptError::failed("Mini-sets go in a regular playlist."));
-    }
     defer(async move {
         let app = app()?;
-        let placed = crate::mini_sets::place(app.clone(), app.state(), playlist.to_string(), blocks).await?;
+        let placed = crate::mini_sets::place(app.clone(), app.state(), target, blocks).await?;
         Ok(ScriptValue::List(placed.into_iter().map(ScriptValue::Text).collect()))
     });
 }
