@@ -64,6 +64,7 @@ pub fn install(app: &AppHandle) {
         RbxAddCommand::class(),
         RbxRemoveCommand::class(),
         RbxExportCommand::class(),
+        RbxPlaceMiniSetsCommand::class(),
     );
     extend_application();
 }
@@ -1405,6 +1406,48 @@ define_class!(
         }
     }
 );
+
+define_class!(
+    // SAFETY: NSScriptCommand is meant to be subclassed, and this adds no ivars.
+    #[unsafe(super(NSScriptCommand, NSObject))]
+    #[name = "RbxPlaceMiniSetsCommand"]
+    struct RbxPlaceMiniSetsCommand;
+
+    impl RbxPlaceMiniSetsCommand {
+        #[unsafe(method_id(performDefaultImplementation))]
+        fn perform(&self) -> Option<Retained<AnyObject>> {
+            once(self, place_mini_sets);
+            None
+        }
+    }
+);
+
+/// This fork's own: `place mini sets {{…}, {…}} to playlist …`.
+///
+/// Unlike every other edit here, Library Protection does not hold it back:
+/// its caller, the fork's MCP server, sends only blocks Ronan has confirmed in
+/// the conversation, so the question the protection asks has been answered.
+/// rekordbox running still refuses it, in the writer.
+fn place_mini_sets(command: &NSScriptCommand) {
+    let Some(blocks) = crate::mini_sets::blocks_of(&from_objc(command.directParameter().as_deref())) else {
+        return fail(&ScriptError::wrong_type(
+            "Say which blocks: a list of lists of track ids, like {{\"12\", \"34\"}, {\"56\"}}.",
+        ));
+    };
+    let Some(playlist) = argument(command, "to").and_then(|p| p.downcast_ref::<RbxPlaylist>().map(|p| p.ivars().id.get()))
+    else {
+        return fail(&ScriptError::no_such_object("There is no such playlist: `to playlist id \"…\"`."));
+    };
+    let kind = library().ok().and_then(|library| model::playlist(&library, playlist)).map(|info| info.kind);
+    if kind != Some(model::KIND_PLAYLIST) {
+        return fail(&ScriptError::failed("Mini-sets go in a regular playlist."));
+    }
+    defer(async move {
+        let app = app()?;
+        let placed = crate::mini_sets::place(app.clone(), app.state(), playlist.to_string(), blocks).await?;
+        Ok(ScriptValue::List(placed.into_iter().map(ScriptValue::Text).collect()))
+    });
+}
 
 fn export(command: &NSScriptCommand) {
     let Some(playlist) =

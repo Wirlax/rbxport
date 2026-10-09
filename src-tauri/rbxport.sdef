@@ -271,5 +271,17 @@
       </parameter>
       <result type="text"/>
     </command>
+
+    <!-- This fork's own. -->
+    <command name="place mini sets" code="RbxpMini" description="Puts blocks of tracks in a playlist laid out in mini-sets: each block goes after the next SEPARATORBREMSEN track with nothing after it, then the rest go on the end after a new separator (SEPARATORBREMSEN, then 100, 099…). Not held back by Library Protection: the caller has had the blocks confirmed. Refused while rekordbox runs. Returns the separator each block went after.">
+      <cocoa class="RbxPlaceMiniSetsCommand"/>
+      <direct-parameter type="any" description="The blocks, in order: a list of lists of track ids, like {{&quot;12&quot;, &quot;34&quot;}, {&quot;56&quot;}}."/>
+      <parameter name="to" code="To  " type="specifier" description="A regular playlist.">
+        <cocoa key="to"/>
+      </parameter>
+      <result>
+        <type type="text" list="yes"/>
+      </result>
+    </command>
   </suite>
 </dictionary>
