@@ -220,6 +220,8 @@ export interface AdvancedPreferences {
   relocateVideo: boolean;
   relocateDesktop: boolean;
   relocateUserFolders: boolean;
+  /** This fork's Organize Library: the folder every track's file is moved into; empty until chosen. */
+  musicFolder: string;
   /** Library Protection: refuse every edit, whatever rekordbox is doing. */
   protectLibrary: boolean;
   /** Edit Library › Double-click to edit; off is a click on a selected row. */
@@ -325,6 +327,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     relocateVideo: true,
     relocateDesktop: true,
     relocateUserFolders: false,
+    musicFolder: "",
     protectLibrary: true,
     doubleClickToEdit: false,
     syncType: "beat",
@@ -502,6 +505,7 @@ export function sanitisePreferences(value: unknown): Preferences {
         advanced.relocateUserFolders,
         strings(advanced.relocateFolders).length > 0 || d.advanced.relocateUserFolders,
       ),
+      musicFolder: typeof advanced.musicFolder === "string" ? advanced.musicFolder : d.advanced.musicFolder,
       recordHistory: bool(advanced.recordHistory, d.advanced.recordHistory),
       // A stored object predates this switch when the key is absent. Preserve
       // that user's writable library; only a truly empty store gets defaults.

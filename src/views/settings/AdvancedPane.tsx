@@ -19,8 +19,11 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { DatabaseDrive, Duplicates, LibrarySummary } from "@/ipc/types";
+import type { DatabaseDrive, Duplicates, LibrarySummary, OrganizeLast } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
+import { errorMessage } from "@/lib/errorMessage";
+import { formatBytes } from "@/lib/format";
+import { refusal } from "@/lib/menu";
 import { QUANTIZE_BEATS, type AdvancedPreferences } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
@@ -179,6 +182,11 @@ export function AdvancedPane({ tab, summary }: {
         </dl>
       </Section>
       <RelocateSection advanced={advanced} set={set} />
+      <OrganizeSection
+        advanced={advanced}
+        set={set}
+        refusal={summary?.readOnly ? refusal(false) : advanced.protectLibrary ? refusal(true) : null}
+      />
       <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
       {/* Last, as in rekordbox, under the external-drive settings. */}
       <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
@@ -250,6 +258,125 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
         onChange={(masterDb) => { void choose(masterDb); }}
       />
       {failed ? <Note failed>{failed}</Note> : null}
+    </Section>
+  );
+}
+
+/**
+ * This fork's Organize Library: every track's file moved into one folder as
+ * `<Artist>/<Album>/<file name>`, and the library pointed at it, so music
+ * gathered anywhere ends up in one place to back up. It says what it would
+ * do and asks first; the library is backed up before anything moves, and
+ * the last run can be put back.
+ */
+function OrganizeSection({ advanced, set, refusal: locked }: {
+  advanced: AdvancedPreferences;
+  set: (patch: Partial<AdvancedPreferences>) => void;
+  /** Why the library cannot be written to now, or null. */
+  refusal: string | null;
+}) {
+  const t = useTranslation();
+  const folder = advanced.musicFolder;
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ text: string; failed?: boolean } | null>(null);
+  const [last, setLast] = useState<OrganizeLast | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void getBackend()
+      .then((backend) => backend.lastOrganize())
+      .then((found) => { if (live) setLast(found); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  const run = (action: () => Promise<void>) => {
+    setBusy(true);
+    setStatus(null);
+    void action()
+      .catch((error: unknown) => setStatus({ text: errorMessage(error), failed: true }))
+      .finally(() => setBusy(false));
+  };
+
+  const organize = () => run(async () => {
+    const backend = await getBackend();
+    const preview = await backend.organizePreview(folder);
+    if (preview.files === 0) {
+      setStatus({ text: t("Every track is already in the music folder.") });
+      return;
+    }
+    const sure = await backend.confirm([
+      t("Organize the library into {folder}?", { folder }),
+      "",
+      t("Files to move: {count} ({size})", { count: preview.files, size: formatBytes(preview.bytes) }),
+      t("Already in place: {count}", { count: preview.inPlace }),
+      t("Missing, not moved: {count}", { count: preview.missing }),
+      t("Left alone (rekordbox’s own files, cloud and streaming): {count}", { count: preview.leftAlone }),
+      "",
+      t("The library is backed up first, and this can be undone."),
+    ].join("\n"), { yes: t("Organize"), no: t("Cancel") });
+    if (!sure) return;
+    setStatus({ text: t("Backing up the library…") });
+    await backend.backUpLibrary();
+    const stop = backend.onOrganizeProgress(({ done, total }) =>
+      setStatus({ text: t("Moving files… {done} of {total}", { done, total }) }));
+    try {
+      const report = await backend.organizeLibrary(folder);
+      setStatus(report.failed.length === 0
+        ? { text: t("Files moved: {count}", { count: report.files }) }
+        : {
+          text: t("Files moved: {count}. Not moved: {failed}, first: {first}", {
+            count: report.files, failed: report.failed.length, first: report.failed[0] ?? "",
+          }),
+          failed: true,
+        });
+    } finally {
+      stop();
+      setLast(await backend.lastOrganize().catch(() => null));
+    }
+  });
+
+  const undo = () => run(async () => {
+    if (!last) return;
+    const backend = await getBackend();
+    const sure = await backend.confirm(
+      t("Put the {count} files moved on {date} back where they were?", {
+        count: last.files, date: new Date(last.at).toLocaleString(),
+      }),
+      { yes: t("Undo"), no: t("Cancel") },
+    );
+    if (!sure) return;
+    const undone = await backend.undoOrganize();
+    setStatus(undone.skipped === 0
+      ? { text: t("Files put back: {count}", { count: undone.files }) }
+      : { text: t("Files put back: {count}. Moved since, left as they are: {skipped}", { count: undone.files, skipped: undone.skipped }) });
+    setLast(await backend.lastOrganize().catch(() => null));
+  });
+
+  return (
+    <Section title="Organize Library">
+      <Note>Moves every track’s file into one folder, as Artist / Album / file, and keeps the library pointing at it.</Note>
+      <div className={styles.actions}>
+        <span className={styles.path} title={folder}>{folder === "" ? t("No folder chosen") : folder}</span>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void (async () => {
+              const backend = await getBackend();
+              const picked = await backend.pickFolder(t("Choose the music folder"));
+              if (picked !== null) set({ musicFolder: picked });
+            })();
+          }}
+        >
+          Choose…
+        </Button>
+      </div>
+      <div className={styles.actions} data-gap-above>
+        <Button disabled={busy || folder === "" || locked !== null} onClick={organize}>Organize Library…</Button>
+        <Button disabled={busy || last === null || locked !== null} onClick={undo}>Undo Last Organize</Button>
+      </div>
+      {locked !== null ? <Note>{locked}</Note> : null}
+      {status ? <Note failed={status.failed ?? false}>{status.text}</Note> : null}
     </Section>
   );
 }

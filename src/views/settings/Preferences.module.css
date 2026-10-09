@@ -445,6 +445,15 @@
 .actions[data-spaced] { margin-bottom: var(--s-pref-button-gap); }
 /* A button under a switch keeps the same gap above it. */
 .actions[data-gap-above] { margin-top: var(--s-pref-button-gap); }
+/* A chosen folder beside its button: one line, cut at the end. */
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--f-size-pref-small);
+}
 
 /* Facts: the library's counts. */
 .facts {
