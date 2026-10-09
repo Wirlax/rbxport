@@ -250,6 +250,36 @@ struct PublicationEntry {
     exact: bool,
 }
 
+/// A journal that cannot be replayed because something else wrote to the
+/// device after the publication stopped: a file it was about to replace or
+/// remove now holds neither the new image nor the file it set aside.
+/// rekordbox does this on its own when it sees a stick, rewriting
+/// `export.pdb` and `exportLibrary.db` and creating `exportLibrary.db-wal`
+/// [OBS 2026-10-09, rekordbox 7.2.14 on Windows 11, #122]. See
+/// [`Publication::set_aside`] for leaving such a journal behind.
+#[derive(Debug)]
+pub struct DeviceChanged {
+    pub path: PathBuf,
+}
+
+impl std::fmt::Display for DeviceChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Publication conflict at {}; the device changed after sync failed and recovery data was retained",
+            self.path.display()
+        )
+    }
+}
+
+impl std::error::Error for DeviceChanged {}
+
+/// Whether `error` is a [`DeviceChanged`].
+#[must_use]
+pub fn is_device_changed(error: &std::io::Error) -> bool {
+    error.get_ref().is_some_and(<dyn std::error::Error + Send + Sync>::is::<DeviceChanged>)
+}
+
 /// What a staging directory's name starts with, so a stage left behind by
 /// an export that could not clean up after itself is recognizably ours.
 const STAGE_PREFIX: &str = ".rbxport-staging-";
@@ -376,6 +406,128 @@ impl Publication {
             }
         }
         Ok(())
+    }
+
+    /// Settles an interrupted publication that [`DeviceChanged`] stops from
+    /// being replayed, so the device can be written again, leaving the
+    /// device's files from one generation.
+    ///
+    /// Publication runs in the journal's order, so the last file the other
+    /// writer changed tells which generation it saw. If that file had
+    /// already been published, the writer saw the new one: the rest of the
+    /// publication is finished. If it had not, the writer saw the earlier
+    /// one: the publication is rolled back, every file it replaced or
+    /// removed put back and every file it created where there was none
+    /// removed. Either way the other writer's files are left as it wrote
+    /// them. A SQLite `-wal` or `-shm` belongs to the database beside it, so
+    /// it is left only when that database is the other writer's, and is
+    /// otherwise moved out of the way.
+    ///
+    /// The journal's record is kept as `keep/publication.json`, and whatever
+    /// the settling moves off the device under `keep/` in the device's own
+    /// tree: the device's earlier versions under `keep/previous`, and other
+    /// writers' files that had to move under `keep/theirs`. `keep` must be
+    /// on the same file system as `root`. Returns the paths left as the
+    /// other writer wrote them, or `None` when there was no journal.
+    #[allow(clippy::too_many_lines, reason = "one settling pass over the journal")]
+    pub fn set_aside(root: &Path, name: &str, keep: &Path) -> std::io::Result<Option<Vec<PathBuf>>> {
+        let journal = root.join(name);
+        if !journal.try_exists()? {
+            return Ok(None);
+        }
+        let _lock = lock(root)?;
+        if !journal.try_exists()? {
+            return Ok(None);
+        }
+        let record = journal.join("publication.json");
+        let bytes = std::fs::read(&record).map_err(at("read the interrupted publication record", &record))?;
+        let entries: Vec<PublicationEntry> = serde_json::from_slice::<Vec<PublicationEntry>>(&bytes)?
+            .into_iter()
+            .filter(|entry| !is_appledouble(&entry.path))
+            .map(|entry| PublicationEntry { path: publish_as(&journal, &entry), exact: true, ..entry })
+            .collect();
+        create_dir_all(keep).map_err(at("create the folder", keep))?;
+        write(&keep.join("publication.json"), &bytes)?;
+        let since = published_at(&journal)?;
+        let changed: Vec<bool> = entries
+            .iter()
+            .map(|entry| written_since(&root.join(&entry.path), since))
+            .collect::<std::io::Result<_>>()?;
+        let base_of = |entry: &PublicationEntry| sqlite_companion_of(&entry.path).and_then(|base| entries.iter().position(|e| e.path == base));
+        let published = |entry: &PublicationEntry| !journal.join(&entry.path).try_exists().unwrap_or(true);
+        let forward = entries
+            .iter()
+            .zip(&changed)
+            .rfind(|(entry, changed)| **changed && entry.present && base_of(entry).is_none())
+            .is_none_or(|(entry, _)| published(entry));
+        // What stays as the other writer left it.
+        let theirs: Vec<bool> = entries
+            .iter()
+            .zip(&changed)
+            .map(|(entry, this)| *this && base_of(entry).is_none_or(|base| changed[base]))
+            .collect();
+        let move_away = |path: &Path, under: &str| -> std::io::Result<()> {
+            let to = keep.join(under).join(path);
+            if let Some(parent) = to.parent() {
+                create_dir_all(parent)?;
+            }
+            rename(&root.join(path), &to).map_err(at("move aside", &root.join(path)))
+        };
+        let kept_paths: Vec<PathBuf> = entries.iter().zip(&theirs).filter(|(_, t)| **t).map(|(e, _)| e.path.clone()).collect();
+        // The device's earlier version of what stays theirs is kept.
+        for path in &kept_paths {
+            let previous = journal.join(".previous").join(path);
+            if previous.try_exists()? {
+                let to = keep.join("previous").join(path);
+                if let Some(parent) = to.parent() {
+                    create_dir_all(parent)?;
+                }
+                rename(&previous, &to).map_err(at("keep", &previous))?;
+            }
+        }
+        // A companion whose database is not the other writer's.
+        for (entry, (changed, theirs)) in entries.iter().zip(changed.iter().zip(&theirs)) {
+            if *changed && !*theirs {
+                move_away(&entry.path, "theirs")?;
+            }
+        }
+        if forward {
+            // Finish the rest as a run's own publication would.
+            let rest: Vec<PublicationEntry> = entries
+                .iter()
+                .zip(&theirs)
+                .filter(|(_, theirs)| !**theirs)
+                .map(|(entry, _)| PublicationEntry { path: entry.path.clone(), present: entry.present, had_target: entry.had_target, exact: true })
+                .collect();
+            write(&record, &serde_json::to_vec(&rest)?)?;
+            Self::finish(root, &journal, false)?;
+        } else {
+            for (entry, theirs) in entries.iter().zip(&theirs).rev() {
+                if *theirs {
+                    continue;
+                }
+                let target = root.join(&entry.path);
+                let previous = journal.join(".previous").join(&entry.path);
+                if previous.try_exists()? {
+                    if let Some(parent) = target.parent() {
+                        create_dir_all(parent)?;
+                    }
+                    rename(&previous, &target).map_err(at("put back", &target))?;
+                    sync_dir(target.parent().unwrap_or(root))?;
+                } else if entry.present && entry.had_target == Some(false) && published(entry) && target.try_exists()? {
+                    // Published where the device had nothing.
+                    in_stored_form(&target, |p| std::fs::remove_file(p)).map_err(at("remove", &target))?;
+                }
+            }
+            // As `finish` retires a journal: out of the way first, then deleted.
+            let discarded = tempfile::Builder::new().prefix(RETIRED_PREFIX).tempdir_in(root)?;
+            std::fs::rename(&journal, discarded.path().join("set-aside"))
+                .map_err(at("set aside the interrupted publication on", root))?;
+            sync_dir(root)?;
+            let _ = remove_tree(discarded.path());
+        }
+        sync_dir(keep)?;
+        Ok(Some(kept_paths))
     }
 
     #[allow(clippy::too_many_lines, reason = "one ordered roll-forward over the journal")]
@@ -574,6 +726,13 @@ fn publish_as(journal: &Path, entry: &PublicationEntry) -> PathBuf {
     if nfc != entry.path && answers(&nfc) { nfc } else { entry.path.clone() }
 }
 
+/// The database a SQLite `-wal` or `-shm` file belongs to.
+fn sqlite_companion_of(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let base = name.strip_suffix("-wal").or_else(|| name.strip_suffix("-shm"))?;
+    Some(path.with_file_name(base))
+}
+
 /// Stages and retired journals a previous run left at `root`. Best effort:
 /// a leftover that will not go is no reason to refuse this export.
 fn remove_leftovers(root: &Path) {
@@ -600,18 +759,13 @@ fn check_external_changes(
     journal: &Path,
     entries: &[PublicationEntry],
 ) -> std::io::Result<()> {
-    let published_at = std::fs::metadata(journal.join("publication.json"))?
-        .modified()?
-        .checked_add(Duration::from_secs(2))
-        .ok_or_else(|| std::io::Error::other("Invalid publication timestamp"))?;
+    let since = published_at(journal)?;
     for entry in entries {
         if is_appledouble(&entry.path) {
             continue;
         }
         let target = root.join(&entry.path);
-        if !target.try_exists().map_err(at("check", &target))?
-            || std::fs::metadata(&target).and_then(|m| m.modified()).map_err(at("check", &target))? <= published_at
-        {
+        if !written_since(&target, since)? {
             continue;
         }
         let image = journal.join(&entry.path);
@@ -624,13 +778,28 @@ fn check_external_changes(
             None
         };
         if !expected.is_some_and(|path| same_file_contents(&target, path).unwrap_or(false)) {
-            return Err(std::io::Error::other(format!(
-                "Publication conflict at {}; the device changed after sync failed and recovery data was retained",
-                entry.path.display()
-            )));
+            return Err(std::io::Error::other(DeviceChanged { path: entry.path.clone() }));
         }
     }
     Ok(())
+}
+
+/// When a journal's publication began, with two seconds' grace for the
+/// coarsest file system clock (FAT).
+fn published_at(journal: &Path) -> std::io::Result<std::time::SystemTime> {
+    std::fs::metadata(journal.join("publication.json"))?
+        .modified()?
+        .checked_add(Duration::from_secs(2))
+        .ok_or_else(|| std::io::Error::other("Invalid publication timestamp"))
+}
+
+/// Whether `target` was written after `since`: by another writer, since a
+/// publication's own images keep the time they were staged.
+fn written_since(target: &Path, since: std::time::SystemTime) -> std::io::Result<bool> {
+    if !target.try_exists().map_err(at("check", target))? {
+        return Ok(false);
+    }
+    Ok(std::fs::metadata(target).and_then(|m| m.modified()).map_err(at("check", target))? > since)
 }
 
 fn same_file_contents(left: &Path, right: &Path) -> std::io::Result<bool> {
@@ -953,6 +1122,139 @@ mod tests {
             std::fs::read(journal.join(".previous").join(path)).unwrap(),
             b"old db"
         );
+    }
+
+    #[test]
+    fn a_journal_the_device_changed_since_is_rolled_back_around_the_change() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let db = "PIONEER/rekordbox/exportLibrary.db";
+        // Another writer rewrote the database after the stop.
+        write_file(&root.path().join(db), b"rekordbox rewrote it");
+        write_file(&journal.join(db), b"staged db");
+        write_file(&journal.join(".previous").join(db), b"the device's database");
+        // Already replaced before the stop: the device's own file is in
+        // `.previous`, the new one in place.
+        write_file(&root.path().join("PIONEER/first.pdb"), b"new first");
+        write_file(&journal.join(".previous/PIONEER/first.pdb"), b"the device's own");
+        // Published where the device had nothing.
+        write_file(&root.path().join("Contents/new.mp3"), b"new audio");
+        // Not reached: still an image, the device's file untouched.
+        write_file(&root.path().join("PIONEER/later.pdb"), b"the device's later");
+        write_file(&journal.join("PIONEER/later.pdb"), b"staged later");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[
+                PublicationEntry { path: "Contents/new.mp3".into(), present: true, had_target: Some(false), exact: true },
+                PublicationEntry { path: "PIONEER/first.pdb".into(), present: true, had_target: Some(true), exact: true },
+                PublicationEntry { path: "PIONEER/later.pdb".into(), present: true, had_target: Some(true), exact: true },
+                PublicationEntry { path: db.into(), present: true, had_target: Some(true), exact: true },
+            ])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join(db));
+
+        let error = Publication::recover(root.path(), ".journal").unwrap_err();
+        assert!(is_device_changed(&error), "{error}");
+        assert!(!is_device_changed(&std::io::Error::other("something else")));
+
+        let keep = root.path().join("kept");
+        let theirs = Publication::set_aside(root.path(), ".journal", &keep).unwrap().unwrap();
+        assert_eq!(theirs, [PathBuf::from(db)]);
+        assert!(!journal.exists());
+        let read = |p: &str| std::fs::read(root.path().join(p)).unwrap();
+        // The other writer's change stays; the device's version of it is kept.
+        assert_eq!(read(db), b"rekordbox rewrote it");
+        assert_eq!(std::fs::read(keep.join("previous").join(db)).unwrap(), b"the device's database");
+        // Everything else is as it was before the publication.
+        assert_eq!(read("PIONEER/first.pdb"), b"the device's own");
+        assert_eq!(read("PIONEER/later.pdb"), b"the device's later");
+        assert!(!root.path().join("Contents/new.mp3").exists());
+        assert!(keep.join("publication.json").is_file());
+        // The device is usable again, and a second call finds nothing to do.
+        Publication::recover(root.path(), ".journal").unwrap();
+        assert!(Publication::set_aside(root.path(), ".journal", &keep).unwrap().is_none());
+        assert!(std::fs::read_dir(root.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(RETIRED_PREFIX)));
+    }
+
+    #[test]
+    fn a_journal_whose_published_database_was_rewritten_is_finished() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let db = "PIONEER/rekordbox/exportLibrary.db";
+        let wal = "PIONEER/rekordbox/exportLibrary.db-wal";
+        // Published before the stop, then rewritten, and opened in WAL mode.
+        write_file(&root.path().join(db), b"rewritten new database");
+        write_file(&journal.join(".previous").join(db), b"the device's database");
+        write_file(&root.path().join(wal), b"their wal");
+        // Published before the stop and left alone since.
+        write_file(&root.path().join("PIONEER/first.pdb"), b"new first");
+        write_file(&journal.join(".previous/PIONEER/first.pdb"), b"the device's own");
+        // Not reached.
+        write_file(&root.path().join("PIONEER/sync"), b"earlier sync record");
+        write_file(&journal.join("PIONEER/sync"), b"new sync record");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[
+                PublicationEntry { path: wal.into(), present: false, had_target: Some(false), exact: true },
+                PublicationEntry { path: "PIONEER/first.pdb".into(), present: true, had_target: Some(true), exact: true },
+                PublicationEntry { path: db.into(), present: true, had_target: Some(true), exact: true },
+                PublicationEntry { path: "PIONEER/sync".into(), present: true, had_target: Some(true), exact: true },
+            ])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join(db));
+        mark_newer(&root.path().join(wal));
+        assert!(is_device_changed(&Publication::recover(root.path(), ".journal").unwrap_err()));
+
+        let keep = root.path().join("kept");
+        let theirs = Publication::set_aside(root.path(), ".journal", &keep).unwrap().unwrap();
+        assert_eq!(theirs, [PathBuf::from(wal), PathBuf::from(db)]);
+        let read = |p: &str| std::fs::read(root.path().join(p)).unwrap();
+        // The writer saw the new generation, so the rest of it is published,
+        // and its database stays with the WAL beside it.
+        assert_eq!(read("PIONEER/sync"), b"new sync record");
+        assert_eq!(read("PIONEER/first.pdb"), b"new first");
+        assert_eq!(read(db), b"rewritten new database");
+        assert_eq!(read(wal), b"their wal");
+        assert_eq!(std::fs::read(keep.join("previous").join(db)).unwrap(), b"the device's database");
+        assert!(!journal.exists());
+    }
+
+    #[test]
+    fn a_wal_beside_a_database_that_is_put_back_is_moved_away() {
+        let root = tempfile::tempdir().unwrap();
+        let journal = root.path().join(".journal");
+        let db = "PIONEER/rekordbox/exportLibrary.db";
+        let wal = "PIONEER/rekordbox/exportLibrary.db-wal";
+        // Not reached: the database is the device's, the new one an image.
+        write_file(&root.path().join(db), b"the device's database");
+        write_file(&journal.join(db), b"new database");
+        // Another file changed by the other writer, not yet published.
+        write_file(&root.path().join("PIONEER/other.pdb"), b"theirs");
+        write_file(&journal.join("PIONEER/other.pdb"), b"new other");
+        // And a WAL appeared, though the database it would belong to is not
+        // the other writer's.
+        write_file(&root.path().join(wal), b"a wal");
+        write_file(
+            &journal.join("publication.json"),
+            &serde_json::to_vec(&[
+                PublicationEntry { path: wal.into(), present: false, had_target: Some(false), exact: true },
+                PublicationEntry { path: "PIONEER/other.pdb".into(), present: true, had_target: Some(true), exact: true },
+                PublicationEntry { path: db.into(), present: true, had_target: Some(true), exact: true },
+            ])
+            .unwrap(),
+        );
+        mark_newer(&root.path().join("PIONEER/other.pdb"));
+        mark_newer(&root.path().join(wal));
+
+        let keep = root.path().join("kept");
+        let theirs = Publication::set_aside(root.path(), ".journal", &keep).unwrap().unwrap();
+        assert_eq!(theirs, [PathBuf::from("PIONEER/other.pdb")]);
+        assert_eq!(std::fs::read(root.path().join(db)).unwrap(), b"the device's database");
+        assert!(!root.path().join(wal).exists(), "a WAL is not left beside a database it may not belong to");
+        assert_eq!(std::fs::read(keep.join("theirs").join(wal)).unwrap(), b"a wal");
+        assert!(!journal.exists());
     }
 
     #[test]

@@ -759,6 +759,7 @@ pub fn export_cancellable(
     rbl_core::durable::create_dir_all(&anlz_root)?;
     rbl_core::durable::create_dir_all(&db_dir)?;
 
+    recover(destination)?;
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     let mut previous = Manifest::load(destination);
     let before = snapshot::Snapshot::read(destination)?;
@@ -1453,6 +1454,7 @@ pub fn create_library_with_root(
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
+    recover(destination)?;
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     let root_name = export_root_name_with(destination, preferred_root)?;
     let db_dir = destination.join(root_name).join("rekordbox");
@@ -1904,8 +1906,35 @@ pub fn verification_failure(report: &VerifyReport) -> String {
 const PUBLICATION: &str = ".rbxport-publication";
 
 /// Complete an interrupted export before reading or changing the device.
+///
+/// An export that stopped part way leaves its journal on the device, and
+/// this finishes it. When the device was written to since, which rekordbox
+/// does by itself the moment it sees the stick, the journal cannot be
+/// finished without overwriting those writes, and refusing left the stick
+/// unusable until it was reformatted (#229). Instead the interrupted export
+/// is settled around those writes, finished or rolled back depending on
+/// which generation the other writer saw (see
+/// `rbl_core::durable::Publication::set_aside`), and its journal is set aside
+/// under `rbxport/recovered-<ms>/` in the library root, so the next export
+/// starts from the device as it is now.
 pub fn recover(destination: &Path) -> std::io::Result<()> {
-    rbl_core::durable::Publication::recover(destination, PUBLICATION)
+    match rbl_core::durable::Publication::recover(destination, PUBLICATION) {
+        Err(error) if rbl_core::durable::is_device_changed(&error) => {
+            let root_name = export_root_name(destination).unwrap_or("PIONEER");
+            let keep = destination.join(root_name).join(format!("rbxport/recovered-{}", rbl_core::time::unix_millis()));
+            if let Some(theirs) = rbl_core::durable::Publication::set_aside(destination, PUBLICATION, &keep)? {
+                tracing::warn!(
+                    device = %destination.display(),
+                    kept = %keep.display(),
+                    changed_by_another_writer = ?theirs,
+                    %error,
+                    "settled an interrupted export the device had changed since, keeping the other writer's files; the next export starts from the device as it is"
+                );
+            }
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 /// The files staged under `root`, relative to it, under the names they are
