@@ -3,10 +3,25 @@
 /**
  * Fetches Git refs, verifies a clean, pushed dev tip descended from main,
  * and dispatches the GitHub Release workflow through gh; it does not build locally.
- * Run: pnpm deploy. Requires authenticated gh and remote access. Optional
- * SKIP_TESTS=true and SKIP_VERSION_BUMP=true control workflow inputs.
+ * Run: pnpm deploy [--notes-instructions TEXT]. Requires authenticated gh and
+ * remote access. Optional SKIP_TESTS=true and SKIP_VERSION_BUMP=true control
+ * workflow inputs. Unless the version bump is skipped, Codex curates the release
+ * notes (TEXT, or RELEASE_NOTES_INSTRUCTIONS, is appended to its prompt) and the
+ * result is pushed as a git note on the source commit for the workflow to read;
+ * a dispatch input would be dropped while main does not declare it.
  */
 import { spawnSync } from "node:child_process";
+import { curateReleaseNotes } from "./curate-release-notes.mjs";
+
+const NOTES_REF = "release-notes";
+
+function notesInstructions(argv) {
+  const index = argv.indexOf("--notes-instructions");
+  if (index === -1) return process.env.RELEASE_NOTES_INSTRUCTIONS ?? "";
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) throw new Error("--notes-instructions needs text");
+  return value;
+}
 
 function setting(name) {
   const value = process.env[name] ?? "false";
@@ -34,9 +49,13 @@ function requireCondition(condition, message) {
 }
 
 function usage() {
-  return `Usage: npm run deploy
+  return `Usage: npm run deploy [-- --notes-instructions "TEXT"]
 
 Dispatches the Release workflow from the exact clean, pushed dev tip.
+
+Options:
+  --notes-instructions TEXT  Extra instructions for the release-notes curator,
+                             for this release only (or RELEASE_NOTES_INSTRUCTIONS)
 
 Environment:
   SKIP_TESTS=true          Skip release validation tests
@@ -44,6 +63,7 @@ Environment:
 }
 
 function deploy() {
+  const instructions = notesInstructions(process.argv.slice(2));
   const skipTests = setting("SKIP_TESTS");
   const skipVersionBump = setting("SKIP_VERSION_BUMP");
 
@@ -58,6 +78,20 @@ function deploy() {
   const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", "origin/main", "HEAD"], { stdio: "inherit" });
   if (ancestry.error) throw ancestry.error;
   requireCondition(ancestry.status === 0, "main is not an ancestor of dev");
+
+  if (!skipVersionBump) {
+    const previous = command("git", ["tag", "--merged", "HEAD", "--list", "v*", "--sort=-version:refname"], true)
+      .split("\n").find(Boolean);
+    requireCondition(previous, "no previous release tag found");
+    console.log(`Asking Codex to curate release notes for ${previous}..${head.slice(0, 7)}.`);
+    const curated = JSON.stringify(curateReleaseNotes({ previous, source: head, instructions }));
+    // Sync the shared notes ref first so the push stays a fast-forward.
+    spawnSync("git", ["fetch", "origin", `+refs/notes/${NOTES_REF}:refs/notes/${NOTES_REF}`], { stdio: "ignore" });
+    command("git", ["notes", "--ref", NOTES_REF, "add", "-f", "-m", curated, head]);
+    command("git", ["push", "origin", `refs/notes/${NOTES_REF}`]);
+  } else if (instructions) {
+    throw new Error("--notes-instructions cannot be used with SKIP_VERSION_BUMP=true");
+  }
 
   const workflowArguments = [
     "workflow", "run", "Release",

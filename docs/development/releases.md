@@ -33,7 +33,13 @@ See [Testing](testing.md) for local checks and their evidence boundaries.
 
 The deployment script checks the clean, pushed `dev` tip and that `main` is
 its ancestor. It asks the local Codex CLI to curate notes from the release diff
-with read-only checkout access, then dispatches the Release workflow.
+with read-only checkout access, attaches the result to the source commit as a
+git note (`refs/notes/release-notes`), then dispatches the Release workflow,
+which reads the note (a dispatch input would be dropped while `main` does not
+declare it) and falls back to commit-derived notes when there is none. To give
+the curator extra instructions for one release, run
+`npm run deploy -- --notes-instructions "…"` or set
+`RELEASE_NOTES_INSTRUCTIONS`.
 
 After validation, the workflow records the version and notes on `dev`, creates
 an immutable tag, and fast-forwards `main`. Installer jobs build from that

@@ -162,6 +162,13 @@ jobs:
           git rev-parse --verify "refs/tags/$previous^{commit}"
           git merge-base --is-ancestor "$previous" "$SOURCE_REF"
           node scripts/sync-version.mjs --version "$version"
+          # npm run deploy attaches the curated notes to the source commit as a
+          # git note (a dispatch input would be dropped while main lacks it).
+          # Without one, notes are derived from the commits.
+          if git fetch origin "+refs/notes/release-notes:refs/notes/release-notes" 2>/dev/null \
+            && RELEASE_NOTES_JSON="$(git notes --ref release-notes show "$SOURCE_REF" 2>/dev/null)"; then
+            export RELEASE_NOTES_JSON
+          fi
           VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" \
             node scripts/generate-release-notes.mjs
           node scripts/release-preflight.mjs --version "$version" --expect-untagged
