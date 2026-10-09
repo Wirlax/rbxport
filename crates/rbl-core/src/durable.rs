@@ -274,7 +274,7 @@ impl Publication {
         let lock = lock(root)?;
         let journal = root.join(name);
         if journal.try_exists()? {
-            Self::finish(root, &journal)?;
+            Self::finish(root, &journal, true)?;
         }
         // Under the exclusive lock nothing else is using a stage, so any
         // left here belonged to an export that stopped or could not delete
@@ -361,7 +361,10 @@ impl Publication {
         )?;
         std::fs::rename(self.stage.path(), &self.journal).map_err(at("start publishing to", &self.root))?;
         sync_dir(&self.root)?;
-        Self::finish(&self.root, &self.journal)
+        // This run wrote the journal and holds the lock: nothing else can
+        // have changed the device since, and a file that looks newer only
+        // has a clock ahead of this one (FAT keeps local time with no zone).
+        Self::finish(&self.root, &self.journal, false)
     }
 
     pub fn recover(root: &Path, name: &str) -> std::io::Result<()> {
@@ -369,14 +372,16 @@ impl Publication {
         if journal.try_exists()? {
             let _lock = lock(root)?;
             if journal.try_exists()? {
-                Self::finish(root, &journal)?;
+                Self::finish(root, &journal, true)?;
             }
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_lines, reason = "one ordered roll-forward over the journal")]
-    fn finish(root: &Path, journal: &Path) -> std::io::Result<()> {
+    /// `replay`: the journal was left by a run that stopped, so the device
+    /// may have been written to since; see [`check_external_changes`].
+    fn finish(root: &Path, journal: &Path, replay: bool) -> std::io::Result<()> {
         let record = journal.join("publication.json");
         let entries: Vec<PublicationEntry> = serde_json::from_slice(
             &std::fs::read(&record).map_err(at("read the interrupted publication record", &record))?,
@@ -398,7 +403,9 @@ impl Publication {
                 String::from_utf8_lossy(&std::fs::read(incomplete)?)
             )));
         }
-        check_external_changes(root, journal, &entries)?;
+        if replay {
+            check_external_changes(root, journal, &entries)?;
+        }
         #[cfg(unix)]
         let root_handle = std::fs::File::open(root)?;
         // The previous generation stays inside the journal until every new
