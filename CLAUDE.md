@@ -19,6 +19,7 @@ le dit en commentaire (« This fork's own ») pour s'y retrouver lors d'un merge
 | --- | --- | --- |
 | **Memory cues toutes les 16 mesures** : bouton « 16 » du groupe MEMORY (mode 1 PLAYER) ou touche `V`. Part de la tête de lecture (calée sur le beat si Q), compte 64 temps sur la beatgrid jusqu'au début, remplace les memory cues simples, garde les loops, limite rekordbox de 10. | `src/views/player/useMemoryCues.ts` (`storeEvery16Bars`), `src/lib/player.ts` (`beatsBackMs`), `src/lib/shortcuts.ts` | [#1](https://github.com/Wirlax/rbxport/pull/1) |
 | **Organize Library** : Préférences › Advanced › Database. Déplace chaque fichier dans `<dossier>/<Artiste>/<Album>/<nom d'origine>`, met à jour `FolderPath`/`FileNameL`, aperçu + confirmation, sauvegarde avant, journal, annulation du dernier rangement. Laisse de côté cloud/streaming et `~/Music/rekordbox`, `~/Music/PioneerDJ`. | `src-tauri/src/organize.rs`, `crates/rbl-db/src/track_files.rs`, `src/views/settings/AdvancedPane.tsx` | [#2](https://github.com/Wirlax/rbxport/pull/2) |
+| **App du fork installée, sans mise à jour** : `pnpm app:install` construit la `.app` (signature ad-hoc, sans artefacts updater) et remplace `/Applications/rbxport.app`, l'ancienne part à la Corbeille. La vérification des mises à jour refuse : le build officiel remplacerait le fork. | `src-tauri/src/update.rs` (`OFFICIAL_FEED`), `scripts/install-app.mjs`, `src-tauri/tauri.fork.conf.json` | [#4](https://github.com/Wirlax/rbxport/pull/4) |
 
 Journal d'Organize Library : `~/Library/Application Support/rbxport/backups/organize/*.jsonl`.
 
@@ -43,9 +44,9 @@ Journal d'Organize Library : `~/Library/Application Support/rbxport/backups/orga
   `rbl.preferences` = `{"advanced":{"protectLibrary":false}}`.
 - `pnpm dev` : la vraie app sur la vraie bibliothèque. Elle se recompile et redémarre à
   chaque changement de fichier Rust, `git switch` compris.
-- `/Applications/rbxport.app` (version officielle) a le même identifiant
-  (`com.rbxport.app`) : une seule instance à la fois, la nôtre se ferme aussitôt si
-  l'officielle est ouverte.
+- `/Applications/rbxport.app` est le build du fork (`pnpm app:install`, à relancer après
+  chaque merge, rbxport fermé). Même identifiant que `pnpm dev` (`com.rbxport.app`) : une
+  seule instance à la fois, la seconde se ferme aussitôt.
 - macOS doit autoriser l'app à lire le dossier Téléchargements (une partie de la
   bibliothèque y était), sinon « Operation not permitted ».
 
@@ -72,7 +73,9 @@ Journal d'Organize Library : `~/Library/Application Support/rbxport/backups/orga
   --delete-branch`, puis `git switch main && git pull --ff-only origin main`.
 - GitHub Actions est désactivé sur le fork : la validation locale fait foi.
 - Récupérer upstream : `git fetch upstream`, puis merge de `upstream/main` sur une branche
-  dédiée, tests complets avant de fusionner.
+  dédiée, tests complets avant de fusionner, puis `pnpm app:install`. Une tâche planifiée
+  de l'app Claude (« Veille upstream rbxport », 19 h) prévient par notification quand
+  upstream bouge ; son repère local est `refs/fork-watch/upstream-seen`.
 
 ## Avant de dire « terminé »
 
