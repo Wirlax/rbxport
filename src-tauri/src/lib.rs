@@ -40,6 +40,9 @@ mod browse_settings;
 mod protocol;
 mod relocate;
 mod organize;
+// This fork's own; only AppleScript reaches it.
+#[cfg(target_os = "macos")]
+mod mini_sets;
 mod sync_window;
 mod report;
 mod scripting;
