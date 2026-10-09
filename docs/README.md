@@ -28,6 +28,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 
 - [Library location](reference/library-location.md): which rekordbox library opens, switching it in Database management, and missing drives.
 - [USB export format](reference/usb-export-db.md): files, binary records, implementation, verification, and unknowns.
+- [USB export pipeline](reference/usb-export-pipeline.md): how an export runs from the Sync Manager to the stick, its safety checks, and where to change it.
 - [Library backups](reference/backups.md): how backups are created and restored, and why.
 - [LINK behavior and hardware coverage](reference/link-testing.md): device dialects, behavior catalog, and physical checks.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
