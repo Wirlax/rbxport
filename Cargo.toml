@@ -62,3 +62,12 @@ opt-level = 2
 inherits = "release"
 debug = 1
 strip = "none"
+
+# This fork's own: what `pnpm app:install` builds unless given `--release`.
+# Release's fat LTO over a single codegen unit re-optimises the whole program
+# on every build (8–9 minutes for a one-line change); thin LTO over 16 units
+# takes a fraction of that for a few percent of speed in the heavy paths.
+[profile.fork]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
