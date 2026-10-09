@@ -1,0 +1,27 @@
+[package]
+name = "rbl-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "This fork's own: an MCP server that builds mini-set playlists in the library, writing through the running app."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rbxport-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rbl-core = { path = "../rbl-core" }
+rbl-db = { path = "../rbl-db" }
+rmcp = { version = "3.5.1", features = ["server", "macros", "transport-io"] }
+schemars = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "sync", "io-std"] }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
