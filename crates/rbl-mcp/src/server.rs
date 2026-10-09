@@ -37,7 +37,10 @@ is a guide, not a rule: a clash is fine when the tracks belong together, but say
 6. Propose the blocks in plain text (title, artist, BPM, key) and wait for his explicit go-ahead. Then call \
 preview_mini_sets, then add_mini_sets with exactly the approved blocks. Never write blocks he has not \
 approved.
-7. Writing needs rekordbox (and its agent) closed; the server starts rbxport itself when it is not open. If \
+7. To change or take out a block, read the playlist with get_mini_sets, name the block by the separator it \
+follows, propose the change, wait for his go-ahead, call preview_mini_set_change, then change_mini_set or \
+remove_mini_set. Taking a block out removes its separator too; separator numbers mean nothing to him.
+8. Writing needs rekordbox (and its agent) closed; the server starts rbxport itself when it is not open. If \
 a write is refused, tell him why.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -84,6 +87,24 @@ pub struct BlocksParams {
     pub blocks: Vec<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ChangeParams {
+    /// The playlist holding the block: its id, or its name.
+    pub playlist: String,
+    /// The separator the block follows, as `get_mini_sets` shows it, e.g. `SEPARATORBREMSEN 100`.
+    pub separator: String,
+    /// The block's tracks afterwards, by id, in mix order. Tracks it keeps stay; others come and go.
+    pub tracks: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoveParams {
+    /// The playlist holding the block: its id, or its name.
+    pub playlist: String,
+    /// The separator the block follows, as `get_mini_sets` shows it, e.g. `SEPARATORBREMSEN 100`.
+    pub separator: String,
+}
+
 impl BlocksParams {
     fn split(self) -> Result<(Target, Vec<Vec<String>>), String> {
         let target = match (self.playlist, self.new_playlist) {
@@ -106,6 +127,23 @@ pub struct Server {
 impl Server {
     pub fn new(app: Arc<App>, library: Option<LibraryLocation>) -> Self {
         Self { tool_router: Self::tool_router(), app, library }
+    }
+
+    /// Checks a change as the write will, without launching anything, then
+    /// has the app make it and answers the playlist's mini-sets afterwards.
+    async fn write_change(&self, playlist: String, separator: String, tracks: Vec<String>) -> Result<String, String> {
+        let library = self.library.clone();
+        let (id, title, tracks) = tokio::task::spawn_blocking(move || {
+            refuse_while_rekordbox_runs(library.as_ref())?;
+            let snapshot = Snapshot::load(library.as_ref())?;
+            let (id, preview) = snapshot.preview_change(&playlist, &separator, &tracks)?;
+            Ok::<_, String>((id, preview.separator, tracks))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let destination = Destination::Change { playlist: id.clone(), separator: title };
+        let placed = self.app.place(&destination, &[tracks]).await?;
+        self.read(move |snapshot| Ok(json!({ "changed": placed, "playlist": snapshot.mini_sets(&id)? }))).await
     }
 
     /// `read` on a fresh snapshot, off the async threads, as JSON.
@@ -212,18 +250,14 @@ impl Server {
         // Everything that can refuse is asked first, so a refusal never
         // launches the app.
         let (destination, blocks) = tokio::task::spawn_blocking(move || {
-            if library.as_ref().is_none_or(|l| l.is_real_install) && rbl_db::is_rekordbox_running() {
-                return Err("rekordbox (or its agent) is running: ask Ronan to quit it, then try again. Nothing was \
-                            written."
-                    .to_owned());
-            }
+            refuse_while_rekordbox_runs(library.as_ref())?;
             let snapshot = Snapshot::load(library.as_ref())?;
             snapshot.preview(&target, &blocks)?;
             let destination = match target {
                 Target::Playlist(wanted) => Destination::Playlist(snapshot.playlist(&wanted)?.id.clone()),
                 Target::New(name) => Destination::New(name.trim().to_owned()),
             };
-            Ok((destination, blocks))
+            Ok::<_, String>((destination, blocks))
         })
         .await
         .map_err(|e| e.to_string())??;
@@ -231,13 +265,50 @@ impl Server {
         let placed = self.app.place(&destination, &blocks).await?;
         self.read(move |snapshot| {
             let id = match destination {
-                Destination::Playlist(id) => Some(id),
+                Destination::Playlist(id) | Destination::Change { playlist: id, .. } => Some(id),
                 Destination::New(name) => snapshot.top_named(&name),
             };
             let after = id.map(|id| snapshot.mini_sets(&id)).transpose()?;
             Ok(json!({ "placed_after": placed, "playlist": after }))
         })
         .await
+    }
+
+    /// What changing or taking out a block would do, without writing.
+    #[tool(
+        description = "What change_mini_set or remove_mini_set would do, without writing: the block after the given \
+                       separator before and after, the new transitions and warnings. No tracks previews taking \
+                       the block out. Refused exactly as the write would be.",
+        annotations(read_only_hint = true)
+    )]
+    async fn preview_mini_set_change(&self, Parameters(params): Parameters<ChangeParams>) -> Result<String, String> {
+        let ChangeParams { playlist, separator, tracks } = params;
+        self.read(move |snapshot| snapshot.preview_change(&playlist, &separator, &tracks).map(|(_, preview)| preview)).await
+    }
+
+    /// Gives an approved block its new tracks.
+    #[tool(
+        description = "Changes the block after the given separator to the given tracks, through rbxport: swap, add, \
+                       drop or reorder tracks. Call it only with a change Ronan has explicitly approved, after \
+                       preview_mini_set_change. Needs rekordbox closed.",
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn change_mini_set(&self, Parameters(params): Parameters<ChangeParams>) -> Result<String, String> {
+        if params.tracks.is_empty() {
+            return Err("A block needs tracks; remove_mini_set takes one out.".to_owned());
+        }
+        self.write_change(params.playlist, params.separator, params.tracks).await
+    }
+
+    /// Takes an approved block out.
+    #[tool(
+        description = "Takes the block after the given separator out of the playlist, with its separator, through \
+                       rbxport. Call it only once Ronan has explicitly approved taking that block out. Needs \
+                       rekordbox closed.",
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
+    )]
+    async fn remove_mini_set(&self, Parameters(params): Parameters<RemoveParams>) -> Result<String, String> {
+        self.write_change(params.playlist, params.separator, Vec::new()).await
     }
 }
 
@@ -249,4 +320,13 @@ impl ServerHandler for Server {
             .with_server_info(Implementation::new("rbxport", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
+}
+
+/// rekordbox holds the library while it (or its agent) runs: asked before
+/// anything is launched. A fixture in a test is nobody's.
+fn refuse_while_rekordbox_runs(library: Option<&LibraryLocation>) -> Result<(), String> {
+    if library.is_none_or(|l| l.is_real_install) && rbl_db::is_rekordbox_running() {
+        return Err("rekordbox (or its agent) is running: ask Ronan to quit it, then try again. Nothing was written.".to_owned());
+    }
+    Ok(())
 }

@@ -19,10 +19,12 @@ const READY_TIMEOUT: Duration = Duration::from_secs(90);
 /// How long one AppleScript round may take before it is given up on.
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(150);
 
-/// Where the blocks go, resolved: a playlist id, or a new playlist's name.
+/// Where the blocks go, resolved: a playlist id, a new playlist's name, or
+/// the block after a separator (by title) in a playlist, to change.
 pub enum Destination {
     Playlist(String),
     New(String),
+    Change { playlist: String, separator: String },
 }
 
 #[derive(Debug)]
@@ -55,8 +57,9 @@ impl App {
     pub async fn place(&self, destination: &Destination, blocks: &[Vec<String>]) -> Result<Vec<String>, String> {
         let _one = self.writing.lock().await;
         self.ensure_running().await?;
-        let (script, argument) = place_script(destination, blocks)?;
-        let placed = osascript(&script, &[argument.as_str()]).await;
+        let (script, arguments) = place_script(destination, blocks)?;
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        let placed = osascript(&script, &arguments).await;
         self.with_launch(|l| l.last_write = Instant::now());
         Ok(list_items(&placed?))
     }
@@ -147,9 +150,10 @@ async fn is_frontmost() -> bool {
     String::from_utf8_lossy(&info.stdout).contains(BUNDLE_ID)
 }
 
-/// The script for one write, and the argument it takes: the playlist id or
-/// the new playlist's name, passed apart so a name needs no escaping.
-fn place_script(destination: &Destination, blocks: &[Vec<String>]) -> Result<(String, String), String> {
+/// The script for one write, and the arguments it takes: the playlist id or
+/// the new playlist's name, and a separator's title, passed apart so they
+/// need no escaping.
+fn place_script(destination: &Destination, blocks: &[Vec<String>]) -> Result<(String, Vec<String>), String> {
     if let Some(bad) = blocks.iter().flatten().find(|id| id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit())) {
         return Err(format!("{bad:?} is not a track id."));
     }
@@ -158,12 +162,16 @@ fn place_script(destination: &Destination, blocks: &[Vec<String>]) -> Result<(St
         .map(|block| format!("{{{}}}", block.iter().map(|id| format!("\"{id}\"")).collect::<Vec<_>>().join(", ")))
         .collect::<Vec<_>>()
         .join(", ");
-    let (target, argument) = match destination {
-        Destination::Playlist(id) => ("to playlist id (item 1 of argv)", id.clone()),
-        Destination::New(name) => ("creating playlist (item 1 of argv)", name.clone()),
+    let (target, arguments) = match destination {
+        Destination::Playlist(id) => ("to playlist id (item 1 of argv)", vec![id.clone()]),
+        Destination::New(name) => ("creating playlist (item 1 of argv)", vec![name.clone()]),
+        Destination::Change { playlist, separator } => (
+            "to playlist id (item 1 of argv) replacing (item 2 of argv)",
+            vec![playlist.clone(), separator.clone()],
+        ),
     };
     let script = format!("on run argv\n\ttell application id \"{BUNDLE_ID}\" to place mini sets {{{list}}} {target}\nend run");
-    Ok((script, argument))
+    Ok((script, arguments))
 }
 
 async fn osascript(script: &str, arguments: &[&str]) -> Result<String, String> {
@@ -216,12 +224,16 @@ mod tests {
     #[test]
     fn the_script_lists_the_blocks_and_takes_the_target_apart() {
         let blocks = vec![vec!["12".to_owned(), "34".to_owned()], vec!["56".to_owned()]];
-        let (script, argument) = place_script(&Destination::New("Mon \"set\"".to_owned()), &blocks).unwrap();
+        let (script, arguments) = place_script(&Destination::New("Mon \"set\"".to_owned()), &blocks).unwrap();
         assert!(script.contains("place mini sets {{\"12\", \"34\"}, {\"56\"}} creating playlist (item 1 of argv)"), "{script}");
-        assert_eq!(argument, "Mon \"set\"");
-        let (script, argument) = place_script(&Destination::Playlist("99".to_owned()), &blocks).unwrap();
+        assert_eq!(arguments, ["Mon \"set\""]);
+        let (script, arguments) = place_script(&Destination::Playlist("99".to_owned()), &blocks).unwrap();
         assert!(script.contains("to playlist id (item 1 of argv)"));
-        assert_eq!(argument, "99");
+        assert_eq!(arguments, ["99"]);
+        let change = Destination::Change { playlist: "99".to_owned(), separator: "SEPARATORBREMSEN 100".to_owned() };
+        let (script, arguments) = place_script(&change, &[Vec::new()]).unwrap();
+        assert!(script.contains("place mini sets {{}} to playlist id (item 1 of argv) replacing (item 2 of argv)"), "{script}");
+        assert_eq!(arguments, ["99", "SEPARATORBREMSEN 100"]);
         assert!(place_script(&Destination::Playlist("99".to_owned()), &[vec!["1\"; quit".to_owned()]]).is_err());
     }
 
