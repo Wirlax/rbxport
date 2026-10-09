@@ -221,7 +221,7 @@ const FILE_NAME_MAX: usize = 120;
 
 /// A directory component under `Contents/`: FAT-safe and cut to rekordbox's
 /// length, trailing spaces and dots dropped after the cut too.
-fn dir_name(name: &str) -> String {
+pub fn dir_name(name: &str) -> String {
     let safe = fat_safe(name);
     if safe.chars().count() <= DIR_NAME_MAX {
         return safe;
