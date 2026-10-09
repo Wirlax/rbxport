@@ -70,7 +70,6 @@ import { answer, deckNumber, setPlaying, whenLoaded, withSetting, type ScriptHan
 import { useAnalysis } from "@/store/useAnalysis";
 import { AnalysisDialog, type AnalysisChoice } from "@/views/analysis/AnalysisDialog";
 import { autoAnalysisOffer, takeRemainingPages } from "@/lib/autoAnalysis";
-import { MissingFileManager } from "@/views/library/MissingFileManager";
 import { NewLibraryDialog, type LibraryQuestion } from "@/views/library/NewLibraryDialog";
 import type { QueueItem } from "@/lib/queue";
 import { TrackFilter } from "@/views/browser/TrackFilter";
@@ -95,6 +94,7 @@ const UpdateManager = lazy(() => import("@/views/update/UpdateManager").then(m =
 const Preferences = lazy(() => import("@/views/settings/Preferences").then(m => ({ default: m.Preferences })));
 const SyncManager = lazy(() => import("@/views/sync/SyncManager").then(m => ({ default: m.SyncManager })));
 const SmartPlaylistEditor = lazy(() => import("@/views/tree/SmartPlaylistEditor").then(m => ({ default: m.SmartPlaylistEditor })));
+const MissingFileManager = lazy(() => import("@/views/library/MissingFileManager").then(m => ({ default: m.MissingFileManager })));
 
 const SHOW_MAIN_SUPPORT = true;
 
