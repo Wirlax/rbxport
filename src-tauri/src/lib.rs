@@ -39,6 +39,7 @@ mod preferences;
 mod browse_settings;
 mod protocol;
 mod relocate;
+mod organize;
 mod sync_window;
 mod report;
 mod scripting;
@@ -577,6 +578,10 @@ pub fn run() {
             relocate::auto_relocate,
             relocate::relocation_targets,
             relocate::relocate_by_location,
+            organize::organize_preview,
+            organize::organize_library,
+            organize::undo_organize,
+            organize::last_organize,
             preferences::open_preferences,
             sync_window::open_sync_window,
             report::open_report_window,

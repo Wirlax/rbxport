@@ -24,6 +24,7 @@ pub mod write;
 pub mod xml;
 mod schema;
 pub mod track_path;
+pub mod track_files;
 
 use std::{
     path::{Path, PathBuf},
