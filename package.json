@@ -24,6 +24,7 @@
     "e2e": "playwright test",
     "budget": "node scripts/check-perf-budgets.mjs && tsx scripts/check-bundle-size.ts",
     "app:install": "node scripts/install-app.mjs",
+    "mcp:install": "node scripts/install-app.mjs --mcp-only",
     "locales": "node scripts/build-locales.mjs",
     "tests:private": "node scripts/tests-private.mjs"
   },
