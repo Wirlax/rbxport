@@ -4143,6 +4143,7 @@ dependencies = [
 name = "rbl-mcp"
 version = "1.3.0"
 dependencies = [
+ "percent-encoding",
  "rbl-core",
  "rbl-db",
  "rmcp",
@@ -4152,6 +4153,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "unicode-normalization",
+ "ureq",
 ]
 
 [[package]]
