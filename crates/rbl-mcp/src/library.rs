@@ -67,6 +67,11 @@ impl Snapshot {
         self.by_id.get(id).and_then(|&i| self.tracks.get(i))
     }
 
+    /// Every track that is not a separator.
+    pub fn real_tracks(&self) -> impl Iterator<Item = &CatalogTrack> {
+        self.tracks.iter().filter(|t| !self.is_separator(t))
+    }
+
     fn is_separator(&self, track: &CatalogTrack) -> bool {
         self.separator_of.contains_key(&track.id) || Separator::parse(&track.title).is_some()
     }

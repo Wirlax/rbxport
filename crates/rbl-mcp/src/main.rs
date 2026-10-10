@@ -5,6 +5,7 @@
 
 mod app;
 mod library;
+mod links;
 mod server;
 
 use std::sync::Arc;

@@ -41,7 +41,17 @@ approved.
 follows, propose the change, wait for his go-ahead, call preview_mini_set_change, then change_mini_set or \
 remove_mini_set. Taking a block out removes its separator too; separator numbers mean nothing to him.
 8. Writing needs rekordbox (and its agent) closed; the server starts rbxport itself when it is not open. If \
-a write is refused, tell him why.";
+a write is refused, tell him why.
+
+Getting tracks he does not have yet:
+9. When he gives a list of tracks to get (a tracklist, names, a pasted list), split each into artist and title \
+and call find_links (100 at most per call). Then answer in this order: the tracks already in his library (no \
+link; say when only another version is there); the sure Deezer links, all of deezer_links in one code block, \
+one per line, ready for deemix; the uncertain ones apart, each with its candidates and what differs, for him \
+to choose; and for those not on Deezer, find the track's own SoundCloud page with your web search \
+(soundcloud.com/<artist>/<track>, the right artist and title, not a mix, a set or a repost) and give that \
+link, or soundcloud_search when you cannot find it. He downloads and imports them himself; afterwards find \
+them with search_tracks to build mini-sets.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchParams {
@@ -103,6 +113,20 @@ pub struct RemoveParams {
     pub playlist: String,
     /// The separator the block follows, as `get_mini_sets` shows it, e.g. `SEPARATORBREMSEN 100`.
     pub separator: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WantedTrack {
+    /// The artist as the list gives it; several are fine (`A & B`, `A feat. B`). Empty when unknown.
+    pub artist: String,
+    /// The title with its version, as the list gives it, e.g. `Bugatti (Pythius Remix)`.
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindLinksParams {
+    /// The tracks to get, in the list's order: 100 at most.
+    pub tracks: Vec<WantedTrack>,
 }
 
 impl BlocksParams {
@@ -309,6 +333,22 @@ impl Server {
     )]
     async fn remove_mini_set(&self, Parameters(params): Parameters<RemoveParams>) -> Result<String, String> {
         self.write_change(params.playlist, params.separator, Vec::new()).await
+    }
+
+    /// Deezer links for tracks not in the library yet.
+    #[tool(
+        description = "For a list of tracks to get: which are already in the library, the Deezer link of each sure \
+                       match (deezer_links, ready for deemix), Deezer tracks that may be it with what differs \
+                       (another version or artist), and a SoundCloud search for the rest. Deezer is searched \
+                       without an account; a long list takes a few seconds.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn find_links(&self, Parameters(params): Parameters<FindLinksParams>) -> Result<String, String> {
+        if params.tracks.len() > 100 {
+            return Err("100 tracks at most per call: split the list.".to_owned());
+        }
+        let wanted: Vec<(String, String)> = params.tracks.into_iter().map(|t| (t.artist, t.title)).collect();
+        self.read(move |snapshot| Ok(crate::links::find(snapshot, &mut crate::links::Deezer::new(), &wanted))).await
     }
 }
 
