@@ -194,7 +194,7 @@ impl Snapshot {
             };
             by_id.insert(t.id.clone(), tracks.len());
             tracks.push(TrackEntry {
-                haystack: fold(&format!("{} {} {}", t.title, t.artist, t.remixer)),
+                haystack: haystack(&format!("{} {} {}", t.title, t.artist, t.remixer)),
                 title_fold: fold(&t.title),
                 json,
                 path,
@@ -378,6 +378,12 @@ pub fn camelot_code(key: Key) -> String {
     format!("{number}{}", if minor { 'A' } else { 'B' })
 }
 
+/// What a search looks in: the text folded, and folded again with its dots
+/// closed up, so `A.M.C` answers to both `a m c` and `amc`.
+fn haystack(text: &str) -> String {
+    format!("{} {}", fold(text), fold(&text.replace('.', "")))
+}
+
 /// Lower case, accents and apostrophes gone, anything else that is not a
 /// letter or digit a single space.
 pub fn fold(text: &str) -> String {
@@ -412,6 +418,14 @@ mod tests {
     fn folding_ignores_case_accents_and_apostrophes() {
         assert_eq!(fold("Booyah Jale’s Edit"), "booyah jales edit");
         assert_eq!(fold("  Beyoncé  — Déjà Vu "), "beyonce deja vu");
+    }
+
+    #[test]
+    fn dotted_names_are_found_with_or_without_the_dots() {
+        let text = haystack("I See You A.M.C");
+        for word in ["amc", "a", "m", "see you"] {
+            assert!(text.contains(word), "{word}");
+        }
     }
 
     #[test]
