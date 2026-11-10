@@ -106,3 +106,77 @@ pub fn memberships(conn: &Connection) -> Result<Vec<(String, String)>> {
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
+
+/// What places a live track's file and describes it, for a reader that
+/// serves the audio (this fork's `tempo-bridge`): read for every track in
+/// one query rather than one per track.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogFile {
+    pub id: String,
+    pub stored: crate::StoredPath,
+    /// kbps; 0 when not stored.
+    pub bitrate: i64,
+    /// `djmdContent.DateCreated`, as stored (`YYYY-MM-DD` in rekordbox 7).
+    pub date_created: String,
+}
+
+/// Every live track's path columns, bitrate and creation date.
+pub fn files(conn: &Connection) -> Result<Vec<CatalogFile>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT ID, {}, CAST(COALESCE(BitRate, 0) AS INTEGER), COALESCE(DateCreated, '')
+         FROM djmdContent WHERE rb_local_deleted = 0
+         ORDER BY CAST(ID AS INTEGER), ID",
+        crate::StoredPath::COLUMNS
+    ))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(CatalogFile {
+            id: row.get(0)?,
+            stored: crate::StoredPath::from_row_at(row, 1)?,
+            bitrate: row.get(6)?,
+            date_created: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// One live cue as stored.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogCue {
+    pub track: String,
+    /// `djmdCue.Kind`: 0 memory, 1 to 3 hot cues A to C, 5 and up D onwards.
+    pub kind: i64,
+    pub in_msec: i64,
+    /// -1 or 0 when the cue is not a loop.
+    pub out_msec: i64,
+    /// `Color`: 0 to 7 for a memory cue's named palette, 255 for none.
+    pub color: i64,
+    /// `ColorTableIndex`: what a hot cue is painted with; 0 for none.
+    pub color_table_index: i64,
+    pub comment: String,
+}
+
+/// Every live cue of every live track, ordered by track then position. The
+/// join starts from live content, as the library index does: the cue table
+/// keeps cues of long-deleted tracks.
+pub fn cues(conn: &Connection) -> Result<Vec<CatalogCue>> {
+    let mut stmt = conn.prepare(
+        "SELECT q.ContentID, CAST(COALESCE(q.Kind, 0) AS INTEGER), CAST(COALESCE(q.InMsec, 0) AS INTEGER),
+                CAST(COALESCE(q.OutMsec, -1) AS INTEGER), CAST(COALESCE(q.Color, 255) AS INTEGER),
+                CAST(COALESCE(q.ColorTableIndex, 0) AS INTEGER), COALESCE(q.Comment, '')
+         FROM djmdContent c CROSS JOIN djmdCue q ON q.ContentID = c.ID
+         WHERE c.rb_local_deleted = 0 AND q.rb_local_deleted = 0
+         ORDER BY CAST(c.ID AS INTEGER), q.InMsec",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(CatalogCue {
+            track: row.get(0)?,
+            kind: row.get(1)?,
+            in_msec: row.get(2)?,
+            out_msec: row.get(3)?,
+            color: row.get(4)?,
+            color_table_index: row.get(5)?,
+            comment: row.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
